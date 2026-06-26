@@ -624,6 +624,18 @@ app.post('/api/phones', async (req, res) => {
 app.put('/api/phones/:id', async (req, res) => { const b = req.body || {}; try { await pool.query('UPDATE pbxng_phones SET vendor=$1,model=$2,ext=$3,label=$4,line_label=$5 WHERE id=$6', [b.vendor || 'yealink', b.model || null, String(b.ext), b.label || null, b.line_label || null, req.params.id]); res.json({ updated: req.params.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.delete('/api/phones/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_phones WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+// Voz IA (servicio Piper + faster-whisper) - estado y recursos del contenedor
+app.get('/api/voz', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='voz_url'");
+    const url = (rows[0] && rows[0].value) || 'http://172.26.20.219:8080';
+    const t = Date.now();
+    const r = await fetch(url + '/health', { signal: AbortSignal.timeout(4000) });
+    const h = await r.json();
+    res.json({ ok: true, url, latency_ms: Date.now() - t, ...h });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
 // Click-to-Call (admin)
 app.get('/api/c2c', async (req, res) => { try { const { rows } = await pool.query('SELECT id,token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled,created_at FROM pbxng_click2call ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/c2c', async (req, res) => { const b = req.body || {}; if (!b.name || !b.dest_value) return res.status(400).json({ error: 'name y destino requeridos' }); try { const token = crypto.randomBytes(6).toString('hex'); const { rows } = await pool.query('INSERT INTO pbxng_click2call (token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,token', [token, b.name, b.dest_type || 'extension', b.dest_value, b.intro || '', b.require_name !== false, !!b.collect_geo, !!b.video, b.enabled !== false]); res.status(201).json(rows[0]); } catch (e) { res.status(500).json({ error: e.message }); } });

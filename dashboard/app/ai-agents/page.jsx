@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, PasswordInput, Alert, Tooltip } from '@mantine/core';
-import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain } from '@tabler/icons-react';
+import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, PasswordInput, Alert, Tooltip, Progress, Slider } from '@mantine/core';
+import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
 
@@ -14,9 +14,12 @@ const empty = { name: '', exten: '', provider: 'demo', model: 'gpt-4o-mini', voi
 export default function AiAgents() {
   const [list, setList] = useState([]); const [opened, setOpened] = useState(false); const [form, setForm] = useState(empty); const [saving, setSaving] = useState(false);
   const [keySet, setKeySet] = useState(false); const [keyVal, setKeyVal] = useState(''); const [keySaving, setKeySaving] = useState(false);
+  const [voz, setVoz] = useState(null); const [vozUrl, setVozUrl] = useState('http://172.26.20.219:8080'); const [vozSpeed, setVozSpeed] = useState('1.0'); const [vozSaving, setVozSaving] = useState(false);
+  async function loadVoz() { try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) { setVoz({ ok: false }); } }
+  async function saveVoz() { setVozSaving(true); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: vozUrl, voz_length_scale: vozSpeed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setVozSaving(false); toast(r.error ? 'Error' : 'Servicio de voz guardado', r.error ? 'bad' : 'ok'); loadVoz(); }
   async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) {} }
-  async function loadKey() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setKeySet(s.openai_api_key === '__SET__'); } catch (_) {} }
-  useEffect(() => { load(); loadKey(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  async function loadKey() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setKeySet(s.openai_api_key === '__SET__'); if (s.voz_url) setVozUrl(s.voz_url); if (s.voz_length_scale) setVozSpeed(s.voz_length_scale); } catch (_) {} }
+  useEffect(() => { load(); loadKey(); loadVoz(); const t = setInterval(() => { load(); loadVoz(); }, 8000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   function edit(a) { setForm({ ...empty, ...a }); setOpened(true); }
   function nuevo() { setForm(empty); setOpened(true); }
@@ -50,6 +53,30 @@ export default function AiAgents() {
           <PasswordInput label="OpenAI API Key" placeholder={keySet ? '•••••••••• (guardada)' : 'sk-...'} value={keyVal} onChange={e => setKeyVal(e.currentTarget.value)} style={{ flex: 1, maxWidth: 460 }} leftSection={<IconKey size={15} />} />
           <Button leftSection={<IconDeviceFloppy size={16} />} loading={keySaving} disabled={!keyVal} onClick={saveKey}>Guardar clave</Button>
         </Group>
+      </Card>
+
+      <Card withBorder radius="lg" padding="lg">
+        <Group justify="space-between" mb="sm">
+          <Group gap="sm"><ThemeIcon variant="light" color="teal"><IconServer2 size={18} /></ThemeIcon><Text fw={600}>Servicio de Voz IA · Piper + Whisper</Text>
+            <Badge variant="light" color={voz?.ok ? 'teal' : 'red'}>{voz?.ok ? 'En línea · ' + voz.latency_ms + 'ms' : 'Sin conexión'}</Badge></Group>
+          <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={loadVoz}>Refrescar</Button>
+        </Group>
+        {voz?.ok ? <>
+          <SimpleGrid cols={{ base: 2, sm: 4 }} mb="md">
+            <div><Text size="xs" c="dimmed">Whisper (STT)</Text><Text fw={700}>{voz.whisper}</Text></div>
+            <div><Text size="xs" c="dimmed">Voz (TTS)</Text><Text fw={700} truncate>{voz.default_voice}</Text></div>
+            <div><Text size="xs" c="dimmed">CPU ({voz.metrics?.ncpu} nucleos)</Text><Group gap={6} wrap="nowrap"><Progress value={voz.metrics?.cpu_pct || 0} color={(voz.metrics?.cpu_pct || 0) > 80 ? 'red' : 'teal'} style={{ flex: 1 }} /><Text size="xs" w={36}>{voz.metrics?.cpu_pct}%</Text></Group></div>
+            <div><Text size="xs" c="dimmed">Memoria</Text><Group gap={6} wrap="nowrap"><Progress value={voz.metrics?.mem_pct || 0} color="blue" style={{ flex: 1 }} /><Text size="xs" w={70}>{voz.metrics?.mem_used_mb}/{voz.metrics?.mem_total_mb}MB</Text></Group></div>
+          </SimpleGrid>
+          <Group gap="xs"><Text size="xs" c="dimmed">Voces instaladas:</Text>{(voz.voices || []).map(v => <Badge key={v} variant="light" radius="sm">{v}</Badge>)}</Group>
+        </> : <Alert variant="light" color="red">No se pudo contactar el servicio de voz en {vozUrl}.{voz?.error ? ' (' + voz.error + ')' : ''}</Alert>}
+        <Divider my="sm" label="Parametros" labelPosition="center" />
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+          <TextInput label="URL del servicio (contenedor pbxng-voz)" value={vozUrl} onChange={e => setVozUrl(e.currentTarget.value)} leftSection={<IconServer2 size={15} />} />
+          <div><Text size="sm" fw={500}>Velocidad de habla</Text><Text size="xs" c="dimmed" mb={10}>Menor = mas rapido · 1.0 = normal</Text>
+            <Slider min={0.7} max={1.4} step={0.05} value={parseFloat(vozSpeed) || 1.0} onChange={v => setVozSpeed(String(v))} marks={[{ value: 0.8, label: 'rapido' }, { value: 1.0, label: 'normal' }, { value: 1.3, label: 'lento' }]} /></div>
+        </SimpleGrid>
+        <Group justify="flex-end" mt="xl"><Button leftSection={<IconDeviceFloppy size={16} />} loading={vozSaving} onClick={saveVoz}>Guardar configuracion de voz</Button></Group>
       </Card>
 
       <Card withBorder radius="lg" padding="lg">

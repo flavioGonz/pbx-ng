@@ -89,9 +89,9 @@ function pcmToWav(pcm, rate) {
   h.write('data', 36); h.writeUInt32LE(pcm.length, 40); return Buffer.concat([h, pcm]);
 }
 // --- Voz neural self-hosted (Piper TTS + faster-whisper STT) ---
-async function neuralTTS(text, vozUrl, voice) {
+async function neuralTTS(text, vozUrl, voice, speed) {
   try {
-    const r = await fetch(vozUrl + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, rate: RATE }) });
+    const r = await fetch(vozUrl + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, rate: RATE, length_scale: parseFloat(speed) || 1.0 }) });
     if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     return buf.length ? buf : null;
@@ -147,7 +147,7 @@ async function speak(session, text) {
   session.log('TTS> ' + text);
   let pcm = null;
   if (session.useOpenAI && session.keys.openai) pcm = await openaiTTS(text, session.agent.voice, session.keys.openai);
-  if ((!pcm || !pcm.length) && session.vozUrl) pcm = await neuralTTS(text, session.vozUrl, session.agent.voice);
+  if ((!pcm || !pcm.length) && session.vozUrl) pcm = await neuralTTS(text, session.vozUrl, session.agent.voice, session.vozSpeed);
   if (!pcm || !pcm.length) pcm = await espeakTTS(text, session.agent.voice);
   if (!pcm || !pcm.length || session.closed) return;
   // enviar en frames de 20ms; cancelable por barge-in
@@ -361,10 +361,11 @@ async function startAiSession(channel, agent) {
   const uuid = crypto.randomUUID();
   const keys = { openai: await getSetting('openai_api_key') };
   const vozUrl = (await getSetting('voz_url')) || 'http://172.26.20.219:8080';
+  const vozSpeed = (await getSetting('voz_length_scale')) || '1.0';
   const useOpenAI = (agent.provider === 'openai') && !!keys.openai;
   const session = {
     uuid, channel, agent, keys, useOpenAI,
-    callerId: (channel.caller && channel.caller.number) || '', vozUrl,
+    callerId: (channel.caller && channel.caller.number) || '', vozUrl, vozSpeed,
     history: [{ role: 'system', content: (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.') }],
     greetingText: agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),
     uttBuf: [], speaking: false, speakToken: 0, bargeMs: 0, busy: false, closed: false, _turns: 0,
