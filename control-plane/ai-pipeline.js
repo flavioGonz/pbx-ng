@@ -11,8 +11,8 @@ const { spawn } = require('child_process');
 
 const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
 const VOSK_MODEL = '/opt/vosk-model-es';
-const RATE = 16000;                   // slin16
-const FRAME_BYTES = 640;              // 20ms @ 16kHz 16-bit
+const RATE = 8000;                    // slin (8kHz telefonia) - el canal AudioSocket reproduce a 8k
+const FRAME_BYTES = 320;              // 20ms @ 8kHz 16-bit
 const BARGE_RMS = 600;                // umbral energia para barge-in
 const BARGE_MS = 280;                 // ms de voz sostenida para cortar TTS
 const SPEECH_RMS = 500;               // umbral de voz para VAD
@@ -91,7 +91,7 @@ function pcmToWav(pcm, rate) {
 // --- Voz neural self-hosted (Piper TTS + faster-whisper STT) ---
 async function neuralTTS(text, vozUrl, voice) {
   try {
-    const r = await fetch(vozUrl + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice }) });
+    const r = await fetch(vozUrl + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, rate: RATE }) });
     if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     return buf.length ? buf : null;
@@ -99,7 +99,7 @@ async function neuralTTS(text, vozUrl, voice) {
 }
 async function neuralSTT(pcm, vozUrl) {
   try {
-    const r = await fetch(vozUrl + '/stt', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pcm });
+    const r = await fetch(vozUrl + '/stt?rate=' + RATE, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pcm });
     if (!r.ok) return '';
     const j = await r.json(); return (j.text || '').trim();
   } catch (_) { return ''; }
@@ -376,7 +376,7 @@ async function startAiSession(channel, agent) {
     const bridge = ARI.Bridge(); await bridge.create({ type: 'mixing' });
     session.bridge = bridge;
     pendingByUuid.set(uuid, session);   // registrar ANTES de crear el externalMedia (evita carrera con el handshake AudioSocket)
-    const em = await ARI.channels.externalMedia({ app: APP, external_host: MEDIA_HOST + ':' + AS_PORT, format: 'slin16', encapsulation: 'audiosocket', transport: 'tcp', connection_type: 'client', data: uuid });
+    const em = await ARI.channels.externalMedia({ app: APP, external_host: MEDIA_HOST + ':' + AS_PORT, format: 'slin', encapsulation: 'audiosocket', transport: 'tcp', connection_type: 'client', data: uuid });
     session.em = em;
     await bridge.addChannel({ channel: channel.id });
     await bridge.addChannel({ channel: em.id });

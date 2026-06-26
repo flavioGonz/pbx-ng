@@ -40,11 +40,12 @@ async def tts(req: Request):
     if not text:
         return Response(b"", media_type="application/octet-stream")
     ls = str(b.get("length_scale", 1.0))
+    out_rate = int(b.get("rate", 16000))
     sr = voice_rate(voice)
     p1 = subprocess.Popen([PIPER, "--model", f"{VOICES}/{voice}.onnx", "--length_scale", ls, "--output-raw"],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     p2 = subprocess.Popen(["sox", "-t", "raw", "-r", str(sr), "-e", "signed", "-b", "16", "-c", "1", "-",
-                           "-t", "raw", "-r", "16000", "-e", "signed", "-b", "16", "-c", "1", "-"],
+                           "-t", "raw", "-r", str(out_rate), "-e", "signed", "-b", "16", "-c", "1", "-"],
                           stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     p1.stdout.close()
     try:
@@ -57,9 +58,13 @@ async def tts(req: Request):
 @app.post("/stt")
 async def stt(req: Request):
     raw = await req.body()
-    if len(raw) < 640:
+    if len(raw) < 320:
         return {"text": ""}
+    in_rate = int(req.query_params.get("rate", 16000))
     audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    if in_rate != 16000 and len(audio) > 1:
+        n = len(audio); m = max(1, int(round(n * 16000.0 / in_rate)))
+        audio = np.interp(np.linspace(0, n, m, endpoint=False), np.arange(n), audio).astype(np.float32)
     segs, _ = WMODEL.transcribe(audio, language="es", beam_size=1, vad_filter=True,
                                 condition_on_previous_text=False)
     text = " ".join(s.text.strip() for s in segs).strip()
