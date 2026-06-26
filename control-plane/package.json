@@ -1,0 +1,22 @@
+{
+  "name": "pbxng-api",
+  "version": "0.1.0",
+  "description": "PBX-NG control plane API (ARI/AMI + PostgreSQL realtime provisioning)",
+  "main": "app.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "ari-client": "^2.2.0",
+    "asterisk-manager": "^0.2.0",
+    "bcryptjs": "^3.0.3",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^9.0.1",
+    "pg": "^8.12.0",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.3",
+    "web-push": "^3.6.7"
+  }
+}

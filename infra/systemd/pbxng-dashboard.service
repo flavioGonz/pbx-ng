@@ -1,0 +1,17 @@
+[Unit]
+Description=PBX-NG Dashboard (Next.js)
+After=network-online.target pbxng-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pbxng-dashboard
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=API_URL=http://127.0.0.1:3000
+
+[Install]
+WantedBy=multi-user.target

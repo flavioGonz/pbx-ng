@@ -1,0 +1,100 @@
+:root { --pbx-accent: #2f74e6; --pbx-accent2: #06b6d4; }
+
+/* ===== Esquema OSCURO ===== */
+[data-mantine-color-scheme="dark"] html { background: #0d1117; }
+[data-mantine-color-scheme="dark"] body {
+  background:
+    radial-gradient(900px 520px at 88% -6%, rgba(47,116,230,.14), transparent 60%),
+    radial-gradient(820px 480px at -6% 108%, rgba(124,92,230,.12), transparent 58%),
+    #0d1117;
+  background-attachment: fixed; color: #e8ebf0;
+}
+[data-mantine-color-scheme="dark"] .mantine-AppShell-navbar { background: rgba(12,16,24,.82); border-right: 1px solid rgba(120,130,150,.12); }
+[data-mantine-color-scheme="dark"] .mantine-AppShell-header { background: rgba(12,16,24,.7); border-bottom: 1px solid rgba(120,130,150,.12); }
+[data-mantine-color-scheme="dark"] .mantine-Table-thead th, [data-mantine-color-scheme="dark"] .mantine-Table-th { background: #131a25; }
+[data-mantine-color-scheme="dark"] .mantine-Table-tbody tr:hover { background: rgba(48,62,90,.42) !important; }
+[data-mantine-color-scheme="dark"] .mantine-NavLink-root:hover { background: rgba(60,80,130,.16); }
+
+/* ===== Esquema CLARO ===== */
+[data-mantine-color-scheme="light"] html { background: #eef2fb; }
+[data-mantine-color-scheme="light"] body {
+  background:
+    radial-gradient(1000px 520px at 90% -8%, rgba(47,116,230,.08), transparent 58%),
+    radial-gradient(900px 480px at -8% 110%, rgba(124,92,230,.07), transparent 55%),
+    #f5f7fc;
+  background-attachment: fixed; color: #1b2233;
+}
+[data-mantine-color-scheme="light"] .mantine-AppShell-navbar { background: rgba(251,252,255,.85); border-right: 1px solid rgba(40,60,120,.08); }
+[data-mantine-color-scheme="light"] .mantine-AppShell-header { background: rgba(255,255,255,.8); border-bottom: 1px solid rgba(40,60,120,.08); }
+[data-mantine-color-scheme="light"] .mantine-Table-thead th, [data-mantine-color-scheme="light"] .mantine-Table-th { background: #eef2f8; }
+[data-mantine-color-scheme="light"] .mantine-Table-tbody tr:hover { background: rgba(48,90,200,.06) !important; }
+[data-mantine-color-scheme="light"] .mantine-NavLink-root:hover { background: rgba(40,70,160,.06); }
+
+/* ===== Comunes ===== */
+.mantine-AppShell-navbar { transition: width .22s cubic-bezier(.4,0,.2,1); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.mantine-AppShell-header { backdrop-filter: saturate(160%) blur(12px); -webkit-backdrop-filter: saturate(160%) blur(12px); }
+.mantine-Card-root { transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease; }
+.mantine-Card-root, .mantine-Paper-root { box-shadow: none !important; }
+.mantine-Card-root:hover { border-color: rgba(120,150,220,.28); }
+.mantine-Table-tbody tr { transition: background .12s ease; }
+.mantine-Table-thead th, .mantine-Table-th { position: sticky; top: 0; z-index: 3; }
+/* Transición suave al cambiar de tema */
+body, .mantine-AppShell-navbar, .mantine-AppShell-header, .mantine-AppShell-main, .mantine-Card-root, .mantine-Paper-root, .mantine-Table-th, .mantine-Table-td, .mantine-Modal-content, .mantine-Modal-header { transition: background-color .3s ease, border-color .3s ease, color .25s ease; }
+.mantine-NavLink-root { border-radius: 9px; transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
+.mantine-NavLink-root[data-active] { background: linear-gradient(90deg, var(--pbx-accent), #1f63d8) !important; color: #fff !important; box-shadow: 0 6px 16px -4px rgba(47,116,230,.5); }
+.mantine-NavLink-root[data-active] .mantine-NavLink-label { color: #fff; font-weight: 650; }
+.mantine-NavLink-root[data-active] svg { color: #fff; }
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(120,130,150,.26); border-radius: 9px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(120,140,180,.42); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+::selection { background: rgba(47,116,230,.30); }
+
+.pbx-pagehead { display: flex; align-items: center; gap: 14px; }
+.pbx-acc-bar { width: 4px; align-self: stretch; border-radius: 4px; }
+.pbx-panel-accent { position: relative; overflow: hidden; }
+.pbx-panel-accent::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--acc, var(--pbx-accent)); opacity: .9; }
+
+@keyframes pbxPageIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.pbx-anim { animation: pbxPageIn .35s cubic-bezier(.4,0,.2,1) both; }
+.pbx-pip { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+@keyframes pbxPulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+.pbx-pulse { animation: pbxPulse 2s infinite; }
+@keyframes pbx-shimmer { 0% { background-position: -400px 0 } 100% { background-position: 400px 0 } }
+[role="tabpanel"] { animation: pbx-tabfade .28s ease; }
+@keyframes pbx-tabfade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.mantine-Modal-content { animation: pbx-modalpop .2s cubic-bezier(.2,.9,.3,1.2); }
+@keyframes pbx-modalpop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+
+/* Softphone PWA */
+@keyframes phIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+.ph-view { animation: phIn .22s ease both; }
+@keyframes phUp { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: none; } }
+.ph-overlay { animation: phUp .28s cubic-bezier(.22,.61,.36,1) both; }
+@keyframes phRing { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+.ph-ring { animation: phRing 1.1s infinite; }
+.ph-key { transition: transform .08s, background .12s; }
+.ph-key:active { transform: scale(.92); background: rgba(255,255,255,.22) !important; }
+.ph-tab { transition: color .15s, background .15s; }
+@keyframes phRipple { 0% { transform: scale(.55); opacity: .6; } 70% { opacity: .12; } 100% { transform: scale(2.1); opacity: 0; } }
+@keyframes phBreathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+@keyframes phEq { 0%,100% { transform: scaleY(.28); } 50% { transform: scaleY(1); } }
+@keyframes phGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,89,.45), 0 10px 30px rgba(0,0,0,.45); } 50% { box-shadow: 0 0 0 14px rgba(52,199,89,0), 0 10px 30px rgba(0,0,0,.45); } }
+.ph-breathe { animation: phBreathe 2.2s ease-in-out infinite; }
+.ph-glow { animation: phGlow 2.4s ease-in-out infinite; }
+
+/* ---- Toaster top-center (estilo banner OTA) ---- */
+.pbx-toaster { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 0; right: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; padding: 0 12px; }
+.pbx-toast { pointer-events: auto; position: relative; overflow: hidden; display: flex; align-items: center; gap: 12px; width: min(440px, 94vw); padding: 11px 12px 13px 14px; border-radius: 16px; background: rgba(20,27,40,.94); color: #eef1f6; border: 1px solid rgba(120,130,150,.18); box-shadow: 0 16px 40px -12px rgba(0,0,0,.5); backdrop-filter: blur(16px) saturate(160%); -webkit-backdrop-filter: blur(16px) saturate(160%); animation: pbxToastIn .34s cubic-bezier(.34,1.4,.5,1) both; }
+[data-mantine-color-scheme="light"] .pbx-toast { background: rgba(255,255,255,.96); color: #1b2233; border-color: rgba(40,60,120,.12); }
+.pbx-toast-out { animation: pbxToastOut .26s cubic-bezier(.4,0,.2,1) both; }
+@keyframes pbxToastIn { from { opacity: 0; transform: translateY(-18px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes pbxToastOut { to { opacity: 0; transform: translateY(-14px) scale(.97); } }
+.pbx-toast-ico { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,.06); }
+.pbx-toast-x { flex: none; border: none; background: transparent; color: inherit; opacity: .5; font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; transition: opacity .15s; }
+.pbx-toast-x:hover { opacity: 1; }
+.pbx-toast-bar { position: absolute; left: 0; bottom: 0; height: 2.5px; width: 100%; transform-origin: left; animation: pbxToastBar linear forwards; opacity: .7; }
+@keyframes pbxToastBar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.pbx-tk-draw { stroke-dasharray: 40; stroke-dashoffset: 40; animation: pbxDraw .5s .12s ease forwards; }
+@keyframes pbxDraw { to { stroke-dashoffset: 0; } }

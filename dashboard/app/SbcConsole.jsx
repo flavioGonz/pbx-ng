@@ -1,0 +1,225 @@
+'use client';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider } from '@mantine/core';
+import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap } from '@tabler/icons-react';
+import { toast } from './notify';
+import SbcFlow from './SbcFlow';
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function fmtUptime(s) { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; }
+function Kpi({ icon, color, label, value, sub }) {
+  return <Card withBorder radius="md" padding="sm"><Group gap="sm" wrap="nowrap"><ThemeIcon variant="light" color={color} size={38} radius="md">{icon}</ThemeIcon><div style={{ minWidth: 0 }}><Text size="xs" c="dimmed">{label}</Text><Text fw={700} fz="lg" lh={1.1} truncate>{value}</Text>{sub && <Text size="xs" c="dimmed">{sub}</Text>}</div></Group></Card>;
+}
+
+// Grafica de area en vivo (estilo Resumen)
+function Spark({ data, color, label, unit, accent }) {
+  const w = 320, h = 84, pad = 6;
+  const vals = data.length ? data : [0];
+  const max = Math.max(1, ...vals); const min = Math.min(0, ...vals);
+  const span = max - min || 1;
+  const n = vals.length;
+  const xs = (i) => pad + (n <= 1 ? 0 : (i * (w - pad * 2) / (n - 1)));
+  const ys = (v) => h - pad - ((v - min) / span) * (h - pad * 2);
+  const pts = vals.map((v, i) => xs(i) + ',' + ys(v).toFixed(1));
+  const line = 'M' + pts.join(' L');
+  const area = line + ` L${xs(n - 1)},${h - pad} L${xs(0)},${h - pad} Z`;
+  const last = vals[vals.length - 1];
+  const id = 'g' + label.replace(/[^a-z]/gi, '');
+  return (
+    <Card withBorder radius="md" padding="sm">
+      <Group justify="space-between" mb={4}><Text size="xs" c="dimmed">{label}</Text><Text fw={800} fz="lg" lh={1} c={accent}>{last}{unit ? <Text span size="xs" c="dimmed"> {unit}</Text> : null}</Text></Group>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: 84, display: 'block' }} preserveAspectRatio="none">
+        <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.34" /><stop offset="100%" stopColor={color} stopOpacity="0.02" /></linearGradient></defs>
+        {[0.25, 0.5, 0.75].map(g => <line key={g} x1={pad} x2={w - pad} y1={pad + g * (h - pad * 2)} y2={pad + g * (h - pad * 2)} stroke="rgba(120,130,150,.12)" strokeWidth="1" />)}
+        <path d={area} fill={`url(#${id})`} />
+        <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={xs(n - 1)} cy={ys(last)} r="3" fill={color} />
+      </svg>
+    </Card>
+  );
+}
+
+function ConsoleBody({ sbc, load, hist }) {
+  const [cfg, setCfg] = useState(''); const [cfgOrig, setCfgOrig] = useState(''); const [cfgMsg, setCfgMsg] = useState(''); const [cfgBusy, setCfgBusy] = useState(false);
+  const [banIp, setBanIp] = useState(''); const [debug, setDebug] = useState(2); const [busy, setBusy] = useState('');
+  const cfgLoaded = useRef(false);
+  useEffect(() => { if (!cfgLoaded.current) { cfgLoaded.current = true; fetch('/backend/api/sbc/cfg').then(r => r.json()).then(d => { setCfg(d.cfg || ''); setCfgOrig(d.cfg || ''); }).catch(() => {}); } }, []);
+
+  const sendCmd = useCallback(async (cmd, arg, opts = {}) => {
+    setBusy(cmd + (arg || ''));
+    const r = await fetch('/backend/api/sbc/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd, arg }) }).then(x => x.json()).catch(() => ({ error: 1 }));
+    if (r.error || !r.id) { setBusy(''); toast('No se pudo enviar el comando', 'bad'); return null; }
+    let res = null;
+    for (let i = 0; i < 15; i++) { await sleep(1100); const s = await fetch('/backend/api/sbc/cmd/' + r.id).then(x => x.json()).catch(() => ({})); if (s.done) { res = s.result; break; } }
+    setBusy(''); load();
+    if (!opts.silent) toast(res ? (res.length > 40 ? 'Listo' : res) : 'Aplicado', res && /error|INVALID|fallo/i.test(res) ? 'bad' : 'ok');
+    return res;
+  }, [load]);
+
+  const stats = sbc?.stats || {}; const core = stats.core || {}; const sl = stats.sl || {}; const shm = stats.shmem || {}; const rates = stats.rates || {};
+  const disp = sbc?.dispatcher || []; const banned = sbc?.banned || []; const rtp = sbc?.rtpengine || {};
+  const memPct = shm.total_size ? Math.round((shm.used_size / shm.total_size) * 100) : 0;
+  const flagInfo = (f) => /A/.test(f) ? { c: 'teal', t: 'Activo' } : /I/.test(f) ? { c: 'orange', t: 'Inactivo' } : /D/.test(f) ? { c: 'red', t: 'Deshabilitado' } : { c: 'gray', t: f || '-' };
+
+  async function saveCfg() {
+    setCfgBusy(true); setCfgMsg('Validando con kamailio -c...');
+    const b64 = btoa(unescape(encodeURIComponent(cfg)));
+    const res = await sendCmd('cfg_save', b64, { silent: true });
+    setCfgBusy(false);
+    if (res && /INVALID/i.test(res)) { setCfgMsg('ERROR: ' + res); toast('Config invalida (no se aplico)', 'bad'); }
+    else if (res && /aplicado/i.test(res)) { setCfgMsg('OK: ' + res); setCfgOrig(cfg); toast('Config aplicada y Kamailio reiniciado', 'ok'); }
+    else { setCfgMsg(res || 'Sin respuesta del agente'); }
+  }
+  const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace">{(core[k] ?? 0).toLocaleString()}</Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? rates[k] + '/s' : ''}</Table.Td></Table.Tr>;
+
+  return (
+    <Tabs defaultValue="flow" variant="pills" radius="md" keepMounted={false}>
+      <Tabs.List mb="md">
+        <Tabs.Tab value="flow" leftSection={<IconSitemap size={16} />}>Flujo de llamadas</Tabs.Tab>
+        <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
+        <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
+        <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
+        <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
+        <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
+      </Tabs.List>
+
+      <Tabs.Panel value="flow"><SbcFlow /></Tabs.Panel>
+
+      <Tabs.Panel value="mon">
+        <SimpleGrid cols={{ base: 1, sm: 3 }} mb="md">
+          <Spark data={hist.map(p => p.req)} color="#2f74e6" label="SIP requests / s" accent="blue" />
+          <Spark data={hist.map(p => p.sess)} color="#14b8a6" label="Sesiones de medios" accent="teal" />
+          <Spark data={hist.map(p => p.mem)} color="#a855f7" label="Memoria compartida" unit="%" accent="grape" />
+        </SimpleGrid>
+        <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} mb="md">
+          <Kpi icon={<IconClock size={20} />} color="grape" label="Uptime" value={fmtUptime(sbc?.uptime)} />
+          <Kpi icon={<IconActivity size={20} />} color="blue" label="Req recibidas/s" value={rates.rcv_requests != null ? rates.rcv_requests : '-'} sub={'tot ' + (core.rcv_requests ?? 0)} />
+          <Kpi icon={<IconArrowsLeftRight size={20} />} color="teal" label="Sesiones media" value={rtp.sessions ?? 0} sub={rtp.up ? 'rtpengine ok' : 'inactivo'} />
+          <Kpi icon={<IconBan size={20} />} color={banned.length ? 'red' : 'gray'} label="IPs bloqueadas" value={banned.length} />
+          <Kpi icon={<IconPlugConnected size={20} />} color="indigo" label="Conexiones TCP" value={stats.tcp_open ?? 0} />
+          <Kpi icon={<IconCpu size={20} />} color={memPct > 80 ? 'red' : 'cyan'} label="Memoria compartida" value={memPct + '%'} sub={Math.round((shm.used_size || 0) / 1048576) + '/' + Math.round((shm.total_size || 0) / 1048576) + ' MB'} />
+        </SimpleGrid>
+        <SimpleGrid cols={{ base: 1, md: 2 }}>
+          <Card withBorder radius="md" padding="md">
+            <Text fw={700} mb="xs">Trafico SIP</Text>
+            <Table verticalSpacing={6}><Table.Thead><Table.Tr><Table.Th>Contador</Table.Th><Table.Th ta="right">Total</Table.Th><Table.Th ta="right">Tasa</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>
+                {reqRow('Requests recibidas', 'rcv_requests')}{reqRow('Requests reenviadas', 'fwd_requests')}{reqRow('Replies recibidas', 'rcv_replies')}{reqRow('Replies reenviadas', 'fwd_replies')}{reqRow('Requests descartadas', 'drop_requests')}{reqRow('Requests con error', 'err_requests')}
+              </Table.Tbody></Table>
+          </Card>
+          <Card withBorder radius="md" padding="md">
+            <Text fw={700} mb="xs">Respuestas (stateless)</Text>
+            <Group gap="xs">
+              {[['1xx', sl['1xx_replies']], ['2xx', sl['2xx_replies']], ['3xx', sl['3xx_replies']], ['4xx', sl['4xx_replies']], ['5xx', sl['5xx_replies']], ['6xx', sl['6xx_replies']], ['404', sl['404_replies']], ['407', sl['407_replies']], ['480', sl['480_replies']]].map(([k, v]) => v != null && <Badge key={k} variant="light" color={k[0] === '2' ? 'teal' : k[0] === '4' || k[0] === '5' || k[0] === '6' ? 'orange' : 'gray'} radius="sm">{k}: {v}</Badge>)}
+            </Group>
+            <Divider my="sm" />
+            <Text size="sm" c="dimmed">Memoria Kamailio</Text>
+            <Progress value={memPct} color={memPct > 80 ? 'red' : 'teal'} mt={6} />
+            <Text size="xs" c="dimmed" mt={4}>{Math.round((shm.used_size || 0) / 1048576)} MB usados - {shm.fragments || 0} fragmentos - max {Math.round((shm.max_used_size || 0) / 1048576)} MB</Text>
+          </Card>
+        </SimpleGrid>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="sec">
+        <Card withBorder radius="md" padding="md" mb="md">
+          <Group justify="space-between" mb="sm"><Text fw={700}>IPs bloqueadas (ipban)</Text>
+            <Group gap="xs">
+              <TextInput placeholder="Bloquear IP... (ej 1.2.3.4)" value={banIp} onChange={e => setBanIp(e.target.value)} w={200} size="xs" />
+              <Button size="xs" color="red" variant="light" leftSection={<IconBan size={14} />} disabled={!banIp} loading={busy === 'ban' + banIp} onClick={async () => { await sendCmd('ban', banIp); setBanIp(''); }}>Bloquear</Button>
+              <Button size="xs" variant="default" leftSection={<IconTrash size={14} />} loading={busy === 'unban_all'} onClick={() => sendCmd('unban_all')}>Limpiar todo</Button>
+            </Group>
+          </Group>
+          {banned.length === 0 ? <Text size="sm" c="dimmed">Sin IPs bloqueadas.</Text> :
+            <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>IP</Table.Th><Table.Th ta="right">Accion</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{banned.map(ip => <Table.Tr key={ip}><Table.Td ff="monospace">{ip}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="teal" loading={busy === 'unban' + ip} onClick={() => sendCmd('unban', ip)}>Desbloquear</Button></Table.Td></Table.Tr>)}</Table.Tbody></Table>}
+        </Card>
+        <Card withBorder radius="md" padding="md">
+          <Text fw={700} mb="xs">Anti-flood (pike)</Text>
+          <Text size="sm" c="dimmed">{(stats.pike_count || 0) === 0 ? 'Sin fuentes sospechosas en seguimiento.' : (stats.pike_count + ' IP(s) en seguimiento por pike.')}</Text>
+          {(stats.pike || []).length > 0 && <Group gap={6} mt="xs">{stats.pike.map(ip => <Badge key={ip} variant="light" color="orange">{ip}</Badge>)}</Group>}
+        </Card>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="disp">
+        <Card withBorder radius="md" padding="md">
+          <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher</Text><Button size="xs" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar dispatcher</Button></Group>
+          <Table><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Prioridad</Table.Th><Table.Th>Latencia</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Accion</Table.Th></Table.Tr></Table.Thead>
+            <Table.Tbody>{disp.map((d, i) => { const fi = flagInfo(d.flags); const active = /A/.test(d.flags || ''); return (
+              <Table.Tr key={i}>
+                <Table.Td ff="monospace" fz="sm">{d.uri}</Table.Td><Table.Td>{d.priority}</Table.Td><Table.Td>{d.latency != null ? d.latency + ' ms' : '-'}</Table.Td>
+                <Table.Td><Badge variant="light" color={fi.c}>{fi.t}</Badge></Table.Td>
+                <Table.Td ta="right">{active
+                  ? <Button size="compact-xs" variant="light" color="orange" leftSection={<IconPlugConnectedX size={13} />} loading={busy === 'disable_target' + d.uri} onClick={() => sendCmd('disable_target', d.uri)}>Deshabilitar</Button>
+                  : <Button size="compact-xs" variant="light" color="teal" leftSection={<IconPlugConnected size={13} />} loading={busy === 'enable_target' + d.uri} onClick={() => sendCmd('enable_target', d.uri)}>Habilitar</Button>}</Table.Td>
+              </Table.Tr>); })}</Table.Tbody></Table>
+        </Card>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="rtp">
+        <SimpleGrid cols={{ base: 2, sm: 4 }} mb="md">
+          <Kpi icon={<IconArrowsLeftRight size={20} />} color={rtp.up ? 'teal' : 'red'} label="Estado" value={rtp.up ? 'Activo' : 'Inactivo'} />
+          <Kpi icon={<IconActivity size={20} />} color="blue" label="Sesiones" value={rtp.sessions ?? 0} />
+          <Kpi icon={<IconPlugConnected size={20} />} color="indigo" label="Paquetes" value={(rtp.packets ?? 0).toLocaleString()} />
+          <Kpi icon={<IconCpu size={20} />} color="cyan" label="Bytes" value={((rtp.bytes ?? 0) / 1048576).toFixed(1) + ' MB'} />
+        </SimpleGrid>
+        <Card withBorder radius="md" padding="md"><Text size="sm" c="dimmed">rtpengine ancla y relaya el RTP en el borde (userspace, control-ng en 127.0.0.1:2223, CLI en :9900). Las sesiones reflejan llamadas con medios pasando por el SBC.</Text></Card>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="cfg">
+        <Card withBorder radius="md" padding="md">
+          <Group justify="space-between" mb="xs">
+            <Group gap="xs"><Text fw={700}>kamailio.cfg</Text>{cfg !== cfgOrig && <Badge color="orange" variant="light">sin guardar</Badge>}</Group>
+            <Group gap="xs">
+              <Tooltip label="Recargar dispatcher (sin reiniciar)"><Button size="xs" variant="default" leftSection={<IconReload size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Reload dispatcher</Button></Tooltip>
+              <Button size="xs" leftSection={<IconDeviceFloppy size={14} />} loading={cfgBusy} disabled={cfg === cfgOrig} onClick={saveCfg}>Validar y guardar</Button>
+            </Group>
+          </Group>
+          <Group gap="xs" mb="xs" c="orange"><IconAlertTriangle size={15} /><Text size="xs" c="dimmed">Se valida con <Code>kamailio -c</Code> antes de aplicar. Si es valido, se hace backup (.bak) y se reinicia Kamailio (corta llamadas activas unos segundos).</Text></Group>
+          <Textarea value={cfg} onChange={e => setCfg(e.target.value)} autosize minRows={18} maxRows={28} styles={{ input: { fontFamily: 'monospace', fontSize: 12.5, lineHeight: 1.5 } }} spellCheck={false} />
+          {cfgMsg && <Code block mt="sm">{cfgMsg}</Code>}
+        </Card>
+        <Card withBorder radius="md" padding="md" mt="md">
+          <Text fw={700} mb="xs">Avanzado</Text>
+          <Group align="flex-end" gap="md">
+            <NumberInput label="Nivel de debug (core)" value={debug} onChange={setDebug} min={-3} max={4} w={170} />
+            <Button variant="light" loading={busy === 'debug' + debug} onClick={() => sendCmd('debug', debug)}>Aplicar debug</Button>
+            <Divider orientation="vertical" />
+            <Button color="red" variant="light" leftSection={<IconReload size={15} />} loading={busy === 'restart'} onClick={() => { if (confirm('Reiniciar Kamailio? Corta las llamadas activas unos segundos.')) sendCmd('restart'); }}>Reiniciar Kamailio</Button>
+          </Group>
+        </Card>
+      </Tabs.Panel>
+    </Tabs>
+  );
+}
+
+export default function SbcConsole({ opened, onClose, inline = false }) {
+  const [sbc, setSbc] = useState(null);
+  const [hist, setHist] = useState([]);
+  const load = useCallback(async () => {
+    try {
+      const d = await fetch('/backend/api/sbc').then(r => r.json());
+      setSbc(d);
+      const shm = d?.stats?.shmem || {}; const memPct = shm.total_size ? Math.round((shm.used_size / shm.total_size) * 100) : 0;
+      setHist(h => [...h, { req: d?.stats?.rates?.rcv_requests || 0, sess: d?.rtpengine?.sessions || 0, mem: memPct }].slice(-40));
+    } catch (_) {}
+  }, []);
+  useEffect(() => { if (!inline && !opened) return; load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [opened, inline, load]);
+
+  if (inline) return <ConsoleBody sbc={sbc} load={load} hist={hist} />;
+
+  return (
+    <Modal opened={opened} onClose={onClose} fullScreen radius={0} padding={0} withCloseButton={false} styles={{ body: { padding: 0, height: '100vh' } }}>
+      <Stack gap={0} h="100vh">
+        <Group justify="space-between" px="lg" py="sm" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)', background: 'linear-gradient(120deg,#1d2540,#243a6b)', color: '#fff' }}>
+          <Group gap="sm">
+            <ThemeIcon size={40} radius="md" variant="light" color="grape"><IconRouteAltLeft size={22} /></ThemeIcon>
+            <div><Text fw={800} lh={1.1}>Consola SBC - Kamailio</Text><Text size="xs" style={{ opacity: .75 }}>{sbc?.version || 'kamailio'} - 172.26.20.205 - uptime {fmtUptime(sbc?.uptime)}</Text></div>
+            <Badge ml="sm" variant="light" color={sbc && !sbc.error ? 'teal' : 'red'}>{sbc && !sbc.error ? 'En linea' : 'Sin datos'}</Badge>
+          </Group>
+          <Group gap="xs"><Tooltip label="Refrescar"><ActionIcon variant="light" color="gray" onClick={load}><IconRefresh size={18} /></ActionIcon></Tooltip><Button variant="white" color="dark" onClick={onClose}>Cerrar</Button></Group>
+        </Group>
+        <ScrollArea style={{ flex: 1 }} p="md"><ConsoleBody sbc={sbc} load={load} hist={hist} /></ScrollArea>
+      </Stack>
+    </Modal>
+  );
+}

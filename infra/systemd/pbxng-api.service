@@ -1,0 +1,19 @@
+[Unit]
+Description=PBX-NG Control Plane API (ARI/AMI + PostgreSQL)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pbxng-api
+ExecStart=/usr/bin/node /opt/pbxng-api/app.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DB_HOST=172.26.20.184
+Environment=ARI_URL=http://172.26.20.183:8088
+Environment=AMI_HOST=172.26.20.183
+
+[Install]
+WantedBy=multi-user.target
