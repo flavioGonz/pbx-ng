@@ -635,6 +635,16 @@ app.get('/api/voz', async (req, res) => {
     res.json({ ok: true, url, latency_ms: Date.now() - t, ...h });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
+async function vozBase() { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='voz_url'"); return (rows[0] && rows[0].value) || 'http://172.26.20.219:8080'; }
+async function vozFwd(method, path, body, ms) { const u = await vozBase(); const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } const r = await fetch(u + path, opt); return r; }
+app.get('/api/voz/logs', async (req, res) => { try { const r = await vozFwd('GET', '/admin/logs'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/voz/restart', async (req, res) => { try { const r = await vozFwd('POST', '/admin/restart', {}); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/voz/voices', async (req, res) => { try { const r = await vozFwd('GET', '/admin/voices'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/voz/voices/install', async (req, res) => { try { const r = await vozFwd('POST', '/admin/voices/install', req.body || {}, 240000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.delete('/api/voz/voices/:key', async (req, res) => { try { const r = await vozFwd('DELETE', '/admin/voices/' + encodeURIComponent(req.params.key)); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/voz/config', async (req, res) => { try { const r = await vozFwd('GET', '/admin/config'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/voz/config', async (req, res) => { try { const r = await vozFwd('POST', '/admin/config', req.body || {}); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/voz/test', async (req, res) => { try { const u = await vozBase(); const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: (req.body && req.body.text) || 'Hola, esta es una prueba de la voz seleccionada.', voice: req.body && req.body.voice, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(20000) }); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // Click-to-Call (admin)
 app.get('/api/c2c', async (req, res) => { try { const { rows } = await pool.query('SELECT id,token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled,created_at FROM pbxng_click2call ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });

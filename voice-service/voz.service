@@ -4,9 +4,10 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/voz
+EnvironmentFile=-/etc/voz.env
+Environment=OMP_NUM_THREADS=4
 ExecStart=/usr/bin/python3 -m uvicorn server:app --host 0.0.0.0 --port 8080 --workers 1
 Restart=always
 RestartSec=3
-Environment=OMP_NUM_THREADS=4
 [Install]
 WantedBy=multi-user.target

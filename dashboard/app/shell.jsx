@@ -10,7 +10,7 @@ import {
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
 import { Menu, Avatar, UnstyledButton } from '@mantine/core';
-import { IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone } from '@tabler/icons-react';
+import { IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine } from '@tabler/icons-react';
 
 function Logo() {
   return (
@@ -45,6 +45,7 @@ const groups = [
     { href: '/usuarios', label: 'Usuarios', icon: IconUsersGroup },
     { href: '/seguridad', label: 'Seguridad', icon: IconShieldCheck },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
+    { href: '/voz', label: 'Voz IA', icon: IconWaveSine },
     { href: '/sbc', label: 'SBC / Kamailio', icon: IconShieldLock },
     { href: '/configuracion', label: 'Configuración', icon: IconSettings },
   ] },
