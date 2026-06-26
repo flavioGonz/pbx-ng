@@ -12,11 +12,13 @@ WMODEL_NAME = os.environ.get("VOZ_WHISPER", "small")
 
 # catalogo curado de voces en espanol (Piper)
 CATALOG = [
-    {"key": "es_MX-claude-high", "label": "Mexicana - Claude (alta)", "path": "es/es_MX/claude/high"},
-    {"key": "es_MX-ald-medium", "label": "Mexicana - Ald (media)", "path": "es/es_MX/ald/medium"},
-    {"key": "es_ES-davefx-medium", "label": "Espana - Dave (media)", "path": "es/es_ES/davefx/medium"},
-    {"key": "es_ES-sharvard-medium", "label": "Espana - Sharvard (media)", "path": "es/es_ES/sharvard/medium"},
-    {"key": "es_ES-carlfm-x_low", "label": "Espana - Carl (rapida)", "path": "es/es_ES/carlfm/x_low"},
+    {"key": "es_MX-claude-high", "label": "Mexicana - Claude (alta, natural)", "path": "es/es_MX/claude/high"},
+    {"key": "es_MX-ald-medium", "label": "Mexicana - Ald (media, masculina)", "path": "es/es_MX/ald/medium"},
+    {"key": "es_ES-sharvard-medium", "label": "Espana - Sharvard (media, expresiva)", "path": "es/es_ES/sharvard/medium"},
+    {"key": "es_ES-davefx-medium", "label": "Espana - Dave (media, masculina)", "path": "es/es_ES/davefx/medium"},
+    {"key": "es_ES-mls_9972-low", "label": "Espana - MLS 9972 (femenina)", "path": "es/es_ES/mls_9972/low"},
+    {"key": "es_ES-mls_10246-low", "label": "Espana - MLS 10246 (masculina)", "path": "es/es_ES/mls_10246/low"},
+    {"key": "es_ES-carlfm-x_low", "label": "Espana - Carl (rapida, liviana)", "path": "es/es_ES/carlfm/x_low"},
 ]
 
 app = FastAPI(title="PBX-NG Voz")

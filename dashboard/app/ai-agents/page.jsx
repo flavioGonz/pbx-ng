@@ -1,25 +1,28 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, PasswordInput, Alert, Tooltip, Progress, Slider } from '@mantine/core';
-import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh } from '@tabler/icons-react';
+import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh, IconPlayerPlay } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
 
 const PROVIDERS = [{ value: 'demo', label: 'Demo (offline · Vosk + espeak)' }, { value: 'openai', label: 'OpenAI (Whisper + GPT + TTS)' }];
 const MODELS = [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini (rápido/económico)' }, { value: 'gpt-4o', label: 'gpt-4o (máxima calidad)' }];
-const VOICES = [{ value: 'es-419', label: 'Español latino (demo)' }, { value: 'nova', label: 'Nova (OpenAI)' }, { value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'shimmer', label: 'Shimmer (OpenAI)' }, { value: 'onyx', label: 'Onyx (OpenAI)' }];
+const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label: 'Alloy' }, { value: 'shimmer', label: 'Shimmer' }, { value: 'onyx', label: 'Onyx' }, { value: 'echo', label: 'Echo' }, { value: 'fable', label: 'Fable' }];
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
-const empty = { name: '', exten: '', provider: 'demo', model: 'gpt-4o-mini', voice: 'es-419', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true };
+const empty = { name: '', exten: '', provider: 'demo', model: 'gpt-4o-mini', voice: 'es_MX-claude-high', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true };
 
 export default function AiAgents() {
   const [list, setList] = useState([]); const [opened, setOpened] = useState(false); const [form, setForm] = useState(empty); const [saving, setSaving] = useState(false);
   const [keySet, setKeySet] = useState(false); const [keyVal, setKeyVal] = useState(''); const [keySaving, setKeySaving] = useState(false);
   const [voz, setVoz] = useState(null); const [vozUrl, setVozUrl] = useState('http://172.26.20.219:8080'); const [vozSpeed, setVozSpeed] = useState('1.0'); const [vozSaving, setVozSaving] = useState(false);
+  const [vozList, setVozList] = useState([]); const previewRef = useRef(null);
+  async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); } catch (_) {} }
+  async function preview(voice) { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }) }); if (!r.ok) { toast('No se pudo generar el audio', 'bad'); return; } const b = await r.blob(); if (previewRef.current) { previewRef.current.src = URL.createObjectURL(b); previewRef.current.play().catch(() => {}); } } catch (_) {} }
   async function loadVoz() { try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) { setVoz({ ok: false }); } }
   async function saveVoz() { setVozSaving(true); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: vozUrl, voz_length_scale: vozSpeed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setVozSaving(false); toast(r.error ? 'Error' : 'Servicio de voz guardado', r.error ? 'bad' : 'ok'); loadVoz(); }
   async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) {} }
   async function loadKey() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setKeySet(s.openai_api_key === '__SET__'); if (s.voz_url) setVozUrl(s.voz_url); if (s.voz_length_scale) setVozSpeed(s.voz_length_scale); } catch (_) {} }
-  useEffect(() => { load(); loadKey(); loadVoz(); const t = setInterval(() => { load(); loadVoz(); }, 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); loadKey(); loadVoz(); loadVozList(); const t = setInterval(() => { load(); loadVoz(); }, 8000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   function edit(a) { setForm({ ...empty, ...a }); setOpened(true); }
   function nuevo() { setForm(empty); setOpened(true); }
@@ -108,7 +111,10 @@ export default function AiAgents() {
           <SimpleGrid cols={3}>
             <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={v => up('provider', v)} />
             <Select label="Modelo (OpenAI)" data={MODELS} value={form.model} onChange={v => up('model', v)} disabled={form.provider !== 'openai'} />
-            <Select label="Voz" data={VOICES} value={form.voice} onChange={v => up('voice', v)} />
+            <Group gap="xs" align="flex-end" wrap="nowrap">
+              <Select label="Voz" description={form.provider === 'openai' ? 'Voces de OpenAI' : 'Voces instaladas (gestionalas en Voz IA)'} data={form.provider === 'openai' ? OPENAI_VOICES : vozList.map(k => ({ value: k, label: k }))} value={form.voice} onChange={v => up('voice', v)} style={{ flex: 1 }} searchable />
+              {form.provider !== 'openai' && <Tooltip label="Escuchar voz"><ActionIcon variant="light" size={36} onClick={() => preview(form.voice)} disabled={!form.voice}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>}
+            </Group>
           </SimpleGrid>
           <Textarea label="Saludo inicial" description="Lo que dice el bot al atender. Si lo dejás vacío, usa uno por defecto." value={form.greeting_text} onChange={e => up('greeting_text', e.currentTarget.value)} autosize minRows={2} placeholder="Hola, gracias por llamar a IES. ¿En qué puedo ayudarte?" />
           <Textarea label="Instrucciones (system prompt)" description="Personalidad y reglas del agente. Ej: Sos el asistente de IES, amable y conciso; ofrecé ventas o soporte." value={form.system_prompt} onChange={e => up('system_prompt', e.currentTarget.value)} autosize minRows={3} />
@@ -120,6 +126,7 @@ export default function AiAgents() {
           </SimpleGrid>
           <TextInput label="Webhook CRM (opcional)" description="URL que recibe {query, caller} y devuelve {result}. El bot la usa para consultar datos del cliente." value={form.crm_webhook} onChange={e => up('crm_webhook', e.currentTarget.value)} placeholder="https://tu-crm/api/lookup" />
           <Switch label="Agente activo" checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />
+          <audio ref={previewRef} style={{ display: 'none' }} />
           <Divider />
           <Group justify="flex-end"><Button variant="default" onClick={() => setOpened(false)}>Cancelar</Button><Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Crear agente'}</Button></Group>
         </Stack>
