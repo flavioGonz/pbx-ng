@@ -88,6 +88,22 @@ function pcmToWav(pcm, rate) {
   h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
   h.write('data', 36); h.writeUInt32LE(pcm.length, 40); return Buffer.concat([h, pcm]);
 }
+// --- Voz neural self-hosted (Piper TTS + faster-whisper STT) ---
+async function neuralTTS(text, vozUrl, voice) {
+  try {
+    const r = await fetch(vozUrl + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice }) });
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    return buf.length ? buf : null;
+  } catch (_) { return null; }
+}
+async function neuralSTT(pcm, vozUrl) {
+  try {
+    const r = await fetch(vozUrl + '/stt', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pcm });
+    if (!r.ok) return '';
+    const j = await r.json(); return (j.text || '').trim();
+  } catch (_) { return ''; }
+}
 // --- LLM OpenAI chat con tools ---
 async function openaiLLM(messages, tools, model, key) {
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -131,18 +147,22 @@ async function speak(session, text) {
   session.log('TTS> ' + text);
   let pcm = null;
   if (session.useOpenAI && session.keys.openai) pcm = await openaiTTS(text, session.agent.voice, session.keys.openai);
+  if ((!pcm || !pcm.length) && session.vozUrl) pcm = await neuralTTS(text, session.vozUrl, session.agent.voice);
   if (!pcm || !pcm.length) pcm = await espeakTTS(text, session.agent.voice);
   if (!pcm || !pcm.length || session.closed) return;
   // enviar en frames de 20ms; cancelable por barge-in
   const token = ++session.speakToken;
   session.speaking = true;
+  const startT = Date.now(); let idx = 0;
   for (let off = 0; off < pcm.length; off += FRAME_BYTES) {
     if (session.closed || token !== session.speakToken) break;   // barge-in / fin
     const slice = pcm.slice(off, off + FRAME_BYTES);
     const frame = Buffer.alloc(3 + slice.length);
     frame[0] = 0x10; frame.writeUInt16BE(slice.length, 1); slice.copy(frame, 3);
     try { session.socket.write(frame); } catch (_) { break; }
-    await new Promise(r => setTimeout(r, 19));
+    idx++;
+    const wait = (startT + idx * 20) - Date.now();   // corrector de deriva: evita underruns/cortes
+    if (wait > 1) await new Promise(r => setTimeout(r, wait));
   }
   if (token === session.speakToken) session.speaking = false;
 }
@@ -153,8 +173,10 @@ async function speak(session, text) {
 async function onUtterance(session, rawText) {
   if (session.closed || session.busy) return;
   let text = rawText;
-  if (session.useOpenAI && session.keys.openai && session.uttBuf.length) {
-    const w = await whisperSTT(Buffer.concat(session.uttBuf), session.keys.openai);
+  if (session.uttBuf.length) {
+    const utt = Buffer.concat(session.uttBuf); let w = '';
+    if (session.useOpenAI && session.keys.openai) w = await whisperSTT(utt, session.keys.openai);
+    else if (session.vozUrl) w = await neuralSTT(utt, session.vozUrl);
     if (w) text = w;
   }
   session.uttBuf = [];
@@ -269,7 +291,7 @@ function handleInAudio(session, pcm) {
     else session.bargeMs = Math.max(0, session.bargeMs - 20);
   }
   // acumular para Whisper (modo openai) y alimentar Vosk (parciales)
-  if (session.useOpenAI) session.uttBuf.push(Buffer.from(pcm));
+  session.uttBuf.push(Buffer.from(pcm)); if (session.uttBuf.length > 1500) session.uttBuf.shift();
   if (session.sttProc && session.sttProc.stdin.writable) { try { session.sttProc.stdin.write(Buffer.from(pcm)); } catch (_) {} }
 }
 
@@ -327,10 +349,11 @@ async function startAiSession(channel, agent) {
   if (!ARI) { try { await channel.hangup(); } catch (_) {} return; }
   const uuid = crypto.randomUUID();
   const keys = { openai: await getSetting('openai_api_key') };
+  const vozUrl = (await getSetting('voz_url')) || 'http://172.26.20.219:8080';
   const useOpenAI = (agent.provider === 'openai') && !!keys.openai;
   const session = {
     uuid, channel, agent, keys, useOpenAI,
-    callerId: (channel.caller && channel.caller.number) || '',
+    callerId: (channel.caller && channel.caller.number) || '', vozUrl,
     history: [{ role: 'system', content: (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.') }],
     greetingText: agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),
     uttBuf: [], speaking: false, speakToken: 0, bargeMs: 0, busy: false, closed: false, _turns: 0,
@@ -346,7 +369,7 @@ async function startAiSession(channel, agent) {
     session.em = em;
     await bridge.addChannel({ channel: channel.id });
     await bridge.addChannel({ channel: em.id });
-    session.log('sesión iniciada (provider=' + (useOpenAI ? 'openai' : 'demo') + ', agente=' + agent.name + ')');
+    session.log('sesión iniciada (provider=' + (useOpenAI ? 'openai' : (vozUrl ? 'neural' : 'demo')) + ', agente=' + agent.name + ')');
     // watchdog: si el caller cuelga
     session.endpointTimer = setInterval(() => checkEndpoint(session), 250);
     channel.once('StasisEnd', () => endSession(session, 'caller-hangup'));
