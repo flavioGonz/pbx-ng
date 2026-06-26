@@ -50,7 +50,7 @@ Todo el plan de marcado, los internos y la configuración viven en **PostgreSQL*
 | **WebRTC** | Softphone en el panel y PWA instalable (SIP.js) · SRTP/DTLS sobre WSS · STUN/TURN (Coturn) |
 | **Internos** | WebRTC y SIP físico · estado en vivo (registrado / en llamada / offline) · IP + RTT · QR de alta |
 | **Aplicaciones** | Colas/ACD · IVR visual (React Flow) · conferencias · ring groups · paging · buzón de voz |
-| **IVR con IA** 🤖 | Conversacional voz-a-voz (STT→LLM→TTS) · modo demo offline (Vosk + espeak) u OpenAI · transferencia y CRM por *function-calling* |
+| **IVR con IA** 🤖 | Conversacional voz-a-voz (STT→LLM→TTS) · **voz neural self-hosted** (Piper + faster-whisper) u OpenAI · transferencia y CRM por *function-calling* |
 | **Click-to-Call** 🌐 | Enlaces y QR públicos para llamar por WebRTC sin registro · invitados efímeros · metadatos del cliente |
 | **Push (RFC 8599)** 🔔 | Despertar dispositivos dormidos · Web Push (VAPID) + FCM + APNs (VoIP) |
 | **Auto-provisioning** 📞 | Teléfonos físicos (Yealink / Grandstream) configurados solos por dirección MAC |
@@ -120,6 +120,7 @@ pbx-ng/
 │   ├── app/                #   Páginas y componentes (App Router)
 │   ├── public/             #   PWA, service worker, assets
 │   └── next.config.js
+├── voice-service/          # Microservicio de voz IA (Piper TTS + faster-whisper STT)
 ├── infra/
 │   ├── asterisk/           # Configs Asterisk (realtime, pjsip, ari, http, rtp…)
 │   ├── sbc/                # Notas del SBC (Kamailio/RTPEngine)
@@ -172,7 +173,7 @@ NPM publica el dominio con TLS/WSS y enruta `/` → panel, `/backend` → API, `
 ## 🌟 Módulos destacados
 
 ### 🤖 IVR conversacional con IA
-Las llamadas a un agente IA pasan por un pipeline **STT → LLM → TTS** sobre **AudioSocket**. Funciona 100% **offline** (Vosk + espeak-ng) sin claves, o con **OpenAI** (Whisper + GPT + TTS) cargando la key. Soporta *barge-in* (interrumpir al bot) y **function-calling**: transferir a un área/persona y consultar un CRM por webhook.
+Las llamadas a un agente IA pasan por un pipeline **STT → LLM → TTS** sobre **AudioSocket**. Funciona 100% **offline** con **voz neural Piper + faster-whisper** (en un CT dedicado, gratis), o con **OpenAI** (Whisper + GPT + TTS) cargando la key. Soporta *barge-in* (interrumpir al bot) y **function-calling**: transferir a un área/persona y consultar un CRM por webhook.
 
 ### 🌐 Click-to-Call público
 Generás un enlace/QR apuntado a un interno, cola, IVR o agente IA. El cliente externo llama por **WebRTC desde el navegador, sin instalar ni registrarse**; se crea un invitado SIP efímero aislado y su nombre/geo viajan con la llamada.
@@ -204,6 +205,7 @@ Proxy SIP de borde con **dispatcher**, **anti-flood (pike/ipban)** y **RTPEngine
 - [x] Colas, IVR visual, conferencias, grupos, buzón
 - [x] SBC Kamailio + RTPEngine
 - [x] IVR conversacional con IA (offline / OpenAI)
+- [x] Voz neural self-hosted (Piper TTS + faster-whisper STT) en CT dedicado
 - [x] Click-to-Call público (WebRTC + QR)
 - [x] Push RFC 8599 (Web Push / FCM / APNs)
 - [x] Auto-provisioning Yealink / Grandstream
