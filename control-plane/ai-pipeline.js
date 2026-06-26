@@ -153,7 +153,8 @@ async function speak(session, text) {
   // enviar en frames de 20ms; cancelable por barge-in
   const token = ++session.speakToken;
   session.speaking = true;
-  const startT = Date.now(); let idx = 0;
+  const PREBUF = 10;            // ~200ms de colchon inicial para absorber jitter
+  let startT = 0; let idx = 0;
   for (let off = 0; off < pcm.length; off += FRAME_BYTES) {
     if (session.closed || token !== session.speakToken) break;   // barge-in / fin
     const slice = pcm.slice(off, off + FRAME_BYTES);
@@ -161,7 +162,9 @@ async function speak(session, text) {
     frame[0] = 0x10; frame.writeUInt16BE(slice.length, 1); slice.copy(frame, 3);
     try { session.socket.write(frame); } catch (_) { break; }
     idx++;
-    const wait = (startT + idx * 20) - Date.now();   // corrector de deriva: evita underruns/cortes
+    if (idx === PREBUF) startT = Date.now();        // marca el reloj tras enviar el colchon
+    if (idx <= PREBUF) continue;                    // las primeras van de corrido (cushion)
+    const wait = (startT + (idx - PREBUF) * 20) - Date.now();   // pacing 20ms con correccion de deriva
     if (wait > 1) await new Promise(r => setTimeout(r, wait));
   }
   if (token === session.speakToken) session.speaking = false;
@@ -225,10 +228,17 @@ const TOOLS = [
 async function doTransfer(session, dest, label) {
   session.log('TRANSFER -> ' + dest + ' (' + (label || '') + ')');
   const ch = session.channel;
-  cleanupMedia(session);
+  // marcar cerrada ANTES de salir de Stasis: el continueInDialplan dispara StasisEnd
+  // y sin esto endSession() colgaria el canal deshaciendo la transferencia.
+  session.transferring = true; session.closed = true;
+  try { if (session.endpointTimer) clearInterval(session.endpointTimer); } catch (_) {}
+  try { if (session.sttProc) session.sttProc.kill('SIGKILL'); } catch (_) {}
+  try { if (session.em) ARI.channels.hangup({ channelId: session.em.id }).catch(() => {}); } catch (_) {}
+  try { if (session.bridge) session.bridge.destroy().catch(() => {}); } catch (_) {}
   try { await ch.continueInDialplan({ context: 'internal', extension: String(dest), priority: 1 }); }
   catch (e) { session.log('transfer err ' + e.message); try { await ch.hangup(); } catch (_) {} }
-  finalize(session);
+  if (session.socket) { try { session.socket.end(); } catch (_) {} }
+  sessions.delete(session.uuid); pendingByUuid.delete(session.uuid);
 }
 function cleanupMedia(session) {
   try { if (session.sttProc) session.sttProc.kill('SIGKILL'); } catch (_) {}
@@ -254,6 +264,7 @@ function finalize(session) {
 // ============================================================
 function startServer() {
   const srv = net.createServer((socket) => {
+    try { socket.setNoDelay(true); } catch (_) {}   // sin Nagle: audio en tiempo real, sin tirones
     let buf = Buffer.alloc(0); let session = null;
     socket.on('data', (data) => {
       buf = Buffer.concat([buf, data]);
