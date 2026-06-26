@@ -64,7 +64,7 @@ export default function VozConsole() {
   }
   async function restart() { if (!confirm('¿Reiniciar el servicio de voz?')) return; setBusy('restart'); await fetch('/backend/api/voz/restart', { method: 'POST' }); toast('Reiniciando servicio…', 'info'); setBusy(''); setTimeout(() => { loadVoz(); loadVoices(); }, 6000); }
 
-  const m = voz?.metrics || {}; const st = voz?.stats || {}; const inst = voices?.installed || []; const cat = voices?.catalog || [];
+  const m = voz?.metrics || {}; const st = voz?.stats || {}; const inst = voices?.installed || []; const cat = voices?.catalog || []; const edge = voices?.edge || [];
 
   return (
     <Stack gap="lg">
@@ -101,7 +101,7 @@ export default function VozConsole() {
           <Card withBorder radius="lg" padding="lg" mb="md">
             <Group gap="sm" mb="sm"><ThemeIcon variant="light" color="teal"><IconPlayerPlay size={18} /></ThemeIcon><Text fw={600}>Probar voz</Text></Group>
             <Group align="flex-end" gap="sm">
-              <Select label="Voz" data={inst.map(v => ({ value: v.key, label: v.key }))} value={testVoice} onChange={setTestVoice} w={220} />
+              <Select label="Voz" data={[{ group: 'Local · Piper', items: inst.map(v => ({ value: v.key, label: v.key })) }, { group: 'Latinoamérica · Edge', items: edge.map(v => ({ value: v.key, label: v.label })) }]} value={testVoice} onChange={setTestVoice} searchable w={300} />
               <TextInput label="Texto" value={testText} onChange={e => setTestText(e.currentTarget.value)} style={{ flex: 1 }} />
               <Button leftSection={<IconPlayerPlay size={16} />} loading={busy === 'test'} onClick={testTTS}>Reproducir</Button>
             </Group>
@@ -124,6 +124,11 @@ export default function VozConsole() {
               </Table.Tbody></Table>
             </Card>
           </SimpleGrid>
+          <Card withBorder radius="lg" padding="lg" mt="md">
+            <Group gap="sm" mb="sm"><ThemeIcon variant="light" color="grape"><IconWaveSine size={18} /></ThemeIcon><Text fw={600}>Voces Latinoamérica · Edge (online, sin instalar)</Text><Badge variant="light" color="grape">{edge.length} voces</Badge></Group>
+            <Text size="xs" c="dimmed" mb="sm">Voces neuronales de Microsoft (gratis, requieren internet). Probalas arriba y elegilas en cada agente o como voz por defecto.</Text>
+            <Group gap={6}>{edge.map(v => <Badge key={v.key} variant="light" radius="sm" style={{ cursor: 'pointer' }} onClick={() => setTestVoice(v.key)}>{v.label}</Badge>)}</Group>
+          </Card>
         </Tabs.Panel>
 
         <Tabs.Panel value="cfg">
@@ -138,7 +143,7 @@ export default function VozConsole() {
             <Card withBorder radius="lg" padding="lg">
               <Text fw={600} mb="md">Motor (reinicia el servicio)</Text>
               <Select label="Modelo Whisper (STT)" description="Más grande = más preciso pero más lento/pesado" data={(cfg.models || ['tiny','base','small','medium']).map(x => ({ value: x, label: x }))} value={cfg.whisper} onChange={v => setCfg(c => ({ ...c, whisper: v }))} mb="md" />
-              <Select label="Voz por defecto (TTS)" data={inst.map(v => ({ value: v.key, label: v.key }))} value={cfg.default_voice} onChange={v => setCfg(c => ({ ...c, default_voice: v }))} mb="lg" />
+              <Select label="Voz por defecto (TTS)" searchable data={[{ group: 'Local · Piper', items: inst.map(v => ({ value: v.key, label: v.key })) }, { group: 'Latinoamérica · Edge (online)', items: edge.map(v => ({ value: v.key, label: v.label })) }]} value={cfg.default_voice} onChange={v => setCfg(c => ({ ...c, default_voice: v }))} mb="lg" />
               <Alert variant="light" color="orange" mb="md" icon={<IconInfoCircle size={16} />}>Cambiar el modelo descarga ~140MB (base) o ~1.5GB (medium) la primera vez y reinicia el servicio.</Alert>
               <Group justify="flex-end"><Button color="grape" leftSection={<IconReload size={16} />} loading={busy === 'engine'} onClick={saveEngine}>Aplicar y reiniciar</Button></Group>
             </Card>

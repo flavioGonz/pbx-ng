@@ -15,8 +15,8 @@ export default function AiAgents() {
   const [list, setList] = useState([]); const [opened, setOpened] = useState(false); const [form, setForm] = useState(empty); const [saving, setSaving] = useState(false);
   const [keySet, setKeySet] = useState(false); const [keyVal, setKeyVal] = useState(''); const [keySaving, setKeySaving] = useState(false);
   const [voz, setVoz] = useState(null); const [vozUrl, setVozUrl] = useState('http://172.26.20.219:8080'); const [vozSpeed, setVozSpeed] = useState('1.0'); const [vozSaving, setVozSaving] = useState(false);
-  const [vozList, setVozList] = useState([]); const previewRef = useRef(null);
-  async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); } catch (_) {} }
+  const [vozList, setVozList] = useState([]); const [edgeList, setEdgeList] = useState([]); const previewRef = useRef(null);
+  async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (_) {} }
   async function preview(voice) { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }) }); if (!r.ok) { toast('No se pudo generar el audio', 'bad'); return; } const b = await r.blob(); if (previewRef.current) { previewRef.current.src = URL.createObjectURL(b); previewRef.current.play().catch(() => {}); } } catch (_) {} }
   async function loadVoz() { try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) { setVoz({ ok: false }); } }
   async function saveVoz() { setVozSaving(true); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: vozUrl, voz_length_scale: vozSpeed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setVozSaving(false); toast(r.error ? 'Error' : 'Servicio de voz guardado', r.error ? 'bad' : 'ok'); loadVoz(); }
@@ -112,7 +112,7 @@ export default function AiAgents() {
             <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={v => up('provider', v)} />
             <Select label="Modelo (OpenAI)" data={MODELS} value={form.model} onChange={v => up('model', v)} disabled={form.provider !== 'openai'} />
             <Group gap="xs" align="flex-end" wrap="nowrap">
-              <Select label="Voz" description={form.provider === 'openai' ? 'Voces de OpenAI' : 'Voces instaladas (gestionalas en Voz IA)'} data={form.provider === 'openai' ? OPENAI_VOICES : vozList.map(k => ({ value: k, label: k }))} value={form.voice} onChange={v => up('voice', v)} style={{ flex: 1 }} searchable />
+              <Select label="Voz" description={form.provider === 'openai' ? 'Voces de OpenAI' : 'Voces instaladas (gestionalas en Voz IA)'} data={form.provider === 'openai' ? OPENAI_VOICES : [{ group: 'Local · Piper (offline)', items: vozList.map(k => ({ value: k, label: k })) }, { group: 'Latinoamérica · Edge (online)', items: edgeList.map(v => ({ value: v.key, label: v.label })) }]} value={form.voice} onChange={v => up('voice', v)} style={{ flex: 1 }} searchable />
               {form.provider !== 'openai' && <Tooltip label="Escuchar voz"><ActionIcon variant="light" size={36} onClick={() => preview(form.voice)} disabled={!form.voice}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>}
             </Group>
           </SimpleGrid>

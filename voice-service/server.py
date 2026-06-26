@@ -21,6 +21,38 @@ CATALOG = [
     {"key": "es_ES-carlfm-x_low", "label": "Espana - Carl (rapida, liviana)", "path": "es/es_ES/carlfm/x_low"},
 ]
 
+
+EDGE_VOICES = [
+    {"key": "es-UY-MateoNeural", "label": "Uruguay - Mateo (masculina)"},
+    {"key": "es-UY-ValentinaNeural", "label": "Uruguay - Valentina (femenina)"},
+    {"key": "es-AR-TomasNeural", "label": "Argentina - Tomas (masculina)"},
+    {"key": "es-AR-ElenaNeural", "label": "Argentina - Elena (femenina)"},
+    {"key": "es-MX-JorgeNeural", "label": "Mexico - Jorge (masculina)"},
+    {"key": "es-MX-DaliaNeural", "label": "Mexico - Dalia (femenina)"},
+    {"key": "es-CO-GonzaloNeural", "label": "Colombia - Gonzalo (masculina)"},
+    {"key": "es-CO-SalomeNeural", "label": "Colombia - Salome (femenina)"},
+    {"key": "es-CL-LorenzoNeural", "label": "Chile - Lorenzo (masculina)"},
+    {"key": "es-CL-CatalinaNeural", "label": "Chile - Catalina (femenina)"},
+    {"key": "es-PE-AlexNeural", "label": "Peru - Alex (masculina)"},
+    {"key": "es-PE-CamilaNeural", "label": "Peru - Camila (femenina)"},
+    {"key": "es-VE-SebastianNeural", "label": "Venezuela - Sebastian (masculina)"},
+    {"key": "es-VE-PaolaNeural", "label": "Venezuela - Paola (femenina)"},
+]
+EDGE_KEYS = {v["key"] for v in EDGE_VOICES}
+
+async def edge_synth(text, voice, out_rate, fmt):
+    import edge_tts, os, time as _t
+    mp3 = "/tmp/edge_%d_%d.mp3" % (os.getpid(), int(_t.time() * 1000))
+    try:
+        await edge_tts.Communicate(text, voice, rate="+12%").save(mp3)
+        ff = ["ffmpeg", "-y", "-i", mp3, "-ar", str(out_rate), "-ac", "1"]
+        ff += (["-f", "wav", "-"] if fmt == "wav" else ["-f", "s16le", "-"])
+        p = subprocess.run(ff, capture_output=True)
+        return p.stdout
+    finally:
+        try: os.remove(mp3)
+        except Exception: pass
+
 app = FastAPI(title="PBX-NG Voz")
 STATS = {"tts": 0, "stt": 0, "tts_ms": 0.0, "stt_ms": 0.0, "started": time.time()}
 print("[voz] cargando whisper", WMODEL_NAME, "...", flush=True)
@@ -76,13 +108,17 @@ async def tts(req: Request):
     b = await req.json()
     text = (b.get("text") or "").strip()
     voice = b.get("voice") or DEFAULT_VOICE
-    if not os.path.exists(f"{VOICES}/{voice}.onnx"):
-        voice = DEFAULT_VOICE
     if not text:
         return Response(b"", media_type="application/octet-stream")
-    ls = str(b.get("length_scale", 1.0))
     out_rate = int(b.get("rate", 16000))
     fmt = b.get("format", "raw")
+    if voice in EDGE_KEYS:
+        out = await edge_synth(text, voice, out_rate, fmt)
+        STATS["tts"] += 1; STATS["tts_ms"] += (time.time() - t0) * 1000
+        return Response(out, media_type="audio/wav" if fmt == "wav" else "application/octet-stream")
+    if not os.path.exists(f"{VOICES}/{voice}.onnx"):
+        voice = DEFAULT_VOICE
+    ls = str(b.get("length_scale", 1.0))
     sr = voice_rate(voice)
     out_args = ["-t", "wav"] if fmt == "wav" else ["-t", "raw"]
     p1 = subprocess.Popen([PIPER, "--model", f"{VOICES}/{voice}.onnx", "--length_scale", ls, "--output-raw"],
@@ -120,7 +156,7 @@ async def stt(req: Request):
 def adm_voices():
     inst = installed_voices(); ik = {v["key"] for v in inst}
     catalog = [{**c, "installed": c["key"] in ik} for c in CATALOG]
-    return {"installed": inst, "catalog": catalog, "default": DEFAULT_VOICE}
+    return {"installed": inst, "catalog": catalog, "edge": EDGE_VOICES, "default": DEFAULT_VOICE}
 
 @app.post("/admin/voices/install")
 async def adm_install(req: Request):
