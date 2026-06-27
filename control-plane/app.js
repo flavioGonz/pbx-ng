@@ -1333,7 +1333,7 @@ app.get('/api/wallboard', async (req, res) => {
   res.json(out);
 });
 
-app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); try { const { rows } = await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); try { const { rows } = await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 app.get('/api/conferences', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,pin FROM pbxng_conferences ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/conferences', async (req, res) => {

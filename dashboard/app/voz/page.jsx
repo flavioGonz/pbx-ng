@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Stack, Card, Group, Text, Button, Badge, ThemeIcon, SimpleGrid, Tabs, Table, TextInput, Select, Slider, Progress, Divider, ActionIcon, Tooltip, Code, ScrollArea, Alert } from '@mantine/core';
-import { IconWaveSine, IconActivity, IconMicrophone2, IconSettings, IconFileText, IconRefresh, IconCpu, IconDeviceFloppy, IconPlayerPlay, IconDownload, IconTrash, IconClock, IconBolt, IconServer2, IconReload, IconInfoCircle, IconCheck, IconVolume, IconArrowBackUp, IconSparkles } from '@tabler/icons-react';
+import { Stack, Card, Group, Text, Button, Badge, ThemeIcon, SimpleGrid, Tabs, Table, TextInput, Select, Slider, Progress, Divider, ActionIcon, Tooltip, Code, ScrollArea, Alert, Modal } from '@mantine/core';
+import { IconWaveSine, IconActivity, IconMicrophone2, IconSettings, IconFileText, IconRefresh, IconCpu, IconDeviceFloppy, IconPlayerPlay, IconDownload, IconTrash, IconClock, IconBolt, IconServer2, IconReload, IconInfoCircle, IconCheck, IconVolume, IconArrowBackUp, IconSparkles, IconAlertTriangle } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
 
@@ -31,6 +31,9 @@ export default function VozConsole() {
   const [logs, setLogs] = useState(''); const [busy, setBusy] = useState('');
   const [testText, setTestText] = useState('Hola, gracias por comunicarte con IES. ¿En qué puedo ayudarte?'); const [testVoice, setTestVoice] = useState(''); const audioRef = useRef(null);
   const [sp, setSp] = useState([]); const [spVoice, setSpVoice] = useState('es-UY-ValentinaNeural'); const [spProg, setSpProg] = useState(null); const [spFilter, setSpFilter] = useState(''); const spRef = useRef(null);
+  const [confirmCfg, setConfirmCfg] = useState(null);
+  const ask = (cfg) => setConfirmCfg(cfg);
+  const doConfirm = async () => { const fn = confirmCfg && confirmCfg.onConfirm; setConfirmCfg(null); if (fn) await fn(); };
 
   async function loadVoz() {
     try { const v = await fetch('/backend/api/voz').then(r => r.json()); setVoz(v);
@@ -58,19 +61,18 @@ export default function VozConsole() {
     }
     setSpProg(null); loadSp(); toast('Audios generados con ' + spVoice, 'ok');
   }
-  async function spRevert(names) { if (!confirm('¿Restaurar los audios originales de Asterisk? Se perderá la voz personalizada en esos prompts.')) return; setBusy('revert'); await fetch('/backend/api/sysprompts/revert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: names || [] }) }); setBusy(''); setTimeout(loadSp, 1500); toast('Restaurando originales…', 'info'); }
+  async function spRevert(names) { setBusy('revert'); await fetch('/backend/api/sysprompts/revert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: names || [] }) }); setBusy(''); setTimeout(loadSp, 1500); toast('Restaurando originales…', 'info'); }
   async function spSaveText(name, text) { try { await fetch('/backend/api/sysprompts/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch (_) {} }
   async function spPlay(name) { try { const r = await fetch('/backend/api/sysprompts/test/' + encodeURIComponent(name) + '?t=' + Date.now()); if (!r.ok) return; const u = URL.createObjectURL(await r.blob()); if (spRef.current) { spRef.current.src = u; await spRef.current.play().catch(() => {}); } } catch (_) {} }
   useEffect(() => { loadVoz(); loadVoices(); loadCfg(); loadSp(); const t = setInterval(loadVoz, 4000); return () => clearInterval(t); }, []);
 
   async function saveBasics() { setBusy('basics'); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: url, voz_length_scale: speed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setBusy(''); toast(r.error ? 'Error' : 'Guardado', r.error ? 'bad' : 'ok'); }
   async function saveEngine() {
-    if (!confirm('Cambiar el modelo/voz reinicia el servicio (puede tardar si descarga el modelo). ¿Continuar?')) return;
     setBusy('engine'); const r = await fetch('/backend/api/voz/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whisper: cfg.whisper, default_voice: cfg.default_voice }) }).then(x => x.json()).catch(() => ({ error: 1 })); setBusy('');
     toast(r.error ? 'Error: ' + r.error : 'Aplicado · reiniciando servicio…', r.error ? 'bad' : 'ok');
   }
   async function install(key) { setBusy('inst' + key); const r = await fetch('/backend/api/voz/voices/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) }).then(x => x.json()).catch(() => ({ error: 'red' })); setBusy(''); toast(r.error ? 'Error: ' + r.error : 'Voz instalada', r.error ? 'bad' : 'ok'); loadVoices(); loadVoz(); }
-  async function removeVoice(key) { if (!confirm('¿Eliminar la voz ' + key + '?')) return; await fetch('/backend/api/voz/voices/' + encodeURIComponent(key), { method: 'DELETE' }); toast('Voz eliminada', 'info'); loadVoices(); loadVoz(); }
+  async function removeVoice(key) { await fetch('/backend/api/voz/voices/' + encodeURIComponent(key), { method: 'DELETE' }); toast('Voz eliminada', 'info'); loadVoices(); loadVoz(); }
   async function testTTS() {
     setBusy('test');
     try {
@@ -81,7 +83,7 @@ export default function VozConsole() {
     } catch (_) { toast('Error de red', 'bad'); }
     setBusy('');
   }
-  async function restart() { if (!confirm('¿Reiniciar el servicio de voz?')) return; setBusy('restart'); await fetch('/backend/api/voz/restart', { method: 'POST' }); toast('Reiniciando servicio…', 'info'); setBusy(''); setTimeout(() => { loadVoz(); loadVoices(); }, 6000); }
+  async function restart() { setBusy('restart'); await fetch('/backend/api/voz/restart', { method: 'POST' }); toast('Reiniciando servicio…', 'info'); setBusy(''); setTimeout(() => { loadVoz(); loadVoices(); }, 6000); }
 
   const m = voz?.metrics || {}; const st = voz?.stats || {}; const inst = voices?.installed || []; const cat = voices?.catalog || []; const edge = voices?.edge || [];
 
@@ -132,7 +134,7 @@ export default function VozConsole() {
               <Text fw={600} mb="sm">Voces instaladas</Text>
               <Table><Table.Tbody>{inst.map(v => (
                 <Table.Tr key={v.key}><Table.Td><Text fw={600} fz="sm">{v.key}</Text></Table.Td><Table.Td><Badge variant="light" color="gray">{v.size_mb} MB</Badge></Table.Td>
-                  <Table.Td ta="right"><ActionIcon variant="subtle" color="red" disabled={v.key === voices?.default} onClick={() => removeVoice(v.key)}><IconTrash size={16} /></ActionIcon></Table.Td></Table.Tr>))}
+                  <Table.Td ta="right"><ActionIcon variant="subtle" color="red" disabled={v.key === voices?.default} onClick={() => ask({ title: 'Eliminar voz', message: 'Se eliminará la voz «' + v.key + '» del servicio. ¿Continuar?', confirmLabel: 'Eliminar', color: 'red', icon: <IconTrash size={22} />, onConfirm: () => removeVoice(v.key) })}><IconTrash size={16} /></ActionIcon></Table.Td></Table.Tr>))}
               </Table.Tbody></Table>
             </Card>
             <Card withBorder radius="lg" padding="lg">
@@ -140,7 +142,7 @@ export default function VozConsole() {
               <Table><Table.Tbody>{cat.map(c => (
                 <Table.Tr key={c.key}><Table.Td><Text fw={600} fz="sm">{c.label}</Text><Text fz="xs" c="dimmed" ff="monospace">{c.key}</Text></Table.Td>
                   <Table.Td ta="right">{c.installed ? <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>Instalada</Badge> :
-                    <Button size="compact-sm" variant="light" leftSection={<IconDownload size={14} />} loading={busy === 'inst' + c.key} onClick={() => install(c.key)}>Instalar</Button>}</Table.Td></Table.Tr>))}
+                    <Button size="compact-sm" variant="light" leftSection={<IconDownload size={14} />} loading={busy === 'inst' + c.key} onClick={() => ask({ title: 'Instalar voz', message: 'Se descargará e instalará la voz «' + c.label + '» en el contenedor (puede tardar). ¿Continuar?', confirmLabel: 'Instalar', color: 'blue', icon: <IconDownload size={22} />, onConfirm: () => install(c.key) })}>Instalar</Button>}</Table.Td></Table.Tr>))}
               </Table.Tbody></Table>
             </Card>
           </SimpleGrid>
@@ -165,12 +167,12 @@ export default function VozConsole() {
               <Select label="Modelo Whisper (STT)" description="Más grande = más preciso pero más lento/pesado" data={(cfg.models || ['tiny','base','small','medium']).map(x => ({ value: x, label: x }))} value={cfg.whisper} onChange={v => setCfg(c => ({ ...c, whisper: v }))} mb="md" />
               <Select label="Voz por defecto (TTS)" searchable data={[{ group: 'Local · Piper', items: inst.map(v => ({ value: v.key, label: v.key })) }, { group: 'Latinoamérica · Edge (online)', items: edge.map(v => ({ value: v.key, label: v.label })) }]} value={cfg.default_voice} onChange={v => setCfg(c => ({ ...c, default_voice: v }))} mb="lg" />
               <Alert variant="light" color="orange" mb="md" icon={<IconInfoCircle size={16} />}>Cambiar el modelo descarga ~140MB (base) o ~1.5GB (medium) la primera vez y reinicia el servicio.</Alert>
-              <Group justify="flex-end"><Button color="grape" leftSection={<IconReload size={16} />} loading={busy === 'engine'} onClick={saveEngine}>Aplicar y reiniciar</Button></Group>
+              <Group justify="flex-end"><Button color="grape" leftSection={<IconReload size={16} />} loading={busy === 'engine'} onClick={() => ask({ title: 'Aplicar configuración del motor', message: 'Cambiar el modelo Whisper o la voz por defecto reinicia el servicio (puede tardar si descarga el modelo). ¿Continuar?', confirmLabel: 'Aplicar y reiniciar', color: 'grape', icon: <IconReload size={22} />, onConfirm: () => saveEngine() })}>Aplicar y reiniciar</Button></Group>
             </Card>
           </SimpleGrid>
           <Card withBorder radius="lg" padding="lg" mt="md">
             <Group justify="space-between"><div><Text fw={600}>Acciones</Text><Text size="xs" c="dimmed">Reiniciar el servicio de voz del contenedor</Text></div>
-              <Button color="red" variant="light" leftSection={<IconReload size={16} />} loading={busy === 'restart'} onClick={restart}>Reiniciar servicio</Button></Group>
+              <Button color="red" variant="light" leftSection={<IconReload size={16} />} loading={busy === 'restart'} onClick={() => ask({ title: 'Reiniciar servicio de voz', message: 'Se reiniciará el microservicio de voz (TTS/STT). Las llamadas con IA en curso pueden cortarse. ¿Continuar?', confirmLabel: 'Reiniciar', color: 'red', icon: <IconReload size={22} />, onConfirm: () => restart() })}>Reiniciar servicio</Button></Group>
           </Card>
         </Tabs.Panel>
 
@@ -187,9 +189,9 @@ export default function VozConsole() {
           <Card withBorder radius="lg" padding="lg" mb="md">
             <Group align="flex-end" gap="sm" wrap="wrap">
               <Select label="Voz del sistema" data={[{ group: 'Latinoamérica · Edge', items: edge.map(v => ({ value: v.key, label: v.label })) }, { group: 'Local · Piper', items: inst.map(v => ({ value: v.key, label: v.key })) }]} value={spVoice} onChange={setSpVoice} searchable w={280} />
-              <Button leftSection={<IconSparkles size={16} />} loading={!!spProg} onClick={() => spGenerate()}>Generar todos</Button>
-              <Button variant="light" leftSection={<IconSparkles size={16} />} loading={!!spProg} onClick={() => spGenerate(sp.filter(x => x.category === 'digitos').map(x => x.name))}>Solo dígitos</Button>
-              <Button variant="default" color="red" leftSection={<IconArrowBackUp size={16} />} loading={busy === 'revert'} onClick={() => spRevert()}>Restaurar originales</Button>
+              <Button leftSection={<IconSparkles size={16} />} loading={!!spProg} onClick={() => ask({ title: 'Generar todos los audios', message: 'Se generarán y desplegarán todos los audios del sistema con la voz ' + spVoice + '. Los originales de Asterisk quedan respaldados.', confirmLabel: 'Generar todos', color: 'teal', icon: <IconSparkles size={22} />, onConfirm: () => spGenerate() })}>Generar todos</Button>
+              <Button variant="light" leftSection={<IconSparkles size={16} />} loading={!!spProg} onClick={() => ask({ title: 'Generar solo los dígitos', message: 'Se generarán los números (0-29, decenas, centenas y auxiliares) con la voz ' + spVoice + '.', confirmLabel: 'Generar dígitos', color: 'teal', icon: <IconSparkles size={22} />, onConfirm: () => spGenerate(sp.filter(x => x.category === 'digitos').map(x => x.name)) })}>Solo dígitos</Button>
+              <Button variant="default" color="red" leftSection={<IconArrowBackUp size={16} />} loading={busy === 'revert'} onClick={() => ask({ title: 'Restaurar audios originales', message: 'Se restaurarán los sonidos de fábrica de Asterisk y se perderá la voz personalizada en los prompts generados. ¿Continuar?', confirmLabel: 'Restaurar originales', color: 'red', icon: <IconArrowBackUp size={22} />, onConfirm: () => spRevert() })}>Restaurar originales</Button>
               {!sp.length && <Button variant="light" onClick={spSeed} loading={busy === 'seed'}>Cargar catálogo</Button>}
             </Group>
             {spProg && <><Progress mt="md" value={spProg.total ? Math.round(spProg.done * 100 / spProg.total) : 0} animated striped /><Text size="xs" c="dimmed" mt={4}>Generando {spProg.done} / {spProg.total}…</Text></>}
@@ -211,7 +213,7 @@ export default function VozConsole() {
                       <Table.Td>{x.deployed_at ? <Badge size="xs" color="teal" variant="light">activo</Badge> : x.has_audio ? <Badge size="xs" color="yellow" variant="light">generado</Badge> : <Badge size="xs" color="gray" variant="light">original</Badge>}</Table.Td>
                       <Table.Td><Group gap={4} justify="flex-end" wrap="nowrap">
                         <Tooltip label="Escuchar"><ActionIcon variant="subtle" disabled={!x.has_audio} onClick={() => spPlay(x.name)}><IconVolume size={16} /></ActionIcon></Tooltip>
-                        <Tooltip label="Regenerar con la voz elegida"><ActionIcon variant="subtle" color="teal" loading={!!spProg} onClick={() => spGenerate([x.name])}><IconRefresh size={15} /></ActionIcon></Tooltip>
+                        <Tooltip label="Regenerar con la voz elegida"><ActionIcon variant="subtle" color="teal" loading={!!spProg} onClick={() => ask({ title: 'Regenerar audio', message: 'Se regenerará «' + x.name + '» con la voz ' + spVoice + ' y se desplegará en Asterisk.', confirmLabel: 'Regenerar', color: 'teal', icon: <IconRefresh size={22} />, onConfirm: () => spGenerate([x.name]) })}><IconRefresh size={15} /></ActionIcon></Tooltip>
                       </Group></Table.Td>
                     </Table.Tr>))}
                 </Table.Tbody>
@@ -222,6 +224,16 @@ export default function VozConsole() {
         </Tabs.Panel>
 
       </Tabs>
+      <Modal opened={!!confirmCfg} onClose={() => setConfirmCfg(null)} centered radius="lg" size="sm" withCloseButton={false} overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}>
+        <Stack gap="md" align="center" ta="center" py="xs">
+          <ThemeIcon size={58} radius="xl" variant="light" color={confirmCfg?.color || 'teal'}>{confirmCfg?.icon || <IconAlertTriangle size={26} />}</ThemeIcon>
+          <div><Text fw={800} fz="lg">{confirmCfg?.title}</Text><Text c="dimmed" fz="sm" mt={6}>{confirmCfg?.message}</Text></div>
+          <Group grow w="100%" mt="xs">
+            <Button variant="default" onClick={() => setConfirmCfg(null)}>Cancelar</Button>
+            <Button color={confirmCfg?.color || 'teal'} onClick={doConfirm}>{confirmCfg?.confirmLabel || 'Confirmar'}</Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }
