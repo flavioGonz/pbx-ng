@@ -74,16 +74,24 @@ export default function SbcFlow() {
   const trunkOnline = trunks.filter(t => t.status === 'online').length;
   const comp = (g, n) => (sys?.components || []).find(c => c.group === g && c.name.includes(n))?.status;
 
-  const nodes = useMemo(() => ([
-    { id: 'wan', type: 'pbx', position: { x: 320, y: 230 }, data: { title: 'Internet / WAN', ip: '200.40.182.246', icon: <IconWorld size={17} />, status: 'ok' } },
-    { id: 'npm', type: 'pbx', position: { x: 620, y: 50 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
-    { id: 'coturn', type: 'pbx', position: { x: 620, y: 410 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
-    { id: 'kamailio', type: 'pbx', position: { x: 620, y: 230 }, data: { title: 'SBC-NG', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
-    { id: 'asterisk', type: 'pbx', position: { x: 940, y: 230 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'En curso', value: ch.length, hot: ch.length > 0 }] } },
-    { id: 'troncales', type: 'pbx', position: { x: 20, y: 230 }, data: { title: 'Troncales (operadores)', icon: <IconDeviceLandlinePhone size={17} />, status: trunks.length ? 'ok' : 'pending', metrics: [{ label: 'Totales', value: trunks.length }, { label: 'Registradas', value: trunkOnline }] } },
-    { id: 'internos', type: 'pbx', position: { x: 1260, y: 150 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
-    { id: 'apps', type: 'pbx', position: { x: 1260, y: 330 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
-  ]), [sbc, trunks, sys, snap]);
+  const nodes = useMemo(() => {
+    const base = [
+      { id: 'wan', type: 'pbx', position: { x: 360, y: 250 }, data: { title: 'Internet / WAN', ip: '200.40.182.246', icon: <IconWorld size={17} />, status: 'ok' } },
+      { id: 'npm', type: 'pbx', position: { x: 660, y: 60 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
+      { id: 'coturn', type: 'pbx', position: { x: 660, y: 440 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
+      { id: 'kamailio', type: 'pbx', position: { x: 660, y: 250 }, data: { title: 'SBC-NG', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
+      { id: 'asterisk', type: 'pbx', position: { x: 980, y: 250 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'En curso', value: ch.length, hot: ch.length > 0 }] } },
+      { id: 'internos', type: 'pbx', position: { x: 1300, y: 170 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
+      { id: 'apps', type: 'pbx', position: { x: 1300, y: 350 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
+    ];
+    const tr = trunks.length ? trunks : [{ name: 'Sin troncales', provider_host: 'agregá una en Troncales', status: 'pending', _empty: true }];
+    const step = 110, startY = 250 - ((tr.length - 1) * step) / 2;
+    const tnodes = tr.map((t, i) => ({
+      id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
+      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={17} />, status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
+    }));
+    return [...base, ...tnodes];
+  }, [sbc, trunks, sys, snap]);
 
   const talking = ch.filter(c => /up|answer/i.test(c.state || '')).length;
   const spine = ch.length ? (talking ? 'talk' : 'ring') : false;
@@ -94,9 +102,9 @@ export default function SbcFlow() {
     e('e3', 'wan', 'coturn', '#0891b2', 'TURN', false),
     e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws', spine),
     e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'trunk interno', spine),
-    e('eT', 'troncales', 'wan', '#0e9488', 'troncal SIP', spine),
     e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined, spine),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
+    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), 'wan', t._empty ? '#94a3b8' : (t.status === 'online' ? '#16a34a' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
   ];
 
   const node = nodes.find(n => n.id === sel);
