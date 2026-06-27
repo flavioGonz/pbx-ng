@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Stack, Text, Group, Button, Badge, Card, ActionIcon, Modal, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, ThemeIcon, ScrollArea, Divider, Tooltip, Box, Paper } from '@mantine/core';
-import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers, IconDeviceLandlinePhone, IconTag, IconWorld, IconHash, IconUser, IconLock, IconPlugConnected, IconAdjustmentsAlt, IconWaveSine, IconArrowsExchange, IconRefresh, IconX, IconKey, IconBroadcast } from '@tabler/icons-react';
+import { Stack, Text, Group, Button, Badge, Card, ActionIcon, Modal, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, ThemeIcon, ScrollArea, Divider, Tooltip, Box, Paper, FileButton } from '@mantine/core';
+import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers, IconDeviceLandlinePhone, IconTag, IconWorld, IconHash, IconUser, IconLock, IconPlugConnected, IconAdjustmentsAlt, IconWaveSine, IconArrowsExchange, IconRefresh, IconX, IconKey, IconBroadcast, IconPhoto } from '@tabler/icons-react';
 import { useLive } from '../useLive';
 import { toast } from '../notify';
 
@@ -14,18 +14,18 @@ const blank = {
   username: '', password: '', from_user: '', from_domain: '',
   codecs: ['ulaw', 'alaw'], dtmf_mode: 'rfc4733', nat: true, direct_media: false,
   qualify_frequency: 60, expiration: 3600, retry_interval: 60, context: 'from-trunk',
-  outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0,
+  outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0, logo: '',
 };
 
 function TNode({ data }) {
   const accent = data.accent;
   const col = data.status === 'online' ? '#16a34a' : data.status === 'offline' ? '#dc2626' : data.status === 'sbc' ? '#7c3aed' : '#64748b';
   return (
-    <div style={{ width: 186, borderRadius: 15, padding: '11px 13px', cursor: data.clickable ? 'pointer' : 'default', background: accent === 'kam' ? 'linear-gradient(160deg,#6d28d9,#4c1d95)' : accent === 'ast' ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: accent ? '#fff' : '#1e293b', border: '1px solid ' + (accent ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 6px 18px rgba(30,50,120,.12)' }}>
+    <div style={{ width: data.clickable ? 200 : 186, borderRadius: 15, padding: '11px 13px', cursor: data.clickable ? 'pointer' : 'default', background: data.tint === 'down' ? 'linear-gradient(160deg,#ef4444,#b91c1c)' : data.tint === 'up' ? 'linear-gradient(160deg,#2f74e6,#1750c2)' : accent === 'kam' ? 'linear-gradient(160deg,#6d28d9,#4c1d95)' : accent === 'ast' ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: (accent || data.tint) ? '#fff' : '#1e293b', border: '1px solid ' + ((accent || data.tint) ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 6px 18px rgba(30,50,120,.12)' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
       <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
       <Group gap={8} wrap="nowrap">
-        <div style={{ width: 28, height: 28, borderRadius: 8, background: accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent ? '#fff' : '#2f74e6', flex: 'none' }}>{data.icon}</div>
+        <div style={{ width: 30, height: 30, borderRadius: 8, background: data.logo ? '#fff' : (accent || data.tint) ? 'rgba(255,255,255,.2)' : 'rgba(47,116,230,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: (accent || data.tint) ? '#fff' : '#2f74e6', flex: 'none', overflow: 'hidden', padding: data.logo ? 3 : 0 }}>{data.logo ? <img src={data.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : data.icon}</div>
         <div style={{ lineHeight: 1.15, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.title}</div>{data.sub && <div style={{ fontSize: 10.5, opacity: .7, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.sub}</div>}</div>
         {data.dot !== false && <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: col, boxShadow: '0 0 0 3px ' + col + '22', flex: 'none' }} />}
       </Group>
@@ -42,6 +42,18 @@ export default function Troncales() {
   async function load() { try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  async function onLogo(file) {
+    if (!file) return;
+    try {
+      const img = new Image(); const url = URL.createObjectURL(file);
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+      const max = 128, sc = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas'); cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      set('logo', cv.toDataURL('image/png'));
+      URL.revokeObjectURL(url);
+    } catch (_) { toast('No se pudo procesar el logo', 'bad'); }
+  }
   function openNew() { setEditing(false); setF(blank); setOpen(true); }
   async function openEdit(t) {
     setEditing(true);
@@ -80,7 +92,7 @@ export default function Troncales() {
       const id = 'tk-' + it.t.name; const kind = it.kind; const stt = it.t.status;
       const on = stt === 'online'; const off = stt === 'offline';
       const ecol = off ? '#dc2626' : on ? '#16a34a' : (kind === 'kamailio' ? '#7c3aed' : '#1d4ed8');
-      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() } });
+      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.adv && it.t.adv.logo, tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() } });
       es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'smoothstep', animated: on, style: { stroke: ecol, strokeWidth: 2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
     });
     return { nodes: ns, edges: es };
@@ -177,6 +189,17 @@ export default function Troncales() {
           <Group grow>
             <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="proveedor-1" value={f.name} onChange={e => set('name', e.target.value)} required disabled={editing} description={editing ? 'No se puede cambiar' : 'Identificador único'} />
             <TextInput label="Caller ID saliente" leftSection={<IconUser size={15} />} placeholder='"Empresa" <099...>' value={f.callerid} onChange={e => set('callerid', e.target.value)} description="Identificación que verá el destino" />
+          </Group>
+          <Group gap="md" align="center" wrap="nowrap">
+            <div style={{ width: 56, height: 56, borderRadius: 12, border: '1px dashed var(--mantine-color-default-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--mantine-color-default-hover)', overflow: 'hidden', flex: 'none' }}>{f.logo ? <img src={f.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} /> : <IconPhoto size={22} style={{ opacity: .4 }} />}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Text size="sm" fw={500}>Logo del proveedor (PNG)</Text>
+              <Text size="xs" c="dimmed">Se muestra en la topología. PNG transparente recomendado.</Text>
+              <Group gap="xs" mt={6}>
+                <FileButton onChange={onLogo} accept="image/png,image/jpeg,image/svg+xml">{(props) => <Button {...props} size="xs" variant="light" leftSection={<IconPhoto size={14} />}>Subir logo</Button>}</FileButton>
+                {f.logo && <Button size="xs" variant="subtle" color="red" onClick={() => set('logo', '')}>Quitar</Button>}
+              </Group>
+            </div>
           </Group>
 
           <Divider label="Conexión" labelPosition="left" />

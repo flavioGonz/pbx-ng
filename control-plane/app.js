@@ -1066,7 +1066,7 @@ function trunkDefaults(o = {}) {
     qualify_frequency: +o.qualify_frequency || 60, expiration: +o.expiration || 3600,
     retry_interval: +o.retry_interval || 60, context: o.context || 'from-trunk',
     outbound_enabled: o.outbound_enabled !== false, outbound_prefix: o.outbound_prefix != null ? String(o.outbound_prefix) : '0',
-    outbound_strip: +o.outbound_strip || 0,
+    outbound_strip: +o.outbound_strip || 0, logo: o.logo || (o.adv_config && o.adv_config.logo) || '',
   };
 }
 async function writeAsteriskTrunk(c, name, a, password, tenant_id) {

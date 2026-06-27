@@ -14,6 +14,7 @@ export const theme = createTheme({
     slate: ['#f6f8fc', '#eef1f7', '#dfe4ee', '#c7cede', '#9aa4ba', '#6b7691', '#505b76', '#3c465c', '#2a3346', '#1b2233'],
   },
   components: {
+    Modal: { defaultProps: { radius: 'lg', centered: true, size: 'lg', overlayProps: { blur: 3, backgroundOpacity: 0.5 } } },
     Card: {
       defaultProps: { withBorder: true, radius: 'lg' },
       styles: { root: { background: 'light-dark(#ffffff, #161d28)', borderColor: 'light-dark(#e6eaf2, rgba(120,130,150,.14))', boxShadow: 'none' } },

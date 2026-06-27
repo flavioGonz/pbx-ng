@@ -62,7 +62,7 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>}
-      <Modal opened={opened} onClose={close} centered radius="lg" size="md"
+      <Modal opened={opened} onClose={close} centered radius="lg" size="lg"
         title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color={color}>{icon || <IconPlus size={20} />}</ThemeIcon><div><Text fw={800} lh={1.1}>Nuevo · {title || ''}</Text>{subtitle && <Text size="xs" c="dimmed">{subtitle}</Text>}</div></Group>}>
         <Stack gap="md">
           {fields.map(f => <Field key={f.name} f={f} value={form[f.name]} up={up} />)}

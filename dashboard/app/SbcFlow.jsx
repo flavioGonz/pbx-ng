@@ -9,17 +9,20 @@ import { useLive } from './useLive';
 function Node({ data }) {
   const st = data.status;
   const col = st === 'ok' || st === true ? '#16a34a' : st === 'pending' ? '#d97706' : st === 'down' ? '#dc2626' : '#64748b';
+  const tint = data.tint === 'down' ? { bg: 'linear-gradient(160deg,#ef4444,#b91c1c)' } : data.tint === 'up' ? { bg: 'linear-gradient(160deg,#2f74e6,#1750c2)' } : null;
+  const filled = !!tint || data.accent;
+  const bg = tint ? tint.bg : data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff';
   return (
-    <div className={"sbc-node" + (data.live ? " sbc-live" : "")} style={{ width: 232, borderRadius: 18, padding: '14px 16px', cursor: 'pointer', background: data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: data.accent ? '#fff' : '#1e293b', border: '1px solid ' + (data.accent ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 10px 30px rgba(30,50,120,.14)', transition: 'transform .15s, box-shadow .15s' }}>
+    <div className={"sbc-node" + (data.live ? " sbc-live" : "")} style={{ width: 232, borderRadius: 18, padding: '14px 16px', cursor: 'pointer', background: bg, color: filled ? '#fff' : '#1e293b', border: '1px solid ' + (filled ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 10px 30px rgba(30,50,120,.14)', transition: 'transform .15s, box-shadow .15s' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
       <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 38, height: 38, borderRadius: 11, background: data.accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: data.accent ? '#fff' : '#2f74e6', flex: 'none' }}>{data.icon}</div>
-        <div style={{ lineHeight: 1.15 }}><div style={{ fontWeight: 800, fontSize: 15.5 }}>{data.title}</div>{data.ip && <div style={{ fontSize: 11, opacity: .7, fontFamily: 'monospace' }}>{data.ip}</div>}</div>
-        <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: col, boxShadow: '0 0 0 3px ' + col + '22' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ width: 42, height: 42, borderRadius: 11, background: data.logo ? '#fff' : filled ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: filled ? '#fff' : '#2f74e6', flex: 'none', overflow: 'hidden', padding: data.logo ? 4 : 0 }}>{data.logo ? <img src={data.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : data.icon}</div>
+        <div style={{ lineHeight: 1.15, minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 15.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>{data.title}</div>{data.ip && <div style={{ fontSize: 11, opacity: .7, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.ip}</div>}</div>
+        <span style={{ marginLeft: 'auto', width: 10, height: 10, borderRadius: '50%', background: filled ? '#fff' : col, boxShadow: '0 0 0 3px ' + (filled ? 'rgba(255,255,255,.3)' : col + '22') }} />
       </div>
       {data.metrics && <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.metrics.map((m, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}><span style={{ opacity: .7 }}>{m.label}</span><b style={{ color: m.hot ? '#16a34a' : 'inherit' }}>{m.value}</b></div>)}
+        {data.metrics.map((m, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}><span style={{ opacity: .7 }}>{m.label}</span><b style={{ color: m.hot && !data.tint && !data.accent ? '#16a34a' : 'inherit', opacity: filled ? .95 : 1 }}>{m.value}</b></div>)}
       </div>}
       {data.hint && <div style={{ marginTop: 8, fontSize: 10.5, opacity: .65, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: '50%', background: '#7c3aed' }} />{data.hint}</div>}
     </div>
@@ -88,7 +91,7 @@ export default function SbcFlow() {
     const step = 110, startY = 250 - ((tr.length - 1) * step) / 2;
     const tnodes = tr.map((t, i) => ({
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
-      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={17} />, status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
+      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.adv && t.adv.logo, tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
     }));
     return [...base, ...tnodes];
   }, [sbc, trunks, sys, snap]);

@@ -118,29 +118,33 @@ export default function Internos() {
             </Table.ScrollContainer>}
       </Card>
 
-      <Modal opened={opened} onClose={close} centered radius="lg" size={editing ? 'lg' : 'md'} overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
+      <Modal opened={opened} onClose={close} centered radius="lg" size={editing ? 'xl' : 'lg'} overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
         title={<Group gap="sm">
           <ThemeIcon size={42} radius="md" variant="light" color={form.type === 'webrtc' ? 'pbx' : 'gray'}>{editing ? <IconPencil size={22} /> : <IconUserPlus size={22} />}</ThemeIcon>
           <div><Text fw={800} size="lg" lh={1.1}>{editing ? 'Editar interno ' + form.id : 'Nuevo interno'}</Text><Text size="xs" c="dimmed">{form.type === 'webrtc' ? 'Softphone WebRTC (navegador / PWA)' : 'Teléfono SIP físico'}</Text></div>
         </Group>}>
         <Stack>
-          <Group grow align="flex-start">
-            <TextInput label="Número de interno" placeholder="1006" value={form.id} onChange={e => set('id', e.target.value)} required disabled={editing} />
-            <PasswordInput label="Contraseña SIP" value={form.pass} onChange={e => set('pass', e.target.value)} required={!editing} placeholder={editing ? 'Sin cambios' : ''} />
-          </Group>
-          <TextInput label="Nombre (libreta)" placeholder="Ej: Recepción, Juan Pérez" value={form.name} onChange={e => set('name', e.target.value)} description="Visible en la libreta de direcciones de los internos" />
-          <div>
-            <Text size="sm" fw={500} mb={6}>Tipo de interno</Text>
-            <SegmentedControl fullWidth value={form.type} onChange={v => set('type', v)} data={[
-              { value: 'webrtc', label: (<Group gap={6} justify="center"><IconWorld size={15} /> WebRTC</Group>) },
-              { value: 'sip', label: (<Group gap={6} justify="center"><IconDeviceLandlinePhone size={15} /> SIP físico</Group>) },
-            ]} />
-            <Text size="xs" c="dimmed" mt={6}>{form.type === 'webrtc' ? 'Para llamar desde el navegador / app (DTLS-SRTP, ICE, codecs ulaw/g722).' : 'Para teléfonos físicos (Yealink, Grandstream) por UDP/TLS (G.711/G.722).'}</Text>
-          </div>
-          <Group grow>
-            <Switch label="Video (VP8/H264)" checked={form.video} onChange={e => set('video', e.currentTarget.checked)} />
-            <NumberInput label="Dispositivos" description="Registros simultáneos" min={1} max={10} value={form.max_contacts} onChange={v => set('max_contacts', v || 1)} />
-          </Group>
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+            <Stack gap="sm">
+              <TextInput label="Número de interno" placeholder="1006" value={form.id} onChange={e => set('id', e.target.value)} required disabled={editing} />
+              <PasswordInput label="Contraseña SIP" value={form.pass} onChange={e => set('pass', e.target.value)} required={!editing} placeholder={editing ? 'Sin cambios' : ''} />
+              <TextInput label="Nombre (libreta)" placeholder="Ej: Recepción, Juan Pérez" value={form.name} onChange={e => set('name', e.target.value)} description="Visible en la libreta de direcciones" />
+            </Stack>
+            <Stack gap="sm">
+              <div>
+                <Text size="sm" fw={500} mb={6}>Tipo de interno</Text>
+                <SegmentedControl fullWidth value={form.type} onChange={v => set('type', v)} data={[
+                  { value: 'webrtc', label: (<Group gap={6} justify="center"><IconWorld size={15} /> WebRTC</Group>) },
+                  { value: 'sip', label: (<Group gap={6} justify="center"><IconDeviceLandlinePhone size={15} /> SIP físico</Group>) },
+                ]} />
+                <Text size="xs" c="dimmed" mt={6}>{form.type === 'webrtc' ? 'Para navegador / app (DTLS-SRTP, ICE, ulaw/g722).' : 'Para teléfonos físicos (Yealink, Grandstream) por UDP/TLS.'}</Text>
+              </div>
+              <Group grow align="flex-start">
+                <Switch label="Video (VP8/H264)" mt={6} checked={form.video} onChange={e => set('video', e.currentTarget.checked)} />
+                <NumberInput label="Dispositivos" description="Registros simultáneos" min={1} max={10} value={form.max_contacts} onChange={v => set('max_contacts', v || 1)} />
+              </Group>
+            </Stack>
+          </SimpleGrid>
           <Card withBorder radius="md" padding="sm" style={{ background: form.record ? 'rgba(225,29,72,.05)' : undefined }}>
             <Group justify="space-between" wrap="nowrap">
               <Group gap={10} wrap="nowrap"><ThemeIcon size={32} radius="md" variant="light" color={form.record ? 'red' : 'gray'}><IconMicrophone2 size={18} /></ThemeIcon>
