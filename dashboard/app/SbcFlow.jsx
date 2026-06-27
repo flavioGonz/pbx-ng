@@ -10,16 +10,16 @@ function Node({ data }) {
   const st = data.status;
   const col = st === 'ok' || st === true ? '#16a34a' : st === 'pending' ? '#d97706' : st === 'down' ? '#dc2626' : '#64748b';
   return (
-    <div className="sbc-node" style={{ width: 200, borderRadius: 16, padding: '12px 14px', cursor: 'pointer', background: data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: data.accent ? '#fff' : '#1e293b', border: '1px solid ' + (data.accent ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 8px 24px rgba(30,50,120,.12)', backdropFilter: 'blur(6px)', transition: 'transform .15s, box-shadow .15s' }}>
+    <div className={"sbc-node" + (data.live ? " sbc-live" : "")} style={{ width: 232, borderRadius: 18, padding: '14px 16px', cursor: 'pointer', background: data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: data.accent ? '#fff' : '#1e293b', border: '1px solid ' + (data.accent ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 10px 30px rgba(30,50,120,.14)', transition: 'transform .15s, box-shadow .15s' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
       <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 9, background: data.accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: data.accent ? '#fff' : '#2f74e6' }}>{data.icon}</div>
-        <div style={{ lineHeight: 1.15 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{data.title}</div>{data.ip && <div style={{ fontSize: 11, opacity: .7, fontFamily: 'monospace' }}>{data.ip}</div>}</div>
+        <div style={{ width: 38, height: 38, borderRadius: 11, background: data.accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: data.accent ? '#fff' : '#2f74e6', flex: 'none' }}>{data.icon}</div>
+        <div style={{ lineHeight: 1.15 }}><div style={{ fontWeight: 800, fontSize: 15.5 }}>{data.title}</div>{data.ip && <div style={{ fontSize: 11, opacity: .7, fontFamily: 'monospace' }}>{data.ip}</div>}</div>
         <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: col, boxShadow: '0 0 0 3px ' + col + '22' }} />
       </div>
       {data.metrics && <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.metrics.map((m, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}><span style={{ opacity: .7 }}>{m.label}</span><b>{m.value}</b></div>)}
+        {data.metrics.map((m, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}><span style={{ opacity: .7 }}>{m.label}</span><b style={{ color: m.hot ? '#16a34a' : 'inherit' }}>{m.value}</b></div>)}
       </div>}
       {data.hint && <div style={{ marginTop: 8, fontSize: 10.5, opacity: .65, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: '50%', background: '#7c3aed' }} />{data.hint}</div>}
     </div>
@@ -58,18 +58,18 @@ export default function SbcFlow() {
     { id: 'wan', type: 'pbx', position: { x: 0, y: 180 }, data: { title: 'Internet / WAN', ip: '200.40.182.246', icon: <IconWorld size={17} />, status: 'ok' } },
     { id: 'npm', type: 'pbx', position: { x: 250, y: 40 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
     { id: 'coturn', type: 'pbx', position: { x: 250, y: 320 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
-    { id: 'kamailio', type: 'pbx', position: { x: 250, y: 175 }, data: { title: 'SBC Kamailio', ip: '172.26.20.205', icon: <IconServer2 size={17} />, status: sbc && !sbc.error ? 'ok' : 'pending', hint: 'Clic para ver detalle', metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
-    { id: 'asterisk', type: 'pbx', position: { x: 560, y: 175 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={17} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'Llamadas', value: ch.length }] } },
+    { id: 'kamailio', type: 'pbx', position: { x: 250, y: 175 }, data: { title: 'SBC Kamailio', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', hint: 'Clic para ver detalle', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
+    { id: 'asterisk', type: 'pbx', position: { x: 560, y: 175 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'En curso', value: ch.length, hot: ch.length > 0 }] } },
     { id: 'troncales', type: 'pbx', position: { x: 870, y: 40 }, data: { title: 'Troncales', icon: <IconDeviceLandlinePhone size={17} />, status: trunks.length ? 'ok' : 'pending', metrics: [{ label: 'Totales', value: trunks.length }, { label: 'Registradas', value: trunkOnline }] } },
-    { id: 'internos', type: 'pbx', position: { x: 870, y: 185 }, data: { title: 'Internos', icon: <IconUsers size={17} />, status: 'ok', metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
+    { id: 'internos', type: 'pbx', position: { x: 870, y: 185 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
     { id: 'apps', type: 'pbx', position: { x: 870, y: 320 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
   ]), [sbc, trunks, sys, snap]);
 
   const e = (id, s, t, color, label) => ({ id, source: s, target: t, animated: true, label, style: { stroke: color, strokeWidth: 2 }, labelStyle: { fontSize: 10, fill: '#64748b' }, markerEnd: { type: MarkerType.ArrowClosed, color } });
   const edges = [
     e('e1', 'wan', 'npm', '#1d4ed8', 'HTTPS/WSS'), e('e2', 'wan', 'kamailio', '#7c3aed', 'SIP'), e('e3', 'wan', 'coturn', '#0891b2', 'TURN'),
-    e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws'), e('e5', 'kamailio', 'asterisk', '#7c3aed', 'dispatcher'),
-    e('e6', 'asterisk', 'troncales', '#16a34a'), e('e7', 'asterisk', 'internos', '#16a34a'), e('e8', 'asterisk', 'apps', '#64748b'),
+    e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws'), { ...e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + ' en curso' : 'dispatcher'), style: { stroke: '#7c3aed', strokeWidth: ch.length ? 4 : 2 } },
+    e('e6', 'asterisk', 'troncales', '#16a34a'), { ...e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined), style: { stroke: '#16a34a', strokeWidth: ch.length ? 4 : 2 } }, e('e8', 'asterisk', 'apps', '#64748b'),
   ];
 
   const node = nodes.find(n => n.id === sel);
@@ -79,8 +79,9 @@ export default function SbcFlow() {
 
   return (
     <>
-      <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}}`}</style>
+      <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}} .sbc-live{animation:sbcpulse 1.6s ease-in-out infinite!important;} @keyframes sbcpulse{0%,100%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 8px rgba(22,163,74,0)}}`}</style>
       <div className="sbc-flow" style={{ position: 'relative', height: '72vh', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
+        {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {ch.length} llamada(s)</div>}
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }}
           onNodeClick={(_, n) => setSel(n.id)} nodesDraggable={false} nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
           <Background color="#cdd7e4" gap={22} />

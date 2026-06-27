@@ -1484,7 +1484,7 @@ app.get('/api/sbc/cfg', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Comando genérico al SBC (lo aplica el agente). cmd + arg opcional.
-const SBC_CMDS = ['reload', 'unban_all', 'unban', 'ban', 'debug', 'disable_target', 'enable_target', 'restart', 'cfg_save'];
+const SBC_CMDS = ['reload', 'unban_all', 'unban', 'ban', 'debug', 'disable_target', 'enable_target', 'add_target', 'del_target', 'restart', 'cfg_save'];
 app.post('/api/sbc/cmd', async (req, res) => {
   const { cmd, arg } = req.body || {};
   if (!SBC_CMDS.includes(cmd)) return res.status(400).json({ error: 'comando inválido' });

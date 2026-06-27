@@ -4,6 +4,8 @@ import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button
 import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap } from '@tabler/icons-react';
 import { toast } from './notify';
 import SbcFlow from './SbcFlow';
+import { useLive } from './useLive';
+import { IconPlus, IconInfoCircle, IconPhone } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function fmtUptime(s) { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; }
@@ -43,6 +45,10 @@ function ConsoleBody({ sbc, load, hist }) {
   const [cfg, setCfg] = useState(''); const [cfgOrig, setCfgOrig] = useState(''); const [cfgMsg, setCfgMsg] = useState(''); const [cfgBusy, setCfgBusy] = useState(false);
   const [banIp, setBanIp] = useState(''); const [debug, setDebug] = useState(2); const [busy, setBusy] = useState('');
   const cfgLoaded = useRef(false);
+  const { snap } = useLive(); const ch = (snap && snap.channels) || [];
+  const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const [newTgt, setNewTgt] = useState('');
+  const fdur = (st) => { if (!st) return '—'; const d = Math.floor((now - new Date(st).getTime()) / 1000); const m = Math.floor(d / 60), ss = d % 60; return (m < 10 ? '0' : '') + m + ':' + (ss < 10 ? '0' : '') + ss; };
   useEffect(() => { if (!cfgLoaded.current) { cfgLoaded.current = true; fetch('/backend/api/sbc/cfg').then(r => r.json()).then(d => { setCfg(d.cfg || ''); setCfgOrig(d.cfg || ''); }).catch(() => {}); } }, []);
 
   const sendCmd = useCallback(async (cmd, arg, opts = {}) => {
@@ -141,28 +147,53 @@ function ConsoleBody({ sbc, load, hist }) {
       </Tabs.Panel>
 
       <Tabs.Panel value="disp">
+        <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-grape-light)' }}>
+          <Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">¿Qué es el dispatcher?</Text></Group>
+          <Text size="sm" c="dimmed">Kamailio (el SBC de borde) recibe las llamadas SIP y las <b>reparte</b> hacia uno o más servidores Asterisk de este grupo de destinos. Si agregás varios Asterisk, balancea y hace <b>failover</b>: si uno queda Inactivo, deriva a otro. Cada destino tiene una <b>prioridad</b> (mayor = se prefiere) y Kamailio mide su <b>latencia</b> con pings (OPTIONS). Estados: <Badge size="xs" variant="light" color="teal">Activo</Badge> responde, <Badge size="xs" variant="light" color="orange">Inactivo</Badge> no responde los pings, <Badge size="xs" variant="light" color="red">Deshabilitado</Badge> apagado manualmente.</Text>
+        </Card>
         <Card withBorder radius="md" padding="md">
-          <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher</Text><Button size="xs" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar dispatcher</Button></Group>
-          <Table><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Prioridad</Table.Th><Table.Th>Latencia</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Accion</Table.Th></Table.Tr></Table.Thead>
-            <Table.Tbody>{disp.map((d, i) => { const fi = flagInfo(d.flags); const active = /A/.test(d.flags || ''); return (
+          <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher ({disp.length})</Text><Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar</Button></Group>
+          <Group align="flex-end" gap="xs" mb="md">
+            <TextInput label="Agregar destino (Asterisk)" placeholder="sip:172.26.20.183:5060 o 172.26.20.x" value={newTgt} onChange={e => setNewTgt(e.target.value)} style={{ flex: 1 }} size="xs" />
+            <Button size="xs" leftSection={<IconPlus size={14} />} disabled={!newTgt} loading={busy === 'add_target' + newTgt} onClick={async () => { await sendCmd('add_target', newTgt.trim()); setNewTgt(''); }}>Agregar</Button>
+          </Group>
+          <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Prioridad</Table.Th><Table.Th>Latencia</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Acciones</Table.Th></Table.Tr></Table.Thead>
+            <Table.Tbody>{disp.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin destinos. Agregá tu primer Asterisk arriba.</Text></Table.Td></Table.Tr> : disp.map((d, i) => { const fi = flagInfo(d.flags); const active = /A/.test(d.flags || ''); return (
               <Table.Tr key={i}>
-                <Table.Td ff="monospace" fz="sm">{d.uri}</Table.Td><Table.Td>{d.priority}</Table.Td><Table.Td>{d.latency != null ? d.latency + ' ms' : '-'}</Table.Td>
+                <Table.Td ff="monospace" fz="sm">{d.uri}</Table.Td><Table.Td>{d.priority}</Table.Td><Table.Td>{d.latency != null ? <Badge size="sm" variant="dot" color={d.latency < 50 ? 'teal' : d.latency < 200 ? 'yellow' : 'red'}>{d.latency} ms</Badge> : '-'}</Table.Td>
                 <Table.Td><Badge variant="light" color={fi.c}>{fi.t}</Badge></Table.Td>
-                <Table.Td ta="right">{active
+                <Table.Td ta="right"><Group gap={4} justify="flex-end" wrap="nowrap">{active
                   ? <Button size="compact-xs" variant="light" color="orange" leftSection={<IconPlugConnectedX size={13} />} loading={busy === 'disable_target' + d.uri} onClick={() => sendCmd('disable_target', d.uri)}>Deshabilitar</Button>
-                  : <Button size="compact-xs" variant="light" color="teal" leftSection={<IconPlugConnected size={13} />} loading={busy === 'enable_target' + d.uri} onClick={() => sendCmd('enable_target', d.uri)}>Habilitar</Button>}</Table.Td>
+                  : <Button size="compact-xs" variant="light" color="teal" leftSection={<IconPlugConnected size={13} />} loading={busy === 'enable_target' + d.uri} onClick={() => sendCmd('enable_target', d.uri)}>Habilitar</Button>}
+                  <Tooltip label="Quitar destino"><ActionIcon variant="subtle" color="red" loading={busy === 'del_target' + d.uri} onClick={() => { if (confirm('¿Quitar ' + d.uri + ' del dispatcher?')) sendCmd('del_target', d.uri); }}><IconTrash size={15} /></ActionIcon></Tooltip>
+                </Group></Table.Td>
               </Table.Tr>); })}</Table.Tbody></Table>
         </Card>
       </Tabs.Panel>
 
       <Tabs.Panel value="rtp">
-        <SimpleGrid cols={{ base: 2, sm: 4 }} mb="md">
+        <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} mb="md">
           <Kpi icon={<IconArrowsLeftRight size={20} />} color={rtp.up ? 'teal' : 'red'} label="Estado" value={rtp.up ? 'Activo' : 'Inactivo'} />
-          <Kpi icon={<IconActivity size={20} />} color="blue" label="Sesiones" value={rtp.sessions ?? 0} />
-          <Kpi icon={<IconPlugConnected size={20} />} color="indigo" label="Paquetes" value={(rtp.packets ?? 0).toLocaleString()} />
-          <Kpi icon={<IconCpu size={20} />} color="cyan" label="Bytes" value={((rtp.bytes ?? 0) / 1048576).toFixed(1) + ' MB'} />
+          <Kpi icon={<IconActivity size={20} />} color="blue" label="Sesiones media" value={rtp.sessions ?? 0} />
+          <Kpi icon={<IconPlugConnected size={20} />} color="indigo" label="Paquetes/s" value={(rtp.pps ?? 0).toLocaleString()} />
+          <Kpi icon={<IconCpu size={20} />} color="cyan" label="Tráfico" value={(((rtp.bps ?? 0) * 8) / 1e6).toFixed(2) + ' Mbps'} sub={((rtp.bps ?? 0) / 1048576).toFixed(2) + ' MB/s'} />
+          <Kpi icon={<IconAlertTriangle size={20} />} color={(rtp.errps || 0) > 0 ? 'red' : 'gray'} label="Errores/s" value={rtp.errps ?? 0} />
+          <Kpi icon={<IconReload size={20} />} color="grape" label="Transcodif." value={rtp.transcoded ?? 0} />
         </SimpleGrid>
-        <Card withBorder radius="md" padding="md"><Text size="sm" c="dimmed">rtpengine ancla y relaya el RTP en el borde (userspace, control-ng en 127.0.0.1:2223, CLI en :9900). Las sesiones reflejan llamadas con medios pasando por el SBC.</Text></Card>
+        <Card withBorder radius="md" padding="md" mb="md">
+          <Group justify="space-between" mb="sm"><Group gap="xs"><Text fw={700}>Flujos de medios en vivo</Text>{ch.length > 0 && <Badge color="teal" variant="light" leftSection={<span className="pbx-pip pbx-pulse" style={{ background: 'var(--mantine-color-teal-6)' }} />}>{ch.length} activo(s)</Badge>}</Group></Group>
+          {ch.length === 0 ? <Text size="sm" c="dimmed" ta="center" py="md">No hay llamadas con medios en curso.</Text> :
+            <Table highlightOnHover verticalSpacing={6}><Table.Thead><Table.Tr><Table.Th>Origen</Table.Th><Table.Th>Conectado con</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Duración</Table.Th><Table.Th>Canal</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{ch.map(c => (
+                <Table.Tr key={c.id}>
+                  <Table.Td fw={600}><Group gap={6} wrap="nowrap"><IconPhone size={14} color="var(--mantine-color-teal-6)" />{c.caller || '—'}</Group></Table.Td>
+                  <Table.Td>{c.connected || '—'}</Table.Td>
+                  <Table.Td><Badge size="sm" variant="light" color={/up|answer/i.test(c.state) ? 'teal' : 'yellow'}>{c.state}</Badge></Table.Td>
+                  <Table.Td ff="monospace">{fdur(c.started)}</Table.Td>
+                  <Table.Td><Text fz="xs" c="dimmed" ff="monospace" truncate maw={180}>{c.name}</Text></Table.Td>
+                </Table.Tr>))}</Table.Tbody></Table>}
+        </Card>
+        <Card withBorder radius="md" padding="md" style={{ background: 'var(--mantine-color-blue-light)' }}><Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">¿Qué hace rtpengine?</Text></Group><Text size="sm" c="dimmed">Es el motor que <b>ancla y reenvía el RTP</b> (audio/video) en el borde: oculta a Asterisk de internet, resuelve NAT y puentea WebRTC↔SIP. Cada sesión = una llamada con medios pasando por el SBC. «Paquetes/s» y «Tráfico» son el rendimiento en vivo del relay; «Transcodif.» cuenta medios que se están convirtiendo de códec.</Text></Card>
       </Tabs.Panel>
 
       <Tabs.Panel value="cfg">

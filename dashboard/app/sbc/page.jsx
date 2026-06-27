@@ -1,8 +1,10 @@
 'use client';
+import dynamic from 'next/dynamic';
 import { Stack } from '@mantine/core';
 import { IconRouteAltLeft } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
-import SbcConsole from '../SbcConsole';
+
+const SbcConsole = dynamic(() => import('../SbcConsole'), { ssr: false });
 
 export default function SbcPage() {
   return (
