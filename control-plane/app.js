@@ -506,16 +506,39 @@ app.post('/api/enroll', async (req, res) => {
 // Seguridad: estado de Fail2Ban + geolocalizacion
 app.get('/api/security', async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT jail, banned, total_failed, total_banned, extract(epoch from (now()-updated_at))::int AS age_s FROM pbxng_fail2ban ORDER BY jail");
+    const { rows } = await pool.query("SELECT jail, banned, bans, config, total_failed, total_banned, extract(epoch from (now()-updated_at))::int AS age_s FROM pbxng_fail2ban ORDER BY jail");
     const ips = [...new Set(rows.flatMap(r => r.banned || []))];
     const geo = await geoLookup(ips);
-    res.json({ jails: rows, geo });
+    const { rows: wl } = await pool.query("SELECT ip, note, extract(epoch from created_at)::int AS created FROM pbxng_f2b_whitelist ORDER BY created_at");
+    res.json({ jails: rows, geo, whitelist: wl });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/security/unban', async (req, res) => {
   const { ip, jail } = req.body || {};
   if (!ip) return res.status(400).json({ error: 'ip requerida' });
   try { await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip, jail) VALUES ('unban',$1,$2)", [ip, jail || null]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/security/ban', async (req, res) => {
+  const { ip, jail } = req.body || {};
+  if (!ip) return res.status(400).json({ error: 'ip requerida' });
+  try { await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip, jail) VALUES ('ban',$1,$2)", [ip, jail || null]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/security/whitelist', async (req, res) => {
+  try { const { rows } = await pool.query("SELECT ip, note, extract(epoch from created_at)::int AS created FROM pbxng_f2b_whitelist ORDER BY created_at"); res.json(rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/security/whitelist', async (req, res) => {
+  const { ip, note } = req.body || {};
+  if (!ip) return res.status(400).json({ error: 'ip requerida' });
+  try { await pool.query("INSERT INTO pbxng_f2b_whitelist (ip,note) VALUES ($1,$2) ON CONFLICT (ip) DO UPDATE SET note=EXCLUDED.note", [ip.trim(), note || null]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/security/whitelist/remove', async (req, res) => {
+  const { ip } = req.body || {};
+  if (!ip) return res.status(400).json({ error: 'ip requerida' });
+  try { await pool.query("DELETE FROM pbxng_f2b_whitelist WHERE ip=$1", [ip]); await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip) VALUES ('wl_del',$1)", [ip]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
