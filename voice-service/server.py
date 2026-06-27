@@ -42,13 +42,24 @@ EDGE_KEYS = {v["key"] for v in EDGE_VOICES}
 
 async def edge_synth(text, voice, out_rate, fmt):
     import edge_tts, os, time as _t
-    mp3 = "/tmp/edge_%d_%d.mp3" % (os.getpid(), int(_t.time() * 1000))
+    ts = "%d_%d" % (os.getpid(), int(_t.time() * 1000))
+    mp3 = "/tmp/edge_%s.mp3" % ts
     try:
         await edge_tts.Communicate(text, voice, rate="+12%").save(mp3)
-        ff = ["ffmpeg", "-y", "-i", mp3, "-ar", str(out_rate), "-ac", "1"]
-        ff += (["-f", "wav", "-"] if fmt == "wav" else ["-f", "s16le", "-"])
-        p = subprocess.run(ff, capture_output=True)
-        return p.stdout
+        if fmt == "wav":
+            wav = "/tmp/edge_%s.wav" % ts
+            try:
+                subprocess.run(["ffmpeg", "-y", "-i", mp3, "-ar", str(out_rate),
+                                "-ac", "1", "-c:a", "pcm_s16le", wav], capture_output=True)
+                with open(wav, "rb") as f:
+                    return f.read()
+            finally:
+                try: os.remove(wav)
+                except Exception: pass
+        else:
+            p = subprocess.run(["ffmpeg", "-y", "-i", mp3, "-ar", str(out_rate),
+                                "-ac", "1", "-f", "s16le", "-"], capture_output=True)
+            return p.stdout
     finally:
         try: os.remove(mp3)
         except Exception: pass

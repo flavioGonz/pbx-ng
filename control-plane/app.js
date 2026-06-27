@@ -646,6 +646,143 @@ app.get('/api/voz/config', async (req, res) => { try { const r = await vozFwd('G
 app.post('/api/voz/config', async (req, res) => { try { const r = await vozFwd('POST', '/admin/config', req.body || {}); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/voz/test', async (req, res) => { try { const u = await vozBase(); const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: (req.body && req.body.text) || 'Hola, esta es una prueba de la voz seleccionada.', voice: req.body && req.body.voice, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(20000) }); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+
+// ===== Audios del sistema (voz coherente) =====
+const SYSPROMPT_CATALOG = [
+  // Buzon de voz (lo que escucha quien llama y el duenio de la casilla)
+  ['vm-intro','buzon','Por favor, deje su mensaje despues del tono. Cuando termine, cuelgue o presione la tecla numeral.'],
+  ['vm-goodbye','buzon','Gracias por llamar. Hasta pronto.'],
+  ['vm-theperson','buzon','La persona en la extension'],
+  ['vm-isunavail','buzon','no se encuentra disponible.'],
+  ['vm-isonphone','buzon','se encuentra en otra llamada.'],
+  ['vm-extension','buzon','La extension'],
+  ['vm-youhave','buzon','Usted tiene'],
+  ['vm-INBOX','buzon','nuevos'],
+  ['vm-Old','buzon','guardados'],
+  ['vm-message','buzon','mensaje.'],
+  ['vm-messages','buzon','mensajes.'],
+  ['vm-no','buzon','No tiene'],
+  ['vm-nomore','buzon','No tiene mas mensajes.'],
+  ['vm-nobodyavail','buzon','No hay nadie disponible para tomar su llamada.'],
+  ['vm-incorrect','buzon','La contrasenia es incorrecta.'],
+  ['vm-incorrect-mailbox','buzon','La casilla o la contrasenia son incorrectas.'],
+  ['vm-pls-try-again','buzon','Por favor, intente nuevamente.'],
+  ['vm-sorry','buzon','Disculpe, no comprendi.'],
+  ['vm-press','buzon','Presione'],
+  ['vm-saved','buzon','Su mensaje fue guardado.'],
+  ['vm-deleted','buzon','El mensaje fue borrado.'],
+  // Errores y generales
+  ['pbx-invalid','general','El numero que usted marco no es valido.'],
+  ['invalid','general','Entrada no valida. Por favor, intente nuevamente.'],
+  ['pbx-transfer','general','Transfiriendo su llamada. Aguarde un momento, por favor.'],
+  ['privacy-incorrect','general','La informacion ingresada no es correcta.'],
+  ['beep','general',''],
+  // Saludos y demo
+  ['demo-congrats','saludo','Felicitaciones. La central PBX-NG esta funcionando correctamente.'],
+  ['demo-thanks','saludo','Gracias por comunicarse. Hasta luego.'],
+  ['demo-echotest','saludo','Comienza la prueba de eco. Hable despues del tono y escuchara su voz.'],
+  ['demo-echodone','saludo','La prueba de eco finalizo.'],
+  ['hello-world','saludo','Hola, mundo.'],
+  // Conferencia
+  ['conf-onlyperson','conferencia','Usted es la unica persona en la conferencia.'],
+  ['conf-hasjoin','conferencia','ingreso a la conferencia.'],
+  ['conf-hasleft','conferencia','salio de la conferencia.'],
+  ['conf-locked','conferencia','La conferencia esta bloqueada.'],
+  ['conf-kicked','conferencia','Ha sido retirado de la conferencia.'],
+  ['conf-placeintoconf','conferencia','Ahora esta en la conferencia.'],
+  ['conf-waitforleader','conferencia','La conferencia comenzara cuando ingrese el moderador.'],
+  ['conf-getpin','conferencia','Por favor, ingrese el codigo de la conferencia, seguido de la tecla numeral.'],
+  ['conf-invalidpin','conferencia','El codigo ingresado no es valido.'],
+  // Colas
+  ['queue-thankyou','cola','Gracias por aguardar.'],
+  ['queue-youarenext','cola','Usted es el proximo en ser atendido.'],
+  ['queue-callswaiting','cola','Cantidad de llamadas en espera:'],
+  ['queue-holdtime','cola','El tiempo estimado de espera es de'],
+  ['queue-minutes','cola','minutos.'],
+  ['queue-minute','cola','minuto.'],
+  ['queue-seconds','cola','segundos.'],
+  ['queue-periodic-announce','cola','Su llamada es importante para nosotros. Le responderemos a la brevedad.'],
+  // Digitos y numeros (para que el buzon diga las extensiones con la misma voz)
+  ['digits/0','digitos','cero'],['digits/1','digitos','uno'],['digits/2','digitos','dos'],['digits/3','digitos','tres'],['digits/4','digitos','cuatro'],['digits/5','digitos','cinco'],['digits/6','digitos','seis'],['digits/7','digitos','siete'],['digits/8','digitos','ocho'],['digits/9','digitos','nueve'],
+  ['digits/10','digitos','diez'],['digits/11','digitos','once'],['digits/12','digitos','doce'],['digits/13','digitos','trece'],['digits/14','digitos','catorce'],['digits/15','digitos','quince'],['digits/16','digitos','dieciseis'],['digits/17','digitos','diecisiete'],['digits/18','digitos','dieciocho'],['digits/19','digitos','diecinueve'],
+  ['digits/20','digitos','veinte'],['digits/21','digitos','veintiuno'],['digits/22','digitos','veintidos'],['digits/23','digitos','veintitres'],['digits/24','digitos','veinticuatro'],['digits/25','digitos','veinticinco'],['digits/26','digitos','veintiseis'],['digits/27','digitos','veintisiete'],['digits/28','digitos','veintiocho'],['digits/29','digitos','veintinueve'],
+  ['digits/30','digitos','treinta'],['digits/40','digitos','cuarenta'],['digits/50','digitos','cincuenta'],['digits/60','digitos','sesenta'],['digits/70','digitos','setenta'],['digits/80','digitos','ochenta'],['digits/90','digitos','noventa'],
+  ['digits/100','digitos','cien'],['digits/200','digitos','doscientos'],['digits/300','digitos','trescientos'],['digits/400','digitos','cuatrocientos'],['digits/500','digitos','quinientos'],['digits/600','digitos','seiscientos'],['digits/700','digitos','setecientos'],['digits/800','digitos','ochocientos'],['digits/900','digitos','novecientos'],
+  ['digits/100-and','digitos','ciento'],['digits/20-and','digitos','veinti'],['digits/1F','digitos','una'],['digits/1M','digitos','un'],['digits/and','digitos','y'],['digits/hundred','digitos','cien'],['digits/thousand','digitos','mil'],['digits/million','digitos','millon'],['digits/millions','digitos','millones'],['digits/minus','digitos','menos'],['digits/oh','digitos','o'],
+  ['digits/star','digitos','asterisco'],['digits/pound','digitos','numeral'],
+];
+
+app.get('/api/sysprompts', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT name, category, text, voice, status, updated_at, deployed_at, (audio IS NOT NULL) AS has_audio FROM pbxng_sysprompts ORDER BY category, name");
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sysprompts/seed', async (req, res) => {
+  try {
+    let n = 0;
+    for (const [name, category, text] of SYSPROMPT_CATALOG) {
+      const r = await pool.query("INSERT INTO pbxng_sysprompts(name, category, text) VALUES($1,$2,$3) ON CONFLICT (name) DO NOTHING", [name, category, text]);
+      n += r.rowCount;
+    }
+    res.json({ ok: true, inserted: n, total: SYSPROMPT_CATALOG.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/sysprompts/:name', async (req, res) => {
+  try {
+    const text = (req.body && req.body.text) || '';
+    await pool.query("UPDATE pbxng_sysprompts SET text=$1 WHERE name=$2", [text, req.params.name]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sysprompts/generate', async (req, res) => {
+  try {
+    const voice = (req.body && req.body.voice) || 'es-UY-ValentinaNeural';
+    let names = (req.body && req.body.names) || [];
+    if (!names.length) { const { rows } = await pool.query("SELECT name FROM pbxng_sysprompts"); names = rows.map(r => r.name); }
+    const u = await vozBase();
+    const results = [];
+    for (const name of names) {
+      try {
+        const { rows } = await pool.query("SELECT text FROM pbxng_sysprompts WHERE name=$1", [name]);
+        if (!rows.length) { results.push({ name, ok: false, error: 'no existe' }); continue; }
+        const text = (rows[0].text || '').trim();
+        if (!text) { results.push({ name, ok: true, skipped: 'sin texto' }); continue; }
+        const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, rate: 8000, format: 'wav' }), signal: AbortSignal.timeout(30000) });
+        if (!r.ok) { results.push({ name, ok: false, error: 'tts ' + r.status }); continue; }
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length < 100) { results.push({ name, ok: false, error: 'audio vacio' }); continue; }
+        await pool.query("UPDATE pbxng_sysprompts SET audio=$1, voice=$2, fmt='wav', status='generado', updated_at=now() WHERE name=$3", [buf, voice, name]);
+        results.push({ name, ok: true, bytes: buf.length });
+      } catch (ex) { results.push({ name, ok: false, error: ex.message }); }
+    }
+    res.json({ ok: true, voice, results, generated: results.filter(x => x.ok && !x.skipped).length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/sysprompts/test/:name', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT audio FROM pbxng_sysprompts WHERE name=$1", [req.params.name]);
+    if (!rows.length || !rows[0].audio) return res.status(404).json({ error: 'sin audio' });
+    res.set('Content-Type', 'audio/wav').send(rows[0].audio);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sysprompts/revert', async (req, res) => {
+  try {
+    let names = (req.body && req.body.names) || [];
+    let r;
+    if (!names.length) r = await pool.query("UPDATE pbxng_sysprompts SET revert=true, updated_at=now() WHERE deployed_at IS NOT NULL OR audio IS NOT NULL");
+    else r = await pool.query("UPDATE pbxng_sysprompts SET revert=true, updated_at=now() WHERE name = ANY($1)", [names]);
+    res.json({ ok: true, count: r.rowCount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ===== fin Audios del sistema =====
+
+
 // Click-to-Call (admin)
 app.get('/api/c2c', async (req, res) => { try { const { rows } = await pool.query('SELECT id,token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled,created_at FROM pbxng_click2call ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/c2c', async (req, res) => { const b = req.body || {}; if (!b.name || !b.dest_value) return res.status(400).json({ error: 'name y destino requeridos' }); try { const token = crypto.randomBytes(6).toString('hex'); const { rows } = await pool.query('INSERT INTO pbxng_click2call (token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,token', [token, b.name, b.dest_type || 'extension', b.dest_value, b.intro || '', b.require_name !== false, !!b.collect_geo, !!b.video, b.enabled !== false]); res.status(201).json(rows[0]); } catch (e) { res.status(500).json({ error: e.message }); } });

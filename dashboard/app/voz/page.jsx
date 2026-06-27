@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { Stack, Card, Group, Text, Button, Badge, ThemeIcon, SimpleGrid, Tabs, Table, TextInput, Select, Slider, Progress, Divider, ActionIcon, Tooltip, Code, ScrollArea, Alert } from '@mantine/core';
-import { IconWaveSine, IconActivity, IconMicrophone2, IconSettings, IconFileText, IconRefresh, IconCpu, IconDeviceFloppy, IconPlayerPlay, IconDownload, IconTrash, IconClock, IconBolt, IconServer2, IconReload, IconInfoCircle, IconCheck } from '@tabler/icons-react';
+import { IconWaveSine, IconActivity, IconMicrophone2, IconSettings, IconFileText, IconRefresh, IconCpu, IconDeviceFloppy, IconPlayerPlay, IconDownload, IconTrash, IconClock, IconBolt, IconServer2, IconReload, IconInfoCircle, IconCheck, IconVolume, IconArrowBackUp, IconSparkles } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
 
@@ -30,6 +30,7 @@ export default function VozConsole() {
   const [url, setUrl] = useState('http://172.26.20.219:8080'); const [speed, setSpeed] = useState('1.0');
   const [logs, setLogs] = useState(''); const [busy, setBusy] = useState('');
   const [testText, setTestText] = useState('Hola, gracias por comunicarte con IES. ¿En qué puedo ayudarte?'); const [testVoice, setTestVoice] = useState(''); const audioRef = useRef(null);
+  const [sp, setSp] = useState([]); const [spVoice, setSpVoice] = useState('es-UY-ValentinaNeural'); const [spProg, setSpProg] = useState(null); const [spFilter, setSpFilter] = useState(''); const spRef = useRef(null);
 
   async function loadVoz() {
     try { const v = await fetch('/backend/api/voz').then(r => r.json()); setVoz(v);
@@ -42,7 +43,25 @@ export default function VozConsole() {
     try { const s = await fetch('/backend/api/settings').then(r => r.json()); if (s.voz_url) setUrl(s.voz_url); if (s.voz_length_scale) setSpeed(s.voz_length_scale); } catch (_) {}
   }
   async function loadLogs() { try { const j = await fetch('/backend/api/voz/logs').then(r => r.json()); setLogs(j.logs || ''); } catch (_) {} }
-  useEffect(() => { loadVoz(); loadVoices(); loadCfg(); const t = setInterval(loadVoz, 4000); return () => clearInterval(t); }, []);
+  async function loadSp() { try { setSp(await fetch('/backend/api/sysprompts').then(r => r.json())); } catch (_) {} }
+  async function spSeed() { setBusy('seed'); await fetch('/backend/api/sysprompts/seed', { method: 'POST' }); setBusy(''); loadSp(); toast('Catálogo cargado', 'ok'); }
+  async function spGenerate(names) {
+    const list = names || sp.map(x => x.name);
+    if (!list.length) return;
+    setSpProg({ done: 0, total: list.length });
+    const B = 8;
+    for (let i = 0; i < list.length; i += B) {
+      const batch = list.slice(i, i + B);
+      try { await fetch('/backend/api/sysprompts/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: spVoice, names: batch }) }); } catch (_) {}
+      setSpProg({ done: Math.min(i + B, list.length), total: list.length });
+      loadSp();
+    }
+    setSpProg(null); loadSp(); toast('Audios generados con ' + spVoice, 'ok');
+  }
+  async function spRevert(names) { if (!confirm('¿Restaurar los audios originales de Asterisk? Se perderá la voz personalizada en esos prompts.')) return; setBusy('revert'); await fetch('/backend/api/sysprompts/revert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: names || [] }) }); setBusy(''); setTimeout(loadSp, 1500); toast('Restaurando originales…', 'info'); }
+  async function spSaveText(name, text) { try { await fetch('/backend/api/sysprompts/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch (_) {} }
+  function spPlay(name) { if (spRef.current) { spRef.current.src = '/backend/api/sysprompts/test/' + encodeURIComponent(name) + '?t=' + Date.now(); spRef.current.play().catch(() => {}); } }
+  useEffect(() => { loadVoz(); loadVoices(); loadCfg(); loadSp(); const t = setInterval(loadVoz, 4000); return () => clearInterval(t); }, []);
 
   async function saveBasics() { setBusy('basics'); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: url, voz_length_scale: speed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setBusy(''); toast(r.error ? 'Error' : 'Guardado', r.error ? 'bad' : 'ok'); }
   async function saveEngine() {
@@ -77,6 +96,7 @@ export default function VozConsole() {
           <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
           <Tabs.Tab value="voices" leftSection={<IconMicrophone2 size={16} />}>Voces</Tabs.Tab>
           <Tabs.Tab value="cfg" leftSection={<IconSettings size={16} />}>Configuración</Tabs.Tab>
+          <Tabs.Tab value="sys" leftSection={<IconVolume size={16} />}>Audios del sistema</Tabs.Tab>
           <Tabs.Tab value="logs" leftSection={<IconFileText size={16} />}>Logs</Tabs.Tab>
         </Tabs.List>
 
@@ -160,6 +180,47 @@ export default function VozConsole() {
             <ScrollArea h={420}><Code block style={{ fontSize: 11.5, lineHeight: 1.5 }}>{logs || 'Tocá «Cargar logs» para ver la salida del servicio.'}</Code></ScrollArea>
           </Card>
         </Tabs.Panel>
+        <Tabs.Panel value="sys">
+          <Alert color="teal" variant="light" icon={<IconInfoCircle size={16} />} mb="md" title="Voz coherente en toda la central">
+            Genera los audios del sistema (buzón de voz, números de extensión, errores, conferencias y colas) con una sola voz, para que toda la PBX suene igual. Los originales de Asterisk quedan respaldados y se pueden restaurar cuando quieras.
+          </Alert>
+          <Card withBorder radius="lg" padding="lg" mb="md">
+            <Group align="flex-end" gap="sm" wrap="wrap">
+              <Select label="Voz del sistema" data={[{ group: 'Latinoamérica · Edge', items: edge.map(v => ({ value: v.key, label: v.label })) }, { group: 'Local · Piper', items: inst.map(v => ({ value: v.key, label: v.key })) }]} value={spVoice} onChange={setSpVoice} searchable w={280} />
+              <Button leftSection={<IconSparkles size={16} />} loading={!!spProg} onClick={() => spGenerate()}>Generar todos</Button>
+              <Button variant="light" leftSection={<IconSparkles size={16} />} loading={!!spProg} onClick={() => spGenerate(sp.filter(x => x.category === 'digitos').map(x => x.name))}>Solo dígitos</Button>
+              <Button variant="default" color="red" leftSection={<IconArrowBackUp size={16} />} loading={busy === 'revert'} onClick={() => spRevert()}>Restaurar originales</Button>
+              {!sp.length && <Button variant="light" onClick={spSeed} loading={busy === 'seed'}>Cargar catálogo</Button>}
+            </Group>
+            {spProg && <><Progress mt="md" value={spProg.total ? Math.round(spProg.done * 100 / spProg.total) : 0} animated striped /><Text size="xs" c="dimmed" mt={4}>Generando {spProg.done} / {spProg.total}…</Text></>}
+          </Card>
+          <Card withBorder radius="lg" padding="lg">
+            <Group justify="space-between" mb="sm">
+              <Group gap="xs"><Text fw={600}>Audios del sistema</Text><Badge variant="light" color="teal">{sp.filter(x => x.has_audio).length} / {sp.length} con voz</Badge></Group>
+              <TextInput placeholder="Buscar…" value={spFilter} onChange={e => setSpFilter(e.currentTarget.value)} w={220} />
+            </Group>
+            <ScrollArea h={460}>
+              <Table stickyHeader highlightOnHover verticalSpacing={4}>
+                <Table.Thead><Table.Tr><Table.Th>Nombre</Table.Th><Table.Th>Texto</Table.Th><Table.Th>Categoría</Table.Th><Table.Th>Estado</Table.Th><Table.Th /></Table.Tr></Table.Thead>
+                <Table.Tbody>
+                  {sp.filter(x => !spFilter || x.name.toLowerCase().includes(spFilter.toLowerCase()) || (x.text || '').toLowerCase().includes(spFilter.toLowerCase())).map(x => (
+                    <Table.Tr key={x.name}>
+                      <Table.Td><Text fz="xs" ff="monospace" fw={600}>{x.name}</Text></Table.Td>
+                      <Table.Td style={{ minWidth: 300 }}><TextInput size="xs" defaultValue={x.text} onBlur={e => spSaveText(x.name, e.currentTarget.value)} variant="unstyled" /></Table.Td>
+                      <Table.Td><Badge size="xs" variant="light" color="gray">{x.category}</Badge></Table.Td>
+                      <Table.Td>{x.deployed_at ? <Badge size="xs" color="teal" variant="light">activo</Badge> : x.has_audio ? <Badge size="xs" color="yellow" variant="light">generado</Badge> : <Badge size="xs" color="gray" variant="light">original</Badge>}</Table.Td>
+                      <Table.Td><Group gap={4} justify="flex-end" wrap="nowrap">
+                        <Tooltip label="Escuchar"><ActionIcon variant="subtle" disabled={!x.has_audio} onClick={() => spPlay(x.name)}><IconVolume size={16} /></ActionIcon></Tooltip>
+                        <Tooltip label="Regenerar con la voz elegida"><ActionIcon variant="subtle" color="teal" loading={!!spProg} onClick={() => spGenerate([x.name])}><IconRefresh size={15} /></ActionIcon></Tooltip>
+                      </Group></Table.Td>
+                    </Table.Tr>))}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
+            <audio ref={spRef} style={{ display: 'none' }} />
+          </Card>
+        </Tabs.Panel>
+
       </Tabs>
     </Stack>
   );
