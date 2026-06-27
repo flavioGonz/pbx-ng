@@ -86,6 +86,7 @@ export function useSoftphone() {
   const [reg, setReg] = useState('idle');
   const [call, setCall] = useState(null);
   const [incoming, setIncoming] = useState(null);
+  const [incomingVideo, setIncomingVideo] = useState(false);
   const [muted, setMuted] = useState(false);
   const [held, setHeld] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -145,7 +146,7 @@ export function useSoftphone() {
         authorizationUsername: ext, authorizationPassword: pass,
         sessionDescriptionHandlerFactoryOptions: { peerConnectionConfiguration: { iceServers: ICE, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' }, iceGatheringTimeout: 1500 },
         delegate: {
-          onInvite: (inv) => setIncoming(inv),
+          onInvite: (inv) => { setIncoming(inv); try { const sdp = (inv.request && inv.request.body) || inv.body || ''; setIncomingVideo(/m=video/i.test(typeof sdp === 'string' ? sdp : '')); } catch (_) { setIncomingVideo(false); } },
           onConnect: () => { if (registerer.current) registerer.current.register().catch(() => {}); },
           onDisconnect: (err) => {
             setReg('connecting');
@@ -172,26 +173,29 @@ export function useSoftphone() {
     localStorage.removeItem(LS);
   }, []);
 
-  const placeCall = useCallback(async (num) => {
+  const placeCall = useCallback(async (num, video) => {
     const target = String(num || '').trim(); if (!target || !ua.current) return;
+    const useVid = video === undefined ? !!(creds && creds.video) : !!video;
+    if (useVid) await primeMedia(true);
     const SIP = await import('sip.js');
     const uri = SIP.UserAgent.makeURI(`sip:${target}@${location.hostname}`);
-    const inviter = new SIP.Inviter(ua.current, uri, { sessionDescriptionHandlerOptions: { constraints: { audio: true, video: !!(creds && creds.video) }, iceGatheringTimeout: 1500 }, earlyMedia: true });
-    wire(inviter, { dir: 'out', number: target, start: Date.now() });
+    const inviter = new SIP.Inviter(ua.current, uri, { sessionDescriptionHandlerOptions: { constraints: { audio: true, video: useVid }, iceGatheringTimeout: 1500 }, earlyMedia: true });
+    wire(inviter, { dir: 'out', number: target, start: Date.now(), video: useVid });
     await inviter.invite();
   }, [creds, wire]);
 
-  const acceptIncoming = useCallback(async () => {
-    const inv = incoming; if (!inv) return; setIncoming(null); stopRinging();
+  const acceptIncoming = useCallback(async (video) => {
+    const inv = incoming; if (!inv) return; const useVid = video === undefined ? incomingVideo : !!video; setIncoming(null); stopRinging();
+    if (useVid) await primeMedia(true);
     const from = (inv.remoteIdentity && inv.remoteIdentity.uri && inv.remoteIdentity.uri.user) || 'desconocido';
-    wire(inv, { dir: 'in', number: from, start: Date.now() });
-    await inv.accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: !!(creds && creds.video) }, iceGatheringTimeout: 1500 } });
-  }, [incoming, creds, wire]);
+    wire(inv, { dir: 'in', number: from, start: Date.now(), video: useVid });
+    await inv.accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: useVid }, iceGatheringTimeout: 1500 } });
+  }, [incoming, incomingVideo, creds, wire]);
 
   const rejectIncoming = useCallback(() => {
     stopRinging();
     if (incoming) { const from = (incoming.remoteIdentity && incoming.remoteIdentity.uri && incoming.remoteIdentity.uri.user) || '?'; pushHist({ dir: 'in', number: from, start: Date.now(), missed: true }); refreshHist(); incoming.reject(); }
-    setIncoming(null);
+    setIncoming(null); setIncomingVideo(false);
   }, [incoming, refreshHist]);
 
   const hangup = useCallback(async () => {
@@ -371,5 +375,5 @@ export function useSoftphone() {
 
   useEffect(() => { if (typeof window !== 'undefined') window.__pbxInCall = !!(call || callInfo || incoming); }, [call, callInfo, incoming]);
 
-  return { reg, call, incoming, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, audioRef, remoteVideoRef, localVideoRef };
+  return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, audioRef, remoteVideoRef, localVideoRef };
 }

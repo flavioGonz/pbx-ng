@@ -8,7 +8,7 @@ import {
   IconPhone, IconPhoneOff, IconBackspace, IconMicrophone, IconMicrophoneOff,
   IconGridDots, IconUser, IconSettings, IconSearch, IconPlus,
   IconPhoneIncoming, IconPhoneOutgoing, IconLogout, IconX, IconClockHour4, IconBell,
-  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera,
+  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock,
 } from '@tabler/icons-react';
 
 const CK = 'pbxng_contacts';
@@ -44,7 +44,7 @@ export default function Phone() {
   const [scan, setScan] = useState(''); const scanV = useRef(null); const scanRaf = useRef(null); const scanStream = useRef(null);
   const registered = sp.reg === 'registered'; const inCall = !!(sp.call || sp.callInfo);
   const established = sp.call === 'Established';
-  const vid = !!sp.creds?.video;
+  const vid = !!sp.callInfo?.video;
   const callState = sp.held ? 'hold' : established ? 'talking' : 'ringing';
   const videoView = vid && established;
   const [ctl, setCtl] = useState(true); const ctlTimer = useRef(null);
@@ -167,7 +167,7 @@ export default function Phone() {
   function press(k) { sp.tone(k); if (!inCall) setDial(d => d + k); }
   function addContact() { if (!nc.name || !nc.number) return; const c = [...contacts, { id: Date.now(), ...nc }].sort((a, b) => a.name.localeCompare(b.name)); setContacts(c); saveC(c); setNc({ name: '', number: '' }); setAddOpen(false); }
   function delContact(id) { const c = contacts.filter(x => x.id !== id); setContacts(c); saveC(c); }
-  function callNum(n) { setTab('teclado'); sp.placeCall(n); }
+  function callNum(n, video) { setTab('teclado'); sp.placeCall(n, video); }
   const isOnline = (num) => { const st = presence[String(num)]; return st === 'online' || st === 'in_call'; };
   const statusOf = (num) => presence[String(num)] || 'offline';
   const stLabel = { online: 'En línea', in_call: 'En llamada', offline: 'Desconectado' };
@@ -217,8 +217,8 @@ export default function Phone() {
               ))}
             </div>
             <div style={S.dialRow}>
-              <div style={{ width: 56 }} />
-              <button style={S.callGreen} onClick={() => sp.placeCall(dial)}><IconPhone size={32} color="#fff" fill="#fff" /></button>
+              <button style={{ ...S.callSec, opacity: dial ? 1 : 0.35 }} onClick={() => dial && sp.placeCall(dial, true)}><IconVideo size={24} color="#fff" /></button>
+              <button style={S.callGreen} onClick={() => sp.placeCall(dial, false)}><IconPhone size={32} color="#fff" fill="#fff" /></button>
               <button style={{ width: 56, height: 56, border: 'none', background: 'none', cursor: dial ? 'pointer' : 'default', color: dial ? '#000' : 'transparent' }} onClick={() => setDial(d => d.slice(0, -1))}><IconBackspace size={26} /></button>
             </div>
           </div>
@@ -238,6 +238,7 @@ export default function Phone() {
                   <div key={d.ext} style={S.crow} onClick={() => callNum(d.ext)}>
                     <Avatar name={d.name || d.ext} online={d.status === 'online' || d.status === 'in_call'} />
                     <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 16 }}>{d.name || ('Interno ' + d.ext)}</div><div style={{ fontSize: 13, color: stColor[d.status] === '#c7c7cc' ? '#8e8e93' : stColor[d.status] }}>{(stLabel[d.status] || 'Desconectado') + ' · ' + d.ext}</div></div>
+                    <button style={S.iconBtn} onClick={(e) => { e.stopPropagation(); callNum(d.ext, true); }}><IconVideo size={18} color="#007aff" /></button>
                     <button style={S.iconBtn} onClick={(e) => { e.stopPropagation(); callNum(d.ext); }}><IconPhone size={20} color="#34c759" /></button>
                   </div>
                 ))
@@ -247,6 +248,7 @@ export default function Phone() {
                   <div key={c.id} style={S.crow}>
                     <Avatar name={c.name} online={isOnline(c.number)} />
                     <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 16 }}>{c.name}</div><div style={{ color: isOnline(c.number) ? stColor[statusOf(c.number)] : '#8e8e93', fontSize: 13 }}>{isOnline(c.number) ? stLabel[statusOf(c.number)] + ' · ' + c.number : c.number}</div></div>
+                    <button style={S.iconBtn} onClick={() => callNum(c.number, true)}><IconVideo size={18} color="#007aff" /></button>
                     <button style={S.iconBtn} onClick={() => callNum(c.number)}><IconPhone size={20} color="#34c759" /></button>
                     <button style={S.iconBtn} onClick={() => delContact(c.id)}><IconX size={18} color="#ff3b30" /></button>
                   </div>
@@ -375,10 +377,17 @@ export default function Phone() {
 
       {sp.incoming && !inCall &&
         <div className="ph-overlay" style={{ ...S.callScreen, justifyContent: 'space-between' }}>
-          <div style={{ textAlign: 'center', marginTop: 70 }}><CallAvatar name={(sp.incoming.remoteIdentity?.uri?.user) || '?'} state="ringing" /><div style={{ fontSize: 28, fontWeight: 600, marginTop: 18 }}>{sp.incoming.remoteIdentity?.uri?.user || 'Llamada'}</div><div style={{ color: 'rgba(255,255,255,.7)', marginTop: 6 }}>Llamada entrante…</div></div>
-          <div style={{ display: 'flex', justifyContent: 'space-around', width: '100%', marginBottom: 50 }}>
+          <div style={{ textAlign: 'center', marginTop: 'calc(env(safe-area-inset-top, 20px) + 60px)' }}>
+            <div style={S.inLabel}>{sp.incomingVideo ? <><IconVideo size={14} /> Videollamada entrante</> : <><IconPhoneIncoming size={14} /> Llamada entrante</>}</div>
+            <CallAvatar name={(sp.incoming.remoteIdentity?.uri?.user) || '?'} state="ringing" />
+            <div style={{ fontSize: 30, fontWeight: 600, marginTop: 18 }}>{sp.incoming.remoteIdentity?.uri?.user || 'Llamada'}</div>
+            <div style={{ color: 'rgba(255,255,255,.6)', marginTop: 6, fontSize: 14 }}>PBX-NG · IES</div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-around', width: '100%', maxWidth: 360, marginBottom: 'calc(env(safe-area-inset-bottom, 20px) + 36px)' }}>
             <div style={{ textAlign: 'center' }}><CScreenBtn bg="#ff3b30" fg="#fff" big onClick={sp.rejectIncoming}><IconPhoneOff size={30} /></CScreenBtn><div style={{ marginTop: 8, fontSize: 13 }}>Rechazar</div></div>
-            <div style={{ textAlign: 'center' }}><CScreenBtn bg="#34c759" fg="#fff" big onClick={sp.acceptIncoming}><IconPhone size={30} fill="#fff" /></CScreenBtn><div style={{ marginTop: 8, fontSize: 13 }}>Aceptar</div></div>
+            {sp.incomingVideo &&
+              <div style={{ textAlign: 'center' }}><CScreenBtn bg="#007aff" fg="#fff" big onClick={() => sp.acceptIncoming(true)}><IconVideo size={28} /></CScreenBtn><div style={{ marginTop: 8, fontSize: 13 }}>Video</div></div>}
+            <div style={{ textAlign: 'center' }}><CScreenBtn bg="#34c759" fg="#fff" big onClick={() => sp.acceptIncoming(false)} className="ph-ring"><IconPhone size={30} fill="#fff" /></CScreenBtn><div style={{ marginTop: 8, fontSize: 13 }}>{sp.incomingVideo ? 'Audio' : 'Aceptar'}</div></div>
           </div>
         </div>}
       {pendIn && !sp.incoming && !inCall &&
@@ -467,6 +476,8 @@ const S = {
   keypad: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 18, margin: '14px 0', width: 'min(300px,80vw)' },
   ioskey: { width: 72, height: 72, borderRadius: '50%', background: 'rgba(255,255,255,.5)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,.7)', boxShadow: '0 4px 16px rgba(60,80,160,.12), inset 0 1px 1px rgba(255,255,255,.9)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#0b0f1a', justifySelf: 'center' },
   dialRow: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28, marginTop: 6 },
+  callSec: { width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(160deg,#3a9bff,#0a66d6)', border: '1px solid rgba(255,255,255,.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 18px rgba(10,102,214,.4)' },
+  inLabel: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,.85)', background: 'rgba(255,255,255,.14)', padding: '5px 12px', borderRadius: 20, marginBottom: 26 },
   callGreen: { width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(160deg,#3ddc6a,#28b14d)', border: '1px solid rgba(255,255,255,.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(40,177,77,.4), inset 0 1px 2px rgba(255,255,255,.5)' },
   head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px' },
   title: { fontSize: 28, fontWeight: 700 },
