@@ -75,14 +75,14 @@ export default function SbcFlow() {
   const comp = (g, n) => (sys?.components || []).find(c => c.group === g && c.name.includes(n))?.status;
 
   const nodes = useMemo(() => ([
-    { id: 'wan', type: 'pbx', position: { x: 40, y: 230 }, data: { title: 'Internet / WAN', ip: '200.40.182.246', icon: <IconWorld size={17} />, status: 'ok' } },
+    { id: 'wan', type: 'pbx', position: { x: 40, y: 110 }, data: { title: 'Internet / WAN', ip: '200.40.182.246', icon: <IconWorld size={17} />, status: 'ok' } },
     { id: 'npm', type: 'pbx', position: { x: 360, y: 40 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
     { id: 'coturn', type: 'pbx', position: { x: 360, y: 420 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
-    { id: 'kamailio', type: 'pbx', position: { x: 360, y: 230 }, data: { title: 'SBC Kamailio', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', hint: 'Clic para ver detalle', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
+    { id: 'kamailio', type: 'pbx', position: { x: 360, y: 230 }, data: { title: 'SBC-NG', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
     { id: 'asterisk', type: 'pbx', position: { x: 740, y: 230 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'En curso', value: ch.length, hot: ch.length > 0 }] } },
-    { id: 'troncales', type: 'pbx', position: { x: 1120, y: 40 }, data: { title: 'Troncales', icon: <IconDeviceLandlinePhone size={17} />, status: trunks.length ? 'ok' : 'pending', metrics: [{ label: 'Totales', value: trunks.length }, { label: 'Registradas', value: trunkOnline }] } },
-    { id: 'internos', type: 'pbx', position: { x: 1120, y: 230 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
-    { id: 'apps', type: 'pbx', position: { x: 1120, y: 420 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
+    { id: 'troncales', type: 'pbx', position: { x: 40, y: 360 }, data: { title: 'Troncales (operadores)', icon: <IconDeviceLandlinePhone size={17} />, status: trunks.length ? 'ok' : 'pending', metrics: [{ label: 'Totales', value: trunks.length }, { label: 'Registradas', value: trunkOnline }] } },
+    { id: 'internos', type: 'pbx', position: { x: 1120, y: 150 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
+    { id: 'apps', type: 'pbx', position: { x: 1120, y: 330 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
   ]), [sbc, trunks, sys, snap]);
 
   const talking = ch.filter(c => /up|answer/i.test(c.state || '')).length;
@@ -93,8 +93,8 @@ export default function SbcFlow() {
     e('e2', 'wan', 'kamailio', '#7c3aed', 'SIP', spine),
     e('e3', 'wan', 'coturn', '#0891b2', 'TURN', false),
     e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws', spine),
-    e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'dispatcher', spine),
-    e('e6', 'asterisk', 'troncales', '#16a34a', undefined, spine),
+    e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'trunk interno', spine),
+    e('eT', 'troncales', 'kamailio', '#0e9488', 'troncales SIP', spine),
     e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined, spine),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
   ];

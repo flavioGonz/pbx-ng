@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid } from '@mantine/core';
+import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2 } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -93,7 +93,7 @@ export default function Internos() {
             <Button leftSection={<IconPlus size={16} />} onClick={openNew}>Nuevo interno</Button>
           </Group>
         </Group>
-        {!snap ? <TableSkeleton rows={6} cols={7} /> :
+        {!snap ? <Group justify="center" py={48}><Loader size="sm" color="pbx" /></Group> :
           list.length === 0 ? <Text c="dimmed" ta="center" py="xl">Sin internos.</Text> :
             <Table.ScrollContainer minWidth={760}>
               <Table striped highlightOnHover verticalSpacing="sm">
@@ -104,7 +104,7 @@ export default function Internos() {
                     <Table.Td>{e.name || <Text c="dimmed" size="sm">—</Text>}</Table.Td>
                     <Table.Td><Badge variant="light" color={e.channels > 0 ? 'orange' : e.status === 'online' ? 'teal' : 'gray'} leftSection={<span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: e.channels > 0 ? '#f59e0b' : e.status === 'online' ? '#22c55e' : '#9aa3b2' }} />}>{e.channels > 0 ? 'En llamada' : e.status === 'online' ? 'Registrado' : 'Desconectado'}</Badge></Table.Td>
                     <Table.Td>{e.ip ? <Text ff="monospace" size="xs">{e.ip}</Text> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
-                    <Table.Td>{e.rtt != null ? <Badge size="sm" variant="dot" color={rttColor(e.rtt)}>{e.rtt.toFixed(0)} ms</Badge> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
+                    <Table.Td>{e.rtt != null ? <Badge size="sm" variant="dot" color={rttColor(e.rtt)}><Slot value={e.rtt.toFixed(0)} /> ms</Badge> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
                     <Table.Td><Badge variant="dot" color={e.webrtc ? 'pbx' : 'gray'}>{e.webrtc ? 'WebRTC' : 'SIP'}</Badge></Table.Td>
                     <Table.Td>{e.video ? <Badge color="violet" variant="light" leftSection={<IconVideo size={12} />}>Sí</Badge> : <Text c="dimmed">—</Text>}</Table.Td>
                     <Table.Td ta="right" onClick={ev => ev.stopPropagation()}>

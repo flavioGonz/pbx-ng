@@ -4,13 +4,14 @@ import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button
 import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap } from '@tabler/icons-react';
 import { toast } from './notify';
 import SbcFlow from './SbcFlow';
+import Slot from './Slot';
 import { useLive } from './useLive';
 import { IconPlus, IconInfoCircle, IconPhone } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function fmtUptime(s) { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; }
 function Kpi({ icon, color, label, value, sub }) {
-  return <Card withBorder radius="md" padding="sm"><Group gap="sm" wrap="nowrap"><ThemeIcon variant="light" color={color} size={38} radius="md">{icon}</ThemeIcon><div style={{ minWidth: 0 }}><Text size="xs" c="dimmed">{label}</Text><Text fw={700} fz="lg" lh={1.1} truncate>{value}</Text>{sub && <Text size="xs" c="dimmed">{sub}</Text>}</div></Group></Card>;
+  return <Card withBorder radius="md" padding="sm"><Group gap="sm" wrap="nowrap"><ThemeIcon variant="light" color={color} size={38} radius="md">{icon}</ThemeIcon><div style={{ minWidth: 0 }}><Text size="xs" c="dimmed">{label}</Text><Text fw={700} fz="lg" lh={1.1} truncate><Slot value={value} /></Text>{sub && <Text size="xs" c="dimmed">{sub}</Text>}</div></Group></Card>;
 }
 
 // Grafica de area en vivo (estilo Resumen)
@@ -73,7 +74,7 @@ function ConsoleBody({ sbc, load, hist }) {
     const res = await sendCmd('cfg_save', b64, { silent: true });
     setCfgBusy(false);
     if (res && /INVALID/i.test(res)) { setCfgMsg('ERROR: ' + res); toast('Config invalida (no se aplico)', 'bad'); }
-    else if (res && /aplicado/i.test(res)) { setCfgMsg('OK: ' + res); setCfgOrig(cfg); toast('Config aplicada y Kamailio reiniciado', 'ok'); }
+    else if (res && /aplicado/i.test(res)) { setCfgMsg('OK: ' + res); setCfgOrig(cfg); toast('Config aplicada y SBC-NG reiniciado', 'ok'); }
     else { setCfgMsg(res || 'Sin respuesta del agente'); }
   }
   const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace">{(core[k] ?? 0).toLocaleString()}</Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? rates[k] + '/s' : ''}</Table.Td></Table.Tr>;
@@ -119,7 +120,7 @@ function ConsoleBody({ sbc, load, hist }) {
               {[['1xx', sl['1xx_replies']], ['2xx', sl['2xx_replies']], ['3xx', sl['3xx_replies']], ['4xx', sl['4xx_replies']], ['5xx', sl['5xx_replies']], ['6xx', sl['6xx_replies']], ['404', sl['404_replies']], ['407', sl['407_replies']], ['480', sl['480_replies']]].map(([k, v]) => v != null && <Badge key={k} variant="light" color={k[0] === '2' ? 'teal' : k[0] === '4' || k[0] === '5' || k[0] === '6' ? 'orange' : 'gray'} radius="sm">{k}: {v}</Badge>)}
             </Group>
             <Divider my="sm" />
-            <Text size="sm" c="dimmed">Memoria Kamailio</Text>
+            <Text size="sm" c="dimmed">Memoria SBC-NG</Text>
             <Progress value={memPct} color={memPct > 80 ? 'red' : 'teal'} mt={6} />
             <Text size="xs" c="dimmed" mt={4}>{Math.round((shm.used_size || 0) / 1048576)} MB usados - {shm.fragments || 0} fragmentos - max {Math.round((shm.max_used_size || 0) / 1048576)} MB</Text>
           </Card>
@@ -149,7 +150,7 @@ function ConsoleBody({ sbc, load, hist }) {
       <Tabs.Panel value="disp">
         <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-grape-light)' }}>
           <Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">¿Qué es el dispatcher?</Text></Group>
-          <Text size="sm" c="dimmed">Kamailio (el SBC de borde) recibe las llamadas SIP y las <b>reparte</b> hacia uno o más servidores Asterisk de este grupo de destinos. Si agregás varios Asterisk, balancea y hace <b>failover</b>: si uno queda Inactivo, deriva a otro. Cada destino tiene una <b>prioridad</b> (mayor = se prefiere) y Kamailio mide su <b>latencia</b> con pings (OPTIONS). Estados: <Badge size="xs" variant="light" color="teal">Activo</Badge> responde, <Badge size="xs" variant="light" color="orange">Inactivo</Badge> no responde los pings, <Badge size="xs" variant="light" color="red">Deshabilitado</Badge> apagado manualmente.</Text>
+          <Text size="sm" c="dimmed">SBC-NG (el SBC de borde) recibe las llamadas SIP y las <b>reparte</b> hacia uno o más servidores Asterisk de este grupo de destinos. Si agregás varios Asterisk, balancea y hace <b>failover</b>: si uno queda Inactivo, deriva a otro. Cada destino tiene una <b>prioridad</b> (mayor = se prefiere) y SBC-NG mide su <b>latencia</b> con pings (OPTIONS). Estados: <Badge size="xs" variant="light" color="teal">Activo</Badge> responde, <Badge size="xs" variant="light" color="orange">Inactivo</Badge> no responde los pings, <Badge size="xs" variant="light" color="red">Deshabilitado</Badge> apagado manualmente.</Text>
         </Card>
         <Card withBorder radius="md" padding="md">
           <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher ({disp.length})</Text><Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar</Button></Group>
@@ -160,7 +161,7 @@ function ConsoleBody({ sbc, load, hist }) {
           <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Prioridad</Table.Th><Table.Th>Latencia</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Acciones</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>{disp.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin destinos. Agregá tu primer Asterisk arriba.</Text></Table.Td></Table.Tr> : disp.map((d, i) => { const fi = flagInfo(d.flags); const active = /A/.test(d.flags || ''); return (
               <Table.Tr key={i}>
-                <Table.Td ff="monospace" fz="sm">{d.uri}</Table.Td><Table.Td>{d.priority}</Table.Td><Table.Td>{d.latency != null ? <Badge size="sm" variant="dot" color={d.latency < 50 ? 'teal' : d.latency < 200 ? 'yellow' : 'red'}>{d.latency} ms</Badge> : '-'}</Table.Td>
+                <Table.Td ff="monospace" fz="sm">{d.uri}</Table.Td><Table.Td>{d.priority}</Table.Td><Table.Td>{d.latency != null ? <Badge size="sm" variant="dot" color={d.latency < 50 ? 'teal' : d.latency < 200 ? 'yellow' : 'red'}><Slot value={d.latency} /> ms</Badge> : '-'}</Table.Td>
                 <Table.Td><Badge variant="light" color={fi.c}>{fi.t}</Badge></Table.Td>
                 <Table.Td ta="right"><Group gap={4} justify="flex-end" wrap="nowrap">{active
                   ? <Button size="compact-xs" variant="light" color="orange" leftSection={<IconPlugConnectedX size={13} />} loading={busy === 'disable_target' + d.uri} onClick={() => sendCmd('disable_target', d.uri)}>Deshabilitar</Button>
@@ -181,7 +182,7 @@ function ConsoleBody({ sbc, load, hist }) {
           <Kpi icon={<IconReload size={20} />} color="grape" label="Transcodif." value={rtp.transcoded ?? 0} />
         </SimpleGrid>
         <Card withBorder radius="md" padding="md" mb="md">
-          <Group justify="space-between" mb="sm"><Group gap="xs"><Text fw={700}>Flujos de medios en vivo</Text>{ch.length > 0 && <Badge color="teal" variant="light" leftSection={<span className="pbx-pip pbx-pulse" style={{ background: 'var(--mantine-color-teal-6)' }} />}>{ch.length} activo(s)</Badge>}</Group></Group>
+          <Group justify="space-between" mb="sm"><Group gap="xs"><Text fw={700}>Flujos de medios en vivo</Text>{ch.length > 0 && <Badge color="teal" variant="light" leftSection={<span className="pbx-pip pbx-pulse" style={{ background: 'var(--mantine-color-teal-6)' }} />}><Slot value={ch.length} /> activo(s)</Badge>}</Group></Group>
           {ch.length === 0 ? <Text size="sm" c="dimmed" ta="center" py="md">No hay llamadas con medios en curso.</Text> :
             <Table highlightOnHover verticalSpacing={6}><Table.Thead><Table.Tr><Table.Th>Origen</Table.Th><Table.Th>Conectado con</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Duración</Table.Th><Table.Th>Canal</Table.Th></Table.Tr></Table.Thead>
               <Table.Tbody>{ch.map(c => (
@@ -205,7 +206,7 @@ function ConsoleBody({ sbc, load, hist }) {
               <Button size="xs" leftSection={<IconDeviceFloppy size={14} />} loading={cfgBusy} disabled={cfg === cfgOrig} onClick={saveCfg}>Validar y guardar</Button>
             </Group>
           </Group>
-          <Group gap="xs" mb="xs" c="orange"><IconAlertTriangle size={15} /><Text size="xs" c="dimmed">Se valida con <Code>kamailio -c</Code> antes de aplicar. Si es valido, se hace backup (.bak) y se reinicia Kamailio (corta llamadas activas unos segundos).</Text></Group>
+          <Group gap="xs" mb="xs" c="orange"><IconAlertTriangle size={15} /><Text size="xs" c="dimmed">Se valida con <Code>kamailio -c</Code> antes de aplicar. Si es valido, se hace backup (.bak) y se reinicia SBC-NG (corta llamadas activas unos segundos).</Text></Group>
           <Textarea value={cfg} onChange={e => setCfg(e.target.value)} autosize minRows={18} maxRows={28} styles={{ input: { fontFamily: 'monospace', fontSize: 12.5, lineHeight: 1.5 } }} spellCheck={false} />
           {cfgMsg && <Code block mt="sm">{cfgMsg}</Code>}
         </Card>
@@ -215,7 +216,7 @@ function ConsoleBody({ sbc, load, hist }) {
             <NumberInput label="Nivel de debug (core)" value={debug} onChange={setDebug} min={-3} max={4} w={170} />
             <Button variant="light" loading={busy === 'debug' + debug} onClick={() => sendCmd('debug', debug)}>Aplicar debug</Button>
             <Divider orientation="vertical" />
-            <Button color="red" variant="light" leftSection={<IconReload size={15} />} loading={busy === 'restart'} onClick={() => { if (confirm('Reiniciar Kamailio? Corta las llamadas activas unos segundos.')) sendCmd('restart'); }}>Reiniciar Kamailio</Button>
+            <Button color="red" variant="light" leftSection={<IconReload size={15} />} loading={busy === 'restart'} onClick={() => { if (confirm('Reiniciar SBC-NG? Corta las llamadas activas unos segundos.')) sendCmd('restart'); }}>Reiniciar SBC-NG</Button>
           </Group>
         </Card>
       </Tabs.Panel>
@@ -244,7 +245,7 @@ export default function SbcConsole({ opened, onClose, inline = false }) {
         <Group justify="space-between" px="lg" py="sm" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)', background: 'linear-gradient(120deg,#1d2540,#243a6b)', color: '#fff' }}>
           <Group gap="sm">
             <ThemeIcon size={40} radius="md" variant="light" color="grape"><IconRouteAltLeft size={22} /></ThemeIcon>
-            <div><Text fw={800} lh={1.1}>Consola SBC - Kamailio</Text><Text size="xs" style={{ opacity: .75 }}>{sbc?.version || 'kamailio'} - 172.26.20.205 - uptime {fmtUptime(sbc?.uptime)}</Text></div>
+            <div><Text fw={800} lh={1.1}>Consola SBC-NG</Text><Text size="xs" style={{ opacity: .75 }}>{sbc?.version || 'kamailio'} - 172.26.20.205 - uptime {fmtUptime(sbc?.uptime)}</Text></div>
             <Badge ml="sm" variant="light" color={sbc && !sbc.error ? 'teal' : 'red'}>{sbc && !sbc.error ? 'En linea' : 'Sin datos'}</Badge>
           </Group>
           <Group gap="xs"><Tooltip label="Refrescar"><ActionIcon variant="light" color="gray" onClick={load}><IconRefresh size={18} /></ActionIcon></Tooltip><Button variant="white" color="dark" onClick={onClose}>Cerrar</Button></Group>

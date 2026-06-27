@@ -85,7 +85,7 @@ export default function Resumen() {
   const svcList = [
     { n: 'Asterisk (AMI/ARI)', ok: h.ari && h.ami, ip: '172.26.20.183' },
     { n: 'Base de datos', ok: h.db, ip: '172.26.20.184' },
-    { n: 'SBC Kamailio', ok: true, ip: '172.26.20.205' },
+    { n: 'SBC-NG', ok: true, ip: '172.26.20.205' },
     { n: 'TURN / Coturn', ok: (comps.find(c => /TURN/i.test(c.name)) || {}).status !== 'down', ip: '172.26.20.204' },
     { n: 'Proxy NPM (TLS/WSS)', ok: (comps.find(c => /Proxy/i.test(c.name)) || {}).status !== 'down', ip: '172.26.20.17' },
   ];

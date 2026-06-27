@@ -22,7 +22,7 @@ function Logo() {
 }
 const groups = [
   { label: 'Telefonía', icon: IconPhoneCall, items: [
-    { href: '/sbc', label: 'SBC / Kamailio', icon: IconShieldLock },
+    { href: '/sbc', label: 'SBC-NG', icon: IconShieldLock },
     { href: '/internos', label: 'Internos', icon: IconUsers },
     { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
     { href: '/troncales', label: 'Troncales', icon: IconArrowsLeftRight },

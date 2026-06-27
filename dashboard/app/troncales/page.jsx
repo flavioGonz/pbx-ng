@@ -69,7 +69,7 @@ export default function Troncales() {
   const { nodes, edges } = useMemo(() => {
     const ns = [], es = [];
     const COL_T = 40, COL_KAM = 380, COL_AST = 660, COL_INT = 940; const ROW = 230, STEP = 100;
-    ns.push({ id: 'kam', type: 't', position: { x: COL_KAM, y: ROW }, data: { title: 'SBC Kamailio', sub: '172.26.20.205', icon: <IconRouteAltLeft size={16} />, accent: 'kam', status: 'sbc', badge: kamTrunks.length + ' troncal(es)' } });
+    ns.push({ id: 'kam', type: 't', position: { x: COL_KAM, y: ROW }, data: { title: 'SBC-NG', sub: '172.26.20.205', icon: <IconRouteAltLeft size={16} />, accent: 'kam', status: 'sbc', badge: kamTrunks.length + ' troncal(es)' } });
     ns.push({ id: 'ast', type: 't', position: { x: COL_AST, y: ROW }, data: { title: 'Asterisk PBX', sub: '172.26.20.183', icon: <IconServer2 size={16} />, accent: 'ast', status: snap?.health?.ami ? 'online' : 'down', badge: ch + ' llamada(s)' } });
     ns.push({ id: 'int', type: 't', position: { x: COL_INT, y: ROW }, data: { title: 'Internos', icon: <IconUsers size={16} />, dot: false, badge: (snap?.extensions || []).length + ' extensiones' } });
     es.push({ id: 'k-a', source: 'kam', target: 'ast', type: 'smoothstep', animated: true, label: 'dispatcher', style: { stroke: '#7c3aed', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c3aed' } });
@@ -172,7 +172,7 @@ export default function Troncales() {
           <Divider label="General" labelPosition="left" />
           <div>
             <Text size="sm" fw={500} mb={4}>¿Dónde vive la troncal?</Text>
-            <SegmentedControl fullWidth value={f.kind} onChange={v => set('kind', v)} disabled={editing} data={[{ value: 'asterisk', label: 'Asterisk (directo)' }, { value: 'kamailio', label: 'SBC Kamailio' }]} />
+            <SegmentedControl fullWidth value={f.kind} onChange={v => set('kind', v)} disabled={editing} data={[{ value: 'asterisk', label: 'Asterisk (directo)' }, { value: 'kamailio', label: 'SBC-NG' }]} />
           </div>
           <Group grow>
             <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="proveedor-1" value={f.name} onChange={e => set('name', e.target.value)} required disabled={editing} description={editing ? 'No se puede cambiar' : 'Identificador único'} />
@@ -226,7 +226,7 @@ export default function Troncales() {
               </Group>}
             </div>
           </>}
-          {!isAst && <Text size="xs" c="dimmed">La troncal se gestiona en el borde Kamailio (registro/seguridad en el SBC). Los parámetros de códec/NAT se administran desde la consola del SBC.</Text>}
+          {!isAst && <Text size="xs" c="dimmed">La troncal se gestiona en el borde SBC-NG (registro/seguridad en el SBC). Los parámetros de códec/NAT se administran desde la consola del SBC.</Text>}
 
           <Button onClick={create} loading={saving} mt="xs" size="md" color="teal">{editing ? 'Guardar cambios' : 'Crear troncal'}</Button>
         </Stack>

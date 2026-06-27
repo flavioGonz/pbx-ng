@@ -9,7 +9,7 @@ const SbcConsole = dynamic(() => import('../SbcConsole'), { ssr: false });
 export default function SbcPage() {
   return (
     <Stack gap="lg">
-      <PageHeader icon={<IconRouteAltLeft size={24} />} title="SBC - Kamailio" subtitle="Session Border Controller - configuracion, seguridad y flujo de llamadas" color="grape" />
+      <PageHeader icon={<IconRouteAltLeft size={24} />} title="SBC-NG" subtitle="Session Border Controller - configuracion, seguridad y flujo de llamadas" color="grape" />
       <SbcConsole inline />
     </Stack>
   );
