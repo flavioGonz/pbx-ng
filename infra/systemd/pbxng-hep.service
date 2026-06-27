@@ -1,0 +1,9 @@
+[Unit]
+Description=PBX-NG HEP collector (Asterisk SIP capture -> PostgreSQL)
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 /opt/pbxng-hep.py
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

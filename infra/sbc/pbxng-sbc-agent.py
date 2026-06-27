@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, subprocess, re, json, time, os, base64
+import os, subprocess, re, json, time, os, base64, threading
 import psycopg2
 DB = dict(host='172.26.20.184', dbname='pbxng', user='pbxng', password='__SET_DB_PASS__', client_encoding='UTF8')
 CFG = '/etc/kamailio/kamailio.cfg'
@@ -165,6 +165,96 @@ def apply_cmd(cmd, arg):
         res = 'error: ' + str(e)
     return res[:600]
 
+def _parse_sip_msg(txt):
+    lines = txt.replace('\r\n', '\n').split('\n')
+    if not lines:
+        return None
+    first = lines[0].strip()
+    method = status = ruri = None
+    if first.startswith('SIP/2.0'):
+        pr = first.split(None, 2)
+        if len(pr) >= 2 and pr[1].isdigit():
+            status = int(pr[1])
+        else:
+            return None
+    else:
+        pr = first.split(None, 2)
+        if len(pr) < 2 or not pr[1].startswith(('sip:', 'sips:', 'tel:')):
+            return None
+        method = pr[0]; ruri = pr[1]
+    hdr = {}
+    for ln in lines[1:]:
+        if ln.strip() == '':
+            break
+        if ':' in ln:
+            k, v = ln.split(':', 1); k = k.strip().lower()
+            if k not in hdr:
+                hdr[k] = v.strip()
+    return dict(method=method, status=status, ruri=ruri,
+                callid=hdr.get('call-id') or hdr.get('i'), cseq=hdr.get('cseq'),
+                from_uri=hdr.get('from') or hdr.get('f'), to_uri=hdr.get('to') or hdr.get('t'))
+
+SIP_TOKENS = ('INVITE ', 'REGISTER ', 'OPTIONS ', 'BYE ', 'CANCEL ', 'ACK ', 'SUBSCRIBE ',
+              'NOTIFY ', 'INFO ', 'PRACK ', 'UPDATE ', 'MESSAGE ', 'REFER ', 'PUBLISH ', 'SIP/2.0')
+
+def sip_capture_loop():
+    while True:
+        try:
+            conn = psycopg2.connect(**DB); conn.autocommit = True; cur = conn.cursor()
+            cur.execute("CREATE TABLE IF NOT EXISTS pbxng_sip_capture (id bigserial PRIMARY KEY, ts timestamptz DEFAULT now(), host text, src text, dst text, method text, status int, callid text, cseq text, from_uri text, to_uri text, ruri text, raw text)")
+            cur.execute("CREATE TABLE IF NOT EXISTS pbxng_settings (key text PRIMARY KEY, value text)")
+            proc = subprocess.Popen(['tcpdump', '-i', 'any', '-n', '-A', '-s', '0', '-l', 'udp', 'port', '5060'],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=1, universal_newlines=True)
+            hdr_re = re.compile(r'IP6?\s+(\S+?)\.(\d+)\s+>\s+(\S+?)\.(\d+):')
+            state = {'src': None, 'dst': None, 'buf': [], 'n': 0, 'enabled': True, 'last': 0.0}
+
+            def flush():
+                if state['src'] and state['buf']:
+                    raw = '\n'.join(state['buf'])
+                    idx = -1
+                    for tok in SIP_TOKENS:
+                        j = raw.find(tok)
+                        if j != -1 and (idx == -1 or j < idx):
+                            idx = j
+                    if idx != -1:
+                        sip = _parse_sip_msg(raw[idx:])
+                        if sip:
+                            try:
+                                cur.execute("INSERT INTO pbxng_sip_capture (host,src,dst,method,status,callid,cseq,from_uri,to_uri,ruri,raw) VALUES ('sbc',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                            (state['src'], state['dst'], sip['method'], sip['status'], sip['callid'], sip['cseq'], sip['from_uri'], sip['to_uri'], sip['ruri'], raw[idx:][:4000]))
+                                state['n'] += 1
+                                if state['n'] % 50 == 0:
+                                    cur.execute("DELETE FROM pbxng_sip_capture WHERE id < (SELECT COALESCE(MAX(id),0)-4000 FROM pbxng_sip_capture)")
+                            except Exception:
+                                pass
+                state['buf'] = []
+
+            for line in proc.stdout:
+                line = line.rstrip('\n')
+                m = hdr_re.search(line)
+                if m:
+                    now = time.time()
+                    if now - state['last'] > 4:
+                        state['last'] = now
+                        try:
+                            cur.execute("SELECT value FROM pbxng_settings WHERE key='sip_capture_on'")
+                            r = cur.fetchone(); state['enabled'] = (r is None or r[0] != '0')
+                        except Exception:
+                            pass
+                    flush()
+                    if state['enabled']:
+                        state['src'] = m.group(1) + ':' + m.group(2)
+                        state['dst'] = m.group(3) + ':' + m.group(4)
+                    else:
+                        state['src'] = state['dst'] = None
+                else:
+                    if state['src'] is not None:
+                        state['buf'].append(line)
+            proc.wait()
+        except Exception as e:
+            print('sipcap err', e, flush=True)
+        time.sleep(5)
+
 def main():
     try:
         c = psycopg2.connect(**DB); cu = c.cursor()
@@ -175,9 +265,12 @@ def main():
         cu.execute("ALTER TABLE pbxng_sbc_cmd ADD COLUMN IF NOT EXISTS arg text")
         cu.execute("ALTER TABLE pbxng_sbc_cmd ADD COLUMN IF NOT EXISTS result text")
         cu.execute("CREATE TABLE IF NOT EXISTS pbxng_sbc_routes (id serial PRIMARY KEY, dest text, gw text, dev text, note text, created_at timestamptz DEFAULT now())")
+        cu.execute("CREATE TABLE IF NOT EXISTS pbxng_sip_capture (id bigserial PRIMARY KEY, ts timestamptz DEFAULT now(), host text, src text, dst text, method text, status int, callid text, cseq text, from_uri text, to_uri text, ruri text, raw text)")
+        cu.execute("CREATE TABLE IF NOT EXISTS pbxng_settings (key text PRIMARY KEY, value text)")
         c.commit(); cu.close(); c.close()
     except Exception as e:
         print('alter err', e, flush=True)
+    threading.Thread(target=sip_capture_loop, daemon=True).start()
     ver = version()
     while True:
         try:

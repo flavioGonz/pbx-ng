@@ -5,8 +5,9 @@ import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, Ic
 import { toast } from './notify';
 import SbcFlow from './SbcFlow';
 import Slot from './Slot';
+import SipLadder from './SipLadder';
 import { useLive } from './useLive';
-import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld } from '@tabler/icons-react';
+import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function fmtUptime(s) { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; }
@@ -95,7 +96,7 @@ function ConsoleBody({ sbc, load, hist }) {
     else if (res && /aplicado/i.test(res)) { setCfgMsg('OK: ' + res); setCfgOrig(cfg); toast('Config aplicada y SBC-NG reiniciado', 'ok'); }
     else { setCfgMsg(res || 'Sin respuesta del agente'); }
   }
-  const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace">{(core[k] ?? 0).toLocaleString()}</Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? rates[k] + '/s' : ''}</Table.Td></Table.Tr>;
+  const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace"><Slot value={(core[k] ?? 0).toLocaleString()} /></Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? <><Slot value={rates[k]} />/s</> : ''}</Table.Td></Table.Tr>;
 
   return (
     <Tabs defaultValue="flow" variant="pills" radius="md" keepMounted={false}>
@@ -106,6 +107,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
+        <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>
         <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
       </Tabs.List>
 
@@ -136,7 +138,7 @@ function ConsoleBody({ sbc, load, hist }) {
           <Card withBorder radius="md" padding="md">
             <Text fw={700} mb="xs">Respuestas (stateless)</Text>
             <Group gap="xs">
-              {[['1xx', sl['1xx_replies']], ['2xx', sl['2xx_replies']], ['3xx', sl['3xx_replies']], ['4xx', sl['4xx_replies']], ['5xx', sl['5xx_replies']], ['6xx', sl['6xx_replies']], ['404', sl['404_replies']], ['407', sl['407_replies']], ['480', sl['480_replies']]].map(([k, v]) => v != null && <Badge key={k} variant="light" color={k[0] === '2' ? 'teal' : k[0] === '4' || k[0] === '5' || k[0] === '6' ? 'orange' : 'gray'} radius="sm">{k}: {v}</Badge>)}
+              {[['1xx', sl['1xx_replies']], ['2xx', sl['2xx_replies']], ['3xx', sl['3xx_replies']], ['4xx', sl['4xx_replies']], ['5xx', sl['5xx_replies']], ['6xx', sl['6xx_replies']], ['404', sl['404_replies']], ['407', sl['407_replies']], ['480', sl['480_replies']]].map(([k, v]) => v != null && <Badge key={k} variant="light" color={k[0] === '2' ? 'teal' : k[0] === '4' || k[0] === '5' || k[0] === '6' ? 'orange' : 'gray'} radius="sm">{k}: <Slot value={v} /></Badge>)}
             </Group>
             <Divider my="sm" />
             <Text size="sm" c="dimmed">Memoria SBC-NG</Text>
@@ -259,6 +261,8 @@ function ConsoleBody({ sbc, load, hist }) {
         </Card>
         <Card withBorder radius="md" padding="md" style={{ background: 'var(--mantine-color-blue-light)' }}><Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">¿Qué hace rtpengine?</Text></Group><Text size="sm" c="dimmed">Es el motor que <b>ancla y reenvía el RTP</b> (audio/video) en el borde: oculta a Asterisk de internet, resuelve NAT y puentea WebRTC↔SIP. Cada sesión = una llamada con medios pasando por el SBC. «Paquetes/s» y «Tráfico» son el rendimiento en vivo del relay; «Transcodif.» cuenta medios que se están convirtiendo de códec.</Text></Card>
       </Tabs.Panel>
+
+      <Tabs.Panel value="sip"><SipLadder /></Tabs.Panel>
 
       <Tabs.Panel value="cfg">
         <Card withBorder radius="md" padding="md">

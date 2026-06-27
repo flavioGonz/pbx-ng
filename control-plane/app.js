@@ -1527,6 +1527,35 @@ app.post('/api/sbc/routes/remove', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// --- SIP capture (debug tipo sngrep) ---
+app.get('/api/sip/messages', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 500, 2000);
+  try {
+    await pool.query("CREATE TABLE IF NOT EXISTS pbxng_sip_capture (id bigserial PRIMARY KEY, ts timestamptz DEFAULT now(), host text, src text, dst text, method text, status int, callid text, cseq text, from_uri text, to_uri text, ruri text, raw text)");
+    const { rows } = await pool.query("SELECT id, extract(epoch from ts)*1000 AS t, host, src, dst, method, status, callid, cseq, from_uri, to_uri, ruri FROM (SELECT * FROM pbxng_sip_capture ORDER BY id DESC LIMIT $1) q ORDER BY id ASC", [limit]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/sip/raw/:id', async (req, res) => {
+  try { const { rows } = await pool.query("SELECT raw FROM pbxng_sip_capture WHERE id=$1", [req.params.id]); res.json({ raw: rows[0] ? rows[0].raw : '' }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/sip/state', async (req, res) => {
+  try {
+    const a = await pool.query("SELECT value FROM pbxng_settings WHERE key='sip_capture_on'");
+    const c = await pool.query("SELECT count(*)::int n FROM pbxng_sip_capture");
+    res.json({ on: !(a.rows[0] && a.rows[0].value === '0'), total: c.rows[0].n });
+  } catch (e) { res.json({ on: true, total: 0 }); }
+});
+app.post('/api/sip/toggle', async (req, res) => {
+  const on = !!(req.body && req.body.on);
+  try { await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('sip_capture_on',$1) ON CONFLICT (key) DO UPDATE SET value=$1", [on ? '1' : '0']); res.json({ ok: true, on }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/sip/clear', async (req, res) => {
+  try { await pool.query("DELETE FROM pbxng_sip_capture"); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/sbc/reload', async (req, res) => {
   try { await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('reload')"); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }

@@ -28,7 +28,7 @@ const groups = [
     { href: '/troncales', label: 'Troncales', icon: IconArrowsLeftRight },
     { href: '/rutas', label: 'Rutas', icon: IconRoute },
     { href: '/ivr', label: 'IVR', icon: IconArrowsSplit },
-    { href: '/ai-agents', label: 'Agentes IA', icon: IconRobot },
+    { href: '/ia-voz', label: 'IA & Voz', icon: IconRobot },
     { href: '/click-to-call', label: 'Click-to-Call', icon: IconWorldShare },
     { href: '/aplicaciones', label: 'Aplicaciones', icon: IconApps },
     { href: '/historial', label: 'Historial', icon: IconHistory },
@@ -46,7 +46,6 @@ const groups = [
     { href: '/usuarios', label: 'Usuarios', icon: IconUsersGroup },
     { href: '/seguridad', label: 'Seguridad', icon: IconShieldCheck },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
-    { href: '/voz', label: 'Voz IA', icon: IconWaveSine },
     { href: '/configuracion', label: 'Configuración', icon: IconSettings },
   ] },
 ];

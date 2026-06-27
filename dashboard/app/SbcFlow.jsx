@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box } from '@mantine/core';
+import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box, Button } from '@mantine/core';
 import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt } from '@tabler/icons-react';
 import { useLive } from './useLive';
 
@@ -83,7 +83,7 @@ export default function SbcFlow() {
       { id: 'npm', type: 'pbx', position: { x: 660, y: 60 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
       { id: 'coturn', type: 'pbx', position: { x: 660, y: 440 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
       { id: 'kamailio', type: 'pbx', position: { x: 660, y: 250 }, data: { title: 'SBC-NG', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
-      { id: 'asterisk', type: 'pbx', position: { x: 980, y: 250 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'En curso', value: ch.length, hot: ch.length > 0 }] } },
+      { id: 'asterisk', type: 'pbx', position: { x: 980, y: 250 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'Canales', value: ch.length, hot: ch.length > 0 }] } },
       { id: 'internos', type: 'pbx', position: { x: 1300, y: 170 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
       { id: 'apps', type: 'pbx', position: { x: 1300, y: 350 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
     ];
@@ -97,6 +97,7 @@ export default function SbcFlow() {
   }, [sbc, trunks, sys, snap]);
 
   const talking = ch.filter(c => /up|answer/i.test(c.state || '')).length;
+  const callCount = (() => { const set = new Set(); ch.forEach(c => set.add([c.caller || '?', c.connected || '?'].sort().join('~'))); return set.size; })();
   const spine = ch.length ? (talking ? 'talk' : 'ring') : false;
   const e = (id, s, t, color, label, live) => ({ id, source: s, target: t, type: 'flow', data: { color, live: live || false }, label, markerEnd: { type: MarkerType.ArrowClosed, color: live ? (live === 'ring' ? '#f59e0b' : '#16a34a') : color } });
   const edges = [
@@ -113,6 +114,8 @@ export default function SbcFlow() {
 
   const node = nodes.find(n => n.id === sel);
   const info = sel ? INFO[sel] : null;
+  const isTrunk = sel ? String(sel).startsWith('trk-') : false;
+  const tk = isTrunk ? trunks.find(t => ('trk-' + t.name) === sel) : null;
   const stColor = (st) => st === 'ok' ? 'teal' : st === 'pending' ? 'orange' : st === 'down' ? 'red' : 'gray';
   const stLabel = (st) => st === 'ok' ? 'Operativo' : st === 'pending' ? 'Pendiente' : st === 'down' ? 'Caido' : '-';
 
@@ -120,7 +123,7 @@ export default function SbcFlow() {
     <>
       <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}} .sbc-live{animation:sbcpulse 1.6s ease-in-out infinite!important;} @keyframes sbcpulse{0%,100%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 8px rgba(22,163,74,0)}} .flow-dash{animation:flowdash .6s linear infinite} @keyframes flowdash{to{stroke-dashoffset:-28}}`}</style>
       <div className="sbc-flow" style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
-        {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {ch.length} llamada(s)</div>}
+        {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {callCount} llamada(s) · {ch.length} canal(es)</div>}
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
           onNodeClick={(_, n) => setSel(n.id)} nodesDraggable={false} nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
           <Background color="#cdd7e4" gap={22} />
@@ -129,7 +132,24 @@ export default function SbcFlow() {
       </div>
 
       <Modal opened={!!sel} onClose={() => setSel(null)} size="lg" radius="lg" centered overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
-        title={info && node && <Group gap="sm"><ThemeIcon size={42} radius="md" variant="light" color={info.color}>{info.icon}</ThemeIcon><div><Text fw={800} size="lg" lh={1.1}>{node.data.title}</Text><Text size="xs" c="dimmed">{info.sub}</Text></div></Group>}>
+        title={node && <Group gap="sm"><ThemeIcon size={42} radius="md" variant="light" color={info ? info.color : 'teal'}>{info ? info.icon : <IconDeviceLandlinePhone size={22} />}</ThemeIcon><div><Text fw={800} size="lg" lh={1.1}>{node.data.title}</Text><Text size="xs" c="dimmed">{info ? info.sub : 'Troncal SIP con el operador'}</Text></div></Group>}>
+        {isTrunk && node &&
+          <Stack gap="md">
+            <Group gap="xs">
+              <Badge variant="light" color={stColor(node.data.status)} leftSection={<IconBolt size={12} />}>{stLabel(node.data.status)}</Badge>
+              {tk?.provider_host && <Badge variant="light" color="gray" ff="monospace">{tk.provider_host}</Badge>}
+              <Badge variant="dot" color="blue">{(tk?.transport || 'udp').toUpperCase()}</Badge>
+              <Badge variant="dot" color="grape">{tk?.kind === 'kamailio' ? 'vía SBC-NG' : 'directa'}</Badge>
+            </Group>
+            <Box><Text fw={600} size="sm" mb={4}>¿Qué es?</Text><Text size="sm" c="dimmed">Troncal SIP que enlaza la PBX con el operador. Por aquí entran y salen las llamadas hacia la red telefónica pública (PSTN). Estado «registrada» = enlace activo con el proveedor.</Text></Box>
+            <SimpleGrid cols={2}>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Estado</Text><Text fw={700}>{stLabel(node.data.status)}</Text></Card>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Host del proveedor</Text><Text fw={700} ff="monospace" size="sm">{tk?.provider_host || '-'}</Text></Card>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Transporte</Text><Text fw={700}>{(tk?.transport || 'udp').toUpperCase()}</Text></Card>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Ruteo</Text><Text fw={700}>{tk?.kind === 'kamailio' ? 'vía SBC-NG' : 'directa'}</Text></Card>
+            </SimpleGrid>
+            <Button component="a" href="/troncales" variant="light" leftSection={<IconDeviceLandlinePhone size={16} />}>Configurar en Troncales</Button>
+          </Stack>}
         {info && node &&
           <Stack gap="md">
             <Group gap="xs">
@@ -155,7 +175,7 @@ export default function SbcFlow() {
             {sel === 'asterisk' && <><Divider label="Estado del nucleo" labelPosition="center" />
               <SimpleGrid cols={3}>
                 <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Version</Text><Text fw={700}>{sys?.asterisk || '-'}</Text></Card>
-                <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Llamadas activas</Text><Text fw={700} size="xl">{ch.length}</Text></Card>
+                <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Canales activos</Text><Text fw={700} size="xl">{ch.length}</Text><Text size="xs" c="dimmed">≈ {callCount} llamada(s) · 2 canales c/u</Text></Card>
                 <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">AMI / ARI</Text><Badge variant="light" color={snap?.health?.ami ? 'teal' : 'red'}>{snap?.health?.ami ? 'conectado' : 'caido'}</Badge></Card>
               </SimpleGrid></>}
           </Stack>}
