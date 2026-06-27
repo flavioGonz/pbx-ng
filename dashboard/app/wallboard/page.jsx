@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SimpleGrid, Card, Text, Title, Stack, Table, Badge, Group, ThemeIcon, RingProgress, Progress, ActionIcon, Tooltip, Box } from '@mantine/core';
 import { IconPhone, IconUsers, IconHeadset, IconBolt, IconPhoneIncoming, IconPhoneOutgoing, IconPhoneOff, IconClock, IconMaximize, IconMinimize, IconArrowDownLeft, IconArrowUpRight, IconActivity, IconPhoneCall, IconUserCheck } from '@tabler/icons-react';
 import { useLive } from '../useLive';
+import Slot from '../Slot';
 
 function fmtDur(s) { if (s == null || s < 0) return '—'; s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60; const p = n => String(n).padStart(2, '0'); return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`; }
 
@@ -20,7 +21,7 @@ function Kpi({ label, value, sub, icon: Icon, accent, color = 'blue', spark }) {
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <div style={{ minWidth: 0 }}>
           <Text size="sm" fw={600} c={accent ? undefined : 'dimmed'} style={accent ? { color: 'rgba(255,255,255,.85)' } : {}}>{label}</Text>
-          <Text fw={800} fz={48} lh={1} mt={2}>{value}</Text>
+          <Text fw={800} fz={48} lh={1} mt={2}><Slot value={value} /></Text>
           {sub && <Text size="xs" mt={6} c={accent ? undefined : 'dimmed'} style={accent ? { color: 'rgba(255,255,255,.8)' } : {}}>{sub}</Text>}
         </div>
         {accent && spark ? <div style={{ alignSelf: 'flex-end' }}><Spark data={spark} /></div> :
@@ -103,10 +104,10 @@ export default function Wallboard() {
         <Card withBorder radius="lg" padding="lg" shadow="sm">
           <Text fw={700} fz="sm" tt="uppercase" c="dimmed" mb="md">Resumen de hoy</Text>
           <SimpleGrid cols={4}>
-            <div><Group gap={6}><IconHeadset size={16} color="var(--mantine-color-teal-6)" /><Text fz="xs" c="dimmed">Atendidas</Text></Group><Text fw={800} fz={28} c="teal">{t.answered ?? '—'}</Text></div>
-            <div><Group gap={6}><IconPhoneOff size={16} color="var(--mantine-color-red-6)" /><Text fz="xs" c="dimmed">Perdidas</Text></Group><Text fw={800} fz={28} c="red">{t.missed ?? '—'}</Text></div>
-            <div><Group gap={6}><IconArrowDownLeft size={16} color="var(--mantine-color-blue-6)" /><Text fz="xs" c="dimmed">Entrantes</Text></Group><Text fw={800} fz={28}>{t.inbound ?? '—'}</Text></div>
-            <div><Group gap={6}><IconArrowUpRight size={16} color="var(--mantine-color-grape-6)" /><Text fz="xs" c="dimmed">Salientes</Text></Group><Text fw={800} fz={28}>{t.outbound ?? '—'}</Text></div>
+            <div><Group gap={6}><IconHeadset size={16} color="var(--mantine-color-teal-6)" /><Text fz="xs" c="dimmed">Atendidas</Text></Group><Text fw={800} fz={28} c="teal"><Slot value={t.answered ?? '—'} /></Text></div>
+            <div><Group gap={6}><IconPhoneOff size={16} color="var(--mantine-color-red-6)" /><Text fz="xs" c="dimmed">Perdidas</Text></Group><Text fw={800} fz={28} c="red"><Slot value={t.missed ?? '—'} /></Text></div>
+            <div><Group gap={6}><IconArrowDownLeft size={16} color="var(--mantine-color-blue-6)" /><Text fz="xs" c="dimmed">Entrantes</Text></Group><Text fw={800} fz={28}><Slot value={t.inbound ?? '—'} /></Text></div>
+            <div><Group gap={6}><IconArrowUpRight size={16} color="var(--mantine-color-grape-6)" /><Text fz="xs" c="dimmed">Salientes</Text></Group><Text fw={800} fz={28}><Slot value={t.outbound ?? '—'} /></Text></div>
           </SimpleGrid>
           <Group justify="space-between" mt="md"><Text fz="xs" c="dimmed">Tasa de atención</Text><Text fz="xs" fw={600}>{answeredPct}%</Text></Group>
           <Progress.Root size="lg" mt={4}><Progress.Section value={answeredPct} color="teal" /></Progress.Root>
@@ -118,7 +119,7 @@ export default function Wallboard() {
           <Group align="center" gap="xl">
             <RingProgress size={150} thickness={16} roundCaps
               sections={[{ value: eps.length ? idle * 100 / eps.length : 0, color: 'teal' }, { value: eps.length ? inCall * 100 / eps.length : 0, color: 'blue' }, { value: eps.length ? offline * 100 / eps.length : 0, color: 'gray.4' }]}
-              label={<div style={{ textAlign: 'center' }}><Text fw={800} fz={28} lh={1}>{online}</Text><Text fz="xs" c="dimmed">en línea</Text></div>} />
+              label={<div style={{ textAlign: 'center' }}><Text fw={800} fz={28} lh={1}><Slot value={online} /></Text><Text fz="xs" c="dimmed">en línea</Text></div>} />
             <Stack gap="xs" style={{ flex: 1 }}>
               <Group justify="space-between"><Group gap={8}><span style={{ width: 11, height: 11, borderRadius: 3, background: 'var(--mantine-color-teal-5)' }} /><Text fz="sm">Disponibles</Text></Group><Text fw={700}>{idle}</Text></Group>
               <Group justify="space-between"><Group gap={8}><span style={{ width: 11, height: 11, borderRadius: 3, background: 'var(--mantine-color-blue-5)' }} /><Text fz="sm">En llamada</Text></Group><Text fw={700}>{inCall}</Text></Group>

@@ -8,6 +8,7 @@ import { useLive } from '../useLive';
 import { toast } from '../notify';
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
+import Slot from '../Slot';
 
 const EMPTY = { id: '', name: '', pass: '', video: false, record: false, type: 'webrtc', max_contacts: 2, tenant_id: 1 };
 const rttColor = (r) => r == null ? 'gray' : r < 80 ? 'teal' : r < 200 ? 'yellow' : 'red';
@@ -72,7 +73,7 @@ export default function Internos() {
       <SimpleGrid cols={{ base: 2, sm: 3, lg: 5 }} spacing="md">
         {kpis.map(x => (
           <Card key={x.k} withBorder radius="lg" padding="md" shadow="sm">
-            <Group gap="sm" wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={x.c}><x.icon size={20} /></ThemeIcon><div><Text fw={800} fz={24} lh={1}>{x.v}</Text><Text size="xs" c="dimmed">{x.k}</Text></div></Group>
+            <Group gap="sm" wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={x.c}><x.icon size={20} /></ThemeIcon><div><Text fw={800} fz={24} lh={1}><Slot value={x.v} /></Text><Text size="xs" c="dimmed">{x.k}</Text></div></Group>
           </Card>
         ))}
       </SimpleGrid>

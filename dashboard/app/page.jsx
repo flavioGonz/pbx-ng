@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
 import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider } from '@mantine/core';
+import Slot from './Slot';
 import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import { useLive } from './useLive';
@@ -112,8 +113,8 @@ export default function Resumen() {
           <Group align="flex-start" wrap="nowrap" gap="md">
             <Box style={{ flex: 1, minWidth: 0 }}><AreaChart cpu={hist.cpu} mem={hist.mem} /></Box>
             <Stack gap={2} w={92}>
-              <Text fw={800} fz={26} lh={1} c="#4f7fd9">{m?.cpu ?? 0}%</Text><Text size="xs" c="dimmed" mb="sm">CPU</Text>
-              <Text fw={800} fz={26} lh={1} c="#b06ad6">{memPct}%</Text><Text size="xs" c="dimmed">Memoria</Text>
+              <Text fw={800} fz={26} lh={1} c="#4f7fd9"><Slot value={m?.cpu ?? 0} />%</Text><Text size="xs" c="dimmed" mb="sm">CPU</Text>
+              <Text fw={800} fz={26} lh={1} c="#b06ad6"><Slot value={memPct} />%</Text><Text size="xs" c="dimmed">Memoria</Text>
             </Stack>
           </Group>
           <Group gap="lg" mt="xs"><Group gap={5}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#4f7fd9' }} /><Text size="xs" c="dimmed">CPU ({m?.cores || '?'} cores)</Text></Group><Group gap={5}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#b06ad6' }} /><Text size="xs" c="dimmed">Memoria</Text></Group><Text size="xs" c="dimmed" ml="auto">load {m?.load ? m.load[0].toFixed(2) : '—'}</Text></Group>

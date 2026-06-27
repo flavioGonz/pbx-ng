@@ -1,5 +1,6 @@
 import '@mantine/core/styles.css';
 import 'sileo/styles.css';
+import 'slot-text/style.css';
 import './globals.css';
 import { MantineProvider, ColorSchemeScript, mantineHtmlProps } from '@mantine/core';
 import DesktopToaster from './desktoptoaster';
