@@ -8,7 +8,7 @@ import {
   IconPhone, IconPhoneOff, IconBackspace, IconMicrophone, IconMicrophoneOff,
   IconGridDots, IconUser, IconSettings, IconSearch, IconPlus,
   IconPhoneIncoming, IconPhoneOutgoing, IconLogout, IconX, IconClockHour4, IconBell,
-  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin,
+  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin, IconVolume, IconVolume3,
 } from '@tabler/icons-react';
 
 const CK = 'pbxng_contacts';
@@ -338,6 +338,7 @@ export default function Phone() {
           {(!videoView || ctl) && !kp &&
             <div style={videoView ? S.vCtl : S.ctlGrid}>
               <Ctl icon={sp.muted ? <IconMicrophoneOff size={26} /> : <IconMicrophone size={26} />} label="Silenciar" active={sp.muted} onClick={sp.toggleMute} />
+              <Ctl icon={sp.speaker ? <IconVolume size={26} /> : <IconVolume3 size={26} />} label="Altavoz" active={sp.speaker} onClick={sp.toggleSpeaker} />
               <Ctl icon={sp.held ? <IconPlayerPlay size={26} /> : <IconPlayerPause size={26} />} label={sp.held ? 'Reanudar' : 'En espera'} active={sp.held} onClick={sp.toggleHold} disabled={!established} />
               <Ctl icon={<IconCircleDot size={26} />} label="Grabar" active={sp.recording} activeColor="#ff453a" onClick={doRecord} disabled={!established} />
               <Ctl icon={<IconGridDots size={26} />} label="Teclado" active={kp} onClick={() => setKp(v => !v)} disabled={!established} />

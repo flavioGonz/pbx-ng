@@ -102,6 +102,7 @@ export function useSoftphone() {
   const [recording, setRecording] = useState(false);
   const [attended, setAttended] = useState(null);
   const [sharing, setSharing] = useState(false);
+  const [speaker, setSpeaker] = useState(false);
   const [filePlaying, setFilePlaying] = useState(null);
   const [creds, setCreds] = useState(null);
   const [hist, setHist] = useState([]);
@@ -136,7 +137,7 @@ export function useSoftphone() {
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
         if (localVideoRef.current) localVideoRef.current.srcObject = null;
         session.current = null; setCall(null); setIncoming(null); setMuted(false); setHeld(false); setRecording(false); setCallInfo(null);
-        consult.current = null; setAttended(null); setSharing(false); setFilePlaying(null); if (fileEl.current) { try { fileEl.current.pause(); } catch (_) {} fileEl.current = null; } if (screenStream.current) { try { screenStream.current.getTracks().forEach(t => t.stop()); } catch (_) {} screenStream.current = null; }
+        consult.current = null; setAttended(null); setSharing(false); setSpeaker(false); setFilePlaying(null); if (fileEl.current) { try { fileEl.current.pause(); } catch (_) {} fileEl.current = null; } if (screenStream.current) { try { screenStream.current.getTracks().forEach(t => t.stop()); } catch (_) {} screenStream.current = null; }
         if (typeof window !== 'undefined' && window.__pbxReloadPending) setTimeout(() => { try { location.reload(); } catch (_) {} }, 700);
       }
     });
@@ -352,6 +353,22 @@ export function useSoftphone() {
     return { ok: true };
   }, [stopFile]);
 
+  const toggleSpeaker = useCallback(async () => {
+    const el = audioRef.current; const next = !speaker;
+    try {
+      if (el && typeof el.setSinkId === 'function') {
+        const devs = await navigator.mediaDevices.enumerateDevices();
+        const outs = devs.filter(d => d.kind === 'audiooutput');
+        let target = '';
+        if (next) { const sp = outs.find(d => /speaker|altavoz|speakerphone/i.test(d.label || '')); target = sp ? sp.deviceId : (outs.find(d => d.deviceId !== 'default' && d.deviceId !== 'communications') || {}).deviceId || ''; }
+        else { const ear = outs.find(d => /communications|earpiece|receiver|auricular/i.test(d.label || '')); target = ear ? ear.deviceId : 'default'; }
+        await el.setSinkId(target);
+      }
+      if (el) { el.volume = 1; el.muted = false; await el.play().catch(() => {}); }
+    } catch (_) {}
+    setSpeaker(next);
+  }, [speaker]);
+
   const toggleRecord = useCallback(async () => {
     const ext = creds && creds.ext; if (!ext) return { error: 'sin interno' };
     const next = !recording;
@@ -387,5 +404,5 @@ export function useSoftphone() {
 
   useEffect(() => { if (typeof window !== 'undefined') window.__pbxInCall = !!(call || callInfo || incoming); }, [call, callInfo, incoming]);
 
-  return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, audioRef, remoteVideoRef, localVideoRef };
+  return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, speaker, toggleSpeaker, audioRef, remoteVideoRef, localVideoRef };
 }
