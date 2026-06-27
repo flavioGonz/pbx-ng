@@ -489,6 +489,23 @@ app.post('/api/geo/report', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+const VM_AGENT = 'http://172.26.20.183:8089';
+app.get('/api/vm', async (req, res) => {
+  try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(req.query.ext || '')); res.json(await r.json()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/vm/audio', async (req, res) => {
+  try { const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(req.query.ext || '') + '&folder=' + encodeURIComponent(req.query.folder || 'INBOX') + '&id=' + encodeURIComponent(req.query.id || '')); if (!r.ok) return res.status(404).end(); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/vm/del', async (req, res) => {
+  try { const r = await fetch(VM_AGENT + '/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/vm/read', async (req, res) => {
+  try { const r = await fetch(VM_AGENT + '/vm/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.use('/api', auth);
 app.get('/api/geo', async (req, res) => {
   const hours = Math.min(+(req.query.hours || 168), 720);

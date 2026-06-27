@@ -8,7 +8,7 @@ import {
   IconPhone, IconPhoneOff, IconBackspace, IconMicrophone, IconMicrophoneOff,
   IconGridDots, IconUser, IconSettings, IconSearch, IconPlus,
   IconPhoneIncoming, IconPhoneOutgoing, IconLogout, IconX, IconClockHour4, IconBell,
-  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin, IconVolume, IconVolume3, IconDeviceMobileVibration,
+  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin, IconVolume, IconVolume3, IconDeviceMobileVibration, IconVoicemail, IconMoonStars, IconPictureInPicture,
 } from '@tabler/icons-react';
 
 const CK = 'pbxng_contacts';
@@ -81,6 +81,17 @@ export default function Phone() {
     return () => window.removeEventListener('devicemotion', onMotion);
     // eslint-disable-next-line
   }, [gest, sp.incoming, pendIn, established, sp.muted]);
+  const [vm, setVm] = useState([]); const [vmOpen, setVmOpen] = useState(false);
+  const [dnd, setDnd] = useState(false);
+  useEffect(() => { try { setDnd(localStorage.getItem('pbxng_dnd') === '1'); } catch (_) {} }, []);
+  function toggleDnd() { const n = !dnd; setDnd(n); localStorage.setItem('pbxng_dnd', n ? '1' : '0'); notify(n ? 'No molestar activado' : 'No molestar desactivado'); }
+  async function loadVm() { try { const d = await fetch('/backend/api/vm?ext=' + (sp.creds?.ext || '')).then(r => r.json()); setVm(Array.isArray(d) ? d : []); } catch (_) {} }
+  useEffect(() => { if (!registered) return; loadVm(); const t = setInterval(loadVm, 20000); return () => clearInterval(t); }, [registered, sp.creds]);
+  async function vmDel(m) { try { await fetch('/backend/api/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext: sp.creds?.ext, folder: m.folder, id: m.id }) }); } catch (_) {} setVm(v => v.filter(x => x.id !== m.id)); }
+  async function doPip() { try { const v = sp.remoteVideoRef.current; if (!v) return; if (document.pictureInPictureElement) await document.exitPictureInPicture(); else if (document.pictureInPictureEnabled) await v.requestPictureInPicture(); } catch (_) {} }
+  const vmNew = vm.filter(m => m.new).length;
+  useEffect(() => { if (dnd && sp.incoming) sp.rejectIncoming?.(); }, [dnd, sp.incoming]);
+  useEffect(() => { if (dnd && pendIn && !pendIn.missed) { wantAccept.current = false; sp.rejectIncoming?.(); setPendIn(null); } }, [dnd, pendIn]);
   useEffect(() => { setContacts(loadC()); }, []);
   useEffect(() => { if (registered && localStorage.getItem('pbxng_geo') !== '0' && navigator.geolocation) { navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 }); } }, [registered]);
   useEffect(() => { fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(d => setAppVer(d.version || '')).catch(() => {}); }, []);
@@ -235,7 +246,7 @@ export default function Phone() {
 
   return (
     <div style={S.app}>
-      <div style={S.statusbar}><span style={{ color: registered ? '#34c759' : '#8e8e93', fontWeight: 600 }}>●</span> Interno {sp.creds?.ext} · {registered ? 'en línea' : sp.reg}</div>
+      <div style={S.statusbar}><span style={{ color: registered ? '#34c759' : '#8e8e93', fontWeight: 600 }}>●</span> Interno {sp.creds?.ext} · {registered ? 'en línea' : sp.reg}{dnd && <span style={{ marginLeft: 8, color: '#ff9500', fontWeight: 600 }}>· No molestar</span>}</div>
       {flash && <div style={S.flash}>{flash}</div>}
       <div className="ph-view" key={tab} style={S.body}>
         {tab === 'teclado' && (
@@ -253,7 +264,14 @@ export default function Phone() {
             </div>
           </div>
         )}
-        {tab === 'llamadas' && <Recents hist={sp.hist} onCall={callNum} contacts={contacts} />}
+        {tab === 'llamadas' && <>
+          <div style={{ ...S.crow, marginTop: 4 }} onClick={() => setVmOpen(true)}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: vmNew ? '#ff3b30' : '#8e8e93', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><IconVoicemail size={22} color="#fff" /></div>
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 16 }}>Buzon de voz</div><div style={{ fontSize: 13, color: vmNew ? '#ff3b30' : '#8e8e93' }}>{vm.length ? (vmNew ? vmNew + ' nuevo(s) - ' : '') + vm.length + ' mensaje(s)' : 'Sin mensajes'}</div></div>
+            <span style={{ color: '#c7c7cc', fontSize: 20 }}>&rsaquo;</span>
+          </div>
+          <Recents hist={sp.hist} onCall={callNum} contacts={contacts} />
+        </>}
         {tab === 'contactos' && (
           <div style={{ padding: '0 0 8px' }}>
             <div style={S.head}><div style={S.title}>Contactos</div>{cTab === 'mis' && <button style={S.addBtn} onClick={() => setAddOpen(true)}><IconPlus size={22} color="#007aff" /></button>}</div>
@@ -314,9 +332,13 @@ export default function Phone() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><IconMapPin size={18} color="#34c759" /> Compartir ubicación en llamadas</span>
                 <button onClick={toggleGeo} style={{ ...S.toggle, background: geoOn ? '#34c759' : '#e5e5ea' }}><span style={{ ...S.knob, transform: geoOn ? 'translateX(20px)' : 'translateX(0)' }} /></button>
               </div>
-              <div style={{ ...S.aRow, borderBottom: 'none' }}>
+              <div style={{ ...S.aRow, borderBottom: '1px solid #e5e5ea' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><IconDeviceMobileVibration size={18} color="#007aff" /> Gestos (boca abajo: silenciar / rechazar)</span>
                 <button onClick={toggleGest} style={{ ...S.toggle, background: gest ? '#34c759' : '#e5e5ea' }}><span style={{ ...S.knob, transform: gest ? 'translateX(20px)' : 'translateX(0)' }} /></button>
+              </div>
+              <div style={{ ...S.aRow, borderBottom: 'none' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><IconMoonStars size={18} color="#ff9500" /> No molestar (rechaza entrantes)</span>
+                <button onClick={toggleDnd} style={{ ...S.toggle, background: dnd ? '#ff9500' : '#e5e5ea' }}><span style={{ ...S.knob, transform: dnd ? 'translateX(20px)' : 'translateX(0)' }} /></button>
               </div>
             </div>
             <button style={S.logout} onClick={sp.disconnect}><IconLogout size={18} /> Cerrar sesión</button>
@@ -326,7 +348,7 @@ export default function Phone() {
 
       <div style={S.tabbar}>
         {[['llamadas', IconClockHour4, 'Llamadas'], ['contactos', IconUser, 'Contactos'], ['teclado', IconGridDots, 'Teclado'], ['ajustes', IconSettings, 'Ajustes']].map(([id, Ic, lbl]) => (
-          <button key={id} className="ph-tab" style={{ ...S.tabBtn, color: tab === id ? '#007aff' : '#8e8e93' }} onClick={() => setTab(id)}><Ic size={24} /><span style={{ fontSize: 10.5, marginTop: 2 }}>{lbl}</span></button>
+          <button key={id} className="ph-tab" style={{ ...S.tabBtn, color: tab === id ? '#007aff' : '#8e8e93', position: 'relative' }} onClick={() => setTab(id)}><Ic size={24} />{id === 'llamadas' && vmNew > 0 && <span style={{ position: 'absolute', top: 4, left: 'calc(50% + 6px)', minWidth: 16, height: 16, borderRadius: 8, background: '#ff3b30', color: '#fff', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{vmNew}</span>}<span style={{ fontSize: 10.5, marginTop: 2 }}>{lbl}</span></button>
         ))}
       </div>
 
@@ -374,6 +396,8 @@ export default function Phone() {
               <Ctl icon={<IconCircleDot size={26} />} label="Grabar" active={sp.recording} activeColor="#ff453a" onClick={doRecord} disabled={!established} />
               <Ctl icon={<IconGridDots size={26} />} label="Teclado" active={kp} onClick={() => setKp(v => !v)} disabled={!established} />
               <Ctl icon={<IconTransfer size={26} />} label="Transferir" onClick={() => setXfer(true)} disabled={!established} />
+              {vid &&
+                <Ctl icon={<IconPictureInPicture size={26} />} label="Mini" onClick={doPip} disabled={!established} />}
               {vid &&
                 <Ctl icon={sp.sharing ? <IconScreenShareOff size={26} /> : <IconScreenShare size={26} />} label={sp.sharing ? 'Dejar pantalla' : 'Pantalla'} active={sp.sharing} onClick={doShare} disabled={!established} />}
               {vid &&
@@ -449,6 +473,23 @@ export default function Phone() {
             </>}
         </div>}
 
+      {vmOpen &&
+        <div className="ph-overlay" style={S.vmWrap}>
+          <div style={S.vmHead}><button style={S.vmBack} onClick={() => setVmOpen(false)}>&lsaquo; Volver</button><div style={{ fontWeight: 700, fontSize: 17 }}>Buzon de voz</div><div style={{ width: 64 }} /></div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 14px' }}>
+            {vm.length === 0 ? <div style={S.empty}>No tenes mensajes de voz.</div> :
+              vm.map(m => (
+                <div key={m.folder + m.id} style={S.vmRow}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: m.new ? '#ff3b30' : '#c7c7cc', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><IconVoicemail size={18} color="#fff" /></div>
+                    <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{m.callerid || 'Desconocido'}{m.new && <span style={{ color: '#ff3b30', marginLeft: 6, fontSize: 12 }}>nuevo</span>}</div><div style={{ fontSize: 12, color: '#8e8e93' }}>{m.origtime ? new Date(m.origtime * 1000).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''} - {m.duration}s</div></div>
+                    <button style={S.iconBtn} onClick={() => vmDel(m)}><IconTrash size={16} color="#ff3b30" /></button>
+                  </div>
+                  <audio controls preload="none" style={{ width: '100%', height: 34, marginTop: 8 }} src={'/backend/api/vm/audio?ext=' + (sp.creds?.ext || '') + '&folder=' + m.folder + '&id=' + m.id} />
+                </div>
+              ))}
+          </div>
+        </div>}
       <audio ref={sp.audioRef} autoPlay />
       <input ref={fileInput} type="file" accept="audio/*,video/*" style={{ display: 'none' }} onChange={onFile} />
     </div>
@@ -566,6 +607,10 @@ const S = {
   scanFrame: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(64vw,260px)', height: 'min(64vw,260px)', border: '3px solid rgba(255,255,255,.9)', borderRadius: 22, boxShadow: '0 0 0 9999px rgba(0,0,0,.45)' },
   scanClose: { position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)', width: 56, height: 56, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.2)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modalWrap: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 70 },
+  vmWrap: { position: 'fixed', inset: 0, maxWidth: 480, margin: '0 auto', background: 'linear-gradient(165deg,#eaf0fb,#f4f0fb,#e8f1fc)', zIndex: 75, display: 'flex', flexDirection: 'column', color: '#0b0f1a' },
+  vmHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'calc(env(safe-area-inset-top,12px) + 10px) 14px 12px', borderBottom: '1px solid rgba(0,0,0,.06)' },
+  vmBack: { background: 'none', border: 'none', color: '#007aff', fontSize: 16, cursor: 'pointer', width: 64, textAlign: 'left' },
+  vmRow: { background: 'rgba(255,255,255,.6)', border: '1px solid rgba(255,255,255,.7)', borderRadius: 12, padding: 10, marginBottom: 8 },
   modal: { width: 'min(340px,88vw)', background: '#fff', borderRadius: 16, padding: 22, color: '#000' },
   minp: { width: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 10, border: '1px solid #d1d1d6', fontSize: 16, marginBottom: 10, outline: 'none' },
   mbtn: { flex: 1, padding: 12, borderRadius: 10, border: 'none', fontWeight: 600, fontSize: 15, cursor: 'pointer' },
