@@ -1,11 +1,12 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import { Card, Table, Text, Stack, Badge, Group, Button, TextInput, Tabs, ActionIcon, Tooltip, SimpleGrid, ThemeIcon } from '@mantine/core';
-import { IconRefresh, IconSearch, IconDownload, IconPlayerPlay, IconPhone, IconPhoneCheck, IconPhoneX, IconClock, IconCalendar, IconArrowUpRight, IconArrowDownLeft, IconArrowsLeftRight, IconCircleCheck, IconMicrophone2, IconRobot, IconArrowsSplit, IconWorld, IconDeviceLandlinePhone, IconRouteAltLeft, IconList } from '@tabler/icons-react';
+import { IconRefresh, IconSearch, IconDownload, IconPlayerPlay, IconPlayerPause, IconPhone, IconPhoneCheck, IconPhoneX, IconClock, IconCalendar, IconArrowUpRight, IconArrowDownLeft, IconArrowsLeftRight, IconCircleCheck, IconMicrophone2, IconRobot, IconArrowsSplit, IconWorld, IconDeviceLandlinePhone, IconRouteAltLeft, IconList } from '@tabler/icons-react';
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
 import { useLive } from '../useLive';
 import Slot from '../Slot';
+import RecordingPlayer from '../RecordingPlayer';
 
 const dispColor = (d) => d === 'ANSWERED' ? 'teal' : d === 'NO ANSWER' ? 'yellow' : d === 'BUSY' ? 'orange' : d === 'FAILED' ? 'red' : 'gray';
 const dispLabel = (d) => ({ ANSWERED: 'Atendida', 'NO ANSWER': 'Sin respuesta', BUSY: 'Ocupado', FAILED: 'Fallida', CONGESTION: 'Congestión' }[d] || d || '—');
@@ -30,7 +31,7 @@ const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style=
 export default function Historial() {
   const { snap } = useLive();
   const [rows, setRows] = useState([]); const [recs, setRecs] = useState([]); const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState(''); const [tab, setTab] = useState('all');
+  const [q, setQ] = useState(''); const [tab, setTab] = useState('all'); const [playId, setPlayId] = useState(null);
   async function load() {
     try { const d = await fetch('/backend/api/cdr?limit=300').then(r => r.json()); setRows(Array.isArray(d) ? d : []); } catch (_) { setRows([]); }
     try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setRecs(Array.isArray(d) ? d : []); } catch (_) {}
@@ -130,7 +131,8 @@ export default function Historial() {
                 <Table.Tbody>{fr.map((r, i) => {
                   const rec = recFor(r); const T = TYPES[r._t] || TYPES.other; const M = MEDIA[r._m] || MEDIA.sip; const nm = clidName(r.clid);
                   return (
-                    <Table.Tr key={i}>
+                    <Fragment key={i}>
+                    <Table.Tr>
                       <Table.Td><Text fz="xs">{r.start ? new Date(r.start).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}</Text></Table.Td>
                       <Table.Td><Badge variant="light" color={T.color} leftSection={<T.icon size={12} />}>{T.label}</Badge></Table.Td>
                       <Table.Td><Text ff="monospace" fz="sm">{r.src || '—'}</Text>{nm && <Text fz="10px" c="dimmed" truncate maw={140}>{nm}</Text>}</Table.Td>
@@ -138,8 +140,10 @@ export default function Historial() {
                       <Table.Td><Badge variant="dot" color={M.color} size="sm">{M.label}</Badge></Table.Td>
                       <Table.Td><Text fz="sm" fw={500}>{fmtDur(r.billsec)}</Text>{r.duration !== r.billsec && <Text fz="10px" c="dimmed">tot {fmtDur(r.duration)}</Text>}</Table.Td>
                       <Table.Td><Badge variant="light" color={dispColor(r.disposition)}>{dispLabel(r.disposition)}</Badge></Table.Td>
-                      <Table.Td>{rec ? <Group gap={4} wrap="nowrap"><audio controls preload="none" style={{ height: 30, maxWidth: 170 }} src={'/backend/api/recordings/' + rec.id + '/audio'} /></Group> : <Text c="dimmed" size="xs">—</Text>}</Table.Td>
+                      <Table.Td>{rec ? <Button size="compact-xs" variant={playId === rec.id ? 'filled' : 'light'} color="teal" leftSection={playId === rec.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === rec.id ? null : rec.id)}>{playId === rec.id ? 'Cerrar' : 'Ver'}</Button> : <Text c="dimmed" size="xs">—</Text>}</Table.Td>
                     </Table.Tr>
+                    {rec && playId === rec.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer src={'/backend/api/recordings/' + rec.id + '/audio'} label={(r.src || '?') + '  \u2192  ' + (r.dst || '?')} /></Table.Td></Table.Tr>}
+                    </Fragment>
                   );
                 })}</Table.Tbody>
               </Table>

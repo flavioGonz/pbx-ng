@@ -1,9 +1,10 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, TextInput, ActionIcon, Tooltip, Select, Switch, PasswordInput, SimpleGrid, ThemeIcon, Tabs, Divider } from '@mantine/core';
-import { IconRefresh, IconSearch, IconTrash, IconDownload, IconDeviceFloppy, IconCloud, IconServer, IconFolder, IconMicrophone2, IconWaveSine, IconDatabase, IconSettings, IconClock, IconUser } from '@tabler/icons-react';
+import { IconRefresh, IconSearch, IconTrash, IconDownload, IconDeviceFloppy, IconCloud, IconServer, IconFolder, IconMicrophone2, IconWaveSine, IconDatabase, IconSettings, IconClock, IconUser, IconPlayerPlay, IconPlayerPause } from '@tabler/icons-react';
 import { TableSkeleton } from '../Skeletons';
 import { toast } from '../notify';
+import RecordingPlayer from '../RecordingPlayer';
 
 const fmtSize = (b) => !b ? '—' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB';
 const fmtDur = (s) => { s = s || 0; return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
@@ -13,7 +14,7 @@ const STG = { local: ['gray', 'Local', IconFolder], s3: ['blue', 'S3', IconCloud
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 export default function Grabaciones() {
   const [list, setList] = useState([]); const [loading, setLoading] = useState(true); const [q, setQ] = useState('');
-  const [cfg, setCfg] = useState(null); const [savingCfg, setSavingCfg] = useState(false);
+  const [cfg, setCfg] = useState(null); const [savingCfg, setSavingCfg] = useState(false); const [playId, setPlayId] = useState(null);
   async function load() { try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setList(Array.isArray(d) ? d : []); } catch (_) { setList([]); } setLoading(false); }
   async function loadCfg() { try { setCfg(await fetch('/backend/api/recordings/config').then(r => r.json())); } catch (_) {} }
   useEffect(() => { load(); loadCfg(); const t = setInterval(load, 12000); return () => clearInterval(t); }, []);
@@ -71,18 +72,21 @@ export default function Grabaciones() {
                     <Table.Tbody>{fl.map(r => {
                       const [col, lbl, Ic] = STG[r.storage] || STG.local;
                       return (
-                        <Table.Tr key={r.id}>
+                        <Fragment key={r.id}>
+                        <Table.Tr>
                           <Table.Td>{r.started_at ? new Date(r.started_at).toLocaleString('es-UY') : '—'}</Table.Td>
                           <Table.Td><Group gap={6}><ThemeIcon size="sm" radius="xl" variant="light" color="pbx"><IconWaveSine size={13} /></ThemeIcon><Text ff="monospace" fw={600}>{r.ext || '—'}</Text></Group></Table.Td>
                           <Table.Td><Badge variant="light" color="gray">{fmtDur(r.duration)}</Badge></Table.Td>
                           <Table.Td>{fmtSize(r.bytes)}</Table.Td>
                           <Table.Td><Badge variant="light" color={col} leftSection={<Ic size={12} />}>{lbl}</Badge></Table.Td>
-                          <Table.Td><audio controls preload="none" style={{ height: 32, maxWidth: 220 }} src={'/backend/api/recordings/' + r.id + '/audio'} /></Table.Td>
+                          <Table.Td><Button size="compact-xs" variant={playId === r.id ? 'filled' : 'light'} color="teal" leftSection={playId === r.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === r.id ? null : r.id)}>{playId === r.id ? 'Cerrar' : 'Reproducir'}</Button></Table.Td>
                           <Table.Td ta="right"><Group gap={4} justify="flex-end">
                             <Tooltip label="Descargar"><ActionIcon variant="subtle" component="a" href={'/backend/api/recordings/' + r.id + '/audio'} download><IconDownload size={17} /></ActionIcon></Tooltip>
                             <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>
                           </Group></Table.Td>
                         </Table.Tr>
+                        {playId === r.id && <Table.Tr><Table.Td colSpan={7} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer src={'/backend/api/recordings/' + r.id + '/audio'} label={'Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
+                        </Fragment>
                       );
                     })}</Table.Tbody>
                   </Table>
