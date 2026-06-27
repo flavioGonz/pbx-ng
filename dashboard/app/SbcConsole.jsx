@@ -6,7 +6,7 @@ import { toast } from './notify';
 import SbcFlow from './SbcFlow';
 import Slot from './Slot';
 import { useLive } from './useLive';
-import { IconPlus, IconInfoCircle, IconPhone } from '@tabler/icons-react';
+import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function fmtUptime(s) { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; }
@@ -49,6 +49,23 @@ function ConsoleBody({ sbc, load, hist }) {
   const { snap } = useLive(); const ch = (snap && snap.channels) || [];
   const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const [newTgt, setNewTgt] = useState('');
+  const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' });
+  const loadRoutes = useCallback(async () => { try { const d = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(d)) setRoutes(d); } catch (_) {} }, []);
+  useEffect(() => { loadRoutes(); }, [loadRoutes]);
+  async function addRoute() {
+    if (!rt.dest.trim() || (!rt.gw.trim() && !rt.dev.trim())) { toast('Indicá destino y gateway o interfaz', 'bad'); return; }
+    setBusy('route_add');
+    const r = await fetch('/backend/api/sbc/routes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rt) }).then(x => x.json()).catch(() => ({ error: 1 }));
+    setBusy('');
+    if (r.error) { toast(r.error === 1 ? 'No se pudo agregar' : r.error, 'bad'); return; }
+    setRt({ dest: '', gw: '', dev: '', note: '' }); toast('Ruta agregada (se aplica en ~6s)', 'ok'); await sleep(800); loadRoutes();
+  }
+  async function delRoute(id, dest) {
+    if (!confirm('¿Quitar la ruta ' + dest + '?')) return;
+    setBusy('route_del' + id);
+    await fetch('/backend/api/sbc/routes/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
+    setBusy(''); toast('Ruta quitada', 'ok'); await sleep(800); loadRoutes();
+  }
   const fdur = (st) => { if (!st) return '—'; const d = Math.floor((now - new Date(st).getTime()) / 1000); const m = Math.floor(d / 60), ss = d % 60; return (m < 10 ? '0' : '') + m + ':' + (ss < 10 ? '0' : '') + ss; };
   useEffect(() => { if (!cfgLoaded.current) { cfgLoaded.current = true; fetch('/backend/api/sbc/cfg').then(r => r.json()).then(d => { setCfg(d.cfg || ''); setCfgOrig(d.cfg || ''); }).catch(() => {}); } }, []);
 
@@ -65,6 +82,7 @@ function ConsoleBody({ sbc, load, hist }) {
 
   const stats = sbc?.stats || {}; const core = stats.core || {}; const sl = stats.sl || {}; const shm = stats.shmem || {}; const rates = stats.rates || {};
   const disp = sbc?.dispatcher || []; const banned = sbc?.banned || []; const rtp = sbc?.rtpengine || {};
+  const net = stats.net || {}; const ifaces = net.ifaces || []; const liveRoutes = net.routes || [];
   const memPct = shm.total_size ? Math.round((shm.used_size / shm.total_size) * 100) : 0;
   const flagInfo = (f) => /A/.test(f) ? { c: 'teal', t: 'Activo' } : /I/.test(f) ? { c: 'orange', t: 'Inactivo' } : /D/.test(f) ? { c: 'red', t: 'Deshabilitado' } : { c: 'gray', t: f || '-' };
 
@@ -86,6 +104,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
+        <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
         <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
       </Tabs.List>
@@ -169,6 +188,50 @@ function ConsoleBody({ sbc, load, hist }) {
                   <Tooltip label="Quitar destino"><ActionIcon variant="subtle" color="red" loading={busy === 'del_target' + d.uri} onClick={() => { if (confirm('¿Quitar ' + d.uri + ' del dispatcher?')) sendCmd('del_target', d.uri); }}><IconTrash size={15} /></ActionIcon></Tooltip>
                 </Group></Table.Td>
               </Table.Tr>); })}</Table.Tbody></Table>
+        </Card>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="net">
+        <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-cyan-light)' }}>
+          <Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">Multi-WAN y rutas estáticas</Text></Group>
+          <Text size="sm" c="dimmed">El SBC puede tener <b>varias salidas a internet</b> (distintas WAN/interfaces). Por defecto todo sale por la ruta <Code>default</Code>. Acá podés crear <b>rutas estáticas</b> para forzar que el tráfico hacia una troncal o red específica salga por otro <b>gateway</b> o <b>interfaz</b>, sin depender del router de internet principal. Las rutas se reaplican automáticamente tras reiniciar el SBC.</Text>
+        </Card>
+        <SimpleGrid cols={{ base: 1, md: 2 }} mb="md">
+          <Card withBorder radius="md" padding="md">
+            <Text fw={700} mb="xs">Interfaces / WAN</Text>
+            {ifaces.length === 0 ? <Text size="sm" c="dimmed">Sin datos del agente todavía.</Text> :
+              <Table verticalSpacing={6}><Table.Thead><Table.Tr><Table.Th>Interfaz</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Direcciones</Table.Th></Table.Tr></Table.Thead>
+                <Table.Tbody>{ifaces.map(f => <Table.Tr key={f.name}>
+                  <Table.Td><Group gap={6} wrap="nowrap"><IconRouter size={15} color="var(--mantine-color-cyan-6)" /><Text ff="monospace" fz="sm">{f.name}</Text></Group></Table.Td>
+                  <Table.Td><Badge size="sm" variant="light" color={/UP/i.test(f.state) ? 'teal' : 'gray'}>{f.state || '-'}</Badge></Table.Td>
+                  <Table.Td>{(f.addrs || []).map(a => <Text key={a} ff="monospace" fz="xs">{a}</Text>)}</Table.Td>
+                </Table.Tr>)}</Table.Tbody></Table>}
+          </Card>
+          <Card withBorder radius="md" padding="md">
+            <Text fw={700} mb="xs">Tabla de ruteo del kernel (en vivo)</Text>
+            {liveRoutes.length === 0 ? <Text size="sm" c="dimmed">Sin datos.</Text> :
+              <ScrollArea.Autosize mah={220}><Stack gap={4}>{liveRoutes.map((r, i) => <Group key={i} gap={6} wrap="nowrap"><IconRoute size={13} color="var(--mantine-color-gray-5)" /><Text ff="monospace" fz="xs">{r}</Text></Group>)}</Stack></ScrollArea.Autosize>}
+          </Card>
+        </SimpleGrid>
+        <Card withBorder radius="md" padding="md">
+          <Text fw={700} mb="xs">Rutas estáticas administradas</Text>
+          <Group align="flex-end" gap="xs" mb="md" wrap="wrap">
+            <TextInput label="Destino (red/host)" placeholder="ej 200.40.10.0/24 o 1.2.3.4" value={rt.dest} onChange={e => setRt({ ...rt, dest: e.target.value })} w={200} size="xs" />
+            <TextInput label="Gateway (via)" placeholder="ej 172.26.30.1" value={rt.gw} onChange={e => setRt({ ...rt, gw: e.target.value })} w={170} size="xs" />
+            <TextInput label="Interfaz (dev, opc.)" placeholder="ej eth1" value={rt.dev} onChange={e => setRt({ ...rt, dev: e.target.value })} w={150} size="xs" />
+            <TextInput label="Nota (opc.)" placeholder="ej WAN troncal Antel" value={rt.note} onChange={e => setRt({ ...rt, note: e.target.value })} style={{ flex: 1, minWidth: 160 }} size="xs" />
+            <Button size="xs" leftSection={<IconPlus size={14} />} loading={busy === 'route_add'} onClick={addRoute}>Agregar ruta</Button>
+          </Group>
+          <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Gateway</Table.Th><Table.Th>Interfaz</Table.Th><Table.Th>Nota</Table.Th><Table.Th ta="right">Acción</Table.Th></Table.Tr></Table.Thead>
+            <Table.Tbody>{routes.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin rutas estáticas. Todo sale por la ruta por defecto.</Text></Table.Td></Table.Tr> : routes.map(r => (
+              <Table.Tr key={r.id}>
+                <Table.Td ff="monospace" fz="sm">{r.dest}</Table.Td>
+                <Table.Td ff="monospace" fz="sm">{r.gw || '—'}</Table.Td>
+                <Table.Td ff="monospace" fz="sm">{r.dev || '—'}</Table.Td>
+                <Table.Td fz="sm">{r.note || ''}</Table.Td>
+                <Table.Td ta="right"><Tooltip label="Quitar ruta"><ActionIcon variant="subtle" color="red" loading={busy === 'route_del' + r.id} onClick={() => delRoute(r.id, r.dest)}><IconTrash size={15} /></ActionIcon></Tooltip></Table.Td>
+              </Table.Tr>))}</Table.Tbody></Table>
+          <Group gap="xs" mt="sm" c="orange"><IconAlertTriangle size={15} /><Text size="xs" c="dimmed">Las rutas se aplican con <Code>ip route replace</Code> en el SBC (CT107). Una ruta mal configurada puede afectar la conectividad; verificá gateway e interfaz antes de guardar.</Text></Group>
         </Card>
       </Tabs.Panel>
 

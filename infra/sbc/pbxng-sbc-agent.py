@@ -75,6 +75,25 @@ def rates(core):
         PREV[k] = (v, now)
     return out
 
+def net_info():
+    out = {"ifaces": [], "routes": []}
+    try:
+        a = subprocess.run(["ip", "-br", "addr"], capture_output=True, text=True, timeout=6).stdout
+        for line in a.splitlines():
+            q = line.split()
+            if not q or q[0] == "lo":
+                continue
+            out["ifaces"].append({"name": q[0], "state": (q[1] if len(q) > 1 else ""), "addrs": q[2:]})
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(["ip", "route", "show"], capture_output=True, text=True, timeout=6).stdout
+        out["routes"] = [l.strip() for l in r.splitlines() if l.strip()]
+    except Exception:
+        pass
+    return out
+
+
 def gather():
     up = kc('core.uptime'); m = re.search(r'uptime:\s*(.+)', up); uptime = m.group(1).strip() if m else None
     core = stats_group('core'); sl = stats_group('sl'); tcp = stats_group('tcp'); shm = stats_group('shmem')
@@ -85,6 +104,7 @@ def gather():
         'rates': rates(core),
         'tcp_open': tcp.get('current_opened_connections', 0),
         'pike': pike, 'pike_count': len(pike),
+        'net': net_info(),
     }
     try: cfg = open(CFG).read()
     except Exception: cfg = ''
@@ -119,6 +139,15 @@ def apply_cmd(cmd, arg):
                 except Exception: pass
                 open(dlp, 'w').write('\n'.join(lines) + '\n')
             kc('dispatcher.reload')
+        elif cmd == 'route_add' and arg:
+            parts = (arg.split('|') + ['', '', ''])[:3]
+            dest, gw, dev = parts[0].strip(), parts[1].strip(), parts[2].strip()
+            cv = ['ip', 'route', 'replace', dest] + (['via', gw] if gw else []) + (['dev', dev] if dev else [])
+            rr = subprocess.run(cv, capture_output=True, text=True, timeout=10)
+            res = 'ruta aplicada' if rr.returncode == 0 else ('error: ' + (rr.stderr or '')[-200:])
+        elif cmd == 'route_del' and arg:
+            rr = subprocess.run(['ip', 'route', 'del'] + arg.strip().split(), capture_output=True, text=True, timeout=10)
+            res = 'ruta quitada' if rr.returncode == 0 else ('error: ' + (rr.stderr or '')[-200:])
         elif cmd == 'restart': subprocess.run(['systemctl', 'restart', 'kamailio'], timeout=30)
         elif cmd == 'cfg_save' and arg:
             content = base64.b64decode(arg).decode('utf-8', 'replace')
@@ -145,6 +174,7 @@ def main():
         cu.execute("ALTER TABLE pbxng_sbc ADD COLUMN IF NOT EXISTS version text")
         cu.execute("ALTER TABLE pbxng_sbc_cmd ADD COLUMN IF NOT EXISTS arg text")
         cu.execute("ALTER TABLE pbxng_sbc_cmd ADD COLUMN IF NOT EXISTS result text")
+        cu.execute("CREATE TABLE IF NOT EXISTS pbxng_sbc_routes (id serial PRIMARY KEY, dest text, gw text, dev text, note text, created_at timestamptz DEFAULT now())")
         c.commit(); cu.close(); c.close()
     except Exception as e:
         print('alter err', e, flush=True)
@@ -163,6 +193,14 @@ def main():
                 res = apply_cmd(cmd, arg)
                 cur.execute("UPDATE pbxng_sbc_cmd SET done=true, result=%s WHERE id=%s", (res, cid))
                 conn.commit()
+            try:
+                cur.execute("SELECT dest, COALESCE(gw,''), COALESCE(dev,'') FROM pbxng_sbc_routes")
+                for dest, gw, dev in cur.fetchall():
+                    cv = ['ip', 'route', 'replace', dest] + (['via', gw] if gw else []) + (['dev', dev] if dev else [])
+                    subprocess.run(cv, capture_output=True, timeout=8)
+                conn.commit()
+            except Exception:
+                conn.rollback()
             cur.close(); conn.close()
         except Exception as e:
             print('agent error:', e, flush=True)

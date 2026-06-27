@@ -103,6 +103,7 @@ export default function SbcFlow() {
     e('e1', 'wan', 'npm', '#1d4ed8', 'HTTPS/WSS', false),
     e('e2', 'wan', 'kamailio', '#7c3aed', 'SIP', spine),
     e('e3', 'wan', 'coturn', '#0891b2', 'TURN', false),
+    e('eC', 'coturn', 'asterisk', '#0891b2', 'media RTP', spine),
     e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws', spine),
     e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'trunk interno', spine),
     e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined, spine),

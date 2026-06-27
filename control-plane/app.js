@@ -1484,7 +1484,7 @@ app.get('/api/sbc/cfg', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Comando genérico al SBC (lo aplica el agente). cmd + arg opcional.
-const SBC_CMDS = ['reload', 'unban_all', 'unban', 'ban', 'debug', 'disable_target', 'enable_target', 'add_target', 'del_target', 'restart', 'cfg_save'];
+const SBC_CMDS = ['reload', 'unban_all', 'unban', 'ban', 'debug', 'disable_target', 'enable_target', 'add_target', 'del_target', 'restart', 'cfg_save', 'route_add', 'route_del'];
 app.post('/api/sbc/cmd', async (req, res) => {
   const { cmd, arg } = req.body || {};
   if (!SBC_CMDS.includes(cmd)) return res.status(400).json({ error: 'comando inválido' });
@@ -1494,6 +1494,38 @@ app.post('/api/sbc/cmd', async (req, res) => {
 app.get('/api/sbc/cmd/:id', async (req, res) => {
   try { const { rows } = await pool.query("SELECT id, cmd, done, result FROM pbxng_sbc_cmd WHERE id=$1", [req.params.id]); res.json(rows[0] || { error: 'no existe' }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+// --- SBC rutas estaticas / multi-WAN ---
+app.get('/api/sbc/routes', async (req, res) => {
+  try {
+    await pool.query("CREATE TABLE IF NOT EXISTS pbxng_sbc_routes (id serial PRIMARY KEY, dest text, gw text, dev text, note text, created_at timestamptz DEFAULT now())");
+    const { rows } = await pool.query("SELECT id, dest, gw, dev, note, created_at FROM pbxng_sbc_routes ORDER BY id");
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/sbc/routes', async (req, res) => {
+  const { dest, gw, dev, note } = req.body || {};
+  if (!dest || !String(dest).trim()) return res.status(400).json({ error: 'destino requerido' });
+  if (!String(gw).trim() && !String(dev).trim()) return res.status(400).json({ error: 'indique gateway o interfaz' });
+  try {
+    await pool.query("CREATE TABLE IF NOT EXISTS pbxng_sbc_routes (id serial PRIMARY KEY, dest text, gw text, dev text, note text, created_at timestamptz DEFAULT now())");
+    const { rows } = await pool.query("INSERT INTO pbxng_sbc_routes (dest, gw, dev, note) VALUES ($1,$2,$3,$4) RETURNING id", [String(dest).trim(), String(gw || '').trim() || null, String(dev || '').trim() || null, String(note || '').trim() || null]);
+    const arg = [String(dest).trim(), String(gw || '').trim(), String(dev || '').trim()].join('|');
+    await pool.query("INSERT INTO pbxng_sbc_cmd (cmd, arg) VALUES ('route_add', $1)", [arg]);
+    res.json({ id: rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/sbc/routes/remove', async (req, res) => {
+  const { id } = req.body || {};
+  if (id == null) return res.status(400).json({ error: 'id requerido' });
+  try {
+    const { rows } = await pool.query("SELECT dest FROM pbxng_sbc_routes WHERE id=$1", [id]);
+    if (rows[0]) {
+      await pool.query("DELETE FROM pbxng_sbc_routes WHERE id=$1", [id]);
+      await pool.query("INSERT INTO pbxng_sbc_cmd (cmd, arg) VALUES ('route_del', $1)", [rows[0].dest]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/sbc/reload', async (req, res) => {
   try { await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('reload')"); res.json({ ok: true }); }
