@@ -96,7 +96,7 @@ export default function Shell({ children }) {
           {rail && <Tooltip label="Expandir menú" position="right"><ActionIcon variant="subtle" color="gray" mx="auto" mb="xs" onClick={toggleRail}><IconLayoutSidebarLeftExpand size={19} /></ActionIcon></Tooltip>}
 
           {/* navegación */}
-          <ScrollArea style={{ flex: 1 }} type="hover">
+          <ScrollArea style={{ flex: 1, marginTop: 14 }} type="hover">
             {groups.map(g => {
               const opened = rail ? true : (openG[g.label] ?? false);
               const GIcon = g.icon;

@@ -60,7 +60,7 @@ export default function VozConsole() {
   }
   async function spRevert(names) { if (!confirm('¿Restaurar los audios originales de Asterisk? Se perderá la voz personalizada en esos prompts.')) return; setBusy('revert'); await fetch('/backend/api/sysprompts/revert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: names || [] }) }); setBusy(''); setTimeout(loadSp, 1500); toast('Restaurando originales…', 'info'); }
   async function spSaveText(name, text) { try { await fetch('/backend/api/sysprompts/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch (_) {} }
-  function spPlay(name) { if (spRef.current) { spRef.current.src = '/backend/api/sysprompts/test/' + encodeURIComponent(name) + '?t=' + Date.now(); spRef.current.play().catch(() => {}); } }
+  async function spPlay(name) { try { const r = await fetch('/backend/api/sysprompts/test/' + encodeURIComponent(name) + '?t=' + Date.now()); if (!r.ok) return; const u = URL.createObjectURL(await r.blob()); if (spRef.current) { spRef.current.src = u; await spRef.current.play().catch(() => {}); } } catch (_) {} }
   useEffect(() => { loadVoz(); loadVoices(); loadCfg(); loadSp(); const t = setInterval(loadVoz, 4000); return () => clearInterval(t); }, []);
 
   async function saveBasics() { setBusy('basics'); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: url, voz_length_scale: speed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setBusy(''); toast(r.error ? 'Error' : 'Guardado', r.error ? 'bad' : 'ok'); }

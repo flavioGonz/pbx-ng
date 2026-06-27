@@ -180,7 +180,7 @@ async function getExtensions() {
 }
 async function getChannels() {
   if (!ari) return [];
-  try { const ch = await ari.channels.list(); return ch.map(c => ({ id: c.id, name: c.name, state: c.state, caller: c.caller && c.caller.number, connected: c.connected && c.connected.number })); } catch (_) { return []; }
+  try { const ch = await ari.channels.list(); return ch.map(c => ({ id: c.id, name: c.name, state: c.state, caller: c.caller && c.caller.number, connected: c.connected && c.connected.number, started: c.creationtime || null })); } catch (_) { return []; }
 }
 async function getQueues() {
   const { rows: qs } = await pool.query("SELECT pq.name, pq.label, pq.access_exten, q.strategy, q.timeout, q.musiconhold FROM pbxng_queues pq LEFT JOIN queues q ON q.name=pq.name ORDER BY pq.name");
@@ -1315,6 +1315,23 @@ app.post('/api/queues/:name/members', async (req, res) => {
 });
 app.delete('/api/queues/:name/members/:ext', async (req, res) => { const { name, ext } = req.params; try { await pool.query('DELETE FROM queue_members WHERE queue_name=$1 AND interface=$2', [name, 'PJSIP/' + ext]); broadcastSoon(); res.json({ removed: ext }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/queues/:name/live', async (req, res) => { try { res.json({ output: await amiCommand('queue show ' + req.params.name) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+
+app.get('/api/wallboard', async (req, res) => {
+  const out = { today: {}, queues: [] };
+  try {
+    const { rows } = await pool.query("SELECT count(*)::int total, count(*) FILTER (WHERE disposition='ANSWERED')::int answered, count(*) FILTER (WHERE disposition IN ('NO ANSWER','BUSY','FAILED','CONGESTION'))::int missed, COALESCE(round(avg(billsec) FILTER (WHERE disposition='ANSWERED'))::int,0) avg_talk, count(*) FILTER (WHERE dcontext='from-trunk')::int inbound FROM cdr WHERE start >= date_trunc('day', now())");
+    out.today = rows[0] || {};
+    out.today.outbound = Math.max(0, (out.today.total || 0) - (out.today.inbound || 0));
+  } catch (e) { out.today = { error: e.message }; }
+  try {
+    const txt = await amiCommand('queue show');
+    const re = /^([^\s].*?) has (\d+) calls? \(max[^)]*\) in '([^']*)' strategy \((\d+)s holdtime, (\d+)s talktime\), W:\d+, C:(\d+), A:(\d+)/gm;
+    let m; while ((m = re.exec(txt)) !== null) {
+      out.queues.push({ name: m[1].trim(), waiting: +m[2], strategy: m[3], holdtime: +m[4], talktime: +m[5], completed: +m[6], abandoned: +m[7] });
+    }
+  } catch (e) { out.queues_error = e.message; }
+  res.json(out);
+});
 
 app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); try { const { rows } = await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 
