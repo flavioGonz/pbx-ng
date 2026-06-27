@@ -92,7 +92,7 @@ export default function Troncales() {
   const isAst = f.kind !== 'kamailio';
 
   return (
-    <div style={{ position: 'relative', height: 'calc(100vh - 96px)', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(15,23,42,.10)', background: 'radial-gradient(820px 420px at 72% -12%, rgba(47,116,230,.06), transparent), #f6f8fb' }}>
+    <div style={{ position: 'relative', height: 'calc(100vh - 40px)', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(15,23,42,.10)', background: 'radial-gradient(820px 420px at 72% -12%, rgba(47,116,230,.06), transparent), #f6f8fb' }}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.18 }} defaultEdgeOptions={{ type: 'smoothstep' }} proOptions={{ hideAttribution: true }} nodesDraggable={false} nodesConnectable={false} onNodeClick={onNodeClick} minZoom={0.3} maxZoom={1.6}>
         <Background color="#cdd7e4" gap={22} />
         <Controls showInteractive={false} />
