@@ -142,7 +142,7 @@ export default function Historial() {
                       <Table.Td><Badge variant="light" color={dispColor(r.disposition)}>{dispLabel(r.disposition)}</Badge></Table.Td>
                       <Table.Td>{rec ? <Button size="compact-xs" variant={playId === rec.id ? 'filled' : 'light'} color="teal" leftSection={playId === rec.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === rec.id ? null : rec.id)}>{playId === rec.id ? 'Cerrar' : 'Ver'}</Button> : <Text c="dimmed" size="xs">—</Text>}</Table.Td>
                     </Table.Tr>
-                    {rec && playId === rec.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer src={'/backend/api/recordings/' + rec.id + '/audio'} label={(r.src || '?') + '  \u2192  ' + (r.dst || '?')} /></Table.Td></Table.Tr>}
+                    {rec && playId === rec.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={rec.id} src={'/backend/api/recordings/' + rec.id + '/audio'} label={(r.src || '?') + '  \u2192  ' + (r.dst || '?')} /></Table.Td></Table.Tr>}
                     </Fragment>
                   );
                 })}</Table.Tbody>

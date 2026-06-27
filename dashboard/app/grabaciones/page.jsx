@@ -85,7 +85,7 @@ export default function Grabaciones() {
                             <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>
                           </Group></Table.Td>
                         </Table.Tr>
-                        {playId === r.id && <Table.Tr><Table.Td colSpan={7} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer src={'/backend/api/recordings/' + r.id + '/audio'} label={'Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
+                        {playId === r.id && <Table.Tr><Table.Td colSpan={7} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
                         </Fragment>
                       );
                     })}</Table.Tbody>

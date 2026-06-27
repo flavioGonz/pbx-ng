@@ -234,6 +234,9 @@ pool.query("CREATE TABLE IF NOT EXISTS pbxng_enroll (token text PRIMARY KEY, ext
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban (jail text PRIMARY KEY, banned jsonb DEFAULT '[]', total_failed int DEFAULT 0, total_banned int DEFAULT 0, updated_at timestamptz DEFAULT now())").catch(e => console.error('[F2B] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban_cmd (id serial PRIMARY KEY, cmd text, ip text, jail text, created_at timestamptz DEFAULT now(), done_at timestamptz)").catch(e => console.error('[F2B] cmd', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_recordings (id serial PRIMARY KEY, filename text UNIQUE NOT NULL, ext text, src text, dst text, started_at timestamptz, bytes bigint DEFAULT 0, duration int DEFAULT 0, storage text DEFAULT 'local', remote_url text, linkedid text, deleted boolean DEFAULT false, created_at timestamptz DEFAULT now())").catch(e => console.error('[REC] table', e.message));
+pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS transcript text").catch(()=>{});
+pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS analysis jsonb").catch(()=>{});
+pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS transcribed_at timestamptz").catch(()=>{});
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_prompts (id serial PRIMARY KEY, name text UNIQUE NOT NULL, format text DEFAULT 'wav', bytes int DEFAULT 0, data bytea, deleted boolean DEFAULT false, updated_at timestamptz DEFAULT now(), synced_at timestamptz)").catch(e => console.error('[PROMPT] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_email_config (tenant_id int PRIMARY KEY, host text, port int DEFAULT 587, secure boolean DEFAULT false, username text, password text, from_addr text, enabled boolean DEFAULT false, updated_at timestamptz DEFAULT now())").catch(e => console.error('[MAIL] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_integrations (type text PRIMARY KEY, enabled boolean DEFAULT false, config jsonb DEFAULT '{}', updated_at timestamptz DEFAULT now())").catch(e => console.error('[INT] table', e.message));
@@ -269,6 +272,76 @@ app.get('/api/recordings/:id/audio', async (req, res) => {
     const buf = Buffer.from(await r.arrayBuffer());
     res.send(buf);
   } catch (e) { res.status(500).end(); }
+});
+
+// ---------- Transcripcion + analisis de grabaciones ----------
+function wavToPcm(buf) {
+  if (buf.length < 44 || buf.slice(0, 4).toString() !== 'RIFF') return null;
+  let pos = 12, rate = 8000, ch = 1, bits = 16, dataOff = -1, dataLen = 0;
+  while (pos + 8 <= buf.length) {
+    const cid = buf.slice(pos, pos + 4).toString('latin1'); const sz = buf.readUInt32LE(pos + 4);
+    if (cid === 'fmt ') { ch = buf.readUInt16LE(pos + 10); rate = buf.readUInt32LE(pos + 12); bits = buf.readUInt16LE(pos + 22); }
+    else if (cid === 'data') { dataOff = pos + 8; dataLen = Math.min(sz, buf.length - pos - 8); break; }
+    pos += 8 + sz + (sz & 1);
+  }
+  if (dataOff < 0 || bits !== 16) return null;
+  let pcm = buf.slice(dataOff, dataOff + dataLen);
+  if (ch === 2) {
+    const n = Math.floor(pcm.length / 4); const mono = Buffer.alloc(n * 2);
+    for (let i = 0; i < n; i++) { const l = pcm.readInt16LE(i * 4), rr = pcm.readInt16LE(i * 4 + 2); mono.writeInt16LE(Math.max(-32768, Math.min(32767, (l + rr) >> 1)), i * 2); }
+    pcm = mono;
+  }
+  return { pcm, rate };
+}
+const STOP_ES = new Set('de la que el en y a los las un una por con no se su para es al lo como mas pero sus le ya o este si porque esta entre cuando muy sin sobre tambien me hasta hay donde quien desde todo nos durante todos uno les ni contra otros ese eso ante ellos e esto mi antes algunos que unos yo otro otras otra el tanto esa estos mucho quienes nada muchos cual poco ella estar estas algunas algo nosotros mi mis tu te ti tu tus ellas nosotras vosostros vosostras os mio mia mios mias tuyo tuya suyo suya nuestro nuestra vuestro vuestra esos esas estoy esta soy son fue ser hola si claro bueno ok dale gracias buenas buenos dias tardes noches'.split(' '));
+const NEG_W = ['molesto','enojado','enojada','reclamo','queja','quejar','cancelar','cancelacion','pesimo','pesima','horrible','terrible','inaceptable','gerente','supervisor','demanda','furioso','indignado','estafa','robo','mentira','nunca','jamas','harto','cansado','problema','problemas','mal','mala','peor','no funciona','no sirve','desastre','verguenza','urgente','grosero'];
+const POS_W = ['gracias','excelente','perfecto','genial','resuelto','solucionado','amable','satisfecho','contento','contenta','buenisimo','barbaro','joya','agradezco','felicito','rapido','eficiente'];
+function analyzeText(text, durSec) {
+  const t = (text || '').toLowerCase();
+  const words = t.replace(/[^a-zaeiouunu0-9\s]/gi, ' ').split(/\s+/).filter(Boolean);
+  let neg = 0, pos = 0; const flags = [];
+  for (const w of NEG_W) { if (t.includes(w)) { neg++; flags.push(w); } }
+  for (const w of POS_W) { if (t.includes(w)) pos++; }
+  let sentiment = 'neutral';
+  if (neg >= 2 && neg > pos) sentiment = 'negativo';
+  else if (neg > pos) sentiment = 'tension';
+  else if (pos >= 2 && pos > neg) sentiment = 'positivo';
+  const conflict = neg >= 2;
+  const freq = {};
+  for (const w of words) { if (w.length > 3 && !STOP_ES.has(w) && !/^[0-9]+$/.test(w)) freq[w] = (freq[w] || 0) + 1; }
+  const keywords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k]) => k);
+  const wc = words.length;
+  const wpm = durSec ? Math.round(wc / (durSec / 60)) : 0;
+  const summary = (text || '').trim().slice(0, 220) + ((text || '').length > 220 ? '…' : '');
+  return { sentiment, conflict, neg, pos, flags: [...new Set(flags)].slice(0, 10), keywords, words: wc, wpm, summary };
+}
+async function doTranscribe(id) {
+  const { rows } = await pool.query('SELECT filename, duration FROM pbxng_recordings WHERE id=$1 AND deleted=false', [id]);
+  if (!rows[0]) throw new Error('grabacion no existe');
+  const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename));
+  if (!r.ok) throw new Error('audio no disponible');
+  const wav = Buffer.from(await r.arrayBuffer());
+  const pc = wavToPcm(wav);
+  if (!pc) throw new Error('formato WAV no soportado (se requiere PCM 16-bit)');
+  const base = await vozBase();
+  const sr = await fetch(base + '/stt?rate=' + pc.rate, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pc.pcm, signal: AbortSignal.timeout(180000) });
+  if (!sr.ok) throw new Error('STT fallo (' + sr.status + ')');
+  const sd = await sr.json();
+  const text = (sd.text || '').trim();
+  const analysis = analyzeText(text, rows[0].duration || 0);
+  await pool.query('UPDATE pbxng_recordings SET transcript=$1, analysis=$2, transcribed_at=now() WHERE id=$3', [text, JSON.stringify(analysis), id]);
+  return { transcript: text, analysis };
+}
+app.get('/api/recordings/:id/transcript', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT transcript, analysis, extract(epoch from transcribed_at)*1000 AS at FROM pbxng_recordings WHERE id=$1', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'no existe' });
+    res.json({ transcript: rows[0].transcript || null, analysis: rows[0].analysis || null, at: rows[0].at || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/recordings/:id/transcribe', async (req, res) => {
+  try { const out = await doTranscribe(req.params.id); res.json(out); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/prompts/:id/audio', async (req, res) => {

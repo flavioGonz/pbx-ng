@@ -1,7 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Group, Text, ActionIcon, Slider, Box, Tooltip, useMantineColorScheme } from '@mantine/core';
-import { IconPlayerPlay, IconPlayerPause, IconDownload, IconVolume, IconWaveSine } from '@tabler/icons-react';
+import { Group, Text, ActionIcon, Slider, Box, Tooltip, Button, Badge, Loader, Divider, useMantineColorScheme } from '@mantine/core';
+import { IconPlayerPlay, IconPlayerPause, IconDownload, IconVolume, IconWaveSine, IconFileText, IconMoodSad, IconMoodSmile, IconMoodNeutral, IconAlertTriangle } from '@tabler/icons-react';
+
+const SENT = {
+  negativo: { c: 'red', t: 'Negativo', i: IconMoodSad },
+  tension: { c: 'orange', t: 'Tension', i: IconAlertTriangle },
+  positivo: { c: 'teal', t: 'Positivo', i: IconMoodSmile },
+  neutral: { c: 'gray', t: 'Neutral', i: IconMoodNeutral },
+};
 
 let wsPromise = null;
 function loadWS() {
@@ -17,13 +24,30 @@ function loadWS() {
 }
 const fmt = (s) => { s = Math.floor(s || 0); const m = Math.floor(s / 60), ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; };
 
-export default function RecordingPlayer({ src, label, download = true }) {
+export default function RecordingPlayer({ src, label, download = true, recId }) {
   const ref = useRef(null); const ws = useRef(null);
   const { colorScheme } = useMantineColorScheme();
   const dark = colorScheme === 'dark';
   const [ready, setReady] = useState(false); const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0); const [dur, setDur] = useState(0);
   const [rate, setRate] = useState(1); const [vol, setVol] = useState(1); const [err, setErr] = useState(false);
+  const [tr, setTr] = useState(null); const [an, setAn] = useState(null); const [tl, setTl] = useState(false); const [topen, setTopen] = useState(false);
+
+  useEffect(() => {
+    if (!recId) return; let dead = false;
+    fetch('/backend/api/recordings/' + recId + '/transcript').then((r) => r.json()).then((d) => { if (dead) return; if (d.transcript) { setTr(d.transcript); setAn(d.analysis); setTopen(true); } }).catch(() => {});
+    return () => { dead = true; };
+  }, [recId]);
+
+  const transcribe = async () => {
+    setTl(true); setTopen(true);
+    try {
+      const d = await fetch('/backend/api/recordings/' + recId + '/transcribe', { method: 'POST' }).then((r) => r.json());
+      if (d.error) { setTr('No se pudo transcribir: ' + d.error); setAn(null); }
+      else { setTr(d.transcript || '(sin habla detectada)'); setAn(d.analysis || null); }
+    } catch (_) { setTr('Error de transcripcion'); }
+    setTl(false);
+  };
 
   useEffect(() => {
     let dead = false;
@@ -48,8 +72,11 @@ export default function RecordingPlayer({ src, label, download = true }) {
   useEffect(() => { if (ws.current) { try { ws.current.setOptions({ waveColor: dark ? '#3d4d68' : '#b9c6da', cursorColor: dark ? '#e6edf6' : '#1e293b' }); } catch (_) {} } }, [dark]);
 
   const toggle = () => { try { ws.current && ws.current.playPause(); } catch (_) {} };
-  const setSpeed = (r) => { setRate(r); try { ws.current && ws.current.setPlaybackRate(r, true); } catch (_) {} };
+  const setSpeed = (rr) => { setRate(rr); try { ws.current && ws.current.setPlaybackRate(rr, true); } catch (_) {} };
   const setV = (v) => { setVol(v); try { ws.current && ws.current.setVolume(v); } catch (_) {} };
+
+  const S = an ? (SENT[an.sentiment] || SENT.neutral) : null;
+  const SIcon = S ? S.i : null;
 
   return (
     <Box p="sm" style={{ borderRadius: 14, background: 'var(--mantine-color-body)', border: '1px solid var(--mantine-color-default-border)', boxShadow: '0 1px 6px rgba(15,23,42,.06)' }}>
@@ -60,11 +87,44 @@ export default function RecordingPlayer({ src, label, download = true }) {
           {err ? <Text size="sm" c="red">No se pudo cargar el audio.</Text> : <div ref={ref} style={{ width: '100%' }} />}
           <Group justify="space-between" mt={2}><Text size="xs" c="dimmed" ff="monospace">{fmt(cur)}</Text><Text size="xs" c="dimmed" ff="monospace">{fmt(dur)}</Text></Group>
         </div>
-        <Group gap={3} wrap="nowrap">{[0.75, 1, 1.25, 1.5, 2].map((r) => (
-          <Box key={r} onClick={() => setSpeed(r)} style={{ cursor: 'pointer', padding: '3px 8px', borderRadius: 8, fontSize: 12, fontWeight: 700, lineHeight: 1, background: rate === r ? 'var(--mantine-color-teal-filled)' : 'transparent', color: rate === r ? '#fff' : 'var(--mantine-color-dimmed)', transition: 'all .15s' }}>{r}x</Box>))}</Group>
+        <Group gap={3} wrap="nowrap">{[0.75, 1, 1.25, 1.5, 2].map((rr) => (
+          <Box key={rr} onClick={() => setSpeed(rr)} style={{ cursor: 'pointer', padding: '3px 8px', borderRadius: 8, fontSize: 12, fontWeight: 700, lineHeight: 1, background: rate === rr ? 'var(--mantine-color-teal-filled)' : 'transparent', color: rate === rr ? '#fff' : 'var(--mantine-color-dimmed)', transition: 'all .15s' }}>{rr}x</Box>
+        ))}</Group>
         <Group gap={6} w={104} wrap="nowrap"><IconVolume size={16} style={{ opacity: .55, flex: 'none' }} /><Slider size="xs" color="teal" value={vol * 100} onChange={(v) => setV(v / 100)} style={{ flex: 1 }} label={null} /></Group>
         {download && <Tooltip label="Descargar"><ActionIcon variant="default" size="lg" component="a" href={src} download><IconDownload size={17} /></ActionIcon></Tooltip>}
       </Group>
+
+      {recId && (
+        <Box mt="sm">
+          <Divider mb="sm" />
+          {!topen && !tr ? (
+            <Button size="xs" variant="light" color="grape" leftSection={<IconFileText size={14} />} onClick={transcribe} loading={tl}>Transcribir y analizar</Button>
+          ) : (
+            <Box>
+              <Group justify="space-between" mb={6}>
+                <Group gap={6}><IconFileText size={15} style={{ opacity: .6 }} /><Text size="sm" fw={700}>Transcripcion</Text></Group>
+                <Group gap={6}>
+                  {an && S && <Badge color={S.c} variant="light" leftSection={<SIcon size={12} />}>{S.t}</Badge>}
+                  {an && an.conflict && <Badge color="red" variant="filled" leftSection={<IconAlertTriangle size={12} />}>Posible discusion</Badge>}
+                  <Button size="compact-xs" variant="subtle" onClick={transcribe} loading={tl}>Reanalizar</Button>
+                </Group>
+              </Group>
+              {tl ? (
+                <Group gap="xs" py="sm"><Loader size="xs" color="grape" /><Text size="sm" c="dimmed">Transcribiendo con Whisper...</Text></Group>
+              ) : (
+                <Box>
+                  <Text size="sm" p="xs" bg="var(--mantine-color-default-hover)" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5, maxHeight: 200, overflow: 'auto', borderRadius: 8 }}>{tr}</Text>
+                  {an && <Group gap={6} mt={8} wrap="wrap">
+                    {(an.keywords || []).map((k) => <Badge key={k} size="sm" variant="dot" color="blue">{k}</Badge>)}
+                    {an.words ? <Text size="xs" c="dimmed" ml="auto">{an.words} palabras - {an.wpm} ppm</Text> : null}
+                  </Group>}
+                  {an && an.flags && an.flags.length > 0 && <Group gap={6} mt={6}><Text size="xs" c="red" fw={600}>Senales:</Text>{an.flags.map((f) => <Badge key={f} size="xs" color="red" variant="light">{f}</Badge>)}</Group>}
+                </Box>
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }
