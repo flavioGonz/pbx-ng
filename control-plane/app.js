@@ -143,6 +143,8 @@ async function trunkStatuses(trunks) {
   const eps = await endpointStates();
   const lines = String(reg).split('\n');
   const out = {};
+  const rttMap = {};
+  try { const co = await amiCommand('pjsip show contacts'); for (const line of String(co).split('\n')) { if (!line.includes('Contact:') || !line.includes('sip:')) continue; const aorM = /Contact:\s*([^/]+)\//.exec(line); const toks = line.trim().split(/\s+/); const last = toks[toks.length - 1]; const rtt = /^[0-9.]+$/.test(last) ? parseFloat(last) : null; if (aorM) rttMap[aorM[1].trim()] = rtt; } } catch (_) {}
   for (const t of trunks) {
     if (t.kind === 'kamailio') { out[t.name] = { status: 'sbc', detail: 'Gestionada por el SBC' }; continue; }
     const ep = eps[t.name]; const reachable = ep && ep.state === 'online';
@@ -158,6 +160,7 @@ async function trunkStatuses(trunks) {
       out[t.name] = { status: reachable ? 'online' : 'offline', detail: reachable ? 'Alcanzable (qualify)' : 'No responde' };
     }
   }
+  for (const t of trunks) { if (out[t.name] && rttMap[t.name] != null) out[t.name].rtt = rttMap[t.name]; }
   return out;
 }
 async function setRecFlag(ext, on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: String(ext), Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: String(ext) }); } catch (_) {} }
@@ -237,6 +240,7 @@ pool.query("CREATE TABLE IF NOT EXISTS pbxng_recordings (id serial PRIMARY KEY, 
 pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS transcript text").catch(()=>{});
 pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS analysis jsonb").catch(()=>{});
 pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS transcribed_at timestamptz").catch(()=>{});
+pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS peaks jsonb").catch(()=>{});
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_prompts (id serial PRIMARY KEY, name text UNIQUE NOT NULL, format text DEFAULT 'wav', bytes int DEFAULT 0, data bytea, deleted boolean DEFAULT false, updated_at timestamptz DEFAULT now(), synced_at timestamptz)").catch(e => console.error('[PROMPT] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_email_config (tenant_id int PRIMARY KEY, host text, port int DEFAULT 587, secure boolean DEFAULT false, username text, password text, from_addr text, enabled boolean DEFAULT false, updated_at timestamptz DEFAULT now())").catch(e => console.error('[MAIL] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_integrations (type text PRIMARY KEY, enabled boolean DEFAULT false, config jsonb DEFAULT '{}', updated_at timestamptz DEFAULT now())").catch(e => console.error('[INT] table', e.message));
@@ -342,6 +346,25 @@ app.get('/api/recordings/:id/transcript', async (req, res) => {
 app.post('/api/recordings/:id/transcribe', async (req, res) => {
   try { const out = await doTranscribe(req.params.id); res.json(out); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+function pcmPeaks(pcm, bars) {
+  bars = bars || 40; const n = Math.floor(pcm.length / 2); const per = Math.max(1, Math.floor(n / bars)); const out = []; let max = 1, rawmax = 0;
+  for (let b = 0; b < bars; b++) { let sum = 0, cnt = 0; for (let i = b * per; i < (b + 1) * per && i < n; i++) { const v = pcm.readInt16LE(i * 2); sum += v * v; cnt++; if (Math.abs(v) > rawmax) rawmax = Math.abs(v); } const rms = cnt ? Math.sqrt(sum / cnt) : 0; out.push(rms); if (rms > max) max = rms; }
+  return { peaks: out.map((v) => Math.round((v / max) * 100)), silent: rawmax < 180 };
+}
+app.get('/api/recordings/:id/peaks', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT filename, peaks FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'no existe' });
+    if (rows[0].peaks) return res.json(rows[0].peaks);
+    const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename));
+    if (!r.ok) return res.json({ peaks: [], silent: true });
+    const pc = wavToPcm(Buffer.from(await r.arrayBuffer()));
+    if (!pc) return res.json({ peaks: [], silent: true });
+    const out = pcmPeaks(pc.pcm, 40);
+    await pool.query('UPDATE pbxng_recordings SET peaks=$1 WHERE id=$2', [JSON.stringify(out), req.params.id]);
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/prompts/:id/audio', async (req, res) => {
@@ -1174,7 +1197,7 @@ app.get('/api/trunks', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config,adv_config FROM pbxng_trunks ORDER BY id");
     const st = await trunkStatuses(rows);
-    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), adv: adv_config || ((kam_config && kam_config.logo) ? { logo: kam_config.logo } : null), logo: (adv_config && adv_config.logo) || (kam_config && kam_config.logo) || null, mode: (adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip'), transport: (adv_config && adv_config.transport) || 'udp' })));
+    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), adv: adv_config || ((kam_config && kam_config.logo) ? { logo: kam_config.logo } : null), logo: (adv_config && adv_config.logo) || (kam_config && kam_config.logo) || null, rtt: (st[t.name] || {}).rtt != null ? (st[t.name] || {}).rtt : null, mode: (adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip'), transport: (adv_config && adv_config.transport) || 'udp' })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

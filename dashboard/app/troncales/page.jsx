@@ -20,6 +20,23 @@ const blank = {
 function TNode({ data }) {
   const accent = data.accent;
   const col = data.status === 'online' ? '#16a34a' : data.status === 'offline' ? '#dc2626' : data.status === 'sbc' ? '#7c3aed' : '#64748b';
+  if (data.logo) {
+    return (
+      <div style={{ width: 156, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: data.clickable ? 'pointer' : 'default', position: 'relative' }}>
+        <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
+        <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
+        <div style={{ position: 'relative' }}>
+          <img src={data.logo} alt="" style={{ width: 74, height: 74, objectFit: 'contain', filter: 'drop-shadow(0 5px 12px rgba(15,42,74,.20))' }} />
+          {data.dot !== false && <span style={{ position: 'absolute', top: 1, right: -3, width: 13, height: 13, borderRadius: '50%', background: col, border: '2px solid var(--mantine-color-body)', boxShadow: '0 0 0 2px ' + col + '33' }} />}
+        </div>
+        <div style={{ textAlign: 'center', lineHeight: 1.25, maxWidth: 154 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--mantine-color-text)' }}>{data.title}</div>
+          {data.sub && <div style={{ fontSize: 10.5, opacity: .6, fontFamily: 'monospace', color: 'var(--mantine-color-text)' }}>{data.sub}</div>}
+          {data.badge && <div style={{ fontSize: 10, opacity: .72, marginTop: 1, color: 'var(--mantine-color-text)' }}>{data.badge}</div>}
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ width: data.clickable ? 200 : 186, borderRadius: 15, padding: '11px 13px', cursor: data.clickable ? 'pointer' : 'default', background: data.tint === 'down' ? 'linear-gradient(160deg,#ef4444,#b91c1c)' : data.tint === 'up' ? 'linear-gradient(160deg,#2f74e6,#1750c2)' : accent === 'kam' ? 'linear-gradient(160deg,#6d28d9,#4c1d95)' : accent === 'ast' ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: (accent || data.tint) ? '#fff' : '#1e293b', border: '1px solid ' + ((accent || data.tint) ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 6px 18px rgba(30,50,120,.12)' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
@@ -91,9 +108,9 @@ export default function Troncales() {
     all.forEach((it, i) => {
       const id = 'tk-' + it.t.name; const kind = it.kind; const stt = it.t.status;
       const on = stt === 'online'; const off = stt === 'offline';
-      const ecol = off ? '#dc2626' : on ? '#16a34a' : (kind === 'kamailio' ? '#7c3aed' : '#1d4ed8');
+      const ecol = off ? '#dc2626' : on ? '#2f74e6' : (kind === 'kamailio' ? '#7c3aed' : '#94a3b8');
       ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.logo || (it.t.adv && it.t.adv.logo), tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() } });
-      es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'smoothstep', animated: on, style: { stroke: ecol, strokeWidth: 2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
+      es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'smoothstep', animated: off, label: it.t.rtt != null ? (Math.round(it.t.rtt) + ' ms') : (on ? 'levantada' : off ? 'caida' : undefined), labelStyle: { fontSize: 10, fontWeight: 700, fill: ecol }, labelBgStyle: { fill: 'var(--mantine-color-body)', fillOpacity: 0.85 }, labelBgPadding: [4, 2], labelBgBorderRadius: 6, style: { stroke: ecol, strokeWidth: 2.2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
     });
     return { nodes: ns, edges: es };
   }, [trunks, snap]);

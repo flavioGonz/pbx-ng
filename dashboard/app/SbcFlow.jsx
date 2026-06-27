@@ -12,6 +12,23 @@ function Node({ data }) {
   const tint = data.tint === 'down' ? { bg: 'linear-gradient(160deg,#ef4444,#b91c1c)' } : data.tint === 'up' ? { bg: 'linear-gradient(160deg,#2f74e6,#1750c2)' } : null;
   const filled = !!tint || data.accent;
   const bg = tint ? tint.bg : data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff';
+  if (data.logo) {
+    return (
+      <div className={"sbc-node" + (data.live ? " sbc-live" : "")} style={{ width: 180, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'pointer', position: 'relative' }}>
+        <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
+        <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
+        <div style={{ position: 'relative' }}>
+          <img src={data.logo} alt="" style={{ width: 78, height: 78, objectFit: 'contain', filter: 'drop-shadow(0 5px 12px rgba(15,42,74,.20))' }} />
+          <span style={{ position: 'absolute', top: 1, right: -3, width: 13, height: 13, borderRadius: '50%', background: col, border: '2px solid #fff', boxShadow: '0 0 0 2px ' + col + '33' }} />
+        </div>
+        <div style={{ textAlign: 'center', lineHeight: 1.2 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: '#1e293b' }}>{data.title}</div>
+          {data.ip && <div style={{ fontSize: 10.5, opacity: .6, fontFamily: 'monospace', color: '#1e293b' }}>{data.ip}</div>}
+          {data.metrics && data.metrics.map((m, i) => <div key={i} style={{ fontSize: 10, opacity: .7, color: '#1e293b' }}>{m.label}: {m.value}</div>)}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={"sbc-node" + (data.live ? " sbc-live" : "")} style={{ width: 232, borderRadius: 18, padding: '14px 16px', cursor: 'pointer', background: bg, color: filled ? '#fff' : '#1e293b', border: '1px solid ' + (filled ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 10px 30px rgba(30,50,120,.14)', transition: 'transform .15s, box-shadow .15s' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
@@ -109,7 +126,7 @@ export default function SbcFlow() {
     e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'trunk interno', spine),
     e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined, spine),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
-    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), 'wan', t._empty ? '#94a3b8' : (t.status === 'online' ? '#16a34a' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
+    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), 'wan', t._empty ? '#94a3b8' : (t.status === 'online' ? '#2f74e6' : t.status === 'offline' ? '#dc2626' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
   ];
 
   const node = nodes.find(n => n.id === sel);

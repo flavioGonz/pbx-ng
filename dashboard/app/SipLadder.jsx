@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Stack, Group, Text, Badge, Card, Button, TextInput, Switch, ScrollArea, ActionIcon, Tooltip, Code, SegmentedControl, Box, Table, Drawer, Divider, Anchor } from '@mantine/core';
-import { IconInfoCircle, IconRefresh, IconPlayerPlay, IconPlayerPause, IconX, IconPhoneCall, IconPhoneOff, IconPhonePlus, IconCircleCheck, IconCircleX, IconArrowsExchange, IconClock, IconBell, IconUserCheck, IconHeartbeat, IconCheck, IconArrowRight, IconDownload, IconTrash, IconSearch } from '@tabler/icons-react';
+import { IconInfoCircle, IconRefresh, IconPlayerPlay, IconPlayerPause, IconX, IconPhoneCall, IconPhoneOff, IconPhonePlus, IconCircleCheck, IconCircleX, IconArrowsExchange, IconClock, IconBell, IconUserCheck, IconHeartbeat, IconCheck, IconArrowRight, IconDownload, IconTrash, IconSearch, IconWaveSine } from '@tabler/icons-react';
 import { toast } from './notify';
 
 const ipOf = (hp) => (hp || '').split(':')[0];
@@ -52,6 +52,8 @@ const fmtT = (t) => { const d = new Date(t); const p = (n, l = 2) => String(n).p
 function dlgStatus(ms) { const c = ms.filter((m) => m.status).map((m) => m.status); if (c.some((x) => x >= 400)) return 'fail'; if (c.some((x) => x >= 200 && x < 300)) return 'ok'; if (c.some((x) => x >= 100 && x < 200)) return 'ring'; return 'info'; }
 const ST = { ok: { c: 'teal', t: 'OK' }, fail: { c: 'red', t: 'Error' }, ring: { c: 'yellow', t: 'En curso' }, info: { c: 'gray', t: 'Info' } };
 const DISPLAY = 300;
+const hasAudio = (ms) => ms.some((m) => m.method === 'INVITE') && ms.some((m) => m.status >= 200 && m.status < 300 && /INVITE/i.test(m.cseq || ''));
+function AudioBars() { return <span className="sip-eq" title="audio (llamada atendida)">{[0, 1, 2, 3].map((i) => <span key={i} style={{ animationDelay: (i * 0.12) + 's' }} />)}</span>; }
 
 export default function SipLadder() {
   const [msgs, setMsgs] = useState([]);
@@ -63,6 +65,7 @@ export default function SipLadder() {
   const [on, setOn] = useState(true);
   const [drawer, setDrawer] = useState(null);
   const [raw, setRaw] = useState(null);
+  const [grouped, setGrouped] = useState(false);
   const liveRef = useRef(live); liveRef.current = live;
   const vpRef = useRef(null);
 
@@ -79,6 +82,12 @@ export default function SipLadder() {
     if (q.trim()) { const s = q.toLowerCase(); arr = arr.filter((m) => ((m.src || '') + (m.dst || '') + (m.callid || '') + (m.method || '') + (m.status || '') + reasonOf(m)).toLowerCase().includes(s)); }
     return arr.length > DISPLAY ? arr.slice(arr.length - DISPLAY) : arr;
   }, [msgs, hostF, filt, q]);
+
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const m of filtered) { const k = m.callid || ('id' + m.id); if (!map.has(k)) map.set(k, []); map.get(k).push(m); }
+    return [...map.entries()].map(([callid, ms]) => ({ callid, ms, from: userOf((ms.find((x) => x.method) || ms[0]).from_uri), to: userOf((ms.find((x) => x.method) || ms[0]).to_uri), status: dlgStatus(ms), audio: hasAudio(ms), t0: ms[0].t })).sort((a, b) => b.t0 - a.t0);
+  }, [filtered]);
 
   useEffect(() => { if (follow && vpRef.current) vpRef.current.scrollTo({ top: vpRef.current.scrollHeight }); }, [filtered, follow]);
 
@@ -110,6 +119,7 @@ export default function SipLadder() {
 
   return (
     <Stack gap="sm">
+      <style>{`.sip-eq{display:inline-flex;gap:1px;align-items:flex-end;height:12px} .sip-eq>span{width:2px;height:4px;background:var(--mantine-color-teal-6);border-radius:1px;animation:sipeq .8s ease-in-out infinite} @keyframes sipeq{0%,100%{height:3px}50%{height:11px}}`}</style>
       <Card withBorder radius="md" padding="sm" style={{ background: 'var(--mantine-color-grape-light)' }}>
         <Group gap="xs" mb={2}><IconInfoCircle size={15} /><Text fw={700} size="sm">Analizador SIP en vivo</Text></Group>
         <Text size="xs" c="dimmed">Cada fila es un mensaje SIP capturado en Asterisk (incl. WebRTC) o el SBC (troncales). Filtra por errores, busca, y <b>hace click en una fila</b> para ver el dialogo completo de esa llamada y la explicacion de cada paso.</Text>
@@ -125,7 +135,7 @@ export default function SipLadder() {
         </Group>
         <Group gap="xs">
           <TextInput size="xs" leftSection={<IconSearch size={14} />} placeholder="Filtrar..." value={q} onChange={(e) => setQ(e.target.value)} w={190} />
-          <Switch checked={follow} onChange={(e) => setFollow(e.currentTarget.checked)} label="Auto" size="xs" />
+          <Switch checked={grouped} onChange={(e) => setGrouped(e.currentTarget.checked)} label="Agrupar" size="xs" color="grape" /><Switch checked={follow} onChange={(e) => setFollow(e.currentTarget.checked)} label="Auto" size="xs" />
           <Badge variant="light" color="gray">{filtered.length}</Badge>
           <Tooltip label="Exportar captura (.txt)"><Button size="xs" variant="default" leftSection={<IconDownload size={14} />} onClick={exportTxt}>Exportar</Button></Tooltip>
           <Tooltip label="Limpiar captura"><ActionIcon variant="light" color="red" onClick={clear}><IconTrash size={16} /></ActionIcon></Tooltip>
@@ -139,7 +149,7 @@ export default function SipLadder() {
               <Table.Tr><Table.Th w={96}>Hora</Table.Th><Table.Th>Origen</Table.Th><Table.Th w={22}></Table.Th><Table.Th>Destino</Table.Th><Table.Th>Mensaje</Table.Th><Table.Th w={84}>CSeq</Table.Th><Table.Th w={72}>Punto</Table.Th></Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {filtered.length === 0 ? <Table.Tr><Table.Td colSpan={7}><Text c="dimmed" ta="center" py="xl" size="sm">Sin trafico SIP capturado todavia.</Text></Table.Td></Table.Tr> :
+              {grouped ? (groups.length === 0 ? <Table.Tr><Table.Td colSpan={7}><Text c="dimmed" ta="center" py="xl" size="sm">Sin conversaciones.</Text></Table.Td></Table.Tr> : groups.map((g) => (<Table.Tr key={g.callid} style={{ cursor: 'pointer' }} onClick={() => setDrawer(g.callid)}><Table.Td style={MONO}>{fmtT(g.t0)}</Table.Td><Table.Td style={MONO}>{g.from}</Table.Td><Table.Td><IconArrowRight size={12} style={{ opacity: .5 }} /></Table.Td><Table.Td style={MONO}>{g.to}</Table.Td><Table.Td><Group gap={6} wrap="nowrap"><Badge variant="light" color={ST[g.status].c}>{ST[g.status].t}</Badge><Badge size="xs" variant="outline" color="gray">{g.ms.length}</Badge>{g.audio && <AudioBars />}</Group></Table.Td><Table.Td></Table.Td><Table.Td>{[...new Set(g.ms.map((m) => m.host))].map((h) => <Badge key={h} size="xs" variant="dot" color={h === 'sbc' ? 'grape' : 'blue'}>{h}</Badge>)}</Table.Td></Table.Tr>))) : (filtered.length === 0 ? <Table.Tr><Table.Td colSpan={7}><Text c="dimmed" ta="center" py="xl" size="sm">Sin trafico SIP capturado todavia.</Text></Table.Td></Table.Tr> :
                 filtered.map((m) => {
                   const tint = m.status >= 400 ? 'rgba(220,38,38,.07)' : (m.status >= 200 && m.status < 300) ? 'rgba(22,163,74,.06)' : (m.method === 'INVITE' || m.method === 'BYE') ? 'rgba(47,116,230,.05)' : undefined;
                   return (
@@ -153,14 +163,14 @@ export default function SipLadder() {
                       <Table.Td><Badge size="xs" variant="dot" color={m.host === 'sbc' ? 'grape' : 'blue'}>{m.host}</Badge></Table.Td>
                     </Table.Tr>
                   );
-                })}
+                }))}
             </Table.Tbody>
           </Table>
         </ScrollArea.Autosize>
       </Card>
 
       <Drawer opened={!!drawer} onClose={() => { setDrawer(null); setRaw(null); }} position="right" size="xl" keepMounted={false}
-        title={dialog && <Group gap="sm"><MsgIcon m={dialog.ms[0]} size={20} /><div><Text fw={800} lh={1.1}>{dialog.from} {'->'} {dialog.to}</Text><Text size="xs" c="dimmed" style={MONO} truncate maw={360}>{dialog.callid}</Text></div><Badge variant="light" color={ST[dialog.status].c}>{ST[dialog.status].t}</Badge></Group>}>
+        title={dialog && <Group gap="sm"><MsgIcon m={dialog.ms[0]} size={20} /><div><Text fw={800} lh={1.1}>{dialog.from} {'->'} {dialog.to}</Text><Text size="xs" c="dimmed" style={MONO} truncate maw={360}>{dialog.callid}</Text></div><Badge variant="light" color={ST[dialog.status].c}>{ST[dialog.status].t}</Badge>{hasAudio(dialog.ms) && <Badge variant="light" color="teal" leftSection={<IconWaveSine size={12} />}>Audio</Badge>}</Group>}>
         {dialog && <Stack gap="md">
           <Card withBorder radius="md" padding="xs">
             <Text fw={700} size="sm" mb={6}>Flujo de la llamada</Text>

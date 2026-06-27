@@ -5,6 +5,7 @@ import { IconRefresh, IconSearch, IconTrash, IconDownload, IconDeviceFloppy, Ico
 import { TableSkeleton } from '../Skeletons';
 import { toast } from '../notify';
 import RecordingPlayer from '../RecordingPlayer';
+import MiniWave from '../MiniWave';
 
 const fmtSize = (b) => !b ? '—' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB';
 const fmtDur = (s) => { s = s || 0; return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
@@ -68,7 +69,7 @@ export default function Grabaciones() {
               fl.length === 0 ? <Text c="dimmed" ta="center" py="xl">{list.length ? 'Sin resultados.' : 'Aún no hay grabaciones. Iniciá una desde el softphone (botón Grabar).'}</Text> :
                 <Table.ScrollContainer minWidth={740}>
                   <Table striped highlightOnHover verticalSpacing="sm">
-                    <Table.Thead><Table.Tr><Th icon={<IconClock size={13} />}>Fecha</Th><Th icon={<IconUser size={13} />}>Interno</Th><Th icon={<IconClock size={13} />}>Duración</Th><Th icon={<IconDatabase size={13} />}>Tamaño</Th><Th icon={<IconServer size={13} />}>Almac.</Th><Th icon={<IconWaveSine size={13} />}>Reproducir</Th><Table.Th /></Table.Tr></Table.Thead>
+                    <Table.Thead><Table.Tr><Th icon={<IconClock size={13} />}>Fecha</Th><Th icon={<IconUser size={13} />}>Interno</Th><Th icon={<IconClock size={13} />}>Duración</Th><Th icon={<IconDatabase size={13} />}>Tamaño</Th><Th icon={<IconServer size={13} />}>Almac.</Th><Th icon={<IconWaveSine size={13} />}>Audio</Th><Th icon={<IconWaveSine size={13} />}>Reproducir</Th><Table.Th /></Table.Tr></Table.Thead>
                     <Table.Tbody>{fl.map(r => {
                       const [col, lbl, Ic] = STG[r.storage] || STG.local;
                       return (
@@ -79,13 +80,13 @@ export default function Grabaciones() {
                           <Table.Td><Badge variant="light" color="gray">{fmtDur(r.duration)}</Badge></Table.Td>
                           <Table.Td>{fmtSize(r.bytes)}</Table.Td>
                           <Table.Td><Badge variant="light" color={col} leftSection={<Ic size={12} />}>{lbl}</Badge></Table.Td>
-                          <Table.Td><Button size="compact-xs" variant={playId === r.id ? 'filled' : 'light'} color="teal" leftSection={playId === r.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === r.id ? null : r.id)}>{playId === r.id ? 'Cerrar' : 'Reproducir'}</Button></Table.Td>
+                          <Table.Td><MiniWave recId={r.id} /></Table.Td><Table.Td><Button size="compact-xs" variant={playId === r.id ? 'filled' : 'light'} color="teal" leftSection={playId === r.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === r.id ? null : r.id)}>{playId === r.id ? 'Cerrar' : 'Reproducir'}</Button></Table.Td>
                           <Table.Td ta="right"><Group gap={4} justify="flex-end">
                             <Tooltip label="Descargar"><ActionIcon variant="subtle" component="a" href={'/backend/api/recordings/' + r.id + '/audio'} download><IconDownload size={17} /></ActionIcon></Tooltip>
                             <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>
                           </Group></Table.Td>
                         </Table.Tr>
-                        {playId === r.id && <Table.Tr><Table.Td colSpan={7} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
+                        {playId === r.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
                         </Fragment>
                       );
                     })}</Table.Tbody>
