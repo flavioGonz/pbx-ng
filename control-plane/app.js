@@ -985,38 +985,96 @@ app.delete('/api/routes/inbound/:id', async (req, res) => {
   } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 
+// ---------------- Troncales SIP (avanzado) ----------------
+const TRUNK_TRANSPORT = { udp: 'transport-udp', tcp: 'transport-tcp', tls: 'transport-tls' };
+function trunkDefaults(o = {}) {
+  return {
+    provider_host: o.provider_host || '', provider_port: +o.provider_port || 5060,
+    transport: ['udp', 'tcp', 'tls'].includes(o.transport) ? o.transport : 'udp',
+    mode: o.mode === 'ip' ? 'ip' : 'register',
+    username: o.username || '', from_user: o.from_user || o.username || '',
+    from_domain: o.from_domain || o.provider_host || '', callerid: o.callerid || '',
+    codecs: Array.isArray(o.codecs) && o.codecs.length ? o.codecs : ['ulaw', 'alaw'],
+    dtmf_mode: ['rfc4733', 'inband', 'info', 'auto'].includes(o.dtmf_mode) ? o.dtmf_mode : 'rfc4733',
+    nat: o.nat !== false, direct_media: !!o.direct_media,
+    qualify_frequency: +o.qualify_frequency || 60, expiration: +o.expiration || 3600,
+    retry_interval: +o.retry_interval || 60, context: o.context || 'from-trunk',
+    outbound_enabled: o.outbound_enabled !== false, outbound_prefix: o.outbound_prefix != null ? String(o.outbound_prefix) : '0',
+    outbound_strip: +o.outbound_strip || 0,
+  };
+}
+async function writeAsteriskTrunk(c, name, a, password, tenant_id) {
+  for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]);
+  const tr = TRUNK_TRANSPORT[a.transport] || 'transport-udp';
+  const tsuf = a.transport === 'tcp' ? ';transport=tcp' : a.transport === 'tls' ? ';transport=tls' : '';
+  const allow = a.codecs.join(',');
+  const nat = a.nat ? 'yes' : 'no';
+  await c.query("INSERT INTO ps_aors (id,contact,qualify_frequency,max_contacts,tenant_id) VALUES ($1,$2,$3,1,$4)", [name, `sip:${a.provider_host}:${a.provider_port}${tsuf}`, a.qualify_frequency, tenant_id]);
+  const hasAuth = !!(a.username && password);
+  if (hasAuth) await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,$4)", [name, a.username, password, tenant_id]);
+  await c.query(
+    "INSERT INTO ps_endpoints (id,transport,aors,outbound_auth,context,disallow,allow,from_user,from_domain,callerid,dtmf_mode,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) " +
+    "VALUES ($1,$2,$1,$3,$4,'all',$5,$6,$7,$8,$9,$10,$11,$11,$11,'username,ip',$12,'trunk')",
+    [name, tr, hasAuth ? name : null, a.context, allow, a.from_user || null, a.from_domain || null, a.callerid || null, a.dtmf_mode, a.direct_media ? 'yes' : 'no', nat, tenant_id]
+  );
+  await c.query("INSERT INTO ps_endpoint_id_ips (id,endpoint,match) VALUES ($1,$1,$2)", [name, a.provider_host]);
+  if (a.mode === 'register') {
+    const cli = a.username ? `sip:${a.username}@${a.provider_host}:${a.provider_port}${tsuf}` : `sip:${a.provider_host}:${a.provider_port}${tsuf}`;
+    await c.query("INSERT INTO ps_registrations (id,server_uri,client_uri,outbound_auth,retry_interval,expiration,transport) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+      [name, `sip:${a.provider_host}:${a.provider_port}${tsuf}`, cli, hasAuth ? name : null, a.retry_interval, a.expiration, tr]);
+  }
+  if (a.outbound_enabled) {
+    const pre = a.outbound_prefix || '';
+    const exten = '_' + (pre ? pre : 'X') + '.';
+    const dialNum = a.outbound_strip ? `${'${EXTEN:' + a.outbound_strip + '}'}` : '${EXTEN}';
+    await setDialplan(c, 'internal', exten, [[1, 'NoOp', 'Salida ' + name], [2, 'Dial', 'PJSIP/' + dialNum + '@' + name + ',60'], [3, 'Hangup', '']]);
+  }
+}
+
 app.get('/api/trunks', async (req, res) => {
-  try { const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config FROM pbxng_trunks ORDER BY id"); const st = await trunkStatuses(rows); res.json(rows.map(({ kam_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register) }))); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config,adv_config FROM pbxng_trunks ORDER BY id");
+    const st = await trunkStatuses(rows);
+    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), adv: adv_config || null, mode: (adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip'), transport: (adv_config && adv_config.transport) || 'udp' })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+app.get('/api/trunks/:name/detail', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT name,provider_host,provider_port,username,COALESCE(kind,'asterisk') AS kind,adv_config,kam_config FROM pbxng_trunks WHERE name=$1", [req.params.name]);
+    if (!rows[0]) return res.status(404).json({ error: 'no existe' });
+    const t = rows[0];
+    const { rows: au } = await pool.query("SELECT 1 FROM ps_auths WHERE id=$1", [req.params.name]);
+    res.json({ name: t.name, kind: t.kind, has_password: !!au[0], adv: trunkDefaults(t.adv_config || { provider_host: t.provider_host, provider_port: t.provider_port, username: t.username, mode: t.do_register ? 'register' : 'ip' }) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/trunks', async (req, res) => {
-  const { name, provider_host, provider_port = 5060, username, password, do_register = true, tenant_id = 1, set_default_outbound = true, kind = 'asterisk' } = req.body || {};
-  if (!name || !provider_host) return res.status(400).json({ error: 'name y provider_host son obligatorios' });
+  const b = req.body || {};
+  const { name, password, tenant_id = 1, kind = 'asterisk' } = b;
+  if (!name || !b.provider_host) return res.status(400).json({ error: 'name y provider_host son obligatorios' });
   if (kind === 'kamailio') {
     try {
-      const kam = { host: provider_host, port: +provider_port || 5060, username: username || null, register: !!do_register };
-      await pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,$3,$4,$5,$6,'kamailio',$7)", [name, provider_host, provider_port, username || null, do_register, tenant_id, JSON.stringify({ ...kam, password: password || null })]);
+      const kam = { host: b.provider_host, port: +b.provider_port || 5060, username: b.username || null, register: b.mode !== 'ip', password: password || null };
+      await pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,$3,$4,$5,$6,'kamailio',$7)", [name, b.provider_host, +b.provider_port || 5060, b.username || null, kam.register, tenant_id, JSON.stringify(kam)]);
       return res.status(201).json({ created: name, kind: 'kamailio' });
     } catch (e) { return res.status(500).json({ error: e.message }); }
   }
-  if (!username || !password) return res.status(400).json({ error: 'username y password son obligatorios para troncal Asterisk' });
+  const a = trunkDefaults(b);
+  if (a.mode === 'register' && !(a.username && password)) return res.status(400).json({ error: 'usuario y contraseña son obligatorios en modo Registro' });
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    await c.query('INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id) VALUES ($1,$2,$3,$4,$5,$6)', [name, provider_host, provider_port, username, do_register, tenant_id]);
-    await c.query("INSERT INTO ps_aors (id,contact,qualify_frequency,tenant_id) VALUES ($1,$2,60,$3)", [name, `sip:${provider_host}:${provider_port}`, tenant_id]);
-    await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,$4)", [name, username, password, tenant_id]);
-    await c.query("INSERT INTO ps_endpoints (id,transport,aors,outbound_auth,context,disallow,allow,from_user,from_domain,tenant_id,pbxng_kind) VALUES ($1,'transport-udp',$1,$1,'from-trunk','all','ulaw,alaw',$2,$3,$4,'trunk')", [name, username, provider_host, tenant_id]);
-    await c.query("INSERT INTO ps_endpoint_id_ips (id,endpoint,match) VALUES ($1,$1,$2)", [name, provider_host]);
-    if (do_register) await c.query("INSERT INTO ps_registrations (id,server_uri,client_uri,outbound_auth,retry_interval,expiration) VALUES ($1,$2,$3,$1,60,3600)", [name, `sip:${provider_host}:${provider_port}`, `sip:${username}@${provider_host}:${provider_port}`]);
-    if (set_default_outbound) await setDialplan(c, 'internal', '_0.', [[1, 'NoOp', 'Salida ' + name + ': ${EXTEN:1}'], [2, 'Dial', 'PJSIP/${EXTEN:1}@' + name + ',60'], [3, 'Hangup', '']]);
-    await c.query('COMMIT'); res.status(201).json({ created: name, register: do_register });
+    await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ($1,$2,$3,$4,$5,$6,'asterisk',$7)", [name, a.provider_host, a.provider_port, a.username || null, a.mode === 'register', tenant_id, JSON.stringify(a)]);
+    await writeAsteriskTrunk(c, name, a, password, tenant_id);
+    await c.query('COMMIT'); res.status(201).json({ created: name, mode: a.mode });
   } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
+
 app.put('/api/trunks/:name', async (req, res) => {
-  const name = req.params.name;
-  const { provider_host, provider_port = 5060, username, password, do_register = true, tenant_id = 1, kind = 'asterisk' } = req.body || {};
-  if (!provider_host) return res.status(400).json({ error: 'provider_host es obligatorio' });
+  const name = req.params.name; const b = req.body || {};
+  const { password, tenant_id = 1, kind = 'asterisk' } = b;
+  if (!b.provider_host) return res.status(400).json({ error: 'provider_host es obligatorio' });
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
@@ -1024,25 +1082,20 @@ app.put('/api/trunks/:name', async (req, res) => {
     if (!ex[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'troncal no existe' }); }
     const { rows: oldAuth } = await c.query('SELECT password FROM ps_auths WHERE id=$1', [name]);
     const oldPass = oldAuth[0] ? oldAuth[0].password : null;
-    // limpiar objetos pjsip previos (si la troncal era Asterisk)
     for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]);
     if (kind === 'kamailio') {
       const { rows: old } = await c.query('SELECT kam_config FROM pbxng_trunks WHERE name=$1', [name]);
       const prev = (old[0] && old[0].kam_config) || {};
-      const kam = { host: provider_host, port: +provider_port || 5060, username: username || null, register: !!do_register, password: password || prev.password || null };
-      await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='kamailio', kam_config=$5 WHERE name=$6", [provider_host, provider_port, username || null, do_register, JSON.stringify(kam), name]);
-    } else {
-      // recuperar password anterior si no se reenvía
-      const pass = password || oldPass;
-      if (!username || !pass) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'usuario y contraseña requeridos para troncal Asterisk' }); }
-      await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='asterisk', kam_config=NULL WHERE name=$5", [provider_host, provider_port, username, do_register, name]);
-      await c.query("INSERT INTO ps_aors (id,contact,qualify_frequency,tenant_id) VALUES ($1,$2,60,$3)", [name, `sip:${provider_host}:${provider_port}`, tenant_id]);
-      await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,$4)", [name, username, pass, tenant_id]);
-      await c.query("INSERT INTO ps_endpoints (id,transport,aors,outbound_auth,context,disallow,allow,from_user,from_domain,tenant_id,pbxng_kind) VALUES ($1,'transport-udp',$1,$1,'from-trunk','all','ulaw,alaw',$2,$3,$4,'trunk')", [name, username, provider_host, tenant_id]);
-      await c.query("INSERT INTO ps_endpoint_id_ips (id,endpoint,match) VALUES ($1,$1,$2)", [name, provider_host]);
-      if (do_register) await c.query("INSERT INTO ps_registrations (id,server_uri,client_uri,outbound_auth,retry_interval,expiration) VALUES ($1,$2,$3,$1,60,3600)", [name, `sip:${provider_host}:${provider_port}`, `sip:${username}@${provider_host}:${provider_port}`]);
+      const kam = { host: b.provider_host, port: +b.provider_port || 5060, username: b.username || null, register: b.mode !== 'ip', password: password || prev.password || null };
+      await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='kamailio', kam_config=$5, adv_config=NULL WHERE name=$6", [b.provider_host, kam.port, b.username || null, kam.register, JSON.stringify(kam), name]);
+      await c.query('COMMIT'); return res.json({ updated: name, kind: 'kamailio' });
     }
-    await c.query('COMMIT'); res.json({ updated: name, kind });
+    const a = trunkDefaults(b);
+    const pass = password || oldPass;
+    if (a.mode === 'register' && !(a.username && pass)) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'usuario y contraseña requeridos en modo Registro' }); }
+    await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='asterisk', kam_config=NULL, adv_config=$5 WHERE name=$6", [a.provider_host, a.provider_port, a.username || null, a.mode === 'register', JSON.stringify(a), name]);
+    await writeAsteriskTrunk(c, name, a, pass, tenant_id);
+    await c.query('COMMIT'); res.json({ updated: name, mode: a.mode });
   } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 
@@ -1051,6 +1104,7 @@ app.delete('/api/trunks/:name', async (req, res) => {
   try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); }
   catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
+
 app.get('/api/registrations', async (req, res) => { try { res.json({ output: await amiCommand('pjsip show registrations') }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // ---------------- Integraciones (Telegram / WhatsApp) ----------------
