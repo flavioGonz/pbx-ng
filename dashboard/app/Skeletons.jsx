@@ -1,20 +1,10 @@
 'use client';
-import { Skeleton, Group, Stack, Card, SimpleGrid } from '@mantine/core';
+import { Loader, Center } from '@mantine/core';
 
-export function TableSkeleton({ rows = 6, cols = 5 }) {
-  return (
-    <Stack gap={10} p="xs">
-      {Array.from({ length: rows }).map((_, r) => (
-        <Group key={r} gap="md" wrap="nowrap">
-          {Array.from({ length: cols }).map((_, c) => (
-            <Skeleton key={c} height={18} radius="sm" style={{ flex: c === 0 ? 0.7 : 1 }} />
-          ))}
-        </Group>
-      ))}
-    </Stack>
-  );
+// Loader unificado para toda la app (reemplaza los skeletons).
+function Spin({ h }) {
+  return <Center mih={h} w="100%" py="md"><Loader size="md" color="pbx" type="bars" /></Center>;
 }
-export function CardsSkeleton({ count = 4, height = 78, cols = { base: 2, sm: 4 } }) {
-  return <SimpleGrid cols={cols}>{Array.from({ length: count }).map((_, i) => <Skeleton key={i} height={height} radius="lg" />)}</SimpleGrid>;
-}
-export function CardSkeleton({ height = 120 }) { return <Card withBorder radius="lg" p="lg"><Skeleton height={height} radius="md" /></Card>; }
+export function TableSkeleton() { return <Spin h={220} />; }
+export function CardsSkeleton() { return <Spin h={90} />; }
+export function CardSkeleton() { return <Spin h={140} />; }

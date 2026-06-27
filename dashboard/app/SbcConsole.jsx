@@ -82,7 +82,7 @@ function ConsoleBody({ sbc, load, hist }) {
   return (
     <Tabs defaultValue="flow" variant="pills" radius="md" keepMounted={false}>
       <Tabs.List mb="md">
-        <Tabs.Tab value="flow" leftSection={<IconSitemap size={16} />}>Flujo de llamadas</Tabs.Tab>
+        <Tabs.Tab value="flow" leftSection={<IconSitemap size={16} />}>Topología</Tabs.Tab>
         <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>

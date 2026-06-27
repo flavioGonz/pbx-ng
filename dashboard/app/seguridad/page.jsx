@@ -4,6 +4,7 @@ import { Stack, Title, Text, Card, Group, Button, Table, Badge, SimpleGrid, Them
 import { IconRefresh, IconShieldCheck, IconBan, IconWorld, IconSearch, IconLockOpen, IconAlertTriangle, IconMapPin, IconClock, IconHandStop, IconShieldPlus, IconTrash, IconPlus, IconList, IconActivity, IconClockHour4 } from '@tabler/icons-react';
 import { TableSkeleton, CardsSkeleton } from '../Skeletons';
 import { toast } from '../notify';
+import Slot from '../Slot';
 
 const fmtDur = (s) => { if (s == null) return '—'; if (s < 0) return 'permanente'; if (s < 60) return s + 's'; if (s < 3600) return Math.round(s / 60) + ' min'; if (s < 86400) return (s / 3600).toFixed(s % 3600 ? 1 : 0) + ' h'; return Math.round(s / 86400) + ' d'; };
 const ago = (ts) => { if (!ts) return '—'; const d = Math.floor(Date.now() / 1000 - ts); if (d < 60) return 'hace ' + d + 's'; if (d < 3600) return 'hace ' + Math.floor(d / 60) + ' min'; if (d < 86400) return 'hace ' + Math.floor(d / 3600) + ' h'; return 'hace ' + Math.floor(d / 86400) + ' d'; };
@@ -60,7 +61,7 @@ export default function Seguridad() {
         <SimpleGrid cols={{ base: 2, sm: 4 }}>
           {cards.map(([l, v, Ic, c]) => (
             <Card key={l} withBorder radius="lg" padding="lg" shadow="sm"><Group><ThemeIcon size={44} radius="md" variant="light" color={c}><Ic size={22} /></ThemeIcon>
-              <div><Text size="sm" c="dimmed">{l}</Text><Text fw={800} fz={26}>{v}</Text></div></Group></Card>
+              <div><Text size="sm" c="dimmed">{l}</Text><Text fw={800} fz={26}><Slot value={v} /></Text></div></Group></Card>
           ))}
         </SimpleGrid>}
 

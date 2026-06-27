@@ -5,6 +5,7 @@ import { IconRefresh, IconSearch, IconDownload, IconPlayerPlay, IconPhone, IconP
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
 import { useLive } from '../useLive';
+import Slot from '../Slot';
 
 const dispColor = (d) => d === 'ANSWERED' ? 'teal' : d === 'NO ANSWER' ? 'yellow' : d === 'BUSY' ? 'orange' : d === 'FAILED' ? 'red' : 'gray';
 const dispLabel = (d) => ({ ANSWERED: 'Atendida', 'NO ANSWER': 'Sin respuesta', BUSY: 'Ocupado', FAILED: 'Fallida', CONGESTION: 'Congestión' }[d] || d || '—');
@@ -105,7 +106,7 @@ export default function Historial() {
       <SimpleGrid cols={{ base: 2, sm: 3, lg: 5 }} spacing="md">
         {kpis.map(x => (
           <Card key={x.k} withBorder radius="lg" padding="md" shadow="sm">
-            <Group gap="sm" wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={x.c}><x.icon size={20} /></ThemeIcon><div><Text fw={800} fz={24} lh={1}>{x.v}</Text><Text size="xs" c="dimmed">{x.k}</Text></div></Group>
+            <Group gap="sm" wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={x.c}><x.icon size={20} /></ThemeIcon><div><Text fw={800} fz={24} lh={1}><Slot value={x.v} /></Text><Text size="xs" c="dimmed">{x.k}</Text></div></Group>
           </Card>
         ))}
       </SimpleGrid>
