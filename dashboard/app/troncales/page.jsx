@@ -12,15 +12,15 @@ function TNode({ data }) {
   const accent = data.accent;
   const col = data.status === 'online' ? '#16a34a' : data.status === 'offline' ? '#dc2626' : data.status === 'sbc' ? '#7c3aed' : '#64748b';
   return (
-    <div style={{ width: 184, borderRadius: 15, padding: '11px 13px', background: accent === 'kam' ? 'linear-gradient(160deg,#6d28d9,#4c1d95)' : accent === 'ast' ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : 'rgba(26,34,48,.94)', color: accent ? '#fff' : '#e8ebf0', border: '1px solid ' + (accent ? 'transparent' : 'rgba(120,130,150,.18)'), boxShadow: '0 8px 22px rgba(30,50,120,.14)' }}>
+    <div style={{ width: 184, borderRadius: 15, padding: '11px 13px', background: accent === 'kam' ? 'linear-gradient(160deg,#6d28d9,#4c1d95)' : accent === 'ast' ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: accent ? '#fff' : '#1e293b', border: '1px solid ' + (accent ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 8px 22px rgba(30,50,120,.14)' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
       <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
       <Group gap={8} wrap="nowrap">
-        <div style={{ width: 28, height: 28, borderRadius: 8, background: accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent ? '#fff' : '#7aa2ec' }}>{data.icon}</div>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent ? '#fff' : '#2f74e6' }}>{data.icon}</div>
         <div style={{ lineHeight: 1.15, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13.5 }}>{data.title}</div>{data.sub && <div style={{ fontSize: 10.5, opacity: .7, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.sub}</div>}</div>
         {data.dot !== false && <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: col, boxShadow: '0 0 0 3px ' + col + '22', flex: 'none' }} />}
       </Group>
-      {data.badge && <div style={{ marginTop: 8 }}><span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 999, background: accent ? 'rgba(255,255,255,.16)' : 'rgba(47,116,230,.16)', color: accent ? '#fff' : '#9db4f0', fontWeight: 600 }}>{data.badge}</span></div>}
+      {data.badge && <div style={{ marginTop: 8 }}><span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 999, background: accent ? 'rgba(255,255,255,.16)' : 'rgba(47,116,230,.16)', color: accent ? '#fff' : '#2f74e6', fontWeight: 600 }}>{data.badge}</span></div>}
     </div>
   );
 }
@@ -77,9 +77,9 @@ export default function Troncales() {
 
       <Flex gap="lg" align="stretch" wrap="wrap">
         <Card withBorder radius="lg" padding={0} shadow="sm" style={{ overflow: 'hidden', flex: '1 1 440px', minWidth: 0 }}>
-          <div style={{ height: 470, background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.10), transparent), #0d1117' }}>
+          <div style={{ height: 470, background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
             <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.22 }} defaultEdgeOptions={{ type: 'smoothstep' }} proOptions={{ hideAttribution: true }} nodesDraggable={false} nodesConnectable={false} minZoom={0.4} maxZoom={1.4}>
-              <Background color="#243042" gap={20} />
+              <Background color="#cdd7e4" gap={20} />
               <Controls showInteractive={false} />
             </ReactFlow>
           </div>

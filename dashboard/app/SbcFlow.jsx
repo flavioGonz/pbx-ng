@@ -10,11 +10,11 @@ function Node({ data }) {
   const st = data.status;
   const col = st === 'ok' || st === true ? '#16a34a' : st === 'pending' ? '#d97706' : st === 'down' ? '#dc2626' : '#64748b';
   return (
-    <div className="sbc-node" style={{ width: 200, borderRadius: 16, padding: '12px 14px', cursor: 'pointer', background: data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : 'rgba(26,34,48,.94)', color: data.accent ? '#fff' : '#e8ebf0', border: '1px solid ' + (data.accent ? 'transparent' : 'rgba(120,130,150,.18)'), boxShadow: '0 8px 24px rgba(30,50,120,.12)', backdropFilter: 'blur(6px)', transition: 'transform .15s, box-shadow .15s' }}>
+    <div className="sbc-node" style={{ width: 200, borderRadius: 16, padding: '12px 14px', cursor: 'pointer', background: data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff', color: data.accent ? '#fff' : '#1e293b', border: '1px solid ' + (data.accent ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 8px 24px rgba(30,50,120,.12)', backdropFilter: 'blur(6px)', transition: 'transform .15s, box-shadow .15s' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
       <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 9, background: data.accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: data.accent ? '#fff' : '#7aa2ec' }}>{data.icon}</div>
+        <div style={{ width: 30, height: 30, borderRadius: 9, background: data.accent ? 'rgba(255,255,255,.18)' : 'rgba(47,116,230,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: data.accent ? '#fff' : '#2f74e6' }}>{data.icon}</div>
         <div style={{ lineHeight: 1.15 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{data.title}</div>{data.ip && <div style={{ fontSize: 11, opacity: .7, fontFamily: 'monospace' }}>{data.ip}</div>}</div>
         <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: col, boxShadow: '0 0 0 3px ' + col + '22' }} />
       </div>
@@ -80,10 +80,10 @@ export default function SbcFlow() {
   return (
     <>
       <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}}`}</style>
-      <div className="sbc-flow" style={{ position: 'relative', height: '72vh', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.10), transparent), #0d1117' }}>
+      <div className="sbc-flow" style={{ position: 'relative', height: '72vh', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }}
           onNodeClick={(_, n) => setSel(n.id)} nodesDraggable={false} nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
-          <Background color="#243042" gap={22} />
+          <Background color="#cdd7e4" gap={22} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>

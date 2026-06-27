@@ -33,7 +33,7 @@ function EntryNode({ data }) {
 function OptionNode({ data }) {
   const d = DEST[data.dest_type] || DEST.extension; const Icon = d.icon;
   return (
-    <div style={{ width: 210, background: 'rgba(26,34,48,.95)', borderRadius: 14, padding: 12, boxShadow: '0 8px 22px rgba(0,0,0,.45)', border: `2px solid ${d.color}55` }}>
+    <div style={{ width: 210, background: '#ffffff', borderRadius: 14, padding: 12, boxShadow: '0 8px 22px rgba(15,42,74,.12)', border: `2px solid ${d.color}55` }}>
       <Handle type="target" position={Position.Left} style={{ background: d.color, width: 10, height: 10 }} />
       <Group justify="space-between" mb={6}>
         <Badge size="lg" radius="md" variant="filled" color="dark" ff="monospace">{data.digit || '?'}</Badge>
@@ -119,7 +119,7 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
 
   const inner = (
     <Stack gap={0} style={{ height: '100%' }}>
-      <Group justify="space-between" px="lg" py="sm" style={{ borderBottom: '1px solid rgba(120,130,150,.14)', background: 'rgba(18,24,34,.92)', borderTopLeftRadius: embedded ? 16 : 0, borderTopRightRadius: embedded ? 16 : 0 }}>
+      <Group justify="space-between" px="lg" py="sm" style={{ borderBottom: '1px solid rgba(120,130,150,.14)', background: '#ffffff', borderTopLeftRadius: embedded ? 16 : 0, borderTopRightRadius: embedded ? 16 : 0 }}>
         <Group gap="sm">
           <Badge size="lg" variant="gradient" gradient={{ from: '#0f2a4a', to: '#16467a' }} leftSection={<IconArrowsSplit size={14} />}>Disenador IVR</Badge>
           <TextInput placeholder="Nombre del IVR" value={name} onChange={e => setName(e.target.value)} w={200} />
@@ -131,15 +131,15 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
         </Group>
       </Group>
       <Group gap={0} style={{ flex: 1, minHeight: 0 }} align="stretch" wrap="nowrap">
-        <Box style={{ flex: 1, minWidth: 0, position: 'relative', background: 'radial-gradient(700px 360px at 70% -10%, rgba(47,116,230,.10), transparent), #0d1117' }}>
+        <Box style={{ flex: 1, minWidth: 0, position: 'relative', background: 'radial-gradient(700px 360px at 70% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
             onNodeClick={(_, n) => n.type === 'option' && setSel(n.id)} fitView proOptions={{ hideAttribution: true }} defaultEdgeOptions={{ animated: true }}>
-            <Background color="#243042" gap={22} />
+            <Background color="#cdd7e4" gap={22} />
             <Controls showInteractive={false} />
           </ReactFlow>
           <Button pos="absolute" bottom={18} left={18} leftSection={<IconPlus size={16} />} onClick={addOption} radius="xl" style={{ boxShadow: '0 6px 18px rgba(15,42,74,.25)' }}>Anadir opcion</Button>
         </Box>
-        <Box w={320} p="lg" style={{ borderLeft: '1px solid rgba(120,130,150,.14)', background: 'rgba(18,24,34,.92)', overflowY: 'auto' }}>
+        <Box w={320} p="lg" style={{ borderLeft: '1px solid rgba(120,130,150,.14)', background: '#ffffff', overflowY: 'auto' }}>
           <Text fw={700} mb="xs">Saludo y menu</Text>
           <Stack gap="sm">
             <Group gap="xs" align="flex-end">
