@@ -104,7 +104,7 @@ export function useSoftphone() {
   const [sharing, setSharing] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [quality, setQuality] = useState(null);
-  const wakeRef = useRef(null);
+  const wakeRef = useRef(null); const heldRef = useRef(false);
   const [filePlaying, setFilePlaying] = useState(null);
   const [creds, setCreds] = useState(null);
   const [hist, setHist] = useState([]);
@@ -442,7 +442,13 @@ export function useSoftphone() {
     if (call !== 'Established') { setQuality(null); return; }
     const s = session.current; if (!s || !s.sessionDescriptionHandler) return;
     const pc = s.sessionDescriptionHandler.peerConnection; if (!pc) return;
-    let lastLost = 0, lastRecv = 0;
+    let lastLost = 0, lastRecv = 0, started = false, stall = 0, dead = false;
+    const die = (why) => { if (dead) return; dead = true; try { console.warn('[softphone] llamada finalizada por', why); } catch (_) {} try { hangup(); } catch (_) {} };
+    // ICE caido => la otra punta se fue
+    const onIce = () => { const st = pc.iceConnectionState; if (st === 'failed' || st === 'closed') die('ice-' + st); };
+    try { pc.addEventListener('iceconnectionstatechange', onIce); } catch (_) {}
+    const onConn = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') die('conn-' + pc.connectionState); };
+    try { pc.addEventListener('connectionstatechange', onConn); } catch (_) {}
     const iv = setInterval(async () => {
       try {
         const stats = await pc.getStats(); let rtt = null, jitter = null, lost = 0, recv = 0;
@@ -452,6 +458,11 @@ export function useSoftphone() {
           if (r.type === 'remote-inbound-rtp' && r.roundTripTime != null && rtt == null) rtt = r.roundTripTime;
         });
         const dLost = Math.max(0, lost - lastLost), dRecv = Math.max(0, recv - lastRecv); lastLost = lost; lastRecv = recv;
+        // Watchdog: si dejan de llegar paquetes (la otra punta colgo y el BYE no llego), colgar local
+        if (recv > 0) started = true;
+        if (started && !heldRef.current && !consult.current) {
+          if (dRecv === 0) { stall += 1; if (stall >= 4) return die('rtp-timeout'); } else { stall = 0; }
+        } else { stall = 0; }
         const lossPct = (dRecv + dLost) > 0 ? (dLost / (dRecv + dLost)) * 100 : 0;
         const rttMs = rtt != null ? Math.round(rtt * 1000) : null;
         const jMs = jitter != null ? Math.round(jitter * 1000) : null;
@@ -462,9 +473,10 @@ export function useSoftphone() {
         setQuality({ score, loss: Math.round(lossPct * 10) / 10, rtt: rttMs, jitter: jMs });
       } catch (_) {}
     }, 2000);
-    return () => clearInterval(iv);
-  }, [call]);
+    return () => { clearInterval(iv); try { pc.removeEventListener('iceconnectionstatechange', onIce); pc.removeEventListener('connectionstatechange', onConn); } catch (_) {} };
+  }, [call, hangup]);
 
+  useEffect(() => { heldRef.current = held; }, [held]);
   useEffect(() => { if (typeof window !== 'undefined') window.__pbxInCall = !!(call || callInfo || incoming); }, [call, callInfo, incoming]);
 
   return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, speaker, toggleSpeaker, quality, audioRef, remoteVideoRef, localVideoRef };
