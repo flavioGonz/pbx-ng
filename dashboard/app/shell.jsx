@@ -6,7 +6,7 @@ import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, Action
 import {
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute,
-  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog,
+  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2,
 } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
@@ -25,6 +25,7 @@ const groups = [
     { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
     { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
     { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
+    { href: '/mapa', label: 'Mapa', icon: IconMap2 },
   ] },
   { label: 'Telefonía', icon: IconPhoneCall, items: [
     { href: '/internos', label: 'Internos', icon: IconUsers },

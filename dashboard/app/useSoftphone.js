@@ -79,6 +79,16 @@ export async function primeMedia(video) {
   } catch (_) {}
 }
 
+function reportGeo(ext, number, dir) {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    if (localStorage.getItem('pbxng_geo') !== '1') return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const c = pos.coords;
+      fetch('/backend/api/geo/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext, number, dir, lat: c.latitude, lng: c.longitude, accuracy: c.accuracy }) }).catch(() => {});
+    }, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+  } catch (_) {}
+}
 function loadHist() { try { return JSON.parse(localStorage.getItem(HIST) || '[]'); } catch (_) { return []; } }
 function pushHist(entry) { try { const h = loadHist(); h.unshift(entry); localStorage.setItem(HIST, JSON.stringify(h.slice(0, 50))); } catch (_) {} }
 
@@ -181,6 +191,7 @@ export function useSoftphone() {
     const uri = SIP.UserAgent.makeURI(`sip:${target}@${location.hostname}`);
     const inviter = new SIP.Inviter(ua.current, uri, { sessionDescriptionHandlerOptions: { constraints: { audio: true, video: useVid }, iceGatheringTimeout: 1500 }, earlyMedia: true });
     wire(inviter, { dir: 'out', number: target, start: Date.now(), video: useVid });
+    reportGeo(creds && creds.ext, target, 'out');
     await inviter.invite();
   }, [creds, wire]);
 
@@ -189,6 +200,7 @@ export function useSoftphone() {
     if (useVid) await primeMedia(true);
     const from = (inv.remoteIdentity && inv.remoteIdentity.uri && inv.remoteIdentity.uri.user) || 'desconocido';
     wire(inv, { dir: 'in', number: from, start: Date.now(), video: useVid });
+    reportGeo(creds && creds.ext, from, 'in');
     await inv.accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: useVid }, iceGatheringTimeout: 1500 } });
   }, [incoming, incomingVideo, creds, wire]);
 

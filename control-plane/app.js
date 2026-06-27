@@ -478,7 +478,26 @@ async function serveProv(req, res, file) {
 }
 app.get('/prov/:file', async (req, res) => { const tok = await getProvSetting('prov_token', ''); if (tok) return res.status(403).type('text/plain').send('token requerido'); return serveProv(req, res, req.params.file); });
 app.get('/prov/:token/:file', async (req, res) => { const tok = await getProvSetting('prov_token', ''); if (tok && req.params.token !== tok) return res.status(403).type('text/plain').send('forbidden'); return serveProv(req, res, req.params.file); });
+pool.query("CREATE TABLE IF NOT EXISTS pbxng_call_geo (id serial PRIMARY KEY, ext text, number text, dir text, lat double precision, lng double precision, accuracy real, ua text, ts timestamptz DEFAULT now())").catch(e => console.error('[GEO] table', e.message));
+app.post('/api/geo/report', async (req, res) => {
+  const b = req.body || {};
+  const lat = parseFloat(b.lat), lng = parseFloat(b.lng);
+  if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return res.status(400).json({ error: 'coordenadas invalidas' });
+  try {
+    await pool.query("INSERT INTO pbxng_call_geo (ext,number,dir,lat,lng,accuracy,ua) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+      [String(b.ext || '').slice(0, 32) || null, String(b.number || '').slice(0, 64) || null, b.dir === 'in' ? 'in' : 'out', lat, lng, parseFloat(b.accuracy) || null, String(req.headers['user-agent'] || '').slice(0, 200)]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.use('/api', auth);
+app.get('/api/geo', async (req, res) => {
+  const hours = Math.min(+(req.query.hours || 168), 720);
+  const limit = Math.min(+(req.query.limit || 300), 1000);
+  try {
+    const { rows } = await pool.query("SELECT id, ext, number, dir, lat, lng, accuracy, extract(epoch from ts)::bigint AS ts FROM pbxng_call_geo WHERE ts > now() - ($1 || ' hours')::interval ORDER BY ts DESC LIMIT $2", [String(hours), limit]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/metrics', async (req, res) => {
   let db_size = null; try { const r = await pool.query("SELECT pg_database_size('pbxng') AS s"); db_size = +r.rows[0].s; } catch (_) {}
   res.json({ ...hostMetrics(), db_size, ts: Date.now() });

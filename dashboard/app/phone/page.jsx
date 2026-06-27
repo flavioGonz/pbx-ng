@@ -8,7 +8,7 @@ import {
   IconPhone, IconPhoneOff, IconBackspace, IconMicrophone, IconMicrophoneOff,
   IconGridDots, IconUser, IconSettings, IconSearch, IconPlus,
   IconPhoneIncoming, IconPhoneOutgoing, IconLogout, IconX, IconClockHour4, IconBell,
-  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock,
+  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin,
 } from '@tabler/icons-react';
 
 const CK = 'pbxng_contacts';
@@ -38,6 +38,9 @@ export default function Phone() {
   const [contacts, setContacts] = useState([]); const [q, setQ] = useState('');
   const [addOpen, setAddOpen] = useState(false); const [nc, setNc] = useState({ name: '', number: '' });
   const [push, setPush] = useState('off'); const [pushBusy, setPushBusy] = useState(false);
+  const [geoOn, setGeoOn] = useState(false);
+  useEffect(() => { try { setGeoOn(localStorage.getItem('pbxng_geo') === '1'); } catch (_) {} }, []);
+  function toggleGeo() { if (geoOn) { localStorage.setItem('pbxng_geo', '0'); setGeoOn(false); notify('Ubicación desactivada'); } else { if (navigator.geolocation) { navigator.geolocation.getCurrentPosition(() => { localStorage.setItem('pbxng_geo', '1'); setGeoOn(true); notify('Ubicación activada'); }, () => notify('Permiso de ubicación denegado'), { enableHighAccuracy: true, timeout: 8000 }); } else notify('Este dispositivo no tiene GPS'); } }
   const [presence, setPresence] = useState({}); const [directory, setDirectory] = useState([]); const [cTab, setCTab] = useState('dir');
   const [xfer, setXfer] = useState(false); const [xferNum, setXferNum] = useState('');
   const [flash, setFlash] = useState(null); const fileInput = useRef(null);
@@ -278,6 +281,12 @@ export default function Phone() {
             </div>
             <div style={S.aSection}>
               <div style={{ ...S.aRow, cursor: 'pointer', borderBottom: 'none' }} onClick={() => sp.tone('5')}><span>Probar tono</span><b style={{ color: '#007aff' }}>Sonar</b></div>
+            </div>
+            <div style={S.aSection}>
+              <div style={{ ...S.aRow, borderBottom: 'none' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><IconMapPin size={18} color="#34c759" /> Compartir ubicación en llamadas</span>
+                <button onClick={toggleGeo} style={{ ...S.toggle, background: geoOn ? '#34c759' : '#e5e5ea' }}><span style={{ ...S.knob, transform: geoOn ? 'translateX(20px)' : 'translateX(0)' }} /></button>
+              </div>
             </div>
             <button style={S.logout} onClick={sp.disconnect}><IconLogout size={18} /> Cerrar sesión</button>
           </div>
