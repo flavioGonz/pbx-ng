@@ -103,6 +103,8 @@ export function useSoftphone() {
   const [attended, setAttended] = useState(null);
   const [sharing, setSharing] = useState(false);
   const [speaker, setSpeaker] = useState(false);
+  const [quality, setQuality] = useState(null);
+  const wakeRef = useRef(null);
   const [filePlaying, setFilePlaying] = useState(null);
   const [creds, setCreds] = useState(null);
   const [hist, setHist] = useState([]);
@@ -402,7 +404,68 @@ export function useSoftphone() {
     // eslint-disable-next-line
   }, []);
 
+  // --- Media Session: controles en pantalla de bloqueo / headset ---
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession; const active = !!(call || callInfo || incoming);
+    const setH = (a, h) => { try { ms.setActionHandler(a, h); } catch (_) {} };
+    if (active) {
+      try {
+        const who = (callInfo && callInfo.number) || (incoming && incoming.remoteIdentity && incoming.remoteIdentity.uri && incoming.remoteIdentity.uri.user) || 'Llamada';
+        if (typeof MediaMetadata !== 'undefined') ms.metadata = new MediaMetadata({ title: who, artist: 'PBX-NG · IES' });
+        ms.playbackState = 'playing';
+      } catch (_) {}
+      setH('stop', () => (session.current ? hangup() : rejectIncoming()));
+      setH('hangup', () => (session.current ? hangup() : rejectIncoming()));
+      setH('pause', () => toggleHold());
+      setH('play', () => toggleHold());
+      setH('togglemicrophone', () => toggleMute());
+    } else {
+      try { ms.playbackState = 'none'; } catch (_) {}
+      ['stop', 'hangup', 'pause', 'play', 'togglemicrophone'].forEach(a => setH(a, null));
+    }
+  }, [call, callInfo, incoming, hangup, rejectIncoming, toggleHold, toggleMute]);
+
+  // --- Wake Lock: mantener pantalla encendida en llamada ---
+  useEffect(() => {
+    const active = !!(call || callInfo || incoming);
+    async function acquire() { try { if ('wakeLock' in navigator && active && !wakeRef.current) { wakeRef.current = await navigator.wakeLock.request('screen'); wakeRef.current.addEventListener && wakeRef.current.addEventListener('release', () => { wakeRef.current = null; }); } } catch (_) {} }
+    async function release() { try { if (wakeRef.current) { await wakeRef.current.release(); wakeRef.current = null; } } catch (_) {} }
+    if (active) acquire(); else release();
+    const onVis = () => { if (document.visibilityState === 'visible' && active && !wakeRef.current) acquire(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { document.removeEventListener('visibilitychange', onVis); };
+  }, [call, callInfo, incoming]);
+
+  // --- Calidad de la llamada (WebRTC stats) ---
+  useEffect(() => {
+    if (call !== 'Established') { setQuality(null); return; }
+    const s = session.current; if (!s || !s.sessionDescriptionHandler) return;
+    const pc = s.sessionDescriptionHandler.peerConnection; if (!pc) return;
+    let lastLost = 0, lastRecv = 0;
+    const iv = setInterval(async () => {
+      try {
+        const stats = await pc.getStats(); let rtt = null, jitter = null, lost = 0, recv = 0;
+        stats.forEach((r) => {
+          if (r.type === 'inbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) { lost = r.packetsLost || 0; recv = r.packetsReceived || 0; jitter = r.jitter; }
+          if (r.type === 'candidate-pair' && r.nominated && r.currentRoundTripTime != null) rtt = r.currentRoundTripTime;
+          if (r.type === 'remote-inbound-rtp' && r.roundTripTime != null && rtt == null) rtt = r.roundTripTime;
+        });
+        const dLost = Math.max(0, lost - lastLost), dRecv = Math.max(0, recv - lastRecv); lastLost = lost; lastRecv = recv;
+        const lossPct = (dRecv + dLost) > 0 ? (dLost / (dRecv + dLost)) * 100 : 0;
+        const rttMs = rtt != null ? Math.round(rtt * 1000) : null;
+        const jMs = jitter != null ? Math.round(jitter * 1000) : null;
+        let score = 4;
+        if (lossPct > 8 || (rttMs != null && rttMs > 500)) score = 1;
+        else if (lossPct > 3 || (rttMs != null && rttMs > 300)) score = 2;
+        else if (lossPct > 1 || (rttMs != null && rttMs > 180)) score = 3;
+        setQuality({ score, loss: Math.round(lossPct * 10) / 10, rtt: rttMs, jitter: jMs });
+      } catch (_) {}
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [call]);
+
   useEffect(() => { if (typeof window !== 'undefined') window.__pbxInCall = !!(call || callInfo || incoming); }, [call, callInfo, incoming]);
 
-  return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, speaker, toggleSpeaker, audioRef, remoteVideoRef, localVideoRef };
+  return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, speaker, toggleSpeaker, quality, audioRef, remoteVideoRef, localVideoRef };
 }

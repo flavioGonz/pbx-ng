@@ -8,7 +8,7 @@ import {
   IconPhone, IconPhoneOff, IconBackspace, IconMicrophone, IconMicrophoneOff,
   IconGridDots, IconUser, IconSettings, IconSearch, IconPlus,
   IconPhoneIncoming, IconPhoneOutgoing, IconLogout, IconX, IconClockHour4, IconBell,
-  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin, IconVolume, IconVolume3,
+  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin, IconVolume, IconVolume3, IconDeviceMobileVibration,
 } from '@tabler/icons-react';
 
 const CK = 'pbxng_contacts';
@@ -55,6 +55,32 @@ export default function Phone() {
   useEffect(() => { if (inCall) showCtl(); else { setCtl(true); clearTimeout(ctlTimer.current); } return () => clearTimeout(ctlTimer.current); }, [inCall, vid]);
 
   const notify = useCallback((text) => { setFlash(text); setTimeout(() => setFlash(null), 2600); }, []);
+  const [gest, setGest] = useState(false);
+  useEffect(() => { try { setGest(localStorage.getItem('pbxng_gest') !== '0'); } catch (_) {} }, []);
+  async function toggleGest() {
+    if (gest) { localStorage.setItem('pbxng_gest', '0'); setGest(false); notify('Gestos desactivados'); return; }
+    try { if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') { const r = await DeviceMotionEvent.requestPermission(); if (r !== 'granted') { notify('Permiso de movimiento denegado'); return; } } } catch (_) {}
+    localStorage.setItem('pbxng_gest', '1'); setGest(true); notify('Gestos activados');
+  }
+  // Gesto: boca abajo -> silencia (en llamada) o rechaza (entrante)
+  const faceRef = useRef({ down: false, t: 0 });
+  useEffect(() => {
+    if (!gest) return;
+    const onMotion = (e) => {
+      const g = e.accelerationIncludingGravity; if (!g || g.z == null) return;
+      const faceDown = g.z < -7.5; const now = Date.now();
+      if (faceDown && !faceRef.current.down) { faceRef.current.down = true; faceRef.current.t = now; }
+      else if (!faceDown && faceRef.current.down) { faceRef.current.down = false; }
+      if (faceDown && faceRef.current.down && faceRef.current.t && now - faceRef.current.t > 700) {
+        faceRef.current.t = 0; // disparar una vez por giro
+        if (sp.incoming || pendIn) { wantAccept.current = false; sp.rejectIncoming?.(); setPendIn(null); try { navigator.vibrate && navigator.vibrate(120); } catch (_) {} notify('Llamada rechazada (boca abajo)'); }
+        else if (established && !sp.muted) { sp.toggleMute(); try { navigator.vibrate && navigator.vibrate(60); } catch (_) {} notify('Micrófono silenciado (boca abajo)'); }
+      }
+    };
+    window.addEventListener('devicemotion', onMotion);
+    return () => window.removeEventListener('devicemotion', onMotion);
+    // eslint-disable-next-line
+  }, [gest, sp.incoming, pendIn, established, sp.muted]);
   useEffect(() => { setContacts(loadC()); }, []);
   useEffect(() => { if (registered && localStorage.getItem('pbxng_geo') !== '0' && navigator.geolocation) { navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 }); } }, [registered]);
   useEffect(() => { fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(d => setAppVer(d.version || '')).catch(() => {}); }, []);
@@ -284,9 +310,13 @@ export default function Phone() {
               <div style={{ ...S.aRow, cursor: 'pointer', borderBottom: 'none' }} onClick={() => sp.tone('5')}><span>Probar tono</span><b style={{ color: '#007aff' }}>Sonar</b></div>
             </div>
             <div style={S.aSection}>
-              <div style={{ ...S.aRow, borderBottom: 'none' }}>
+              <div style={{ ...S.aRow, borderBottom: '1px solid #e5e5ea' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><IconMapPin size={18} color="#34c759" /> Compartir ubicación en llamadas</span>
                 <button onClick={toggleGeo} style={{ ...S.toggle, background: geoOn ? '#34c759' : '#e5e5ea' }}><span style={{ ...S.knob, transform: geoOn ? 'translateX(20px)' : 'translateX(0)' }} /></button>
+              </div>
+              <div style={{ ...S.aRow, borderBottom: 'none' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><IconDeviceMobileVibration size={18} color="#007aff" /> Gestos (boca abajo: silenciar / rechazar)</span>
+                <button onClick={toggleGest} style={{ ...S.toggle, background: gest ? '#34c759' : '#e5e5ea' }}><span style={{ ...S.knob, transform: gest ? 'translateX(20px)' : 'translateX(0)' }} /></button>
               </div>
             </div>
             <button style={S.logout} onClick={sp.disconnect}><IconLogout size={18} /> Cerrar sesión</button>
@@ -327,6 +357,7 @@ export default function Phone() {
               <div style={{ fontSize: videoView ? 19 : 28, fontWeight: 600, marginTop: videoView ? 0 : 18 }}>{sp.callInfo?.number}</div>
               <div style={{ color: 'rgba(255,255,255,.85)', marginTop: videoView ? 2 : 6, display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center', fontSize: videoView ? 13 : 15 }}>
                 {sp.held ? 'En espera' : established ? <Timer since={sp.callInfo?.since} /> : (sp.callInfo?.dir === 'in' ? (vid ? 'Videollamada entrante…' : 'Entrante…') : 'Llamando…')}
+                {established && sp.quality && <SignalBars q={sp.quality} />}
                 {sp.recording && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#ff453a' }}><IconCircleFilled size={9} className="pbx-pulse" /> REC</span>}
                 {sp.filePlaying && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><IconFileMusic size={12} /> {sp.filePlaying.name}</span>}
               </div>
@@ -430,6 +461,16 @@ function Ctl({ icon, label, active, activeColor, onClick, disabled }) {
       <span style={{ width: 64, height: 64, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: active ? (activeColor || '#fff') : 'rgba(255,255,255,.18)', color: active ? (activeColor ? '#fff' : '#000') : '#fff', backdropFilter: 'blur(8px)', transition: 'all .15s' }}>{icon}</span>
       <span style={{ fontSize: 12 }}>{label}</span>
     </button>
+  );
+}
+function SignalBars({ q }) {
+  const colors = { 1: '#ff3b30', 2: '#ff9500', 3: '#ffcc00', 4: '#34c759' };
+  const c = colors[q.score] || '#8e8e93';
+  const txt = { 1: 'Mala', 2: 'Regular', 3: 'Buena', 4: 'Excelente' }[q.score] || '';
+  return (
+    <span title={'Calidad: ' + txt + (q.rtt != null ? ' · ' + q.rtt + ' ms' : '') + (q.loss ? ' · ' + q.loss + '% pérdida' : '')} style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 2, height: 14 }}>
+      {[1, 2, 3, 4].map(i => <span key={i} style={{ width: 3.5, height: 4 + i * 2.6, borderRadius: 1, background: i <= q.score ? c : 'rgba(255,255,255,.3)' }} />)}
+    </span>
   );
 }
 function Equalizer({ color = '#34c759' }) {
