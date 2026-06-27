@@ -46,7 +46,7 @@ export default function Mapa() {
     loadLeaflet().then((lf) => {
       if (!alive || !mapEl.current || map.current) return;
       L.current = lf;
-      map.current = lf.map(mapEl.current, { zoomControl: true }).setView([-34.9011, -56.1645], 11);
+      map.current = lf.map(mapEl.current, { zoomControl: false, scrollWheelZoom: true }).setView([-34.9011, -56.1645], 11);
       const tl = TILES[scheme] || TILES.light;
       tileRef.current = lf.tileLayer(tl.url, { maxZoom: 19, attribution: tl.attr }).addTo(map.current);
       layer.current = lf.layerGroup().addTo(map.current);

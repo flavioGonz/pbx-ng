@@ -21,12 +21,6 @@ function Logo() {
   );
 }
 const groups = [
-  { label: 'Operación', icon: IconDeviceAnalytics, items: [
-    { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
-    { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
-    { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
-    { href: '/mapa', label: 'Mapa', icon: IconMap2 },
-  ] },
   { label: 'Telefonía', icon: IconPhoneCall, items: [
     { href: '/internos', label: 'Internos', icon: IconUsers },
     { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
@@ -38,6 +32,12 @@ const groups = [
     { href: '/aplicaciones', label: 'Aplicaciones', icon: IconApps },
     { href: '/historial', label: 'Historial', icon: IconHistory },
     { href: '/grabaciones', label: 'Grabaciones', icon: IconMicrophone2 },
+  ] },
+  { label: 'Operación', icon: IconDeviceAnalytics, items: [
+    { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
+    { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
+    { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
+    { href: '/mapa', label: 'Mapa', icon: IconMap2 },
   ] },
   { label: 'Sistema', icon: IconAdjustmentsCog, items: [
     { href: '/dialplan', label: 'Dialplan', icon: IconTerminal2 },
@@ -61,7 +61,7 @@ export default function Shell({ children }) {
   useEffect(() => {
     setOpenG(prev => {
       if (Object.keys(prev).length) return prev;
-      const init = {}; groups.forEach(g => { init[g.label] = g.items.some(isActive); });
+      const init = {}; groups.forEach(g => { init[g.label] = g.label === 'Telefonía' || g.items.some(isActive); });
       return init;
     });
   }, [path]);
