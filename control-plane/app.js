@@ -1101,7 +1101,7 @@ app.get('/api/trunks', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config,adv_config FROM pbxng_trunks ORDER BY id");
     const st = await trunkStatuses(rows);
-    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), adv: adv_config || null, mode: (adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip'), transport: (adv_config && adv_config.transport) || 'udp' })));
+    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), adv: adv_config || ((kam_config && kam_config.logo) ? { logo: kam_config.logo } : null), logo: (adv_config && adv_config.logo) || (kam_config && kam_config.logo) || null, mode: (adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip'), transport: (adv_config && adv_config.transport) || 'udp' })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1152,7 +1152,7 @@ app.put('/api/trunks/:name', async (req, res) => {
     if (kind === 'kamailio') {
       const { rows: old } = await c.query('SELECT kam_config FROM pbxng_trunks WHERE name=$1', [name]);
       const prev = (old[0] && old[0].kam_config) || {};
-      const kam = { host: b.provider_host, port: +b.provider_port || 5060, username: b.username || null, register: b.mode !== 'ip', password: password || prev.password || null };
+      const kam = { host: b.provider_host, port: +b.provider_port || 5060, username: b.username || null, register: b.mode !== 'ip', password: password || prev.password || null, logo: b.logo || prev.logo || null };
       await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='kamailio', kam_config=$5, adv_config=NULL WHERE name=$6", [b.provider_host, kam.port, b.username || null, kam.register, JSON.stringify(kam), name]);
       await c.query('COMMIT'); return res.json({ updated: name, kind: 'kamailio' });
     }

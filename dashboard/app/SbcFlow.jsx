@@ -91,7 +91,7 @@ export default function SbcFlow() {
     const step = 110, startY = 250 - ((tr.length - 1) * step) / 2;
     const tnodes = tr.map((t, i) => ({
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
-      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.adv && t.adv.logo, tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
+      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
     }));
     return [...base, ...tnodes];
   }, [sbc, trunks, sys, snap]);

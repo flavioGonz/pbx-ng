@@ -92,7 +92,7 @@ export default function Troncales() {
       const id = 'tk-' + it.t.name; const kind = it.kind; const stt = it.t.status;
       const on = stt === 'online'; const off = stt === 'offline';
       const ecol = off ? '#dc2626' : on ? '#16a34a' : (kind === 'kamailio' ? '#7c3aed' : '#1d4ed8');
-      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.adv && it.t.adv.logo, tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() } });
+      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.logo || (it.t.adv && it.t.adv.logo), tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() } });
       es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'smoothstep', animated: on, style: { stroke: ecol, strokeWidth: 2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
     });
     return { nodes: ns, edges: es };
@@ -143,7 +143,7 @@ export default function Troncales() {
                 <Card key={t.name} withBorder radius="md" padding="xs" style={{ cursor: 'pointer', borderColor: sel?.name === t.name ? 'var(--mantine-color-teal-4)' : undefined, background: t.kind === 'kamailio' ? 'rgba(124,58,237,.04)' : 'rgba(29,78,216,.04)' }} onClick={() => setSel(t)}>
                   <Group justify="space-between" wrap="nowrap" gap={6}>
                     <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                      <ThemeIcon size={28} radius="md" variant="light" color={t.kind === 'kamailio' ? 'grape' : 'blue'}>{t.kind === 'kamailio' ? <IconRouteAltLeft size={15} /> : <IconServer2 size={15} />}</ThemeIcon>
+                      {t.logo ? <div style={{ width: 28, height: 28, borderRadius: 8, background: '#fff', border: '1px solid var(--mantine-color-default-border)', overflow: 'hidden', flex: 'none', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src={t.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></div> : <ThemeIcon size={28} radius="md" variant="light" color={t.kind === 'kamailio' ? 'grape' : 'blue'}>{t.kind === 'kamailio' ? <IconRouteAltLeft size={15} /> : <IconServer2 size={15} />}</ThemeIcon>}
                       <div style={{ minWidth: 0 }}><Text fw={600} fz="sm" truncate>{t.name}</Text><Text fz={11} c="dimmed" ff="monospace" truncate>{t.provider_host}:{t.provider_port}</Text></div>
                     </Group>
                     <Group gap={2} wrap="nowrap"><ActionIcon variant="subtle" color="gray" size="sm" onClick={e => { e.stopPropagation(); openEdit(t); }}><IconEdit size={15} /></ActionIcon><ActionIcon variant="subtle" color="red" size="sm" onClick={e => { e.stopPropagation(); del(t); }}><IconTrash size={15} /></ActionIcon></Group>
