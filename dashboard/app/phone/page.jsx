@@ -39,8 +39,8 @@ export default function Phone() {
   const [addOpen, setAddOpen] = useState(false); const [nc, setNc] = useState({ name: '', number: '' });
   const [push, setPush] = useState('off'); const [pushBusy, setPushBusy] = useState(false);
   const [geoOn, setGeoOn] = useState(false);
-  useEffect(() => { try { setGeoOn(localStorage.getItem('pbxng_geo') === '1'); } catch (_) {} }, []);
-  function toggleGeo() { if (geoOn) { localStorage.setItem('pbxng_geo', '0'); setGeoOn(false); notify('Ubicación desactivada'); } else { if (navigator.geolocation) { navigator.geolocation.getCurrentPosition(() => { localStorage.setItem('pbxng_geo', '1'); setGeoOn(true); notify('Ubicación activada'); }, () => notify('Permiso de ubicación denegado'), { enableHighAccuracy: true, timeout: 8000 }); } else notify('Este dispositivo no tiene GPS'); } }
+  useEffect(() => { try { setGeoOn(localStorage.getItem('pbxng_geo') !== '0'); } catch (_) {} }, []);
+  function toggleGeo() { if (geoOn) { localStorage.setItem('pbxng_geo', '0'); setGeoOn(false); notify('Ubicación desactivada'); } else { localStorage.setItem('pbxng_geo', '1'); setGeoOn(true); if (navigator.geolocation) navigator.geolocation.getCurrentPosition(() => notify('Ubicación activada'), () => notify('Permití la ubicación en el navegador'), { enableHighAccuracy: true, timeout: 8000 }); } }
   const [presence, setPresence] = useState({}); const [directory, setDirectory] = useState([]); const [cTab, setCTab] = useState('dir');
   const [xfer, setXfer] = useState(false); const [xferNum, setXferNum] = useState('');
   const [flash, setFlash] = useState(null); const fileInput = useRef(null);
@@ -56,6 +56,7 @@ export default function Phone() {
 
   const notify = useCallback((text) => { setFlash(text); setTimeout(() => setFlash(null), 2600); }, []);
   useEffect(() => { setContacts(loadC()); }, []);
+  useEffect(() => { if (registered && localStorage.getItem('pbxng_geo') !== '0' && navigator.geolocation) { navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 }); } }, [registered]);
   useEffect(() => { fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(d => setAppVer(d.version || '')).catch(() => {}); }, []);
   // Llamada entrante abierta desde la notificación push (?incall=) -> pantalla full-screen
   useEffect(() => {

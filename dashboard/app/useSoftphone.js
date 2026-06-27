@@ -82,7 +82,7 @@ export async function primeMedia(video) {
 function reportGeo(ext, number, dir) {
   try {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-    if (localStorage.getItem('pbxng_geo') !== '1') return;
+    if (localStorage.getItem('pbxng_geo') === '0') return;
     navigator.geolocation.getCurrentPosition((pos) => {
       const c = pos.coords;
       fetch('/backend/api/geo/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext, number, dir, lat: c.latitude, lng: c.longitude, accuracy: c.accuracy }) }).catch(() => {});
