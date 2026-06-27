@@ -1,15 +1,15 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2 } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useLive } from '../useLive';
 import { toast } from '../notify';
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
 
-const EMPTY = { id: '', name: '', pass: '', video: false, type: 'webrtc', max_contacts: 2, tenant_id: 1 };
+const EMPTY = { id: '', name: '', pass: '', video: false, record: false, type: 'webrtc', max_contacts: 2, tenant_id: 1 };
 const rttColor = (r) => r == null ? 'gray' : r < 80 ? 'teal' : r < 200 ? 'yellow' : 'red';
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 
@@ -24,16 +24,19 @@ export default function Internos() {
   const [qrExt, setQrExt] = useState(''); const [enroll, setEnroll] = useState(null); const [gen, setGen] = useState(false);
   const [emailTo, setEmailTo] = useState(''); const [sending, setSending] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const [recAll, setRecAll] = useState(false); const [recBusy, setRecBusy] = useState(false);
+  useEffect(() => { fetch('/backend/api/extensions/record-all').then(r => r.json()).then(d => setRecAll(!!d.enabled)).catch(() => {}); }, []);
+  async function toggleRecAll(on) { setRecBusy(true); setRecAll(on); const r = await fetch('/backend/api/extensions/record-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then(x => x.json()).catch(() => ({ error: 1 })); setRecBusy(false); if (r.error) { setRecAll(!on); toast('Error', 'bad'); } else toast(on ? 'Grabación global activada' : 'Grabación global desactivada', 'ok'); }
 
   function suggestExt() { const nums = list.map(e => parseInt(e.id, 10)).filter(n => !isNaN(n)); const base = nums.length ? Math.max(...nums) : 9100; return String(base + 1); }
   function openNew() { setForm(EMPTY); setEditing(false); setEnroll(null); setEmailTo(''); open(); }
-  function openEdit(e) { setForm({ id: e.id, name: e.name || '', pass: '', video: !!e.video, type: e.webrtc ? 'webrtc' : 'sip', max_contacts: 2, tenant_id: e.tenant_id || 1 }); setEditing(true); setEnroll(null); setEmailTo(''); open(); generate(e.id); }
+  function openEdit(e) { setForm({ id: e.id, name: e.name || '', pass: '', video: !!e.video, record: !!e.record, type: e.webrtc ? 'webrtc' : 'sip', max_contacts: 2, tenant_id: e.tenant_id || 1 }); setEditing(true); setEnroll(null); setEmailTo(''); open(); generate(e.id); }
   function openQrModal() { setEnroll(null); setQrExt(suggestExt()); openQr(); }
 
   async function save() {
     if (!form.id || (!editing && !form.pass)) { toast('Completá interno y contraseña', 'bad'); return; }
     setSaving(true);
-    const body = { id: form.id, name: form.name || '', password: form.pass || undefined, video: form.video, webrtc: form.type === 'webrtc', max_contacts: form.max_contacts };
+    const body = { id: form.id, name: form.name || '', password: form.pass || undefined, video: form.video, record: form.record, webrtc: form.type === 'webrtc', max_contacts: form.max_contacts };
     const url = editing ? '/backend/api/endpoints/' + form.id : '/backend/api/endpoints';
     const r = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(x => x.json()).catch(() => ({ error: 'red' }));
     setSaving(false);
@@ -73,6 +76,13 @@ export default function Internos() {
           </Card>
         ))}
       </SimpleGrid>
+      <Card withBorder radius="lg" padding="md" shadow="sm" style={{ background: recAll ? 'rgba(225,29,72,.05)' : undefined }}>
+        <Group justify="space-between" wrap="nowrap">
+          <Group gap={12} wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={recAll ? 'red' : 'gray'}><IconMicrophone2 size={22} /></ThemeIcon>
+            <div><Text fw={700}>Grabación global de llamadas</Text><Text fz="sm" c="dimmed">Si la activás, se graban todas las llamadas internas de la central (anula los interruptores por interno).</Text></div></Group>
+          <Switch size="lg" color="red" checked={recAll} disabled={recBusy} onChange={e => toggleRecAll(e.currentTarget.checked)} />
+        </Group>
+      </Card>
       <Card withBorder radius="lg" padding="lg" shadow="sm">
         <Group justify="space-between" mb="md">
           <Group gap="xs"><Text fw={600}>{list.length} internos</Text><Badge variant="light" color="teal">{online} en línea</Badge></Group>
@@ -130,6 +140,14 @@ export default function Internos() {
             <Switch label="Video (VP8/H264)" checked={form.video} onChange={e => set('video', e.currentTarget.checked)} />
             <NumberInput label="Dispositivos" description="Registros simultáneos" min={1} max={10} value={form.max_contacts} onChange={v => set('max_contacts', v || 1)} />
           </Group>
+          <Card withBorder radius="md" padding="sm" style={{ background: form.record ? 'rgba(225,29,72,.05)' : undefined }}>
+            <Group justify="space-between" wrap="nowrap">
+              <Group gap={10} wrap="nowrap"><ThemeIcon size={32} radius="md" variant="light" color={form.record ? 'red' : 'gray'}><IconMicrophone2 size={18} /></ThemeIcon>
+                <div><Text fw={600} fz="sm">Grabar las llamadas de este interno</Text><Text fz="xs" c="dimmed">Se guardan en Grabaciones y quedan enlazadas en el Historial</Text></div></Group>
+              <Switch checked={form.record} onChange={e => set('record', e.currentTarget.checked)} color="red" disabled={recAll} />
+            </Group>
+            {recAll && <Text fz="xs" c="dimmed" mt={6}>La grabación global está activa: se graban TODAS las llamadas, sin importar este interruptor.</Text>}
+          </Card>
 
           {editing &&
             <Card withBorder radius="md" padding="md">

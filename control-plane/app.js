@@ -160,8 +160,13 @@ async function trunkStatuses(trunks) {
   }
   return out;
 }
+async function setRecFlag(ext, on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: String(ext), Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: String(ext) }); } catch (_) {} }
+async function setRecAll(on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: '_ALL_', Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: '_ALL_' }); } catch (_) {} }
+async function syncRecFlags() { try { const { rows } = await pool.query("SELECT id FROM ps_endpoints WHERE pbxng_record=true"); for (const r of rows) await setRecFlag(r.id, true); const { rows: s } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); await setRecAll(!!(s[0] && s[0].value === '1')); } catch (_) {} }
+setTimeout(() => { syncRecFlags().catch(() => {}); }, 9000);
+
 async function getExtensions() {
-  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' ORDER BY id");
+  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' ORDER BY id");
   const st = await endpointStates();
   const names = {};
   try { const { rows: nr } = await pool.query('SELECT ext,name FROM pbxng_directory'); nr.forEach(n => names[n.ext] = n.name); } catch (_) {}
@@ -176,7 +181,7 @@ async function getExtensions() {
       if (aorM && ipM) contacts[aorM[1].trim()] = { ip: ipM[1], rtt };
     }
   } catch (_) {}
-  return rows.map(r => ({ id: r.id, name: names[r.id] || null, context: r.context, allow: r.allow, tenant_id: r.tenant_id, status: st[r.id] ? st[r.id].state : 'offline', channels: st[r.id] ? st[r.id].channels : 0, ip: contacts[r.id] ? contacts[r.id].ip : null, rtt: contacts[r.id] ? contacts[r.id].rtt : null, video: /vp8|h264/i.test(r.allow || ''), webrtc: r.transport === 'transport-ws' }));
+  return rows.map(r => ({ id: r.id, name: names[r.id] || null, context: r.context, allow: r.allow, tenant_id: r.tenant_id, status: st[r.id] ? st[r.id].state : 'offline', channels: st[r.id] ? st[r.id].channels : 0, ip: contacts[r.id] ? contacts[r.id].ip : null, rtt: contacts[r.id] ? contacts[r.id].rtt : null, video: /vp8|h264/i.test(r.allow || ''), webrtc: r.transport === 'transport-ws', record: r.pbxng_record === true || r.pbxng_record === 'yes' || r.pbxng_record === 't' }));
 }
 async function getChannels() {
   if (!ari) return [];
@@ -875,6 +880,8 @@ app.get('/api/system', async (req, res) => {
 });
 
 app.get('/api/extensions', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/extensions/record-all', async (req, res) => { try { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); res.json({ enabled: !!(rows[0] && rows[0].value === '1') }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/extensions/record-all', async (req, res) => { try { const on = !!(req.body && req.body.enabled); await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('record_all',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [on ? '1' : '0']); await setRecAll(on); res.json({ ok: true, enabled: on }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/endpoints', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/endpoints', async (req, res) => {
   const { id, password, context = 'internal', tenant_id = 1, video = false, webrtc = false, max_contacts = 2 } = req.body || {};
@@ -892,7 +899,7 @@ app.post('/api/endpoints', async (req, res) => {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','no','yes','yes','yes')", [id, transport, context, allow, tenant_id]);
     }
     if (req.body && req.body.name) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
-    await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: id, webrtc, video });
+    await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.status(201).json({ created: id, webrtc, video });
   } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 app.put('/api/endpoints/:id', async (req, res) => {
@@ -911,7 +918,7 @@ app.put('/api/endpoints/:id', async (req, res) => {
       await c.query("UPDATE ps_endpoints SET transport=$2, context=COALESCE($3,context), disallow='all', allow=$4, webrtc='no', media_encryption='no', direct_media='no', rtp_symmetric='yes', force_rport='yes', rewrite_contact='yes' WHERE id=$1", [id, transport, context, allow]);
     }
     if (req.body && req.body.name !== undefined) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
-    await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, webrtc, video });
+    await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.json({ updated: id, webrtc, video });
   } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 app.delete('/api/endpoints/:id', async (req, res) => {
