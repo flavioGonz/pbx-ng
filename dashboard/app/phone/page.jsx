@@ -8,7 +8,7 @@ import {
   IconPhone, IconPhoneOff, IconBackspace, IconMicrophone, IconMicrophoneOff,
   IconGridDots, IconUser, IconSettings, IconSearch, IconPlus,
   IconPhoneIncoming, IconPhoneOutgoing, IconLogout, IconX, IconClockHour4, IconBell,
-  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin, IconVolume, IconVolume3, IconDeviceMobileVibration, IconVoicemail, IconMoonStars, IconPictureInPicture,
+  IconPlayerPause, IconPlayerPlay, IconTransfer, IconCircleDot, IconCircleFilled, IconScreenShare, IconPencil, IconScreenShareOff, IconArrowForwardUp, IconUsersGroup, IconFileMusic, IconQrcode, IconCamera, IconVideo, IconVideoOff, IconLock, IconMapPin, IconVolume, IconVolume3, IconDeviceMobileVibration, IconMailbox, IconMoonStars, IconPictureInPicture,
 } from '@tabler/icons-react';
 
 const CK = 'pbxng_contacts';
@@ -266,7 +266,7 @@ export default function Phone() {
         )}
         {tab === 'llamadas' && <>
           <div style={{ ...S.crow, marginTop: 4 }} onClick={() => setVmOpen(true)}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: vmNew ? '#ff3b30' : '#8e8e93', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><IconVoicemail size={22} color="#fff" /></div>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: vmNew ? '#ff3b30' : '#8e8e93', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><IconMailbox size={22} color="#fff" /></div>
             <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 16 }}>Buzon de voz</div><div style={{ fontSize: 13, color: vmNew ? '#ff3b30' : '#8e8e93' }}>{vm.length ? (vmNew ? vmNew + ' nuevo(s) - ' : '') + vm.length + ' mensaje(s)' : 'Sin mensajes'}</div></div>
             <span style={{ color: '#c7c7cc', fontSize: 20 }}>&rsaquo;</span>
           </div>
@@ -481,7 +481,7 @@ export default function Phone() {
               vm.map(m => (
                 <div key={m.folder + m.id} style={S.vmRow}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: m.new ? '#ff3b30' : '#c7c7cc', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><IconVoicemail size={18} color="#fff" /></div>
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: m.new ? '#ff3b30' : '#c7c7cc', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><IconMailbox size={18} color="#fff" /></div>
                     <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{m.callerid || 'Desconocido'}{m.new && <span style={{ color: '#ff3b30', marginLeft: 6, fontSize: 12 }}>nuevo</span>}</div><div style={{ fontSize: 12, color: '#8e8e93' }}>{m.origtime ? new Date(m.origtime * 1000).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''} - {m.duration}s</div></div>
                     <button style={S.iconBtn} onClick={() => vmDel(m)}><IconTrash size={16} color="#ff3b30" /></button>
                   </div>
