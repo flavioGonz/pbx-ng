@@ -105,10 +105,29 @@ def gather():
         'tcp_open': tcp.get('current_opened_connections', 0),
         'pike': pike, 'pike_count': len(pike),
         'net': net_info(),
+        'modules': modules_info(),
     }
     try: cfg = open(CFG).read()
     except Exception: cfg = ''
     return uptime, disp, banned, stats, cfg
+
+ADV_MODS = ['dialog','topos','topoh','acc','tls','drouting','secfilter','ratelimit','permissions','auth_db','sqlops']
+def modules_info():
+    import glob, os
+    try: cfg = open(CFG).read()
+    except Exception: cfg = ''
+    loaded = [m.split(chr(47))[-1] for m in re.findall(r'loadmodule\s+"?([\w/]+?)(?:\.so)?"?\s*$', cfg, re.M)]
+    md = ''
+    cand = ['/usr/lib/x86_64-linux-gnu/kamailio/modules','/usr/lib64/kamailio/modules','/usr/lib/kamailio/modules'] + glob.glob('/usr/lib*/**/kamailio/modules', recursive=True)
+    for d in cand:
+        if os.path.isdir(d): md = d; break
+    avail = {}
+    for m in ADV_MODS:
+        avail[m] = (os.path.isfile(os.path.join(md, m + '.so')) if md else False)
+    feats = {}
+    for f in ['topos','dialog_limits','acc','secfilter','ratelimit','tls','drouting']:
+        feats[f] = ('PBXNG:' + f) in cfg
+    return {'loaded': sorted(set(loaded)), 'avail': avail, 'features': feats}
 
 def apply_cmd(cmd, arg):
     res = 'ok'

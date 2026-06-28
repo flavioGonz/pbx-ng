@@ -114,6 +114,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
         <Tabs.Tab value="turn" leftSection={<IconCloud size={16} />}>TURN</Tabs.Tab>
+        <Tabs.Tab value="adv" leftSection={<IconCpu size={16} />}>Avanzado</Tabs.Tab>
         <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>
         <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
       </Tabs.List>
@@ -258,6 +259,35 @@ function ConsoleBody({ sbc, load, hist }) {
       <Tabs.Panel value="turn"><TurnConsole /></Tabs.Panel>
 
       <Tabs.Panel value="sip"><SipLadder /></Tabs.Panel>
+
+      <Tabs.Panel value="adv">
+        <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-grape-light)' }}>
+          <Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">SBC avanzado (Kamailio)</Text></Group>
+          <Text size="sm" c="dimmed">Kamailio puede hacer mucho más como SBC: topology hiding, límite de llamadas concurrentes, accounting en el borde, LCR, rate-limiting y TLS. Acá ves qué módulos están instalados y qué features están activas. Cada activación se aplica de forma reversible (validación + backup + restart).</Text>
+        </Card>
+        <Card withBorder radius="md" padding="md" mb="md">
+          <Text fw={700} mb="xs">Módulos cargados ({(stats.modules?.loaded || []).length})</Text>
+          <Group gap={6}>{(stats.modules?.loaded || []).map((m) => <Badge key={m} variant="light" color="gray" size="sm">{m}</Badge>)}</Group>
+        </Card>
+        <SimpleGrid cols={{ base: 1, md: 2 }}>
+          {[{ id: 'topos', mod: 'topos', label: 'Topology hiding', icon: <IconShieldLock size={18} />, desc: 'Oculta IPs y rutas internas a proveedores y clientes (privacidad/seguridad).' },
+            { id: 'dialog_limits', mod: 'dialog', label: 'Límite de llamadas concurrentes', icon: <IconActivity size={18} />, desc: 'Máximo de llamadas simultáneas global y por troncal/IP (anti-fraude y capacidad).' },
+            { id: 'acc', mod: 'acc', label: 'Accounting / CDR en el borde', icon: <IconFileCode size={18} />, desc: 'Registro de llamadas en el SBC, independiente de Asterisk.' },
+            { id: 'drouting', mod: 'drouting', label: 'Routing avanzado / LCR', icon: <IconRoute size={18} />, desc: 'Ruteo de salientes por prefijo y costo, con failover entre troncales.' },
+            { id: 'secfilter', mod: 'secfilter', label: 'Filtro de seguridad', icon: <IconBan size={18} />, desc: 'Bloqueo por patrones, User-Agent y país.' },
+            { id: 'ratelimit', mod: 'ratelimit', label: 'Rate limiting', icon: <IconActivity size={18} />, desc: 'Límites de tasa por método, más finos que pike.' },
+            { id: 'tls', mod: 'tls', label: 'TLS troncales', icon: <IconShieldLock size={18} />, desc: 'Cifrado de la señalización SIP de las troncales del operador.' }].map((f) => {
+            const av = (stats.modules?.avail || {})[f.mod]; const on = (stats.modules?.features || {})[f.id];
+            return (<Card key={f.id} withBorder radius="md" padding="md">
+              <Group justify="space-between" wrap="nowrap" mb={4}><Group gap="sm" wrap="nowrap"><ThemeIcon size={36} radius="md" variant="light" color={on ? 'teal' : av ? 'grape' : 'gray'}>{f.icon}</ThemeIcon><Text fw={700} size="sm">{f.label}</Text></Group>
+                {on ? <Badge color="teal" variant="filled" size="sm">Activo</Badge> : av ? <Badge color="grape" variant="light" size="sm">Disponible</Badge> : <Badge color="gray" variant="light" size="sm">No instalado</Badge>}</Group>
+              <Text size="xs" c="dimmed">{f.desc}</Text>
+              {!av && f.id === 'tls' && <Text size="xs" c="orange" mt={4}>Requiere instalar kamailio-tls-modules en el CT107.</Text>}
+            </Card>);
+          })}
+        </SimpleGrid>
+        <Text size="xs" c="dimmed" mt="md">La activación de cada feature se habilita por etapas (cada una toca la configuración viva del SBC). Próximo: límite de llamadas concurrentes.</Text>
+      </Tabs.Panel>
 
       <Tabs.Panel value="cfg">
         <Card withBorder radius="md" padding="md">
