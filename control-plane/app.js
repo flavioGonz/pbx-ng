@@ -1209,7 +1209,7 @@ app.get('/api/trunks/:name/detail', async (req, res) => {
     if (!rows[0]) return res.status(404).json({ error: 'no existe' });
     const t = rows[0];
     const { rows: au } = await pool.query("SELECT 1 FROM ps_auths WHERE id=$1", [req.params.name]);
-    res.json({ name: t.name, kind: t.kind, has_password: !!au[0], adv: trunkDefaults(t.adv_config || { provider_host: t.provider_host, provider_port: t.provider_port, username: t.username, mode: t.do_register ? 'register' : 'ip' }) });
+    res.json({ name: t.name, kind: t.kind, has_password: !!au[0], adv: trunkDefaults(t.adv_config || t.kam_config || { provider_host: t.provider_host, provider_port: t.provider_port, username: t.username, mode: t.do_register ? 'register' : 'ip' }) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1219,7 +1219,7 @@ app.post('/api/trunks', async (req, res) => {
   if (!name || !b.provider_host) return res.status(400).json({ error: 'name y provider_host son obligatorios' });
   if (kind === 'kamailio') {
     try {
-      const kam = { host: b.provider_host, port: +b.provider_port || 5060, username: b.username || null, register: b.mode !== 'ip', password: password || null };
+      const kam = Object.assign(trunkDefaults(b), { host: b.provider_host, port: +b.provider_port || 5060, register: b.mode !== 'ip', password: password || null });
       await pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,$3,$4,$5,$6,'kamailio',$7)", [name, b.provider_host, +b.provider_port || 5060, b.username || null, kam.register, tenant_id, JSON.stringify(kam)]);
       return res.status(201).json({ created: name, kind: 'kamailio' });
     } catch (e) { return res.status(500).json({ error: e.message }); }
@@ -1250,7 +1250,7 @@ app.put('/api/trunks/:name', async (req, res) => {
     if (kind === 'kamailio') {
       const { rows: old } = await c.query('SELECT kam_config FROM pbxng_trunks WHERE name=$1', [name]);
       const prev = (old[0] && old[0].kam_config) || {};
-      const kam = { host: b.provider_host, port: +b.provider_port || 5060, username: b.username || null, register: b.mode !== 'ip', password: password || prev.password || null, logo: b.logo || prev.logo || null, dids: Array.isArray(b.dids) ? b.dids.filter(Boolean) : (b.dids ? String(b.dids).split(/[\s,]+/).filter(Boolean) : (prev.dids || [])), channels: +b.channels || prev.channels || 0 };
+      const kam = Object.assign(trunkDefaults(b), { host: b.provider_host, port: +b.provider_port || 5060, register: b.mode !== 'ip', password: password || prev.password || null });
       await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='kamailio', kam_config=$5, adv_config=NULL WHERE name=$6", [b.provider_host, kam.port, b.username || null, kam.register, JSON.stringify(kam), name]);
       await c.query('COMMIT'); return res.json({ updated: name, kind: 'kamailio' });
     }

@@ -121,7 +121,7 @@ export default function Troncales() {
   const onNodeClick = (_, n) => { if (n.data?.clickable) { const t = trunks.find(x => x.name === n.data.name); if (t) { setSel(t); } } };
   const stBadge = (t) => <Badge size="xs" variant="filled" color={t.status === 'online' ? 'teal' : t.status === 'offline' ? 'red' : t.status === 'sbc' ? 'grape' : 'gray'}>{t.detail || (t.status === 'online' ? 'Conectada' : t.status === 'offline' ? 'Caída' : t.status === 'sbc' ? 'En el SBC' : 'Sin datos')}</Badge>;
   const glass = { background: 'rgba(255,255,255,.86)', backdropFilter: 'blur(10px)', border: '1px solid rgba(15,23,42,.08)', boxShadow: '0 10px 30px rgba(15,42,74,.10)' };
-  const isAst = f.kind !== 'kamailio';
+  const isAst = true; // troncales SBC usan los mismos campos SIP que las directas
 
   return (
     <div style={{ position: 'relative', height: 'calc(100vh - 40px)', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(15,23,42,.10)', background: 'radial-gradient(820px 420px at 72% -12%, rgba(47,116,230,.06), transparent), #f6f8fb' }}>

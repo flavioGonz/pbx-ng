@@ -2,12 +2,15 @@
 import { Stack, Title, Text, Badge, Tabs } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconTag, IconPhoneIncoming, IconArrowsSplit, IconTarget, IconAsterisk, IconDeviceLandlinePhone, IconBackspace, IconPlus, IconId, IconRoute } from '@tabler/icons-react';
 import CrudPanel from '../CrudPanel';
+import { useEffect, useState } from 'react';
 import PageHeader from '../PageHeader';
 import DidOverview from '../DidOverview';
 
 const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación' };
 
 export default function Rutas() {
+  const [trunkOpts, setTrunkOpts] = useState([]);
+  useEffect(() => { fetch('/backend/api/trunks').then((r) => r.json()).then((d) => Array.isArray(d) && setTrunkOpts(d.map((t) => ({ value: t.name, label: t.name + (t.provider_host ? ' (' + t.provider_host + ')' : '') })))).catch(() => {}); }, []);
   return (
     <Stack gap="lg">
       <PageHeader icon={<IconRoute size={24} />} title="Rutas" subtitle="Enrutamiento de llamadas de las troncales · entrantes (DID) y salientes" color="indigo" />
@@ -49,7 +52,7 @@ export default function Rutas() {
             fields={[
               { name: 'name', label: 'Nombre', icon: <IconTag size={15} />, placeholder: 'Salida nacional', description: 'Etiqueta de la regla. Ej: Salida nacional, Celulares.' },
               { name: 'pattern', label: 'Patrón (sin el _)', required: true, icon: <IconAsterisk size={15} />, placeholder: '0X.', description: 'Patrón de marcado de Asterisk. Ej: 0X. = un 0 seguido de uno o más dígitos. X = un dígito 0-9, . = uno o más.' },
-              { name: 'trunk', label: 'Troncal', required: true, icon: <IconDeviceLandlinePhone size={15} />, placeholder: 'proveedor-1', description: 'Troncal por la que sale la llamada. Ej: proveedor-1.' },
+              { name: 'trunk', label: 'Troncal', required: true, type: 'select', data: trunkOpts, icon: <IconDeviceLandlinePhone size={15} />, description: 'Elegí la troncal por la que sale la llamada.' },
               { name: 'strip', label: 'Quitar dígitos iniciales', icon: <IconBackspace size={15} />, placeholder: '1', description: 'Cuántos dígitos del principio sacar antes de enviar. Ej: 1 (quita el 0 que marcó el usuario).' },
               { name: 'prepend', label: 'Anteponer (opcional)', icon: <IconPlus size={15} />, placeholder: '+598', description: 'Texto a agregar adelante del número. Ej: +598 o 0.' },
               { name: 'callerid', label: 'CallerID saliente (opcional)', icon: <IconId size={15} />, placeholder: '59824000000', description: 'Número que verá el destinatario. Ej: 59824000000.' },
