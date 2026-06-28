@@ -1,0 +1,138 @@
+# PBX-NG · stack Docker completo (todos los nodos).
+# Perfiles (profiles) para instalar separado o junto:
+#   core  -> postgres, redis, asterisk, api, dashboard
+#   sbc   -> kamailio, rtpengine
+#   media -> coturn
+#   ai    -> voz (TTS/STT)
+#   proxy -> nginx-proxy-manager
+# Uso:  docker compose --profile core --profile sbc up -d   (o usar install.sh)
+name: pbxng
+networks:
+  pbxng:
+    driver: bridge
+volumes:
+  pg_data:
+  redis_data:
+  npm_data:
+  npm_letsencrypt:
+  asterisk_sounds:
+  voz_models:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["core"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-pbxng}
+      POSTGRES_USER: ${DB_USER:-pbxng}
+      POSTGRES_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [pbxng]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["core"]
+    restart: unless-stopped
+    volumes: [redis_data:/data]
+    networks: [pbxng]
+
+  asterisk:
+    build: ./images/asterisk          # Asterisk 22 LTS + res_config_pgsql
+    image: pbxng/asterisk:22
+    profiles: ["core"]
+    restart: unless-stopped
+    network_mode: host                # SIP/RTP necesitan red del host
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS}
+    volumes:
+      - asterisk_sounds:/var/lib/asterisk/sounds/custom
+      - ./config/asterisk:/etc/asterisk/pbxng
+
+  api:
+    build: ../control-plane           # Node/Express ARI+AMI
+    image: pbxng/api
+    profiles: ["core"]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${DB_NAME:-pbxng}
+      PGUSER: ${DB_USER:-pbxng}
+      PGPASSWORD: ${DB_PASS}
+      ARI_URL: http://${ASTERISK_HOST:-asterisk}:8088
+      AST_AGENT: http://${ASTERISK_HOST:-asterisk}:8092
+      TURN_AGENT: http://coturn-agent:8091
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+    ports: ["3000:3000"]
+    networks: [pbxng]
+
+  dashboard:
+    build: ../dashboard               # Next.js
+    image: pbxng/dashboard
+    profiles: ["core"]
+    restart: unless-stopped
+    depends_on: [api]
+    environment:
+      BACKEND_URL: http://api:3000
+    ports: ["3001:3001"]
+    networks: [pbxng]
+
+  kamailio:
+    build: ./images/kamailio          # Kamailio 5.6 + modulos SBC
+    image: pbxng/kamailio:5.6
+    profiles: ["sbc"]
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      postgres: { condition: service_healthy }
+    volumes:
+      - ./config/kamailio:/etc/kamailio
+    environment:
+      DB_URL: postgres://${DB_USER:-pbxng}:${DB_PASS}@${DB_HOST:-127.0.0.1}/${DB_NAME:-pbxng}
+
+  rtpengine:
+    image: drachtio/rtpengine:latest
+    profiles: ["sbc"]
+    restart: unless-stopped
+    network_mode: host
+    command: ["rtpengine", "--interface", "${PUBLIC_IP:-127.0.0.1}", "--listen-ng", "127.0.0.1:2223", "--port-min", "30000", "--port-max", "40000"]
+
+  coturn:
+    image: coturn/coturn:latest
+    profiles: ["media"]
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config/coturn/turnserver.conf:/etc/turnserver.conf:ro
+
+  voz:
+    build: ./images/voz               # Piper TTS + faster-whisper
+    image: pbxng/voz
+    profiles: ["ai"]
+    restart: unless-stopped
+    volumes: [voz_models:/opt/voz/models]
+    ports: ["8080:8080"]
+    networks: [pbxng]
+
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "81:81"]
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    networks: [pbxng]
