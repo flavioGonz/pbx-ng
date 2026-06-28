@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box, Button } from '@mantine/core';
-import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter } from '@tabler/icons-react';
+import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter, IconCloud } from '@tabler/icons-react';
 import { useLive } from './useLive';
 
 function Node({ data }) {
@@ -14,7 +14,7 @@ function Node({ data }) {
   const bg = tint ? tint.bg : data.accent ? 'linear-gradient(160deg,#1d4ed8,#1e3a8a)' : '#ffffff';
   if (data.logo) {
     return (
-      <div className={"sbc-node" + (data.live ? " sbc-live" : "")} style={{ width: 180, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'pointer', position: 'relative' }}>
+      <div className={"sbc-node" + (data.pulse === 'down' ? ' trk-down' : '') + (data.live ? ' sbc-live' : '')} style={{ width: 180, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'pointer', position: 'relative' }}>
         <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
         <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
         <div style={{ position: 'relative' }}>
@@ -30,7 +30,7 @@ function Node({ data }) {
     );
   }
   return (
-    <div className={"sbc-node" + (data.live ? " sbc-live" : "")} style={{ width: 232, borderRadius: 18, padding: '14px 16px', cursor: 'pointer', background: bg, color: filled ? '#fff' : '#1e293b', border: '1px solid ' + (filled ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 10px 30px rgba(30,50,120,.14)', transition: 'transform .15s, box-shadow .15s' }}>
+    <div className={"sbc-node" + (data.pulse === 'down' ? ' trk-down' : '') + (data.live ? ' sbc-live' : '')} style={{ width: 232, borderRadius: 18, padding: '14px 16px', cursor: 'pointer', background: bg, color: filled ? '#fff' : '#1e293b', border: '1px solid ' + (filled ? 'transparent' : 'rgba(15,23,42,.10)'), boxShadow: '0 10px 30px rgba(30,50,120,.14)', transition: 'transform .15s, box-shadow .15s' }}>
       <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
       <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -55,20 +55,34 @@ function GwNode({ data }) {
     </div>
   );
 }
-const nodeTypes = { pbx: Node, gw: GwNode };
+function CloudNode({ data }) {
+  return (
+    <div className="sbc-node" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+      <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
+      <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
+      <div style={{ width: 84, height: 84, borderRadius: '50%', background: 'linear-gradient(160deg,#3b82f6,#1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 10px 26px rgba(29,78,216,.35)' }}><IconCloud size={40} /></div>
+      <div style={{ textAlign: 'center', lineHeight: 1.2 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: '#1e293b' }}>{data.title}</div>
+        {data.metrics && data.metrics.map((m, i) => <div key={i} style={{ fontSize: 10.5, opacity: .65, color: '#1e293b', fontFamily: 'monospace' }}>{m.value}</div>)}
+      </div>
+    </div>
+  );
+}
+const nodeTypes = { pbx: Node, gw: GwNode, cloud: CloudNode };
 
 function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, label }) {
   const [path, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const base = (data && data.color) || '#94a3b8';
   const live = data && data.live;
-  const lc = live === 'ring' ? '#f59e0b' : '#16a34a';
+  const down = live === 'down';
+  const lc = down ? '#dc2626' : live === 'ring' ? '#f59e0b' : '#16a34a';
   return (
     <>
-      <path id={id} d={path} fill="none" stroke={base} strokeWidth={live ? 3 : 1.8} strokeOpacity={live ? 0.22 : 0.85} markerEnd={markerEnd} strokeLinecap="round" />
-      {live && (
+      <path id={id} d={path} fill="none" stroke={down ? lc : base} strokeWidth={live ? 3 : 1.8} strokeOpacity={live ? (down ? 0.95 : 0.22) : 0.85} markerEnd={markerEnd} strokeLinecap="round" className={down ? 'flow-blink' : undefined} />
+      {live && !down && (
         <>
           <path d={path} fill="none" stroke={lc} strokeWidth={3} strokeLinecap="round" strokeDasharray="2 12" className="flow-dash" style={{ filter: 'drop-shadow(0 0 4px ' + lc + 'cc)' }} />
-          <circle r="4.5" fill={lc} style={{ filter: 'drop-shadow(0 0 6px ' + lc + ')' }}><animateMotion dur={live === 'ring' ? '2.2s' : '1.5s'} repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href={'#' + id} /></animateMotion></circle>
+          <circle r="4.5" fill={lc} style={{ filter: 'drop-shadow(0 0 6px ' + lc + ')' }}><animateMotion dur={live === 'ring' ? '2.2s' : live === 'ok' ? '2.6s' : '1.5s'} repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href={'#' + id} /></animateMotion></circle>
         </>
       )}
       {label && <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" style={{ fontSize: 10.5, fontWeight: 600, fill: live ? lc : '#64748b', paintOrder: 'stroke', stroke: '#f6f8fb', strokeWidth: 3, strokeLinejoin: 'round' }}>{label}</text>}
@@ -108,7 +122,7 @@ export default function SbcFlow() {
 
   const computedNodes = useMemo(() => {
     const base = [
-      { id: 'wan', type: 'pbx', position: { x: 360, y: 80 }, data: { title: 'Internet', icon: <IconWorld size={17} />, status: 'ok', hint: 'Clientes WebRTC y públicos', metrics: [{ label: 'Dominio', value: 'pbx.ies.com.uy' }] } },
+      { id: 'wan', type: 'cloud', position: { x: 360, y: 80 }, data: { title: 'Internet', metrics: [{ value: 'pbx.ies.com.uy' }] } },
       { id: 'npm', type: 'pbx', position: { x: 660, y: 60 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
       { id: 'coturn', type: 'pbx', position: { x: 660, y: 440 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
       { id: 'kamailio', type: 'pbx', position: { x: 660, y: 250 }, data: { title: 'SBC-NG', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
@@ -120,7 +134,7 @@ export default function SbcFlow() {
     const step = 172, startY = 250 - ((tr.length - 1) * step) / 2;
     const tnodes = tr.map((t, i) => ({
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
-      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
+      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), pulse: t._empty ? null : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'ok' : null), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
     }));
     const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
     return [...base, ...gwNodes, ...tnodes];
@@ -130,17 +144,25 @@ export default function SbcFlow() {
 
   const talking = ch.filter(c => /up|answer/i.test(c.state || '')).length;
   const callCount = (() => { const set = new Set(); ch.forEach(c => set.add([c.caller || '?', c.connected || '?'].sort().join('~'))); return set.size; })();
-  const spine = ch.length ? (talking ? 'talk' : 'ring') : false;
-  const e = (id, s, t, color, label, live) => ({ id, source: s, target: t, type: 'flow', data: { color, live: live || false }, label, markerEnd: { type: MarkerType.ArrowClosed, color: live ? (live === 'ring' ? '#f59e0b' : '#16a34a') : color } });
+  const callMode = talking ? 'talk' : 'ring';
+  const chName = (c) => { const m = /^PJSIP\/([^-]+)-/.exec(c.name || ''); return m ? m[1] : null; };
+  const extSet = new Set(eps.map((x) => x.id));
+  const wrtcSet = new Set(eps.filter((x) => x.webrtc).map((x) => x.id));
+  const trunkActive = (nm) => ch.some((c) => chName(c) === nm);
+  const anyTrunkActive = trunks.some((t) => trunkActive(t.name));
+  const internosActive = ch.some((c) => extSet.has(chName(c)));
+  const webrtcActive = ch.some((c) => wrtcSet.has(chName(c)));
+  const lcOf = (live) => live === 'down' ? '#dc2626' : live === 'ring' ? '#f59e0b' : '#16a34a';
+  const e = (id, s, t, color, label, live) => ({ id, source: s, target: t, type: 'flow', data: { color, live: live || false }, label, markerEnd: { type: MarkerType.ArrowClosed, color: live ? lcOf(live) : color } });
   const edges = [
-    e('e1', 'wan', 'npm', '#1d4ed8', 'HTTPS/WSS', false),
-    e('e3', 'wan', 'coturn', '#0891b2', 'TURN', false),
-    e('eC', 'coturn', 'asterisk', '#0891b2', 'media RTP', spine),
-    e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws', spine),
-    e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'trunk interno', spine),
-    e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined, spine),
+    e('e1', 'wan', 'npm', '#1d4ed8', 'HTTPS/WSS', webrtcActive ? callMode : false),
+    e('e3', 'wan', 'coturn', '#0891b2', 'TURN', webrtcActive ? callMode : false),
+    e('eC', 'coturn', 'asterisk', '#0891b2', 'media RTP', webrtcActive ? callMode : false),
+    e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws', webrtcActive ? callMode : false),
+    e('e5', 'kamailio', 'asterisk', '#7c3aed', anyTrunkActive ? 'llamada por troncal' : 'trunk interno', anyTrunkActive ? callMode : false),
+    e('e7', 'asterisk', 'internos', '#16a34a', internosActive ? '● en curso' : undefined, internosActive ? callMode : false),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
-    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio'), t._empty ? '#94a3b8' : (t.status === 'online' ? '#2f74e6' : t.status === 'offline' ? '#dc2626' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
+    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio'), t._empty ? '#94a3b8' : (t.status === 'online' ? '#16a34a' : t.status === 'offline' ? '#dc2626' : '#0e9488'), undefined, t._empty ? false : (t.status === 'offline' ? 'down' : trunkActive(t.name) ? callMode : t.status === 'online' ? 'ok' : false))),
     ...(Array.isArray(sbcRoutes) ? sbcRoutes : []).map((rr) => e('gw-e-' + rr.id, 'gw-' + rr.id, 'kamailio', '#0891b2', undefined, false)),
   ];
 
@@ -153,7 +175,7 @@ export default function SbcFlow() {
 
   return (
     <>
-      <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}} .sbc-live{animation:sbcpulse 1.6s ease-in-out infinite!important;} @keyframes sbcpulse{0%,100%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 8px rgba(22,163,74,0)}} .flow-dash{animation:flowdash .6s linear infinite} @keyframes flowdash{to{stroke-dashoffset:-28}}`}</style>
+      <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}} .sbc-live{animation:sbcpulse 1.6s ease-in-out infinite!important;} @keyframes sbcpulse{0%,100%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 8px rgba(22,163,74,0)}} .flow-dash{animation:flowdash .6s linear infinite} @keyframes flowdash{to{stroke-dashoffset:-28}} .flow-blink{animation:flowblink 1s steps(1,end) infinite} @keyframes flowblink{0%,49%{stroke-opacity:.95}50%,100%{stroke-opacity:.18}} .trk-down{animation:trkblink 1.1s steps(1,end) infinite} @keyframes trkblink{0%,49%{opacity:1}50%,100%{opacity:.4}}`}</style>
       <div className="sbc-flow" style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
         {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {callCount} llamada(s) · {ch.length} canal(es)</div>}
         <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
