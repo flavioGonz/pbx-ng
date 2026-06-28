@@ -154,20 +154,6 @@ function ConsoleBody({ sbc, load, hist }) {
       </Tabs.Panel>
 
       <Tabs.Panel value="sec">
-        <SegmentedControl fullWidth mb="md" value={secView} onChange={setSecView} data={[{ value: 'sbc', label: 'Borde - SBC (Kamailio)' }, { value: 'ast', label: 'Nucleo - Asterisk (Fail2Ban)' }]} />
-        {secView === 'ast' ? <>
-          <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
-            <Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">Seguridad del nucleo (Asterisk - Fail2Ban)</Text></Group>
-            <Text size="sm" c="dimmed">Segunda capa de defensa: Fail2Ban corre en el Asterisk (CT103) y banea IPs por fuerza bruta SIP analizando los logs de PJSIP. El SBC (borde) ya filtra antes con pike/htable. Gestion completa (whitelist, mapa, politica) en la pagina Seguridad.</Text>
-          </Card>
-          {!f2b ? <Text size="sm" c="dimmed">Cargando estado de Fail2Ban...</Text> : (f2b.jails || []).length === 0 ? <Text size="sm" c="dimmed">Sin jails de Fail2Ban activos.</Text> :
-            <Stack gap="sm">{(f2b.jails || []).map((j) => { const bl = Array.isArray(j.banned) ? j.banned : []; return (
-              <Card key={j.jail} withBorder radius="md" padding="sm">
-                <Group justify="space-between"><Text fw={700}>{j.jail}</Text><Group gap={6}><Badge variant="light" color="red">{bl.length} baneadas</Badge><Badge variant="light" color="orange">{j.total_failed || 0} intentos</Badge></Group></Group>
-                {bl.length > 0 && <Table mt="xs" highlightOnHover><Table.Tbody>{bl.map((ip, i) => { const ipv = typeof ip === 'string' ? ip : (ip.ip || JSON.stringify(ip)); return <Table.Tr key={i}><Table.Td ff="monospace" fz="sm">{ipv}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="teal" onClick={async () => { await fetch('/backend/api/security/unban', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ipv, jail: j.jail }) }).catch(() => {}); toast('Desbloqueando ' + ipv, 'ok'); }}>Desbloquear</Button></Table.Td></Table.Tr>; })}</Table.Tbody></Table>}
-              </Card>); })}</Stack>}
-          <Button mt="md" variant="light" component="a" href="/seguridad" leftSection={<IconShieldLock size={16} />}>Gestion completa de seguridad</Button>
-        </> : <>
         <Card withBorder radius="md" padding="md" mb="md">
           <Group justify="space-between" mb="sm"><Text fw={700}>IPs bloqueadas (ipban)</Text>
             <Group gap="xs">
@@ -185,7 +171,6 @@ function ConsoleBody({ sbc, load, hist }) {
           <Text size="sm" c="dimmed">{(stats.pike_count || 0) === 0 ? 'Sin fuentes sospechosas en seguimiento.' : (stats.pike_count + ' IP(s) en seguimiento por pike.')}</Text>
           {(stats.pike || []).length > 0 && <Group gap={6} mt="xs">{stats.pike.map(ip => <Badge key={ip} variant="light" color="orange">{ip}</Badge>)}</Group>}
         </Card>
-        </>}
       </Tabs.Panel>
 
       <Tabs.Panel value="disp">

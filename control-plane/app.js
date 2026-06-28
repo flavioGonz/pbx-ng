@@ -844,6 +844,34 @@ app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd
 app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+// --- Troncal interna Asterisk <-> SBC (modelo borde) ---
+app.get('/api/asterisk/sbc-trunk', async (req, res) => {
+  try {
+    const ep = (await pool.query("SELECT id,transport,aors,context,allow FROM ps_endpoints WHERE id='to-sbc'")).rows;
+    const aor = (await pool.query("SELECT contact,qualify_frequency FROM ps_aors WHERE id='to-sbc'")).rows;
+    const idp = (await pool.query("SELECT match FROM ps_endpoint_id_ips WHERE id='to-sbc'")).rows;
+    res.json({ exists: ep.length > 0, endpoint: ep[0] || null, aor: aor[0] || null, identify: idp[0] || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/asterisk/sbc-trunk', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const ip = (b.sbc_ip || '172.26.20.205').trim();
+    const port = +b.sbc_port || 5060;
+    const ctx = (b.context || 'from-trunk').trim();
+    const codecs = (Array.isArray(b.codecs) && b.codecs.length ? b.codecs : ['ulaw', 'alaw', 'g722']).join(',');
+    const contact = 'sip:' + ip + ':' + port;
+    await pool.query("INSERT INTO ps_aors(id,contact,qualify_frequency) VALUES('to-sbc',$1,30) ON CONFLICT(id) DO UPDATE SET contact=$1,qualify_frequency=30", [contact]);
+    await pool.query("INSERT INTO ps_endpoints(id,transport,aors,context,disallow,allow,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) VALUES('to-sbc','transport-udp','to-sbc',$1,'all',$2,'no','yes','yes','yes','ip',1,'trunk') ON CONFLICT(id) DO UPDATE SET context=$1,allow=$2,transport='transport-udp',aors='to-sbc',identify_by='ip',direct_media='no'", [ctx, codecs]);
+    await pool.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES('to-sbc','to-sbc',$1) ON CONFLICT(id) DO UPDATE SET match=$1,endpoint='to-sbc'", [ip]);
+    try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/asterisk/sbc-trunk', async (req, res) => {
+  try { await pool.query("DELETE FROM ps_endpoint_id_ips WHERE id='to-sbc'"); await pool.query("DELETE FROM ps_endpoints WHERE id='to-sbc'"); await pool.query("DELETE FROM ps_aors WHERE id='to-sbc'"); try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {} res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // --- Modulos (PBX modular: activar/desactivar) ---
 const MODULE_IDS = ['sbc', 'turn', 'voz', 'clicktocall', 'push', 'autoprov', 'ai'];
 app.get('/api/modules', async (req, res) => {

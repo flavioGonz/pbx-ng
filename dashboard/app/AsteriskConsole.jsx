@@ -1,24 +1,30 @@
 /* AsteriskConsole.jsx - consola del nucleo Asterisk (Nucleo / Red / Dialplan / Seguridad) */
 'use client';
 import { useEffect, useState } from 'react';
-import { Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, ThemeIcon, Table, Loader, Center } from '@mantine/core';
-import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, IconPlugConnected, IconBolt, IconInfoCircle, IconRouter } from '@tabler/icons-react';
+import { Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, ThemeIcon, Table, Loader, Center, TextInput, NumberInput, Button, MultiSelect, Alert } from '@mantine/core';
+import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, IconPlugConnected, IconBolt, IconInfoCircle, IconRouter, IconDeviceLandlinePhone, IconDeviceFloppy, IconTrash } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import RoutesPanel from './RoutesPanel';
 import Dialplan from './dialplan/page';
+import { toast } from './notify';
 
 export default function AsteriskConsole() {
   const { snap } = useLive();
   const [core, setCore] = useState(null); const [net, setNet] = useState(null); const [f2b, setF2b] = useState(null);
-  async function load() { try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {} }
+  const [trunk, setTrunk] = useState(null); const [tf, setTf] = useState({ sbc_ip: '172.26.20.205', sbc_port: 5060, context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'] }); const [tbusy, setTbusy] = useState('');
+  async function load() { try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {}
+    try { const tk = await fetch('/backend/api/asterisk/sbc-trunk').then((r) => r.json()); setTrunk(tk); if (tk && tk.exists) setTf((f) => ({ ...f, sbc_ip: (tk.identify && tk.identify.match) || f.sbc_ip, context: (tk.endpoint && tk.endpoint.context) || f.context, codecs: (tk.endpoint && tk.endpoint.allow) ? tk.endpoint.allow.split(',') : f.codecs })); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, []);
   useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
+  async function saveTrunk() { setTbusy('save'); const r = await fetch('/backend/api/asterisk/sbc-trunk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tf) }).then((x) => x.json()).catch(() => ({ error: 1 })); setTbusy(''); toast(r.error ? 'Error al guardar' : 'Troncal hacia el SBC guardada (pjsip recargado)', r.error ? 'bad' : 'ok'); setTimeout(load, 700); }
+  async function delTrunk() { if (!confirm('¿Eliminar la troncal interna hacia el SBC?')) return; setTbusy('del'); await fetch('/backend/api/asterisk/sbc-trunk', { method: 'DELETE' }).catch(() => {}); setTbusy(''); toast('Troncal eliminada', 'info'); setTimeout(load, 700); }
   const ch = (snap && snap.channels) || []; const m = (core && core.metrics) || {};
   const flag = (on, l) => <Badge variant="light" color={on ? 'teal' : 'gray'} size="sm">{l}</Badge>;
   return (
     <Tabs defaultValue="core" variant="pills" radius="md" keepMounted={false}>
       <Tabs.List mb="md">
         <Tabs.Tab value="core" leftSection={<IconActivity size={16} />}>Núcleo</Tabs.Tab>
+        <Tabs.Tab value="trunk" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncal SBC</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="dialplan" leftSection={<IconTerminal2 size={16} />}>Dialplan</Tabs.Tab>
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad</Tabs.Tab>
@@ -40,6 +46,20 @@ export default function AsteriskConsole() {
           <Card withBorder radius="md" padding="md"><Text fw={700} mb="xs">Transportes PJSIP</Text><Group gap="xs">{(core.transports || []).map((t) => <Badge key={t.id} variant="light" color="blue" leftSection={<IconPlugConnected size={12} />}>{t.id} · {(t.proto || '').toUpperCase()}</Badge>)}</Group></Card>
           <Card withBorder radius="md" padding="md"><Text fw={700} mb="xs">Módulos clave</Text><Group gap="xs">{Object.entries(core.modules || {}).map(([k, v]) => <Badge key={k} variant="light" color={v ? 'teal' : 'red'}>{k}: {v ? 'cargado' : 'no'}</Badge>)}</Group></Card>
         </Stack>}
+      </Tabs.Panel>
+
+      <Tabs.Panel value="trunk">
+        <Alert color="grape" icon={<IconInfoCircle size={16} />} variant="light" title="Troncal interna Asterisk -> SBC" mb="md">El SBC (Kamailio) es quien se registra contra cada proveedor (Antel, etc.). Asterisk habla con UNA sola troncal interna hacia el SBC: las llamadas salientes se envían al SBC y las entrantes llegan desde él. Configurá ese enlace acá.</Alert>
+        <Card withBorder radius="md" padding="md" maw={620}>
+          <Group justify="space-between" mb="sm"><Text fw={700}>Enlace hacia el SBC</Text>{trunk && (trunk.exists ? <Badge color="teal" variant="light" leftSection={<IconPlugConnected size={12} />}>Configurada</Badge> : <Badge color="gray" variant="light">No configurada</Badge>)}</Group>
+          <Stack gap="sm">
+            <Group grow><TextInput label="IP del SBC" value={tf.sbc_ip} onChange={(e) => setTf({ ...tf, sbc_ip: e.target.value })} leftSection={<IconRouter size={15} />} description="Kamailio (CT107)" /><NumberInput label="Puerto SIP" value={tf.sbc_port} onChange={(v) => setTf({ ...tf, sbc_port: v })} w={140} /></Group>
+            <TextInput label="Contexto entrante" value={tf.context} onChange={(e) => setTf({ ...tf, context: e.target.value })} description="Dónde caen las llamadas que entran desde el SBC" />
+            <MultiSelect label="Códecs" data={['ulaw','alaw','g722','g729','opus']} value={tf.codecs} onChange={(v) => setTf({ ...tf, codecs: v })} clearable={false} />
+            <Group><Button leftSection={<IconDeviceFloppy size={16} />} loading={tbusy === 'save'} onClick={saveTrunk} color="grape">{trunk && trunk.exists ? 'Actualizar troncal' : 'Crear troncal hacia el SBC'}</Button>{trunk && trunk.exists && <Button variant="light" color="red" leftSection={<IconTrash size={16} />} loading={tbusy === 'del'} onClick={delTrunk}>Eliminar</Button>}</Group>
+            <Text size="xs" c="dimmed">Identificación por IP (sin contraseña): Asterisk acepta el tráfico del SBC y le envía las salientes. Para que las troncales del proveedor salgan por aquí, las rutas salientes deben usar esta troncal (to-sbc).</Text>
+          </Stack>
+        </Card>
       </Tabs.Panel>
 
       <Tabs.Panel value="net">

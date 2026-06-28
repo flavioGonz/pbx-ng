@@ -82,6 +82,8 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         try: b = json.loads(self.rfile.read(n) or b"{}")
         except Exception: b = {}
+        if self.path.startswith("/reload"):
+            subprocess.run("asterisk -rx 'pjsip reload'", shell=True, timeout=20); return self._s(200, {"ok": True})
         if self.path.startswith("/route"):
             act = b.get("action"); rs = load_routes()
             if act == "add":
