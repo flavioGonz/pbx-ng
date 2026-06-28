@@ -1,10 +1,12 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { TextInput, PasswordInput, Button, Text } from '@mantine/core';
 export default function Login() {
   const [u, setU] = useState(''); const [p, setP] = useState(''); const [err, setErr] = useState(''); const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', tagline: 'Comunicaciones unificadas', logo: '' });
+  useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then(setBrand).catch(() => {}); }, []);
   async function submit(e) {
     e.preventDefault(); setErr(''); setLoading(true);
     try {
@@ -19,9 +21,9 @@ export default function Login() {
     <div style={wrap}>
       <div style={panel}>
         <div style={brand}>
-          <svg width="64" height="64" viewBox="0 0 48 48"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#7aa2ff" /><stop offset="1" stopColor="#1e40af" /></linearGradient></defs><path d="M24 2 L42 9 V25 C42 36 34 43 24 46 C14 43 6 36 6 25 V9 Z" fill="url(#lg)" /><text x="24" y="30" textAnchor="middle" fontWeight="800" fontSize="15" fill="#fff" fontFamily="Inter,sans-serif">IES</text></svg>
-          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-.02em', marginTop: 18 }}>PBX-NG</div>
-          <div style={{ color: '#aebfe0', marginTop: 4 }}>Comunicaciones unificadas</div>
+          {brand.logo ? <img src={brand.logo} alt="" style={{ width: 64, height: 64, objectFit: 'contain' }} /> : <svg width="64" height="64" viewBox="0 0 48 48"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#7aa2ff" /><stop offset="1" stopColor="#1e40af" /></linearGradient></defs><path d="M24 2 L42 9 V25 C42 36 34 43 24 46 C14 43 6 36 6 25 V9 Z" fill="url(#lg)" /><text x="24" y="30" textAnchor="middle" fontWeight="800" fontSize="15" fill="#fff" fontFamily="Inter,sans-serif">IES</text></svg>}
+          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-.02em', marginTop: 18 }}>{brand.name}</div>
+          <div style={{ color: '#aebfe0', marginTop: 4 }}>{brand.tagline || brand.subtitle}</div>
         </div>
         <div style={tagline}>
           <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.25 }}>Plataforma de telefonía<br />empresarial</div>

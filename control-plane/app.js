@@ -602,7 +602,9 @@ app.post('/api/vm/read', async (req, res) => {
   try { const r = await fetch(VM_AGENT + '/vm/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.get('/api/branding', async (req, res) => { try { const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; }; res.json({ name: (await g('brand_name')) || 'PBX-NG', subtitle: (await g('brand_subtitle')) || 'Comunicaciones', tagline: (await g('brand_tagline')) || '', logo: (await g('brand_logo')) || '' }); } catch (e) { res.json({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' }); } });
 app.use('/api', auth);
+app.post('/api/branding', async (req, res) => { try { const b = req.body || {}; const setk = async (k, v) => { if (v === undefined) return; await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", [k, v || '']); }; await setk('brand_name', b.name); await setk('brand_subtitle', b.subtitle); await setk('brand_tagline', b.tagline); await setk('brand_logo', b.logo); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/geo', async (req, res) => {
   const hours = Math.min(+(req.query.hours || 168), 720);
   const limit = Math.min(+(req.query.limit || 300), 1000);

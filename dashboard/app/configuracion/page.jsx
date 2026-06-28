@@ -4,6 +4,7 @@ import { Card, Title, Text, Stack, SimpleGrid, Group, Badge, Tabs, Button, Skele
 import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle } from '@tabler/icons-react';
 import { toast } from '../notify';
 import ModulesPanel from '../ModulesPanel';
+import BrandingPanel from '../BrandingPanel';
 const STMAP = { ok: ['teal', 'Activo'], pending: ['yellow', 'Pendiente'], optional: ['gray', 'Opcional'], down: ['red', 'Caído'], off: ['gray', 'Inactivo'] };
 
 export default function Configuracion() {
@@ -46,6 +47,7 @@ export default function Configuracion() {
       <Tabs defaultValue="componentes" variant="pills" radius="md" keepMounted={false}>
         <Tabs.List mb="md">
           <Tabs.Tab value="modulos" leftSection={<IconAdjustments size={16} />}>Módulos</Tabs.Tab>
+          <Tabs.Tab value="branding" leftSection={<IconAdjustments size={16} />}>Branding</Tabs.Tab>
           <Tabs.Tab value="componentes" leftSection={<IconServer2 size={16} />}>Componentes</Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={16} />}>Email por empresa</Tabs.Tab>
           <Tabs.Tab value="audios" leftSection={<IconMicrophone2 size={16} />}>Audios</Tabs.Tab>
@@ -53,6 +55,8 @@ export default function Configuracion() {
         </Tabs.List>
 
         <Tabs.Panel value="modulos"><ModulesPanel /></Tabs.Panel>
+
+        <Tabs.Panel value="branding"><BrandingPanel /></Tabs.Panel>
 
         <Tabs.Panel value="componentes">
           {loading ?

@@ -12,7 +12,8 @@ import {
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
 
-function Logo() {
+function Logo({ logo, name }) {
+  if (logo) return <img src={logo} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 8 }} />;
   return (
     <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
       <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#557bd7" /><stop offset="1" stopColor="#143196" /></linearGradient></defs>
@@ -60,6 +61,8 @@ export default function Shell({ children }) {
   useEffect(() => { fetch('/backend/api/modules').then((r) => r.json()).then(setMods).catch(() => {}); }, []);
   const MOD_MAP = { '/sbc': 'sbc', '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai' };
   const visibleItem = (it) => !MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false;
+  const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
+  useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then((bb) => { setBrand(bb); if (bb && bb.name && typeof document !== 'undefined') document.title = bb.name; }).catch(() => {}); }, []);
   useEffect(() => { try { setRail(localStorage.getItem('pbxng_rail') === '1'); } catch (_) {} }, []);
   const isActive = (it) => it.href === '/' ? path === '/' : path.startsWith(it.href);
   // por defecto: abrir el grupo que contiene la ruta activa
@@ -95,8 +98,8 @@ export default function Shell({ children }) {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           {/* cabecera del sidebar: logo + contraer */}
           <Group justify="space-between" wrap="nowrap" mb="xs" px={rail ? 0 : 4} style={{ justifyContent: rail ? 'center' : 'space-between' }}>
-            {!rail && <Group gap={8} wrap="nowrap"><Logo /><div><Text fw={800} size="sm" lh={1.05}>PBX-NG</Text><Text size="10px" c="dimmed" lh={1.05}>Comunicaciones</Text></div></Group>}
-            {rail && <Logo />}
+            {!rail && <Group gap={8} wrap="nowrap"><Logo logo={brand.logo} name={brand.name} /><div><Text fw={800} size="sm" lh={1.05}>{brand.name}</Text><Text size="10px" c="dimmed" lh={1.05}>{brand.subtitle}</Text></div></Group>}
+            {rail && <Logo logo={brand.logo} name={brand.name} />}
             {!rail && <Tooltip label="Contraer menú" position="right"><ActionIcon variant="subtle" color="gray" onClick={toggleRail}><IconLayoutSidebarLeftCollapse size={19} /></ActionIcon></Tooltip>}
           </Group>
           {rail && <Tooltip label="Expandir menú" position="right"><ActionIcon variant="subtle" color="gray" mx="auto" mb="xs" onClick={toggleRail}><IconLayoutSidebarLeftExpand size={19} /></ActionIcon></Tooltip>}

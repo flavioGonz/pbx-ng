@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box, Button } from '@mantine/core';
@@ -110,6 +110,7 @@ export default function SbcFlow() {
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [menu, setMenu] = useState(null);
+  const flowRef = useRef(null);
   const [teOpen, setTeOpen] = useState(false);
   const [teName, setTeName] = useState(null);
   async function load() {
@@ -205,13 +206,19 @@ export default function SbcFlow() {
   return (
     <>
       <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}} .sbc-live{animation:sbcpulse 1.6s ease-in-out infinite!important;} @keyframes sbcpulse{0%,100%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 8px rgba(22,163,74,0)}} .flow-dash{animation:flowdash .6s linear infinite} @keyframes flowdash{to{stroke-dashoffset:-28}} .flow-blink{animation:flowblink 1s steps(1,end) infinite} @keyframes flowblink{0%,49%{stroke-opacity:.95}50%,100%{stroke-opacity:.18}} .trk-down{animation:trkblink 1.1s steps(1,end) infinite} @keyframes trkblink{0%,49%{opacity:1}50%,100%{opacity:.4}}`}</style>
-      <div className="sbc-flow" style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
+      <div className="sbc-flow" ref={flowRef} style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
         {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {callCount} llamada(s) · {ch.length} canal(es)</div>}
         <ReactFlow nodes={rfNodes} edges={edges.filter((e) => _ids.has(e.source) && _ids.has(e.target))} onNodesChange={onNodesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
-          onNodeClick={(_, n) => setSel(n.id)} onNodeContextMenu={(ev, n) => { ev.preventDefault(); setMenu({ x: ev.clientX, y: ev.clientY, id: n.id }); }} onPaneClick={() => setMenu(null)} onNodeDragStop={() => setRfNodes((cur) => { const map = {}; cur.forEach((n) => { map[n.id] = n.position; }); try { localStorage.setItem('pbxng_sbc_nodepos', JSON.stringify(map)); } catch (_) {} return cur; })} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
+          onNodeClick={(_, n) => setSel(n.id)} onNodeContextMenu={(ev, n) => { ev.preventDefault(); const r = flowRef.current ? flowRef.current.getBoundingClientRect() : { left: 0, top: 0 }; setMenu({ x: ev.clientX - r.left, y: ev.clientY - r.top, id: n.id }); }} onPaneClick={() => setMenu(null)} onNodeDragStop={() => setRfNodes((cur) => { const map = {}; cur.forEach((n) => { map[n.id] = n.position; }); try { localStorage.setItem('pbxng_sbc_nodepos', JSON.stringify(map)); } catch (_) {} return cur; })} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
           <Background color="#cdd7e4" gap={22} />
           <Controls showInteractive={false} />
         </ReactFlow>
+        {menu && (<>
+          <div onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} style={{ position: 'absolute', inset: 0, zIndex: 200 }} />
+          <div style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 201, background: '#fff', borderRadius: 12, boxShadow: '0 14px 38px rgba(15,42,74,.24)', border: '1px solid rgba(15,23,42,.08)', padding: 6, minWidth: 196 }}>
+            {menuActions(menu.id).map((a, i) => (<button key={i} onClick={() => { a.onClick(); setMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', padding: '9px 11px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: a.color || '#1e293b', textAlign: 'left' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>{a.icon}{a.label}</button>))}
+          </div>
+        </>)}
       </div>
 
       <Modal opened={!!sel} onClose={() => setSel(null)} size="lg" radius="lg" centered overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
@@ -264,14 +271,7 @@ export default function SbcFlow() {
           </Stack>}
       </Modal>
 
-      {menu && (<>
-        <div onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} style={{ position: 'fixed', inset: 0, zIndex: 200 }} />
-        <div style={{ position: 'fixed', left: Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 210), top: menu.y, zIndex: 201, background: '#fff', borderRadius: 12, boxShadow: '0 14px 38px rgba(15,42,74,.24)', border: '1px solid rgba(15,23,42,.08)', padding: 6, minWidth: 196 }}>
-          {menuActions(menu.id).map((a, i) => (
-            <button key={i} onClick={() => { a.onClick(); setMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', padding: '9px 11px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: a.color || '#1e293b', textAlign: 'left' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>{a.icon}{a.label}</button>
-          ))}
-        </div>
-      </>)}
+
 
       <TrunkEditor opened={teOpen} onClose={() => setTeOpen(false)} initialName={teName} onSaved={load} />
     </>
