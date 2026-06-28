@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider } from '@mantine/core';
 import {
-  IconSitemap, IconServer2,
+  IconSitemap, IconServer2, IconDatabase,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute,
   IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2,
@@ -47,6 +47,7 @@ const groups = [
     { href: '/dialplan', label: 'Dialplan', icon: IconTerminal2 },
     { href: '/empresas', label: 'Empresas', icon: IconBuilding },
     { href: '/usuarios', label: 'Usuarios', icon: IconUsersGroup },
+    { href: '/basedatos', label: 'Base de datos', icon: IconDatabase },
     { href: '/seguridad', label: 'Seguridad', icon: IconShieldCheck },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
     { href: '/configuracion', label: 'Configuración', icon: IconSettings },

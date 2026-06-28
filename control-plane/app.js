@@ -872,6 +872,24 @@ app.delete('/api/asterisk/sbc-trunk', async (req, res) => {
   try { await pool.query("DELETE FROM ps_endpoint_id_ips WHERE id='to-sbc'"); await pool.query("DELETE FROM ps_endpoints WHERE id='to-sbc'"); await pool.query("DELETE FROM ps_aors WHERE id='to-sbc'"); try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {} res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// --- Base de datos (PostgreSQL ARA + control plane) ---
+app.get('/api/db', async (req, res) => {
+  try {
+    const q = async (sql) => (await pool.query(sql)).rows;
+    const ver = ((await q('select version() v'))[0].v || '').split(' on ')[0];
+    const up = (await q("select date_trunc('second', now()-pg_postmaster_start_time())::text u, pg_postmaster_start_time()::text s"))[0];
+    const sz = (await q('select pg_size_pretty(pg_database_size(current_database())) p, pg_database_size(current_database()) b'))[0];
+    const conn = (await q("select count(*)::int total, count(*) filter (where state='active')::int active, count(*) filter (where state='idle')::int idle from pg_stat_activity where datname=current_database()"))[0];
+    const maxc = (await q('show max_connections'))[0].max_connections;
+    const tables = await q('select schemaname as schema, relname as name, n_live_tup as rows, pg_total_relation_size(relid) as bytes, pg_size_pretty(pg_total_relation_size(relid)) as size from pg_stat_user_tables order by pg_total_relation_size(relid) desc limit 100');
+    res.json({ version: ver, uptime: up.u, started: up.s, size: sz.p, size_bytes: +sz.b, conn: { total: conn.total, active: conn.active, idle: conn.idle, max: +maxc }, tables });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/db/maintenance', async (req, res) => {
+  try { const t = req.body && req.body.table; if (t && /^[a-zA-Z0-9_]+$/.test(t)) await pool.query('VACUUM ANALYZE ' + t); else await pool.query('VACUUM ANALYZE'); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // --- Modulos (PBX modular: activar/desactivar) ---
 const MODULE_IDS = ['sbc', 'turn', 'voz', 'clicktocall', 'push', 'autoprov', 'ai'];
 app.get('/api/modules', async (req, res) => {
