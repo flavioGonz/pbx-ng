@@ -45,7 +45,17 @@ function Node({ data }) {
     </div>
   );
 }
-const nodeTypes = { pbx: Node };
+function GwNode({ data }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+      <Handle type="target" position={Position.Left} style={{ background: '#94a3b8' }} />
+      <Handle type="source" position={Position.Right} style={{ background: '#94a3b8' }} />
+      <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#fff', border: '2px solid #0891b2', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(8,145,178,.20)', color: '#0891b2' }}><IconRouter size={26} /></div>
+      {data.gw && <div style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: '#0f172a' }}>{data.gw}</div>}
+    </div>
+  );
+}
+const nodeTypes = { pbx: Node, gw: GwNode };
 
 function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, label }) {
   const [path, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
@@ -112,11 +122,11 @@ export default function SbcFlow() {
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
       data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
     }));
-    const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'pbx', position: { x: 250, y: 480 + i * 112 }, data: { title: 'Gateway', icon: <IconRouter size={17} />, status: 'ok', metrics: [{ label: 'ruta', value: r.dest }] } }));
+    const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
     return [...base, ...gwNodes, ...tnodes];
   }, [sbc, trunks, sys, snap, sbcRoutes]);
 
-  useEffect(() => { setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return ex ? { ...n, position: ex.position } : n; })); }, [computedNodes, setRfNodes]);
+  useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_sbc_nodepos') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
 
   const talking = ch.filter(c => /up|answer/i.test(c.state || '')).length;
   const callCount = (() => { const set = new Set(); ch.forEach(c => set.add([c.caller || '?', c.connected || '?'].sort().join('~'))); return set.size; })();
@@ -147,7 +157,7 @@ export default function SbcFlow() {
       <div className="sbc-flow" style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
         {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {callCount} llamada(s) · {ch.length} canal(es)</div>}
         <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
-          onNodeClick={(_, n) => setSel(n.id)} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
+          onNodeClick={(_, n) => setSel(n.id)} onNodeDragStop={() => setRfNodes((cur) => { const map = {}; cur.forEach((n) => { map[n.id] = n.position; }); try { localStorage.setItem('pbxng_sbc_nodepos', JSON.stringify(map)); } catch (_) {} return cur; })} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
           <Background color="#cdd7e4" gap={22} />
           <Controls showInteractive={false} />
         </ReactFlow>
