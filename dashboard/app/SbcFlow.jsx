@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box, Button } from '@mantine/core';
-import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt } from '@tabler/icons-react';
+import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter } from '@tabler/icons-react';
 import { useLive } from './useLive';
 
 function Node({ data }) {
@@ -80,13 +80,14 @@ const INFO = {
 
 export default function SbcFlow() {
   const { snap } = useLive();
-  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null);
+  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]);
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   async function load() {
     try { setSbc(await fetch('/backend/api/sbc').then(r => r.json())); } catch (_) {}
     try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {}
     try { setSys(await fetch('/backend/api/system').then(r => r.json())); } catch (_) {}
+    try { const _r = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(_r)) setSbcRoutes(_r); } catch (_) {}
   }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
 
@@ -111,8 +112,9 @@ export default function SbcFlow() {
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
       data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
     }));
-    return [...base, ...tnodes];
-  }, [sbc, trunks, sys, snap]);
+    const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'pbx', position: { x: 250, y: 480 + i * 112 }, data: { title: 'Gateway', ip: r.gw || r.dev || '', icon: <IconRouter size={17} />, status: 'ok', metrics: [{ label: 'ruta', value: r.dest }, { label: 'vía', value: r.gw || r.dev || '' }] } }));
+    return [...base, ...gwNodes, ...tnodes];
+  }, [sbc, trunks, sys, snap, sbcRoutes]);
 
   useEffect(() => { setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return ex ? { ...n, position: ex.position } : n; })); }, [computedNodes, setRfNodes]);
 
@@ -128,7 +130,8 @@ export default function SbcFlow() {
     e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'trunk interno', spine),
     e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined, spine),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
-    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), 'kamailio', t._empty ? '#94a3b8' : (t.status === 'online' ? '#2f74e6' : t.status === 'offline' ? '#dc2626' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
+    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio'), t._empty ? '#94a3b8' : (t.status === 'online' ? '#2f74e6' : t.status === 'offline' ? '#dc2626' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
+    ...(Array.isArray(sbcRoutes) ? sbcRoutes : []).map((rr) => e('gw-e-' + rr.id, 'gw-' + rr.id, 'kamailio', '#0891b2', (rr.gw || rr.dev || ''), false)),
   ];
 
   const node = computedNodes.find(n => n.id === sel);

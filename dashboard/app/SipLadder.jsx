@@ -69,7 +69,7 @@ export default function SipLadder() {
   const liveRef = useRef(live); liveRef.current = live;
   const vpRef = useRef(null);
 
-  const load = async () => { try { const d = await fetch('/backend/api/sip/messages?limit=500').then((r) => r.json()); if (Array.isArray(d)) setMsgs(d); } catch (_) {} };
+  const load = async () => { try { const d = await fetch('/backend/api/sip/messages?limit=500').then((r) => r.json()); if (Array.isArray(d)) setMsgs(d.map((x) => ({ ...x, t: Number(x.t) }))); } catch (_) {} };
   useEffect(() => { load(); fetch('/backend/api/sip/state').then((r) => r.json()).then((d) => setOn(!!d.on)).catch(() => {}); }, []);
   useEffect(() => { const t = setInterval(() => { if (liveRef.current && !drawer) load(); }, 3000); return () => clearInterval(t); }, [drawer]);
 

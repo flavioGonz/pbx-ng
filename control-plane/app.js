@@ -1165,6 +1165,7 @@ function trunkDefaults(o = {}) {
     outbound_strip: +o.outbound_strip || 0, logo: o.logo || (o.adv_config && o.adv_config.logo) || '',
     dids: Array.isArray(o.dids) ? o.dids.filter(Boolean) : (o.dids ? String(o.dids).split(/[\s,]+/).filter(Boolean) : ((o.adv_config && o.adv_config.dids) || [])),
     channels: +o.channels || (o.adv_config && +o.adv_config.channels) || 0,
+    gateway: o.gateway || (o.adv_config && o.adv_config.gateway) || '',
   };
 }
 async function writeAsteriskTrunk(c, name, a, password, tenant_id) {
@@ -1199,7 +1200,7 @@ app.get('/api/trunks', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config,adv_config FROM pbxng_trunks ORDER BY id");
     const st = await trunkStatuses(rows);
-    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), adv: adv_config || ((kam_config && kam_config.logo) ? { logo: kam_config.logo } : null), logo: (adv_config && adv_config.logo) || (kam_config && kam_config.logo) || null, rtt: (st[t.name] || {}).rtt != null ? (st[t.name] || {}).rtt : null, dids: (adv_config && adv_config.dids) || (kam_config && kam_config.dids) || [], channels: (adv_config && adv_config.channels) || (kam_config && kam_config.channels) || 0, mode: (adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip'), transport: (adv_config && adv_config.transport) || 'udp' })));
+    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), adv: adv_config || ((kam_config && kam_config.logo) ? { logo: kam_config.logo } : null), logo: (adv_config && adv_config.logo) || (kam_config && kam_config.logo) || null, rtt: (st[t.name] || {}).rtt != null ? (st[t.name] || {}).rtt : null, dids: (adv_config && adv_config.dids) || (kam_config && kam_config.dids) || [], channels: (adv_config && adv_config.channels) || (kam_config && kam_config.channels) || 0, gateway: (adv_config && adv_config.gateway) || (kam_config && kam_config.gateway) || '', mode: (adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip'), transport: (adv_config && adv_config.transport) || 'udp' })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

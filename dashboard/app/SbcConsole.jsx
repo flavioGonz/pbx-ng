@@ -50,16 +50,17 @@ function ConsoleBody({ sbc, load, hist }) {
   const { snap } = useLive(); const ch = (snap && snap.channels) || [];
   const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const [newTgt, setNewTgt] = useState('');
-  const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' });
+  const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' }); const [editId, setEditId] = useState(null);
   const loadRoutes = useCallback(async () => { try { const d = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(d)) setRoutes(d); } catch (_) {} }, []);
   useEffect(() => { loadRoutes(); }, [loadRoutes]);
   async function addRoute() {
     if (!rt.dest.trim() || (!rt.gw.trim() && !rt.dev.trim())) { toast('Indicá destino y gateway o interfaz', 'bad'); return; }
     setBusy('route_add');
+    if (editId) { await fetch('/backend/api/sbc/routes/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editId }) }).catch(() => {}); await sleep(300); }
     const r = await fetch('/backend/api/sbc/routes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rt) }).then(x => x.json()).catch(() => ({ error: 1 }));
     setBusy('');
-    if (r.error) { toast(r.error === 1 ? 'No se pudo agregar' : r.error, 'bad'); return; }
-    setRt({ dest: '', gw: '', dev: '', note: '' }); toast('Ruta agregada (se aplica en ~6s)', 'ok'); await sleep(800); loadRoutes();
+    if (r.error) { toast(r.error === 1 ? 'No se pudo guardar' : r.error, 'bad'); return; }
+    setRt({ dest: '', gw: '', dev: '', note: '' }); setEditId(null); toast(editId ? 'Ruta actualizada' : 'Ruta agregada (se aplica en ~6s)', 'ok'); await sleep(800); loadRoutes();
   }
   async function delRoute(id, dest) {
     if (!confirm('¿Quitar la ruta ' + dest + '?')) return;
@@ -222,7 +223,7 @@ function ConsoleBody({ sbc, load, hist }) {
             <TextInput label="Gateway (via)" placeholder="ej 172.26.30.1" value={rt.gw} onChange={e => setRt({ ...rt, gw: e.target.value })} w={170} size="xs" />
             <TextInput label="Interfaz (dev, opc.)" placeholder="ej eth1" value={rt.dev} onChange={e => setRt({ ...rt, dev: e.target.value })} w={150} size="xs" />
             <TextInput label="Nota (opc.)" placeholder="ej WAN troncal Antel" value={rt.note} onChange={e => setRt({ ...rt, note: e.target.value })} style={{ flex: 1, minWidth: 160 }} size="xs" />
-            <Button size="xs" leftSection={<IconPlus size={14} />} loading={busy === 'route_add'} onClick={addRoute}>Agregar ruta</Button>
+            <Button size="xs" leftSection={<IconPlus size={14} />} loading={busy === 'route_add'} onClick={addRoute}>{editId ? 'Guardar cambios' : 'Agregar ruta'}</Button>{editId && <Button size="xs" variant="subtle" color="gray" onClick={() => { setEditId(null); setRt({ dest: '', gw: '', dev: '', note: '' }); }}>Cancelar</Button>}
           </Group>
           <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Gateway</Table.Th><Table.Th>Interfaz</Table.Th><Table.Th>Nota</Table.Th><Table.Th ta="right">Acción</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>{routes.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin rutas estáticas. Todo sale por la ruta por defecto.</Text></Table.Td></Table.Tr> : routes.map(r => (
@@ -231,7 +232,7 @@ function ConsoleBody({ sbc, load, hist }) {
                 <Table.Td ff="monospace" fz="sm">{r.gw || '—'}</Table.Td>
                 <Table.Td ff="monospace" fz="sm">{r.dev || '—'}</Table.Td>
                 <Table.Td fz="sm">{r.note || ''}</Table.Td>
-                <Table.Td ta="right"><Tooltip label="Quitar ruta"><ActionIcon variant="subtle" color="red" loading={busy === 'route_del' + r.id} onClick={() => delRoute(r.id, r.dest)}><IconTrash size={15} /></ActionIcon></Tooltip></Table.Td>
+                <Table.Td ta="right"><Group gap={4} justify="flex-end" wrap="nowrap"><Tooltip label="Editar"><ActionIcon variant="subtle" color="gray" onClick={() => { setRt({ dest: r.dest, gw: r.gw || '', dev: r.dev || '', note: r.note || '' }); setEditId(r.id); }}><IconRoute size={15} /></ActionIcon></Tooltip><Tooltip label="Quitar ruta"><ActionIcon variant="subtle" color="red" loading={busy === 'route_del' + r.id} onClick={() => delRoute(r.id, r.dest)}><IconTrash size={15} /></ActionIcon></Tooltip></Group></Table.Td>
               </Table.Tr>))}</Table.Tbody></Table>
           <Group gap="xs" mt="sm" c="orange"><IconAlertTriangle size={15} /><Text size="xs" c="dimmed">Las rutas se aplican con <Code>ip route replace</Code> en el SBC (CT107). Una ruta mal configurada puede afectar la conectividad; verificá gateway e interfaz antes de guardar.</Text></Group>
         </Card>

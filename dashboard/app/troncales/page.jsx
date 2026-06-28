@@ -14,7 +14,7 @@ const blank = {
   username: '', password: '', from_user: '', from_domain: '',
   codecs: ['ulaw', 'alaw'], dtmf_mode: 'rfc4733', nat: true, direct_media: false,
   qualify_frequency: 60, expiration: 3600, retry_interval: 60, context: 'from-trunk',
-  outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0, logo: '', dids: [], channels: 0,
+  outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0, logo: '', dids: [], channels: 0, gateway: '',
 };
 
 function TNode({ data }) {
@@ -57,6 +57,8 @@ export default function Troncales() {
   const [trunks, setTrunks] = useState([]); const [open, setOpen] = useState(false); const [f, setF] = useState(blank);
   const [saving, setSaving] = useState(false); const [editing, setEditing] = useState(false); const [showList, setShowList] = useState(true); const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
+  const [gwOpts, setGwOpts] = useState([]);
+  useEffect(() => { fetch('/backend/api/sbc/routes').then((r) => r.json()).then((d) => Array.isArray(d) && setGwOpts(d.map((r) => ({ value: String(r.id), label: (r.note || r.dest) + ' (via ' + (r.gw || r.dev) + ')' })))).catch(() => {}); }, []);
   async function load() { try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
@@ -265,6 +267,7 @@ export default function Troncales() {
               <TagsInput label="Números del proveedor (DID)" placeholder="Escribí y Enter" value={f.dids} onChange={v => set('dids', v)} description="Números fijos que entrega esta troncal" leftSection={<IconDeviceLandlinePhone size={15} />} />
               <NumberInput label="Canales (capacidad)" value={f.channels} onChange={v => set('channels', v)} min={0} max={1000} description="Llamadas simultáneas del proveedor" w={190} />
             </Group>
+            <Select label="¿Por dónde se llega a esta troncal?" value={f.gateway || ''} onChange={v => set('gateway', v || '')} data={[{ value: '', label: 'Directa / Internet (ruta por defecto)' }, ...gwOpts]} leftSection={<IconRouteAltLeft size={15} />} description="Ruta estática del SBC (Red) por la que se alcanza el proveedor. Se dibuja en la topología." />
             <Divider label="Avanzado" labelPosition="left" />
             <Group grow>
               <TextInput label="Contexto entrante" value={f.context} onChange={e => set('context', e.target.value)} description="Dónde caen las llamadas entrantes" />
