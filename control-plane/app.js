@@ -249,6 +249,7 @@ pool.query("CREATE TABLE IF NOT EXISTS pbxng_integrations (type text PRIMARY KEY
 pool.query("ALTER TABLE pbxng_trunks ADD COLUMN IF NOT EXISTS kind text DEFAULT 'asterisk'").catch(e => console.error('[TRK] kind', e.message));
   pool.query("ALTER TABLE pbxng_trunks ADD COLUMN IF NOT EXISTS kam_config jsonb").catch(e => console.error('[TRK] kamcfg', e.message));
   pool.query("CREATE TABLE IF NOT EXISTS pbxng_outbound_routes (id serial PRIMARY KEY, name text, pattern text, trunk text, strip int DEFAULT 0, prepend text, callerid text, created_at timestamptz DEFAULT now())").catch(e => console.error('[ROUT] out', e.message));
+pool.query("CREATE TABLE IF NOT EXISTS pbxng_ivr_audios (id serial PRIMARY KEY, name text UNIQUE, text text, voice text, ref text, created_at timestamptz DEFAULT now())").catch(e => console.error('[IVRA] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_inbound_routes (id serial PRIMARY KEY, did text, name text, dest_type text, dest_value text, created_at timestamptz DEFAULT now())").catch(e => console.error('[ROUT] in', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_directory (ext text PRIMARY KEY, name text, updated_at timestamptz DEFAULT now())").catch(e => console.error('[DIR] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_rec_config (id int PRIMARY KEY DEFAULT 1, backend text DEFAULT 'local', nas_path text, s3_endpoint text, s3_region text, s3_bucket text, s3_key text, s3_secret text, s3_prefix text DEFAULT 'recordings/', auto_upload boolean DEFAULT false, retain_local boolean DEFAULT true, updated_at timestamptz DEFAULT now())").then(() => pool.query("INSERT INTO pbxng_rec_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING")).catch(e => console.error('[REC] cfg', e.message));
@@ -889,6 +890,25 @@ app.post('/api/db/maintenance', async (req, res) => {
   try { const t = req.body && req.body.table; if (t && /^[a-zA-Z0-9_]+$/.test(t)) await pool.query('VACUUM ANALYZE ' + t); else await pool.query('VACUUM ANALYZE'); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// --- IVR: generar audio por TTS y desplegarlo a Asterisk ---
+app.get('/api/ivr/audios', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,text,voice,ref,created_at FROM pbxng_ivr_audios ORDER BY created_at DESC'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/ivr/gen-audio', async (req, res) => {
+  try {
+    const b = req.body || {}; const text = (b.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'texto requerido' });
+    let name = (b.name || ('ivr_' + Date.now())).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || ('ivr_' + Date.now());
+    const u = await vozBase();
+    const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice: b.voice, rate: 8000, format: 'wav' }), signal: AbortSignal.timeout(25000) });
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf.length) return res.status(500).json({ error: 'TTS devolvió vacío' });
+    const sr = await astFwd('POST', '/sound', { name, b64: buf.toString('base64') }, 15000).then((x) => x.json());
+    if (!sr.ok) return res.status(500).json({ error: 'deploy: ' + (sr.error || '?') });
+    await pool.query("INSERT INTO pbxng_ivr_audios(name,text,voice,ref) VALUES($1,$2,$3,$4) ON CONFLICT(name) DO UPDATE SET text=$2,voice=$3,ref=$4,created_at=now()", [name, text, b.voice || '', sr.ref]);
+    res.json({ ok: true, ref: sr.ref, name });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/ivr/audios/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_ivr_audios WHERE id=$1', [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // --- Modulos (PBX modular: activar/desactivar) ---
 const MODULE_IDS = ['sbc', 'turn', 'voz', 'clicktocall', 'push', 'autoprov', 'ai'];

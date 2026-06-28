@@ -82,6 +82,16 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         try: b = json.loads(self.rfile.read(n) or b"{}")
         except Exception: b = {}
+        if self.path.startswith("/sound"):
+            import base64 as _b64, os as _os
+            nm = re.sub(r"[^a-zA-Z0-9_-]", "", str(b.get("name","")))[:60]
+            if not nm: return self._s(400, {"error": "name requerido"})
+            try:
+                data = _b64.b64decode(b.get("b64",""))
+                d = "/var/lib/asterisk/sounds/custom"; _os.makedirs(d, exist_ok=True)
+                open(_os.path.join(d, nm + ".wav"), "wb").write(data)
+                return self._s(200, {"ok": True, "ref": "custom/" + nm, "bytes": len(data)})
+            except Exception as e: return self._s(500, {"error": str(e)})
         if self.path.startswith("/reload"):
             subprocess.run("asterisk -rx 'pjsip reload'", shell=True, timeout=20); return self._s(200, {"ok": True})
         if self.path.startswith("/route"):

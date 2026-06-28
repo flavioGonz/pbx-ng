@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box } from '@mantine/core';
+import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea } from '@mantine/core';
 import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft } from '@tabler/icons-react';
 import { toast } from './notify';
 
@@ -50,6 +50,11 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
   const [name, setName] = useState(ivr?.name || '');
   const [exten, setExten] = useState(ivr?.exten || '');
   const [greeting, setGreeting] = useState(ivr?.greeting || 'demo-congrats');
+  const [ivrAudios, setIvrAudios] = useState([]);
+  const [genOpen, setGenOpen] = useState(false); const [genText, setGenText] = useState(''); const [genName, setGenName] = useState(''); const [genVoice, setGenVoice] = useState(''); const [genVoices, setGenVoices] = useState([]); const [genBusy, setGenBusy] = useState(false);
+  useEffect(() => { fetch('/backend/api/ivr/audios').then(r => r.json()).then(d => Array.isArray(d) && setIvrAudios(d)).catch(() => {}); fetch('/backend/api/voz').then(r => r.json()).then(d => { setGenVoices(d.voices || []); if (d.default_voice) setGenVoice(d.default_voice); }).catch(() => {}); }, []);
+  async function previewGen() { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: genText, voice: genVoice }) }); const b = await r.blob(); if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); } } catch (_) {} }
+  async function genAudio() { if (!genText.trim()) return; setGenBusy(true); const r = await fetch('/backend/api/ivr/gen-audio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: genText, voice: genVoice || undefined, name: genName || undefined }) }).then(x => x.json()).catch(() => ({ error: 1 })); setGenBusy(false); if (r.error) { toast('Error generando audio: ' + r.error, 'bad'); return; } toast('Audio generado y desplegado a Asterisk', 'ok'); setGreeting(r.ref); setGenOpen(false); fetch('/backend/api/ivr/audios').then(x => x.json()).then(d => Array.isArray(d) && setIvrAudios(d)).catch(() => {}); }
   const [timeout, setTimeoutV] = useState(ivr?.timeout || 8);
   const [prompts, setPrompts] = useState(promptsProp || []);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -115,7 +120,7 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
     if (r.error) toast('Error subiendo audio: ' + r.error, 'bad'); else { toast('Audio "' + nm + '" cargado', 'ok'); setGreeting(nm); fetch('/backend/api/prompts').then(r => r.json()).then(d => setPrompts(Array.isArray(d) ? d : [])).catch(() => {}); }
   }
 
-  const promptData = [...new Set([greeting, ...prompts.map(p => p.name), 'demo-congrats', 'vm-goodbye', 'hello-world'])].filter(Boolean).map(n => ({ value: n, label: n }));
+  const promptData = [...new Set([greeting, ...prompts.map(p => p.name), ...ivrAudios.map(a => a.ref), 'demo-congrats', 'vm-goodbye', 'hello-world'])].filter(Boolean).map(n => ({ value: n, label: n }));
 
   const inner = (
     <Stack gap={0} style={{ height: '100%' }}>
@@ -144,7 +149,7 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
           <Stack gap="sm">
             <Group gap="xs" align="flex-end">
               <Select label="Audio de saludo" data={promptData} value={greeting} onChange={setGreeting} searchable style={{ flex: 1 }} />
-              <Tooltip label="Reproducir"><ActionIcon variant="light" size="lg" onClick={playGreeting}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>
+              <Tooltip label="Reproducir"><ActionIcon variant="light" size="lg" onClick={playGreeting}><IconPlayerPlay size={16} /></ActionIcon></Tooltip><Tooltip label="Generar con voz IA (TTS)"><ActionIcon variant="light" color="grape" size="lg" onClick={() => setGenOpen(true)}><IconRobot size={16} /></ActionIcon></Tooltip>
             </Group>
             <FileButton onChange={uploadAudio} accept="audio/*">{(props) => <Button {...props} variant="light" leftSection={<IconUpload size={15} />} size="xs">Subir audio nuevo</Button>}</FileButton>
             <NumberInput label="Espera de digito (s)" value={timeout} onChange={setTimeoutV} min={1} max={30} />
@@ -164,6 +169,14 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
           ) : <Text c="dimmed" fz="sm" ta="center" py="lg">Hace clic en una opcion del lienzo para editarla, o "Anadir opcion".</Text>}
         </Box>
       </Group>
+      <Modal opened={genOpen} onClose={() => setGenOpen(false)} title="Generar audio del saludo con IA (TTS)" centered radius="lg" zIndex={3000}>
+        <Stack gap="sm">
+          <Textarea label="Texto del saludo" placeholder="Bienvenido a la empresa. Marque 1 para ventas, 2 para soporte." autosize minRows={3} value={genText} onChange={(e) => setGenText(e.currentTarget.value)} />
+          <Group grow><Select label="Voz" data={genVoices.map((v) => ({ value: v, label: v }))} value={genVoice} onChange={setGenVoice} searchable /><TextInput label="Nombre (opcional)" placeholder="saludo-principal" value={genName} onChange={(e) => setGenName(e.target.value)} /></Group>
+          <Group justify="space-between"><Button variant="default" leftSection={<IconPlayerPlay size={15} />} onClick={previewGen} disabled={!genText.trim()}>Previsualizar</Button><Button color="grape" loading={genBusy} leftSection={<IconDeviceFloppy size={15} />} onClick={genAudio} disabled={!genText.trim()}>Generar y usar</Button></Group>
+          <Text size="xs" c="dimmed">Se sintetiza con el contenedor de Voz y se despliega a Asterisk como audio del IVR.</Text>
+        </Stack>
+      </Modal>
       <audio ref={audioRef} style={{ display: 'none' }} />
     </Stack>
   );
