@@ -99,8 +99,8 @@ export default function Troncales() {
     ns.push({ id: 'kam', type: 't', position: { x: COL_KAM, y: ROW }, data: { title: 'SBC-NG', sub: '172.26.20.205', icon: <IconRouteAltLeft size={16} />, accent: 'kam', status: 'sbc', badge: kamTrunks.length + ' troncal(es)' } });
     ns.push({ id: 'ast', type: 't', position: { x: COL_AST, y: ROW }, data: { title: 'Asterisk PBX', sub: '172.26.20.183', icon: <IconServer2 size={16} />, accent: 'ast', status: snap?.health?.ami ? 'online' : 'down', badge: ch + ' llamada(s)' } });
     ns.push({ id: 'int', type: 't', position: { x: COL_INT, y: ROW }, data: { title: 'Internos', icon: <IconUsers size={16} />, dot: false, badge: (snap?.extensions || []).length + ' extensiones' } });
-    es.push({ id: 'k-a', source: 'kam', target: 'ast', type: 'smoothstep', animated: true, label: 'dispatcher', style: { stroke: '#7c3aed', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c3aed' } });
-    es.push({ id: 'a-i', source: 'ast', target: 'int', type: 'smoothstep', animated: true, style: { stroke: '#16a34a', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#16a34a' } });
+    es.push({ id: 'k-a', source: 'kam', target: 'ast', type: 'default', animated: true, label: 'dispatcher', style: { stroke: '#7c3aed', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c3aed' } });
+    es.push({ id: 'a-i', source: 'ast', target: 'int', type: 'default', animated: true, style: { stroke: '#16a34a', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#16a34a' } });
     const all = [...kamTrunks.map(t => ({ t, kind: 'kamailio' })), ...astTrunks.map(t => ({ t, kind: 'asterisk' }))];
     const start = ROW - ((all.length - 1) * STEP) / 2;
     all.forEach((it, i) => {
@@ -108,12 +108,12 @@ export default function Troncales() {
       const on = stt === 'online'; const off = stt === 'offline';
       const ecol = off ? '#dc2626' : on ? '#2f74e6' : (kind === 'kamailio' ? '#7c3aed' : '#94a3b8');
       ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.logo || (it.t.adv && it.t.adv.logo), tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() + (it.t.channels ? ' · ' + it.t.channels + ' ch' : '') } });
-      es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'smoothstep', animated: off, label: it.t.rtt != null ? (Math.round(it.t.rtt) + ' ms') : (on ? 'levantada' : off ? 'caida' : undefined), labelStyle: { fontSize: 10, fontWeight: 700, fill: ecol }, labelBgStyle: { fill: 'var(--mantine-color-body)', fillOpacity: 0.85 }, labelBgPadding: [4, 2], labelBgBorderRadius: 6, style: { stroke: ecol, strokeWidth: 2.2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
+      es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'default', animated: true, label: it.t.rtt != null ? (Math.round(it.t.rtt) + ' ms') : (on ? 'levantada' : off ? 'caida' : undefined), labelStyle: { fontSize: 10, fontWeight: 700, fill: ecol }, labelBgStyle: { fill: 'var(--mantine-color-body)', fillOpacity: 0.85 }, labelBgPadding: [4, 2], labelBgBorderRadius: 6, style: { stroke: ecol, strokeWidth: 2.2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
     });
     return { nodes: ns, edges: es };
   }, [trunks, snap]);
 
-  useEffect(() => { setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return ex ? { ...n, position: ex.position } : n; })); }, [computedNodes, setRfNodes]);
+  useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_trunks_nodepos') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
 
   const onNodeClick = (_, n) => { if (n.data?.clickable) { const t = trunks.find(x => x.name === n.data.name); if (t) { setSel(t); } } };
   const stBadge = (t) => <Badge size="xs" variant="filled" color={t.status === 'online' ? 'teal' : t.status === 'offline' ? 'red' : t.status === 'sbc' ? 'grape' : 'gray'}>{t.detail || (t.status === 'online' ? 'Conectada' : t.status === 'offline' ? 'Caída' : t.status === 'sbc' ? 'En el SBC' : 'Sin datos')}</Badge>;
@@ -122,7 +122,7 @@ export default function Troncales() {
 
   return (
     <div style={{ position: 'relative', height: 'calc(100vh - 40px)', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(15,23,42,.10)', background: 'radial-gradient(820px 420px at 72% -12%, rgba(47,116,230,.06), transparent), #f6f8fb' }}>
-      <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.18 }} defaultEdgeOptions={{ type: 'smoothstep' }} proOptions={{ hideAttribution: true }} nodesDraggable nodesConnectable={false} onNodeClick={onNodeClick} minZoom={0.3} maxZoom={1.6}>
+      <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.18 }} defaultEdgeOptions={{ type: 'default' }} proOptions={{ hideAttribution: true }} onNodeDragStop={() => setRfNodes((cur) => { const map = {}; cur.forEach((n) => { map[n.id] = n.position; }); try { localStorage.setItem('pbxng_trunks_nodepos', JSON.stringify(map)); } catch (_) {} return cur; })} nodesDraggable nodesConnectable={false} onNodeClick={onNodeClick} minZoom={0.3} maxZoom={1.6}>
         <Background color="#cdd7e4" gap={22} />
         <Controls showInteractive={false} />
       </ReactFlow>
