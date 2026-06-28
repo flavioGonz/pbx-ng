@@ -3,6 +3,7 @@ import { Stack, Title, Text, Badge, Tabs } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconTag, IconPhoneIncoming, IconArrowsSplit, IconTarget, IconAsterisk, IconDeviceLandlinePhone, IconBackspace, IconPlus, IconId, IconRoute } from '@tabler/icons-react';
 import CrudPanel from '../CrudPanel';
 import PageHeader from '../PageHeader';
+import DidOverview from '../DidOverview';
 
 const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación' };
 
@@ -17,6 +18,7 @@ export default function Rutas() {
         </Tabs.List>
 
         <Tabs.Panel value="entrantes">
+          <DidOverview />
           <CrudPanel title="Rutas entrantes (DID)" subtitle="Número que recibís del operador → destino interno" color="indigo" icon={<IconArrowDownLeft size={18} />}
             idKey="id" fetchUrl="/backend/api/routes/inbound" createUrl="/backend/api/routes/inbound" deleteUrl={(r) => '/backend/api/routes/inbound/' + r.id}
             columns={[

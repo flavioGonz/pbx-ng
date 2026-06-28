@@ -68,7 +68,7 @@ function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
 const edgeTypes = { flow: FlowEdge };
 
 const INFO = {
-  wan: { icon: <IconWorld size={22} />, color: 'blue', sub: 'Punto de entrada publico de la plataforma', what: 'Representa Internet y la IP publica de la sede. Todo el trafico externo (clientes WebRTC, troncales SIP del operador y relay de medios) entra por aqui mediante port-forwarding en el firewall.', points: ['IP publica 200.40.182.246 con NAT hacia la LAN 172.26.20.0/24', 'Puertos publicados: 443 (HTTPS/WSS), 5060/5061 (SIP), 3478 + rango RTP (TURN)', 'Primera capa de la defensa en capas: solo se exponen los puertos imprescindibles'] },
+  wan: { icon: <IconWorld size={22} />, color: 'blue', sub: 'Ingreso de clientes desde Internet (WebRTC)', what: 'Acceso publico para softphones WebRTC y clientes externos (HTTPS/WSS via el proxy, TURN via Coturn). Las troncales del operador NO dependen de este nodo: se conectan directo al SBC, que puede alcanzarlas por distintas WAN/rutas (ver pestana Red).', points: ['IP publica 200.40.182.246 con NAT hacia la LAN 172.26.20.0/24', 'Puertos publicados: 443 (HTTPS/WSS), 5060/5061 (SIP), 3478 + rango RTP (TURN)', 'Primera capa de la defensa en capas: solo se exponen los puertos imprescindibles'] },
   npm: { icon: <IconShieldLock size={22} />, color: 'indigo', sub: 'Terminacion TLS y proxy inverso (Nginx Proxy Manager)', what: 'Termina el cifrado TLS/WSS con certificados Lets Encrypt para el dominio pbx.ies.com.uy y enruta cada ruta al servicio interno correcto. Es lo que permite que el softphone WebRTC funcione desde el navegador sin plugins.', points: ['/ → dashboard Next.js (3001), /socket.io → API (3000), /ws → Asterisk (8088)', 'proxy_read_timeout 3600s para mantener vivos los WebSocket de senalizacion', 'Renovacion automatica del certificado SSL'] },
   coturn: { icon: <IconArrowsLeftRight size={22} />, color: 'cyan', sub: 'Servidor STUN/TURN para NAT traversal', what: 'Cuando un cliente WebRTC esta detras de un firewall simetrico y no puede establecer medios directos, Coturn actua de relay del audio/video (RTP) garantizando que la llamada tenga sonido en ambos sentidos.', points: ['realm pbx.ies.com.uy - escucha en :3478 (UDP/TCP) + rango relay 49152-65535', 'Credenciales temporales inyectadas en el cliente', 'Solo se usa como ultimo recurso (STUN primero, TURN si hace falta)'] },
   kamailio: { icon: <IconRouteAltLeft size={22} />, color: 'grape', sub: 'Session Border Controller (senalizacion)', what: 'Proxy SIP de borde que protege a Asterisk: distribuye el registro y las llamadas con dispatcher, aplica anti-flood (pike) y bloquea escaneres/fuerza bruta antes de que lleguen al core. Gestionable desde la pestana Configuracion.', points: ['dispatcher → reparte hacia los Asterisk activos', 'pike + htable(ipban) → mitigacion de DDoS y escaneo SIP', 'rtpengine ancla y relaya el RTP en el borde (userspace), ocultando a Asterisk', 'Administrado via agente que sincroniza estado y comandos contra la base de datos'] },
@@ -97,7 +97,7 @@ export default function SbcFlow() {
 
   const computedNodes = useMemo(() => {
     const base = [
-      { id: 'wan', type: 'pbx', position: { x: 360, y: 250 }, data: { title: 'Internet / WAN', ip: '200.40.182.246', icon: <IconWorld size={17} />, status: 'ok' } },
+      { id: 'wan', type: 'pbx', position: { x: 360, y: 80 }, data: { title: 'Internet', icon: <IconWorld size={17} />, status: 'ok', hint: 'Clientes WebRTC y públicos', metrics: [{ label: 'Dominio', value: 'pbx.ies.com.uy' }] } },
       { id: 'npm', type: 'pbx', position: { x: 660, y: 60 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
       { id: 'coturn', type: 'pbx', position: { x: 660, y: 440 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
       { id: 'kamailio', type: 'pbx', position: { x: 660, y: 250 }, data: { title: 'SBC-NG', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
@@ -122,14 +122,13 @@ export default function SbcFlow() {
   const e = (id, s, t, color, label, live) => ({ id, source: s, target: t, type: 'flow', data: { color, live: live || false }, label, markerEnd: { type: MarkerType.ArrowClosed, color: live ? (live === 'ring' ? '#f59e0b' : '#16a34a') : color } });
   const edges = [
     e('e1', 'wan', 'npm', '#1d4ed8', 'HTTPS/WSS', false),
-    e('e2', 'wan', 'kamailio', '#7c3aed', 'SIP', spine),
     e('e3', 'wan', 'coturn', '#0891b2', 'TURN', false),
     e('eC', 'coturn', 'asterisk', '#0891b2', 'media RTP', spine),
     e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws', spine),
     e('e5', 'kamailio', 'asterisk', '#7c3aed', ch.length ? ch.length + (talking ? ' en conversación' : ' sonando') : 'trunk interno', spine),
     e('e7', 'asterisk', 'internos', '#16a34a', ch.length ? '● ' + ch.length : undefined, spine),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
-    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), 'wan', t._empty ? '#94a3b8' : (t.status === 'online' ? '#2f74e6' : t.status === 'offline' ? '#dc2626' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
+    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), 'kamailio', t._empty ? '#94a3b8' : (t.status === 'online' ? '#2f74e6' : t.status === 'offline' ? '#dc2626' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
   ];
 
   const node = computedNodes.find(n => n.id === sel);
