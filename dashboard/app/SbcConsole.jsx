@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl } from '@mantine/core';
-import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap } from '@tabler/icons-react';
+import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl, Switch } from '@mantine/core';
+import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap, IconServer2 } from '@tabler/icons-react';
 import { toast } from './notify';
 import SbcFlow from './SbcFlow';
 import Slot from './Slot';
@@ -52,12 +52,15 @@ function ConsoleBody({ sbc, load, hist }) {
   const cfgLoaded = useRef(false);
   const { snap } = useLive(); const ch = (snap && snap.channels) || [];
   const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-  const [newTgt, setNewTgt] = useState('');
-  const [secView, setSecView] = useState('sbc'); const [f2b, setF2b] = useState(null);
+  const [newTgt, setNewTgt] = useState(''); const [dlgOpen, setDlgOpen] = useState(false); const [dlgEdit, setDlgEdit] = useState(null); const [dtUri, setDtUri] = useState(''); const [dtPrio, setDtPrio] = useState(0);
+  async function saveTgt() { const uri = dtUri.trim(); if (!uri) return; if (dlgEdit) await sendCmd('del_target', dlgEdit.uri); await sendCmd('add_target', uri + '|' + (dtPrio || 0)); setDlgOpen(false); }
+  const [secView, setSecView] = useState('sbc'); const [featLimit, setFeatLimit] = useState(30);
+  async function applyFeats(next) { await sendCmd('feat_apply', JSON.stringify(next)); } const [f2b, setF2b] = useState(null);
   useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
   const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' }); const [editId, setEditId] = useState(null);
   const loadRoutes = useCallback(async () => { try { const d = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(d)) setRoutes(d); } catch (_) {} }, []);
   useEffect(() => { loadRoutes(); }, [loadRoutes]);
+  useEffect(() => { const l = sbc?.stats?.modules?.feats_cfg?.dialog_limits?.limit; if (l) setFeatLimit(l); }, [sbc]);
   async function addRoute() {
     if (!rt.dest.trim() || (!rt.gw.trim() && !rt.dev.trim())) { toast('Indicá destino y gateway o interfaz', 'bad'); return; }
     setBusy('route_add');
@@ -186,10 +189,7 @@ function ConsoleBody({ sbc, load, hist }) {
         </Card>
         <Card withBorder radius="md" padding="md">
           <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher ({disp.length})</Text><Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar</Button></Group>
-          <Group align="flex-end" gap="xs" mb="md">
-            <TextInput label="Agregar destino (Asterisk)" placeholder="sip:172.26.20.183:5060 o 172.26.20.x" value={newTgt} onChange={e => setNewTgt(e.target.value)} style={{ flex: 1 }} size="xs" />
-            <Button size="xs" leftSection={<IconPlus size={14} />} disabled={!newTgt} loading={busy === 'add_target' + newTgt} onClick={async () => { await sendCmd('add_target', newTgt.trim()); setNewTgt(''); }}>Agregar</Button>
-          </Group>
+          <Group mb="md"><Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => { setDlgEdit(null); setDtUri(''); setDtPrio(0); setDlgOpen(true); }}>Nuevo destino</Button></Group>
           <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Prioridad</Table.Th><Table.Th>Latencia</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Acciones</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>{disp.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin destinos. Agregá tu primer Asterisk arriba.</Text></Table.Td></Table.Tr> : disp.map((d, i) => { const fi = flagInfo(d.flags); const active = /A/.test(d.flags || ''); return (
               <Table.Tr key={i}>
@@ -198,10 +198,18 @@ function ConsoleBody({ sbc, load, hist }) {
                 <Table.Td ta="right"><Group gap={4} justify="flex-end" wrap="nowrap">{active
                   ? <Button size="compact-xs" variant="light" color="orange" leftSection={<IconPlugConnectedX size={13} />} loading={busy === 'disable_target' + d.uri} onClick={() => sendCmd('disable_target', d.uri)}>Deshabilitar</Button>
                   : <Button size="compact-xs" variant="light" color="teal" leftSection={<IconPlugConnected size={13} />} loading={busy === 'enable_target' + d.uri} onClick={() => sendCmd('enable_target', d.uri)}>Habilitar</Button>}
-                  <Tooltip label="Quitar destino"><ActionIcon variant="subtle" color="red" loading={busy === 'del_target' + d.uri} onClick={() => { if (confirm('¿Quitar ' + d.uri + ' del dispatcher?')) sendCmd('del_target', d.uri); }}><IconTrash size={15} /></ActionIcon></Tooltip>
+                  <Tooltip label="Editar"><ActionIcon variant="subtle" color="gray" onClick={() => { setDlgEdit(d); setDtUri(d.uri); setDtPrio(Number(d.priority) || 0); setDlgOpen(true); }}><IconRouteAltLeft size={15} /></ActionIcon></Tooltip><Tooltip label="Quitar destino"><ActionIcon variant="subtle" color="red" loading={busy === 'del_target' + d.uri} onClick={() => { if (confirm('¿Quitar ' + d.uri + ' del dispatcher?')) sendCmd('del_target', d.uri); }}><IconTrash size={15} /></ActionIcon></Tooltip>
                 </Group></Table.Td>
               </Table.Tr>); })}</Table.Tbody></Table>
         </Card>
+              <Modal opened={dlgOpen} onClose={() => setDlgOpen(false)} centered radius="lg" title={<Group gap="sm"><ThemeIcon size={34} radius="md" variant="light" color="grape"><IconRouteAltLeft size={18} /></ThemeIcon><Text fw={800}>{dlgEdit ? 'Editar destino' : 'Nuevo destino del dispatcher'}</Text></Group>}>
+          <Stack gap="md">
+            {dlgEdit && (() => { const fi = flagInfo(dlgEdit.flags); const active = /A/.test(dlgEdit.flags || ''); return <Group gap="xs"><Badge variant="light" color={fi.c}>{fi.t}</Badge>{active && dlgEdit.latency != null && <Badge variant="dot" color={dlgEdit.latency < 50 ? 'teal' : dlgEdit.latency < 200 ? 'yellow' : 'red'}>{Math.round(dlgEdit.latency)} ms</Badge>}</Group>; })()}
+            <TextInput label="Destino (Asterisk)" description="IP o sip:host:puerto. Ej: 172.26.20.183 o sip:172.26.20.183:5060" placeholder="172.26.20.183" value={dtUri} onChange={(e) => setDtUri(e.target.value)} leftSection={<IconServer2 size={15} />} required />
+            <NumberInput label="Prioridad" description="Mayor = se prefiere primero (failover al resto)" value={dtPrio} onChange={setDtPrio} min={0} max={100} w={160} />
+            <Group justify="space-between"><Text size="xs" c="dimmed">Se mide latencia con OPTIONS automáticamente tras agregar.</Text><Button color="grape" onClick={saveTgt}>{dlgEdit ? 'Guardar' : 'Agregar destino'}</Button></Group>
+          </Stack>
+        </Modal>
       </Tabs.Panel>
 
       <Tabs.Panel value="trunks"><Troncales /></Tabs.Panel>
@@ -283,6 +291,8 @@ function ConsoleBody({ sbc, load, hist }) {
                 {on ? <Badge color="teal" variant="filled" size="sm">Activo</Badge> : av ? <Badge color="grape" variant="light" size="sm">Disponible</Badge> : <Badge color="gray" variant="light" size="sm">No instalado</Badge>}</Group>
               <Text size="xs" c="dimmed">{f.desc}</Text>
               {!av && f.id === 'tls' && <Text size="xs" c="orange" mt={4}>Requiere instalar kamailio-tls-modules en el CT107.</Text>}
+              {av && ['topoh','dialog_limits','acc'].includes(f.id) && <Group mt="sm" gap="sm" align="center" wrap="wrap"><Switch checked={!!on} onChange={(e) => applyFeats({ ...(stats.modules?.feats_cfg || {}), [f.id]: { ...(((stats.modules?.feats_cfg || {})[f.id]) || {}), on: e.currentTarget.checked, ...(f.id === 'dialog_limits' ? { limit: featLimit } : {}) } })} onLabel="ON" offLabel="OFF" />{f.id === 'dialog_limits' && <Group gap={6} align="center"><Text size="xs" c="dimmed">Máx. simultáneas</Text><NumberInput size="xs" w={90} value={featLimit} onChange={setFeatLimit} min={1} max={2000} /><Button size="xs" variant="light" onClick={() => applyFeats({ ...(stats.modules?.feats_cfg || {}), dialog_limits: { on: true, limit: featLimit } })}>Aplicar</Button></Group>}</Group>}
+              {av && !['topoh','dialog_limits','acc'].includes(f.id) && <Badge mt="sm" variant="dot" color="gray">Activación próximamente</Badge>}
             </Card>);
           })}
         </SimpleGrid>

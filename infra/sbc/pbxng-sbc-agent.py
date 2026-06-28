@@ -111,6 +111,49 @@ def gather():
     except Exception: cfg = ''
     return uptime, disp, banned, stats, cfg
 
+
+FEATS_FILE = "/etc/kamailio/pbxng-feats.json"
+def _load_feats():
+    try: return json.load(open(FEATS_FILE))
+    except Exception: return {}
+def _build_global(f):
+    L = ["#=== PBXNG-MODS START ==="]
+    if f.get("topoh",{}).get("on"): L += ["loadmodule \"topoh.so\"", "modparam(\"topoh\",\"mask_key\",\"PbxNgTopo2026\")", "modparam(\"topoh\",\"mask_ip\",\"172.26.20.205\")"]
+    if f.get("dialog_limits",{}).get("on"): L += ["loadmodule \"dialog.so\"", "modparam(\"dialog\",\"profiles_no_value\",\"pbxcalls\")", "modparam(\"dialog\",\"db_mode\",0)"]
+    if f.get("acc",{}).get("on"): L += ["loadmodule \"acc.so\"", "modparam(\"acc\",\"log_flag\",1)", "modparam(\"acc\",\"log_extra\",\"src=$fU;dst=$tU;si=$si\")"]
+    L.append("#=== PBXNG-MODS END ===")
+    return "\n".join(L)
+def _build_route(f):
+    L = ["#=== PBXNG-ROUTE START ==="]
+    if f.get("acc",{}).get("on"): L.append("    if (is_method(\"INVITE\") && !has_totag()) setflag(1);")
+    if f.get("dialog_limits",{}).get("on"):
+        lim = int(f.get("dialog_limits",{}).get("limit") or 30)
+        L += ["    if (is_method(\"INVITE\") && !has_totag()) {", "        get_profile_size(\"pbxcalls\", \"$var(pbxn)\");", "        if ($var(pbxn) >= " + str(lim) + ") { sl_send_reply(\"503\", \"Maximum concurrent calls\"); exit; }", "        set_dlg_profile(\"pbxcalls\");", "        dlg_manage();", "    }"]
+    L.append("#=== PBXNG-ROUTE END ===")
+    return "\n".join(L)
+def _strip_block(s,a,b):
+    import re
+    return re.sub(re.escape(a)+".*?"+re.escape(b)+"\n?", "", s, flags=re.S)
+def apply_feats(f):
+    import time as _t
+    cfg = open(CFG).read()
+    open(CFG+".pre-feat","w").write(cfg)
+    cfg = _strip_block(cfg,"#=== PBXNG-MODS START ===","#=== PBXNG-MODS END ===")
+    cfg = _strip_block(cfg,"#=== PBXNG-ROUTE START ===","#=== PBXNG-ROUTE END ===")
+    cfg = cfg.replace("request_route {", _build_global(f)+"\n\nrequest_route {", 1)
+    anchor = "    # --- in-dialog ---"
+    if anchor in cfg: cfg = cfg.replace(anchor, _build_route(f)+"\n"+anchor, 1)
+    else: cfg = cfg.replace("request_route {\n", "request_route {\n"+_build_route(f)+"\n", 1)
+    open(CFG,"w").write(cfg)
+    chk = subprocess.run("kamailio -c -f "+CFG, shell=True, capture_output=True, text=True)
+    if chk.returncode != 0:
+        open(CFG,"w").write(open(CFG+".pre-feat").read()); return "cfg invalida: "+(chk.stderr or chk.stdout)[-220:]
+    subprocess.run("systemctl restart kamailio", shell=True); _t.sleep(2)
+    act = subprocess.run("systemctl is-active kamailio", shell=True, capture_output=True, text=True).stdout.strip()
+    if act != "active":
+        open(CFG,"w").write(open(CFG+".pre-feat").read()); subprocess.run("systemctl restart kamailio", shell=True); return "kamailio no levanto; revertido"
+    json.dump(f, open(FEATS_FILE,"w")); return "aplicado"
+
 ADV_MODS = ['dialog','topos','topoh','acc','tls','drouting','secfilter','ratelimit','permissions','auth_db','sqlops']
 def modules_info():
     import glob, os
@@ -124,10 +167,9 @@ def modules_info():
     avail = {}
     for m in ADV_MODS:
         avail[m] = (os.path.isfile(os.path.join(md, m + '.so')) if md else False)
-    feats = {}
-    for f in ['topos','dialog_limits','acc','secfilter','ratelimit','tls','drouting']:
-        feats[f] = ('PBXNG:' + f) in cfg
-    return {'loaded': sorted(set(loaded)), 'avail': avail, 'features': feats}
+    ff = _load_feats()
+    feats = {k: bool(ff.get(k,{}).get('on')) for k in ['topos','topoh','dialog_limits','acc','secfilter','ratelimit','tls','drouting']}
+    return {'loaded': sorted(set(loaded)), 'avail': avail, 'features': feats, 'feats_cfg': ff}
 
 def apply_cmd(cmd, arg):
     res = 'ok'
@@ -141,13 +183,14 @@ def apply_cmd(cmd, arg):
         elif cmd == 'enable_target' and arg: kc('dispatcher.set_state', 'a', '1', arg)
         elif cmd == 'add_target' and arg:
             dlp = '/etc/kamailio/dispatcher.list'
-            uri = arg if arg.startswith('sip:') else ('sip:' + arg)
+            ap = arg.split('|'); a0 = ap[0].strip(); prio = (ap[1].strip() if len(ap) > 1 and ap[1].strip() else '0')
+            uri = a0 if a0.startswith('sip:') else ('sip:' + a0)
             lines = open(dlp).read().splitlines() if os.path.exists(dlp) else []
             exists = any((uri in l) for l in lines)
             if not exists:
                 try: open(dlp + '.bak', 'w').write('\n'.join(lines) + '\n')
                 except Exception: pass
-                with open(dlp, 'a') as f: f.write('1 ' + uri + ' 0 0\n')
+                with open(dlp, 'a') as f: f.write('1 ' + uri + ' 0 ' + prio + '\n')
             kc('dispatcher.reload')
         elif cmd == 'del_target' and arg:
             dlp = '/etc/kamailio/dispatcher.list'
@@ -170,6 +213,7 @@ def apply_cmd(cmd, arg):
         elif cmd == 'restart': subprocess.run(['systemctl', 'restart', 'kamailio'], timeout=30)
         elif cmd == 'svc_start': subprocess.run(['systemctl', 'start', 'kamailio'], timeout=30)
         elif cmd == 'svc_stop': subprocess.run(['systemctl', 'stop', 'kamailio'], timeout=30)
+        elif cmd == 'feat_apply' and arg: res = apply_feats(json.loads(arg))
         elif cmd == 'cfg_save' and arg:
             content = base64.b64decode(arg).decode('utf-8', 'replace')
             tmp = '/tmp/kam_new.cfg'; open(tmp, 'w').write(content)
