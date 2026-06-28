@@ -104,9 +104,8 @@ function ConsoleBody({ sbc, load, hist }) {
   const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace"><Slot value={(core[k] ?? 0).toLocaleString()} /></Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? <><Slot value={rates[k]} />/s</> : ''}</Table.Td></Table.Tr>;
 
   return (
-    <Tabs defaultValue="flow" variant="pills" radius="md" keepMounted={false}>
+    <Tabs defaultValue="mon" variant="pills" radius="md" keepMounted={false}>
       <Tabs.List mb="md">
-        <Tabs.Tab value="flow" leftSection={<IconSitemap size={16} />}>Topología</Tabs.Tab>
         <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
@@ -117,8 +116,6 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>
         <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
       </Tabs.List>
-
-      <Tabs.Panel value="flow"><SbcFlow /></Tabs.Panel>
 
       <Tabs.Panel value="mon">
         <SimpleGrid cols={{ base: 1, sm: 3 }} mb="md">

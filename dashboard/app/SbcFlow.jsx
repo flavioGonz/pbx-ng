@@ -105,7 +105,7 @@ const INFO = {
 
 export default function SbcFlow() {
   const { snap } = useLive();
-  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]);
+  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]); const [npmCert, setNpmCert] = useState(null);
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [menu, setMenu] = useState(null);
@@ -116,6 +116,7 @@ export default function SbcFlow() {
     try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {}
     try { setSys(await fetch('/backend/api/system').then(r => r.json())); } catch (_) {}
     try { const _r = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(_r)) setSbcRoutes(_r); } catch (_) {}
+    try { setNpmCert(await fetch('/backend/api/npm/cert').then(r => r.json())); } catch (_) {}
   }
   async function delTrunk(name) { if (!confirm('¿Eliminar la troncal ' + name + '?')) return; try { await fetch('/backend/api/trunks/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} load(); }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
@@ -128,7 +129,7 @@ export default function SbcFlow() {
   const computedNodes = useMemo(() => {
     const base = [
       { id: 'wan', type: 'cloud', position: { x: 360, y: 80 }, data: { title: 'Internet', metrics: [{ value: 'pbx.ies.com.uy' }] } },
-      { id: 'npm', type: 'pbx', position: { x: 660, y: 60 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
+      { id: 'npm', type: 'pbx', position: { x: 660, y: 60 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: (npmCert && npmCert.days_left != null && npmCert.days_left < 15) ? 'down' : (comp('Seguridad', 'Proxy') || 'ok'), metrics: [{ label: 'TLS/WSS', value: 'pbx.ies.com.uy' }, { label: 'SSL vence', value: (npmCert && npmCert.days_left != null) ? (npmCert.days_left + ' dias') : '-' }] } },
       { id: 'coturn', type: 'pbx', position: { x: 660, y: 440 }, data: { title: 'Coturn (TURN)', ip: '172.26.20.204', icon: <IconArrowsLeftRight size={17} />, status: comp('WebRTC', 'TURN') || 'ok', metrics: [{ label: 'NAT relay', value: ':3478' }] } },
       { id: 'kamailio', type: 'pbx', position: { x: 660, y: 250 }, data: { title: 'SBC-NG', ip: '172.26.20.205', icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
       { id: 'asterisk', type: 'pbx', position: { x: 980, y: 250 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'Canales', value: ch.length, hot: ch.length > 0 }] } },
@@ -143,7 +144,7 @@ export default function SbcFlow() {
     }));
     const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
     return [...base, ...gwNodes, ...tnodes];
-  }, [sbc, trunks, sys, snap, sbcRoutes]);
+  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert]);
 
   useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_sbc_nodepos') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
 

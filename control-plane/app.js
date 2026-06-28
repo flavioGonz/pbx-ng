@@ -816,6 +816,25 @@ app.post('/api/turn/restart', async (req, res) => { try { const r = await turnFw
 app.get('/api/turn/logs', async (req, res) => { try { const r = await turnFwd('GET', '/logs'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/turn/test', async (req, res) => { try { const r = await turnFwd('POST', '/test', {}, 15000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+// --- NPM cert expiry (para avisar vencimiento SSL del WebRTC) ---
+let _npmCertCache = null;
+async function npmCertInfo() {
+  if (_npmCertCache && Date.now() - _npmCertCache.t < 1800000) return _npmCertCache.d;
+  const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; };
+  const url = (await g('npm_url')) || 'http://172.26.20.17:81';
+  const id = await g('npm_identity'); const sec = await g('npm_secret');
+  if (!id || !sec) return { error: 'npm-creds-missing' };
+  const tk = await fetch(url + '/api/tokens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity: id, secret: sec }), signal: AbortSignal.timeout(8000) }).then((r) => r.json());
+  if (!tk.token) return { error: 'npm-auth-failed' };
+  const certs = await fetch(url + '/api/nginx/certificates', { headers: { Authorization: 'Bearer ' + tk.token }, signal: AbortSignal.timeout(8000) }).then((r) => r.json());
+  const dom = 'pbx.ies.com.uy';
+  const c = (Array.isArray(certs) ? certs : []).find((x) => (x.domain_names || []).includes(dom));
+  const d = c ? { domain: dom, expires_on: c.expires_on, days_left: Math.round((new Date(c.expires_on).getTime() - Date.now()) / 86400000) } : { error: 'cert-not-found' };
+  _npmCertCache = { t: Date.now(), d };
+  return d;
+}
+app.get('/api/npm/cert', async (req, res) => { try { res.json(await npmCertInfo()); } catch (e) { res.status(500).json({ error: e.message }); } });
+
 
 // ===== Audios del sistema (voz coherente) =====
 const SYSPROMPT_CATALOG = [
