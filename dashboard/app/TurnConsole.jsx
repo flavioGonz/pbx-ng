@@ -1,7 +1,7 @@
 /* TurnConsole.jsx - consola de gestion de Coturn (TURN/STUN) */
 'use client';
 import { useEffect, useState } from 'react';
-import { Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, PasswordInput, ThemeIcon, Divider, Code, ScrollArea, Box, Tooltip, ActionIcon } from '@mantine/core';
+import { Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, PasswordInput, ThemeIcon, Divider, Code, ScrollArea, Box, Tooltip, ActionIcon, Loader, Center } from '@mantine/core';
 import { IconArrowsLeftRight, IconRefresh, IconDeviceFloppy, IconBolt, IconWorld, IconHash, IconKey, IconPlugConnected, IconCloud, IconTestPipe, IconReload, IconCpu } from '@tabler/icons-react';
 import { toast } from './notify';
 
@@ -35,7 +35,7 @@ export default function TurnConsole() {
   async function test() { setBusy('test'); setTestOut(''); const r = await fetch('/backend/api/turn/test', { method: 'POST' }).then((x) => x.json()).catch(() => ({ out: 'error' })); setBusy(''); setTestOut(r.out || JSON.stringify(r)); }
   async function showLogs() { setBusy('logs'); const r = await fetch('/backend/api/turn/logs').then((x) => x.json()).catch(() => ({ log: 'error' })); setBusy(''); setLogs(r.log || ''); }
 
-  if (!d) return <Text c="dimmed" size="sm">Cargando estado de Coturn…</Text>;
+  if (!d) return <Center mih={360}><Stack align="center" gap="sm"><Loader size="lg" color="cyan" /><Text c="dimmed" size="sm">Cargando estado de Coturn…</Text></Stack></Center>;
   if (d.error) return <Card withBorder radius="md" padding="lg"><Text c="red" fw={600}>No se pudo contactar el agente TURN (CT106:8091).</Text><Text size="sm" c="dimmed" mt={4}>Verificá que el servicio pbxng-turn esté activo.</Text></Card>;
 
   const m = d.metrics || {};

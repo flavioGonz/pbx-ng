@@ -1,7 +1,7 @@
 /* AsteriskConsole.jsx - consola del nucleo Asterisk (Nucleo / Red / Dialplan / Seguridad) */
 'use client';
 import { useEffect, useState } from 'react';
-import { Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, ThemeIcon, Table } from '@mantine/core';
+import { Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, ThemeIcon, Table, Loader, Center } from '@mantine/core';
 import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, IconPlugConnected, IconBolt, IconInfoCircle, IconRouter } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import RoutesPanel from './RoutesPanel';
@@ -25,7 +25,7 @@ export default function AsteriskConsole() {
       </Tabs.List>
 
       <Tabs.Panel value="core">
-        {!core ? <Text c="dimmed" size="sm">Cargando estado de Asterisk…</Text> : core.error ? <Card withBorder radius="md" padding="lg"><Text c="red" fw={600}>No se pudo contactar el agente de Asterisk (CT103:8092).</Text></Card> : <Stack gap="lg">
+        {!core ? <Center mih={360}><Stack align="center" gap="sm"><Loader size="lg" color="blue" /><Text c="dimmed" size="sm">Cargando estado de Asterisk…</Text></Stack></Center> : core.error ? <Card withBorder radius="md" padding="lg"><Text c="red" fw={600}>No se pudo contactar el agente de Asterisk (CT103:8092).</Text></Card> : <Stack gap="lg">
           <Card withBorder radius="md" padding="md"><Group justify="space-between"><Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="blue"><IconServer2 size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>Asterisk PBX</Text><Text size="xs" c="dimmed">172.26.20.183 · {core.version}</Text></div></Group><Badge size="lg" variant="filled" color={snap && snap.health && snap.health.ami ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{snap && snap.health && snap.health.ami ? 'Operativo' : 'Sin AMI'}</Badge></Group></Card>
           <SimpleGrid cols={{ base: 2, sm: 4 }}>
             <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Versión</Text><Text fw={700} size="sm">{core.version || '-'}</Text></Card>
