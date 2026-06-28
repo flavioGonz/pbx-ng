@@ -142,6 +142,12 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         try: b = json.loads(self.rfile.read(n) or b"{}")
         except Exception: b = {}
+        if self.path.startswith("/service"):
+            act = b.get("action")
+            if act in ("start","stop","restart"):
+                subprocess.run("systemctl %s coturn" % act, shell=True); time.sleep(1.0)
+                return self._send(200, {"ok": sh("systemctl is-active coturn") == "active", "action": act})
+            return self._send(400, {"error":"action invalida"})
         if self.path.startswith("/restart"):
             subprocess.run("systemctl restart coturn", shell=True); time.sleep(1.2)
             return self._send(200, {"ok": sh("systemctl is-active coturn") == "active"})

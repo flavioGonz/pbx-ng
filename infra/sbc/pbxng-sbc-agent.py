@@ -149,6 +149,8 @@ def apply_cmd(cmd, arg):
             rr = subprocess.run(['ip', 'route', 'del'] + arg.strip().split(), capture_output=True, text=True, timeout=10)
             res = 'ruta quitada' if rr.returncode == 0 else ('error: ' + (rr.stderr or '')[-200:])
         elif cmd == 'restart': subprocess.run(['systemctl', 'restart', 'kamailio'], timeout=30)
+        elif cmd == 'svc_start': subprocess.run(['systemctl', 'start', 'kamailio'], timeout=30)
+        elif cmd == 'svc_stop': subprocess.run(['systemctl', 'stop', 'kamailio'], timeout=30)
         elif cmd == 'cfg_save' and arg:
             content = base64.b64decode(arg).decode('utf-8', 'replace')
             tmp = '/tmp/kam_new.cfg'; open(tmp, 'w').write(content)

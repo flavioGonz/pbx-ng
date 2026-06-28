@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Card, Title, Text, Stack, SimpleGrid, Group, Badge, Tabs, Button, Skeleton, Select, TextInput, PasswordInput, NumberInput, Switch, ThemeIcon, Divider, Table, ActionIcon, FileButton, Tooltip, Code, Alert } from '@mantine/core';
 import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle } from '@tabler/icons-react';
 import { toast } from '../notify';
+import ModulesPanel from '../ModulesPanel';
 const STMAP = { ok: ['teal', 'Activo'], pending: ['yellow', 'Pendiente'], optional: ['gray', 'Opcional'], down: ['red', 'Caído'], off: ['gray', 'Inactivo'] };
 
 export default function Configuracion() {
@@ -44,11 +45,14 @@ export default function Configuracion() {
 
       <Tabs defaultValue="componentes" variant="pills" radius="md" keepMounted={false}>
         <Tabs.List mb="md">
+          <Tabs.Tab value="modulos" leftSection={<IconAdjustments size={16} />}>Módulos</Tabs.Tab>
           <Tabs.Tab value="componentes" leftSection={<IconServer2 size={16} />}>Componentes</Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={16} />}>Email por empresa</Tabs.Tab>
           <Tabs.Tab value="audios" leftSection={<IconMicrophone2 size={16} />}>Audios</Tabs.Tab>
           <Tabs.Tab value="integraciones" leftSection={<IconPlugConnected size={16} />}>Integraciones</Tabs.Tab>
         </Tabs.List>
+
+        <Tabs.Panel value="modulos"><ModulesPanel /></Tabs.Panel>
 
         <Tabs.Panel value="componentes">
           {loading ?

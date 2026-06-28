@@ -106,7 +106,7 @@ const INFO = {
 
 export default function SbcFlow() {
   const { snap } = useLive();
-  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]); const [npmCert, setNpmCert] = useState(null); const [voz, setVoz] = useState(null);
+  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]); const [npmCert, setNpmCert] = useState(null); const [voz, setVoz] = useState(null); const [mods, setMods] = useState({});
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [menu, setMenu] = useState(null);
@@ -119,6 +119,7 @@ export default function SbcFlow() {
     try { const _r = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(_r)) setSbcRoutes(_r); } catch (_) {}
     try { setNpmCert(await fetch('/backend/api/npm/cert').then(r => r.json())); } catch (_) {}
     try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) {}
+    try { setMods(await fetch('/backend/api/modules').then(r => r.json())); } catch (_) {}
   }
   async function delTrunk(name) { if (!confirm('¿Eliminar la troncal ' + name + '?')) return; try { await fetch('/backend/api/trunks/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} load(); }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
@@ -146,8 +147,9 @@ export default function SbcFlow() {
       data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), pulse: t._empty ? null : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'ok' : null), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
     }));
     const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
-    return [...base, ...gwNodes, ...tnodes];
-  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert, voz]);
+    const hidden = new Set(); if (mods.sbc === false) hidden.add('kamailio'); if (mods.turn === false) hidden.add('coturn'); if (mods.voz === false) hidden.add('voz');
+    return [...base, ...gwNodes, ...tnodes].filter((n) => !hidden.has(n.id));
+  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert, voz, mods]);
 
   useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_sbc_nodepos') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
 
@@ -177,6 +179,7 @@ export default function SbcFlow() {
     ...(trunks.some((t) => t.gateway === 'internet') ? [e('wan-kam', 'wan', 'kamailio', '#0e9488', 'troncales SIP', false)] : []),
   ];
 
+  const _ids = new Set(computedNodes.map((n) => n.id));
   const node = computedNodes.find(n => n.id === sel);
   const info = sel ? INFO[sel] : null;
   const isTrunk = sel ? String(sel).startsWith('trk-') : false;
@@ -204,7 +207,7 @@ export default function SbcFlow() {
       <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}} .sbc-live{animation:sbcpulse 1.6s ease-in-out infinite!important;} @keyframes sbcpulse{0%,100%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 8px rgba(22,163,74,0)}} .flow-dash{animation:flowdash .6s linear infinite} @keyframes flowdash{to{stroke-dashoffset:-28}} .flow-blink{animation:flowblink 1s steps(1,end) infinite} @keyframes flowblink{0%,49%{stroke-opacity:.95}50%,100%{stroke-opacity:.18}} .trk-down{animation:trkblink 1.1s steps(1,end) infinite} @keyframes trkblink{0%,49%{opacity:1}50%,100%{opacity:.4}}`}</style>
       <div className="sbc-flow" style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
         {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {callCount} llamada(s) · {ch.length} canal(es)</div>}
-        <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
+        <ReactFlow nodes={rfNodes} edges={edges.filter((e) => _ids.has(e.source) && _ids.has(e.target))} onNodesChange={onNodesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
           onNodeClick={(_, n) => setSel(n.id)} onNodeContextMenu={(ev, n) => { ev.preventDefault(); setMenu({ x: ev.clientX, y: ev.clientY, id: n.id }); }} onPaneClick={() => setMenu(null)} onNodeDragStop={() => setRfNodes((cur) => { const map = {}; cur.forEach((n) => { map[n.id] = n.position; }); try { localStorage.setItem('pbxng_sbc_nodepos', JSON.stringify(map)); } catch (_) {} return cur; })} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
           <Background color="#cdd7e4" gap={22} />
           <Controls showInteractive={false} />

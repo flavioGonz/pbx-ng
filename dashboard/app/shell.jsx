@@ -56,6 +56,10 @@ export default function Shell({ children }) {
   const path = usePathname();
   const [rail, setRail] = useState(false);
   const [openG, setOpenG] = useState({});
+  const [mods, setMods] = useState({});
+  useEffect(() => { fetch('/backend/api/modules').then((r) => r.json()).then(setMods).catch(() => {}); }, []);
+  const MOD_MAP = { '/sbc': 'sbc', '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai' };
+  const visibleItem = (it) => !MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false;
   useEffect(() => { try { setRail(localStorage.getItem('pbxng_rail') === '1'); } catch (_) {} }, []);
   const isActive = (it) => it.href === '/' ? path === '/' : path.startsWith(it.href);
   // por defecto: abrir el grupo que contiene la ruta activa
@@ -110,7 +114,7 @@ export default function Shell({ children }) {
                       <IconChevronRight size={14} style={{ opacity: .6, transform: opened ? 'rotate(90deg)' : 'none', transition: 'transform .18s' }} />
                     </UnstyledButton>
                   ) : <Box my={6} mx="auto" style={{ width: 22, height: 1, background: 'rgba(120,130,150,.18)' }} />}
-                  {rail ? g.items.map(navItem) : <Collapse in={opened}><Box mt={2}>{g.items.map(navItem)}</Box></Collapse>}
+                  {rail ? g.items.filter(visibleItem).map(navItem) : <Collapse in={opened}><Box mt={2}>{g.items.filter(visibleItem).map(navItem)}</Box></Collapse>}
                 </Box>
               );
             })}

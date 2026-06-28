@@ -842,6 +842,26 @@ app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd
 app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+// --- Modulos (PBX modular: activar/desactivar) ---
+const MODULE_IDS = ['sbc', 'turn', 'voz', 'clicktocall', 'push', 'autoprov', 'ai'];
+app.get('/api/modules', async (req, res) => {
+  try { const out = {}; for (const id of MODULE_IDS) { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', ['mod_' + id]); out[id] = rows[0] ? rows[0].value !== '0' : true; } res.json(out); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/modules', async (req, res) => {
+  const { id, enabled } = req.body || {};
+  if (!MODULE_IDS.includes(id)) return res.status(400).json({ error: 'modulo invalido' });
+  try {
+    await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", ['mod_' + id, enabled ? '1' : '0']);
+    let svc = null;
+    try {
+      if (id === 'turn') { const r = await turnFwd('POST', '/service', { action: enabled ? 'start' : 'stop' }, 12000); svc = await r.json(); }
+      else if (id === 'sbc') { await pool.query('INSERT INTO pbxng_sbc_cmd(cmd,arg) VALUES($1,$2)', [enabled ? 'svc_start' : 'svc_stop', 'kamailio']); svc = { queued: true }; }
+    } catch (e) { svc = { error: e.message }; }
+    res.json({ ok: true, id, enabled: !!enabled, svc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 
 // ===== Audios del sistema (voz coherente) =====
 const SYSPROMPT_CATALOG = [
