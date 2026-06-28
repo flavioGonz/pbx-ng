@@ -178,6 +178,11 @@ function ConsoleBody({ sbc, load, hist }) {
           <Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">¿Qué es el dispatcher?</Text></Group>
           <Text size="sm" c="dimmed">SBC-NG (el SBC de borde) recibe las llamadas SIP y las <b>reparte</b> hacia uno o más servidores Asterisk de este grupo de destinos. Si agregás varios Asterisk, balancea y hace <b>failover</b>: si uno queda Inactivo, deriva a otro. Cada destino tiene una <b>prioridad</b> (mayor = se prefiere) y SBC-NG mide su <b>latencia</b> con pings (OPTIONS). Estados: <Badge size="xs" variant="light" color="teal">Activo</Badge> responde, <Badge size="xs" variant="light" color="orange">Inactivo</Badge> no responde los pings, <Badge size="xs" variant="light" color="red">Deshabilitado</Badge> apagado manualmente.</Text>
         </Card>
+        <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
+          <Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">Llamadas salientes (importante)</Text></Group>
+          <Text size="sm" c="dimmed">El dispatcher cubre el sentido <b>SBC &rarr; Asterisk</b> (entrantes). Para las <b>salientes</b> (Asterisk &rarr; proveedor a través del SBC) hace falta crear en Asterisk una <b>troncal interna hacia el SBC</b> (identificada por IP). Sin esa troncal, las llamadas salientes por el proveedor no funcionan. Configurala en <b>Asterisk &rarr; Troncal SBC</b>.</Text>
+          <Button mt="sm" size="xs" variant="light" component="a" href="/asterisk" leftSection={<IconDeviceLandlinePhone size={14} />}>Ir a Asterisk &rarr; Troncal SBC</Button>
+        </Card>
         <Card withBorder radius="md" padding="md">
           <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher ({disp.length})</Text><Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar</Button></Group>
           <Group align="flex-end" gap="xs" mb="md">
