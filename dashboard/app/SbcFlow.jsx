@@ -100,12 +100,13 @@ const INFO = {
   asterisk: { icon: <IconServer2 size={22} />, color: 'blue', sub: 'Nucleo de comunicaciones (PBX)', what: 'El motor que procesa las llamadas: registra los internos (chan_pjsip), ejecuta el plan de marcado en tiempo real desde PostgreSQL, hace transcoding entre codecs y puentea WebRTC ↔ SIP. La API lo controla por ARI/AMI.', points: ['Asterisk 22 LTS - chan_pjsip - realtime (ARA) sobre PostgreSQL', 'Transcoding nativo ulaw/alaw/g722; WebRTC con SRTP/DTLS', 'Expone ARI (control de llamadas) y AMI (eventos en vivo)'] },
   troncales: { icon: <IconDeviceLandlinePhone size={22} />, color: 'teal', sub: 'Enlaces con operadores SIP (PSTN)', what: 'Las troncales conectan la PBX con la red telefonica publica a traves de proveedores SIP, permitiendo llamadas entrantes y salientes hacia numeros externos.', points: ['Cada troncal = endpoint PJSIP + registro contra el proveedor', 'Estado registrada = enlace activo con el operador', 'Las salientes se enrutan por el dialplan segun prefijo'] },
   internos: { icon: <IconUsers size={22} />, color: 'blue', sub: 'Extensiones de usuario (WebRTC y SIP)', what: 'Los internos son las extensiones de los usuarios: telefonos fisicos (SIP/UDP/TLS) y softphones en navegador o PWA (WebRTC/WSS). Comparten plan de marcado y pueden llamarse entre si.', points: ['WebRTC: ulaw/g722 + SRTP/DTLS sobre WSS', 'SIP fisico: G.711/G.722 sobre UDP o TLS', 'Estado en vivo via AMI (registrado / en llamada / offline)'] },
+  voz: { icon: <IconWaveSine size={22} />, color: 'grape', sub: 'Sintesis y reconocimiento de voz (IVR IA)', what: 'Contenedor dedicado (CT108) que provee TTS neural (Piper) y STT (faster-whisper) en espanol para el IVR conversacional con IA. Asterisk le envia el audio de la llamada por AudioSocket y recibe la voz sintetizada.', points: ['Piper (voces es) + faster-whisper (modelo small) - 100% offline', 'Edge-TTS opcional para voces LatAm (online)', 'Gestionable desde la consola Voz (/voz)'] },
   apps: { icon: <IconApps size={22} />, color: 'orange', sub: 'Aplicaciones de telefonia', what: 'Funciones de valor construidas sobre el core: colas/ACD, IVR, conferencias, grupos de timbrado, paging y buzones de voz. Se aprovisionan dinamicamente desde el panel hacia el dialplan realtime.', points: ['Colas (ACD) con estrategias de reparto y agentes', 'IVR, ConfBridge, ring groups, paging y voicemail', 'Todo configurable sin tocar archivos en el servidor'] },
 };
 
 export default function SbcFlow() {
   const { snap } = useLive();
-  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]); const [npmCert, setNpmCert] = useState(null);
+  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]); const [npmCert, setNpmCert] = useState(null); const [voz, setVoz] = useState(null);
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [menu, setMenu] = useState(null);
@@ -117,6 +118,7 @@ export default function SbcFlow() {
     try { setSys(await fetch('/backend/api/system').then(r => r.json())); } catch (_) {}
     try { const _r = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(_r)) setSbcRoutes(_r); } catch (_) {}
     try { setNpmCert(await fetch('/backend/api/npm/cert').then(r => r.json())); } catch (_) {}
+    try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) {}
   }
   async function delTrunk(name) { if (!confirm('¿Eliminar la troncal ' + name + '?')) return; try { await fetch('/backend/api/trunks/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} load(); }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
@@ -135,6 +137,7 @@ export default function SbcFlow() {
       { id: 'asterisk', type: 'pbx', position: { x: 980, y: 250 }, data: { title: 'Asterisk PBX', ip: '172.26.20.183', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'Canales', value: ch.length, hot: ch.length > 0 }] } },
       { id: 'internos', type: 'pbx', position: { x: 1300, y: 170 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
       { id: 'apps', type: 'pbx', position: { x: 1300, y: 350 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
+      { id: 'voz', type: 'pbx', position: { x: 1300, y: 470 }, data: { title: 'Voz IA (TTS/STT)', ip: '172.26.20.219', icon: <IconWaveSine size={17} />, status: voz && (voz.whisper || voz.ok || voz.default_voice) ? 'ok' : (voz && voz.error ? 'down' : 'pending'), metrics: [{ label: 'Motor', value: 'Piper + Whisper' }, { label: 'Whisper', value: (voz && voz.whisper) || '-' }] } },
     ];
     const tr = trunks.length ? trunks : [{ name: 'Sin troncales', provider_host: 'agregá una en Troncales', status: 'pending', _empty: true }];
     const step = 172, startY = 250 - ((tr.length - 1) * step) / 2;
@@ -144,7 +147,7 @@ export default function SbcFlow() {
     }));
     const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
     return [...base, ...gwNodes, ...tnodes];
-  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert]);
+  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert, voz]);
 
   useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_sbc_nodepos') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
 
@@ -168,6 +171,7 @@ export default function SbcFlow() {
     e('e5', 'kamailio', 'asterisk', '#7c3aed', anyTrunkActive ? 'llamada por troncal' : 'trunk interno', anyTrunkActive ? callMode : false),
     e('e7', 'asterisk', 'internos', '#16a34a', internosActive ? '● en curso' : undefined, internosActive ? callMode : false),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
+    e('e-voz', 'asterisk', 'voz', '#7c3aed', 'AudioSocket IA', false),
     ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway === 'internet' ? 'wan' : (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio')), t._empty ? '#94a3b8' : (t.status === 'online' ? '#16a34a' : t.status === 'offline' ? '#dc2626' : '#0e9488'), undefined, t._empty ? false : (t.status === 'offline' ? 'down' : trunkActive(t.name) ? callMode : t.status === 'online' ? 'ok' : false))),
     ...(Array.isArray(sbcRoutes) ? sbcRoutes : []).map((rr) => e('gw-e-' + rr.id, 'gw-' + rr.id, 'kamailio', '#0891b2', undefined, false)),
     ...(trunks.some((t) => t.gateway === 'internet') ? [e('wan-kam', 'wan', 'kamailio', '#0e9488', 'troncales SIP', false)] : []),

@@ -835,6 +835,13 @@ async function npmCertInfo() {
 }
 app.get('/api/npm/cert', async (req, res) => { try { res.json(await npmCertInfo()); } catch (e) { res.status(500).json({ error: e.message }); } });
 
+// --- Asterisk core agent (CT103) ---
+const AST_AGENT = process.env.AST_AGENT || 'http://172.26.20.183:8092';
+async function astFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } return fetch(AST_AGENT + path, opt); }
+app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd('GET', '/core'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+
 
 // ===== Audios del sistema (voz coherente) =====
 const SYSPROMPT_CATALOG = [
