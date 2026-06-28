@@ -185,6 +185,7 @@ export default function SbcFlow({ fullBleed }) {
   const info = sel ? INFO[sel] : null;
   const isTrunk = sel ? String(sel).startsWith('trk-') : false;
   const tk = isTrunk ? trunks.find(t => ('trk-' + t.name) === sel) : null;
+  const hasDetail = !!(node && (info || (isTrunk && tk)));
   const stColor = (st) => st === 'ok' ? 'teal' : st === 'pending' ? 'orange' : st === 'down' ? 'red' : 'gray';
   const stLabel = (st) => st === 'ok' ? 'Operativo' : st === 'pending' ? 'Pendiente' : st === 'down' ? 'Caido' : '-';
   const ico = { edit: <IconEdit size={15} />, det: <IconBolt size={15} />, del: <IconTrash size={15} />, add: <IconPlus size={15} />, link: <IconExternalLink size={15} /> };
@@ -222,7 +223,7 @@ export default function SbcFlow({ fullBleed }) {
         </>)}
       </div>
 
-      <Modal opened={!!sel} onClose={() => setSel(null)} size="lg" radius="lg" centered overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
+      <Modal opened={hasDetail} onClose={() => setSel(null)} size="lg" radius="lg" centered overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
         title={node && <Group gap="sm"><ThemeIcon size={42} radius="md" variant="light" color={info ? info.color : 'teal'}>{info ? info.icon : <IconDeviceLandlinePhone size={22} />}</ThemeIcon><div><Text fw={800} size="lg" lh={1.1}>{node.data.title}</Text><Text size="xs" c="dimmed">{info ? info.sub : 'Troncal SIP con el operador'}</Text></div></Group>}>
         {isTrunk && node &&
           <Stack gap="md">
