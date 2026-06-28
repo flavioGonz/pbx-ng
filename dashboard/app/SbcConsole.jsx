@@ -7,6 +7,7 @@ import SbcFlow from './SbcFlow';
 import Slot from './Slot';
 import SipLadder from './SipLadder';
 import Troncales from './troncales/page';
+import RoutesPanel from './RoutesPanel';
 import TurnConsole from './TurnConsole';
 import { useLive } from './useLive';
 import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud } from '@tabler/icons-react';
@@ -236,26 +237,7 @@ function ConsoleBody({ sbc, load, hist }) {
               <ScrollArea.Autosize mah={220}><Stack gap={4}>{liveRoutes.map((r, i) => <Group key={i} gap={6} wrap="nowrap"><IconRoute size={13} color="var(--mantine-color-gray-5)" /><Text ff="monospace" fz="xs">{r}</Text></Group>)}</Stack></ScrollArea.Autosize>}
           </Card>
         </SimpleGrid>
-        <Card withBorder radius="md" padding="md">
-          <Text fw={700} mb="xs">Rutas estáticas administradas</Text>
-          <Group align="flex-end" gap="xs" mb="md" wrap="wrap">
-            <TextInput label="Destino (red/host)" placeholder="ej 200.40.10.0/24 o 1.2.3.4" value={rt.dest} onChange={e => setRt({ ...rt, dest: e.target.value })} w={200} size="xs" />
-            <TextInput label="Gateway (via)" placeholder="ej 172.26.30.1" value={rt.gw} onChange={e => setRt({ ...rt, gw: e.target.value })} w={170} size="xs" />
-            <TextInput label="Interfaz (dev, opc.)" placeholder="ej eth1" value={rt.dev} onChange={e => setRt({ ...rt, dev: e.target.value })} w={150} size="xs" />
-            <TextInput label="Nota (opc.)" placeholder="ej WAN troncal Antel" value={rt.note} onChange={e => setRt({ ...rt, note: e.target.value })} style={{ flex: 1, minWidth: 160 }} size="xs" />
-            <Button size="xs" leftSection={<IconPlus size={14} />} loading={busy === 'route_add'} onClick={addRoute}>{editId ? 'Guardar cambios' : 'Agregar ruta'}</Button>{editId && <Button size="xs" variant="subtle" color="gray" onClick={() => { setEditId(null); setRt({ dest: '', gw: '', dev: '', note: '' }); }}>Cancelar</Button>}
-          </Group>
-          <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Gateway</Table.Th><Table.Th>Interfaz</Table.Th><Table.Th>Nota</Table.Th><Table.Th ta="right">Acción</Table.Th></Table.Tr></Table.Thead>
-            <Table.Tbody>{routes.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin rutas estáticas. Todo sale por la ruta por defecto.</Text></Table.Td></Table.Tr> : routes.map(r => (
-              <Table.Tr key={r.id}>
-                <Table.Td ff="monospace" fz="sm">{r.dest}</Table.Td>
-                <Table.Td ff="monospace" fz="sm">{r.gw || '—'}</Table.Td>
-                <Table.Td ff="monospace" fz="sm">{r.dev || '—'}</Table.Td>
-                <Table.Td fz="sm">{r.note || ''}</Table.Td>
-                <Table.Td ta="right"><Group gap={4} justify="flex-end" wrap="nowrap"><Tooltip label="Editar"><ActionIcon variant="subtle" color="gray" onClick={() => { setRt({ dest: r.dest, gw: r.gw || '', dev: r.dev || '', note: r.note || '' }); setEditId(r.id); }}><IconRoute size={15} /></ActionIcon></Tooltip><Tooltip label="Quitar ruta"><ActionIcon variant="subtle" color="red" loading={busy === 'route_del' + r.id} onClick={() => delRoute(r.id, r.dest)}><IconTrash size={15} /></ActionIcon></Tooltip></Group></Table.Td>
-              </Table.Tr>))}</Table.Tbody></Table>
-          <Group gap="xs" mt="sm" c="orange"><IconAlertTriangle size={15} /><Text size="xs" c="dimmed">Las rutas se aplican con <Code>ip route replace</Code> en el SBC (CT107). Una ruta mal configurada puede afectar la conectividad; verificá gateway e interfaz antes de guardar.</Text></Group>
-        </Card>
+        <RoutesPanel scope="sbc" />
       </Tabs.Panel>
 
       <Tabs.Panel value="rtp">
