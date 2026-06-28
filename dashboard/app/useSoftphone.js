@@ -155,7 +155,7 @@ export function useSoftphone() {
       const uri = UserAgent.makeURI(`sip:${ext}@${location.hostname}`);
       const agent = new UserAgent({
         uri,
-        transportOptions: { server: `wss://${location.host}/ws`, traceSip: false },
+        transportOptions: { server: `wss://${location.host}${(() => { try { const q = new URLSearchParams(window.location.search).get('wsedge'); if (q === 'sbc') localStorage.setItem('pbxng_wsedge', 'sbc'); if (q === 'off') localStorage.removeItem('pbxng_wsedge'); return localStorage.getItem('pbxng_wsedge') === 'sbc' ? '/ws-sbc' : '/ws'; } catch (_) { return '/ws'; } })()}`, traceSip: false },
         authorizationUsername: ext, authorizationPassword: pass,
         sessionDescriptionHandlerFactoryOptions: { peerConnectionConfiguration: { iceServers: ICE, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' }, iceGatheringTimeout: 1500 },
         delegate: {
