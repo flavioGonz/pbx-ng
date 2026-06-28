@@ -59,9 +59,14 @@ def core():
     mods = {}
     for k, like in [("pjsip","res_pjsip.so"),("srtp","res_srtp.so"),("crypto","res_crypto.so"),("rtp","res_rtp_asterisk.so")]:
         mods[k] = "Running" in ast("module show like %s" % like) or like in ast("module show like %s" % like)
-    eps = ast("pjsip show endpoints | grep -c Endpoint:")
+    uptxt = ast("core show uptime")
+    upline = ""
+    for l in uptxt.splitlines():
+        if "uptime" in l.lower(): upline = l.strip(); break
+    eptxt = ast("pjsip show endpoints")
+    neps = len([l for l in eptxt.splitlines() if l.strip().startswith("Endpoint:") and "<Endpoint/CID" not in l])
     return {"version": ver[:40], "channels": nch, "transports": tr, "modules": mods,
-            "uptime": ast("core show uptime | head -1"), "endpoints": eps}
+            "uptime": upline, "endpoints": neps}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
