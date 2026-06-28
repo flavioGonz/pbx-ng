@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath } from '@xyflow/react';
+import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box, Button } from '@mantine/core';
 import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt } from '@tabler/icons-react';
@@ -82,6 +82,7 @@ export default function SbcFlow() {
   const { snap } = useLive();
   const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null);
   const [sel, setSel] = useState(null);
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   async function load() {
     try { setSbc(await fetch('/backend/api/sbc').then(r => r.json())); } catch (_) {}
     try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {}
@@ -94,7 +95,7 @@ export default function SbcFlow() {
   const trunkOnline = trunks.filter(t => t.status === 'online').length;
   const comp = (g, n) => (sys?.components || []).find(c => c.group === g && c.name.includes(n))?.status;
 
-  const nodes = useMemo(() => {
+  const computedNodes = useMemo(() => {
     const base = [
       { id: 'wan', type: 'pbx', position: { x: 360, y: 250 }, data: { title: 'Internet / WAN', ip: '200.40.182.246', icon: <IconWorld size={17} />, status: 'ok' } },
       { id: 'npm', type: 'pbx', position: { x: 660, y: 60 }, data: { title: 'Proxy NPM', ip: '172.26.20.17', icon: <IconShieldLock size={17} />, status: comp('Seguridad', 'Proxy') || 'ok', metrics: [{ label: 'TLS / WSS', value: 'pbx.ies.com.uy' }] } },
@@ -105,13 +106,15 @@ export default function SbcFlow() {
       { id: 'apps', type: 'pbx', position: { x: 1300, y: 350 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
     ];
     const tr = trunks.length ? trunks : [{ name: 'Sin troncales', provider_host: 'agregá una en Troncales', status: 'pending', _empty: true }];
-    const step = 110, startY = 250 - ((tr.length - 1) * step) / 2;
+    const step = 172, startY = 250 - ((tr.length - 1) * step) / 2;
     const tnodes = tr.map((t, i) => ({
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
       data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
     }));
     return [...base, ...tnodes];
   }, [sbc, trunks, sys, snap]);
+
+  useEffect(() => { setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return ex ? { ...n, position: ex.position } : n; })); }, [computedNodes, setRfNodes]);
 
   const talking = ch.filter(c => /up|answer/i.test(c.state || '')).length;
   const callCount = (() => { const set = new Set(); ch.forEach(c => set.add([c.caller || '?', c.connected || '?'].sort().join('~'))); return set.size; })();
@@ -129,7 +132,7 @@ export default function SbcFlow() {
     ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), 'wan', t._empty ? '#94a3b8' : (t.status === 'online' ? '#2f74e6' : t.status === 'offline' ? '#dc2626' : '#0e9488'), i === 0 ? 'troncal SIP' : undefined, t._empty ? false : spine)),
   ];
 
-  const node = nodes.find(n => n.id === sel);
+  const node = computedNodes.find(n => n.id === sel);
   const info = sel ? INFO[sel] : null;
   const isTrunk = sel ? String(sel).startsWith('trk-') : false;
   const tk = isTrunk ? trunks.find(t => ('trk-' + t.name) === sel) : null;
@@ -141,8 +144,8 @@ export default function SbcFlow() {
       <style>{`.sbc-node:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(30,50,120,.22)!important;} .sbc-flow{animation:sbcfade .45s ease;} @keyframes sbcfade{from{opacity:0;transform:scale(.99)}to{opacity:1;transform:none}} .sbc-live{animation:sbcpulse 1.6s ease-in-out infinite!important;} @keyframes sbcpulse{0%,100%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 10px 30px rgba(30,50,120,.14),0 0 0 8px rgba(22,163,74,0)}} .flow-dash{animation:flowdash .6s linear infinite} @keyframes flowdash{to{stroke-dashoffset:-28}}`}</style>
       <div className="sbc-flow" style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
         {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {callCount} llamada(s) · {ch.length} canal(es)</div>}
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
-          onNodeClick={(_, n) => setSel(n.id)} nodesDraggable={false} nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
+        <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
+          onNodeClick={(_, n) => setSel(n.id)} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
           <Background color="#cdd7e4" gap={22} />
           <Controls showInteractive={false} />
         </ReactFlow>

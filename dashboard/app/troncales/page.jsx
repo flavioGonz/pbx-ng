@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { ReactFlow, Background, Controls, Handle, Position, MarkerType } from '@xyflow/react';
+import { ReactFlow, Background, Controls, Handle, Position, MarkerType, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Button, Badge, Card, ActionIcon, Modal, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, ScrollArea, Divider, Tooltip, Box, Paper, FileButton } from '@mantine/core';
 import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers, IconDeviceLandlinePhone, IconTag, IconWorld, IconHash, IconUser, IconLock, IconPlugConnected, IconAdjustmentsAlt, IconWaveSine, IconArrowsExchange, IconRefresh, IconX, IconKey, IconBroadcast, IconPhoto } from '@tabler/icons-react';
@@ -56,6 +56,7 @@ export default function Troncales() {
   const { snap } = useLive();
   const [trunks, setTrunks] = useState([]); const [open, setOpen] = useState(false); const [f, setF] = useState(blank);
   const [saving, setSaving] = useState(false); const [editing, setEditing] = useState(false); const [showList, setShowList] = useState(true); const [sel, setSel] = useState(null);
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   async function load() { try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
@@ -95,9 +96,9 @@ export default function Troncales() {
   const online = trunks.filter(t => t.status === 'online').length;
   const kamTrunks = trunks.filter(t => t.kind === 'kamailio'); const astTrunks = trunks.filter(t => t.kind !== 'kamailio');
 
-  const { nodes, edges } = useMemo(() => {
+  const { nodes: computedNodes, edges } = useMemo(() => {
     const ns = [], es = [];
-    const COL_T = 40, COL_KAM = 380, COL_AST = 660, COL_INT = 940; const ROW = 230, STEP = 100;
+    const COL_T = 40, COL_KAM = 380, COL_AST = 660, COL_INT = 940; const ROW = 230, STEP = 160;
     ns.push({ id: 'kam', type: 't', position: { x: COL_KAM, y: ROW }, data: { title: 'SBC-NG', sub: '172.26.20.205', icon: <IconRouteAltLeft size={16} />, accent: 'kam', status: 'sbc', badge: kamTrunks.length + ' troncal(es)' } });
     ns.push({ id: 'ast', type: 't', position: { x: COL_AST, y: ROW }, data: { title: 'Asterisk PBX', sub: '172.26.20.183', icon: <IconServer2 size={16} />, accent: 'ast', status: snap?.health?.ami ? 'online' : 'down', badge: ch + ' llamada(s)' } });
     ns.push({ id: 'int', type: 't', position: { x: COL_INT, y: ROW }, data: { title: 'Internos', icon: <IconUsers size={16} />, dot: false, badge: (snap?.extensions || []).length + ' extensiones' } });
@@ -115,6 +116,8 @@ export default function Troncales() {
     return { nodes: ns, edges: es };
   }, [trunks, snap]);
 
+  useEffect(() => { setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return ex ? { ...n, position: ex.position } : n; })); }, [computedNodes, setRfNodes]);
+
   const onNodeClick = (_, n) => { if (n.data?.clickable) { const t = trunks.find(x => x.name === n.data.name); if (t) { setSel(t); } } };
   const stBadge = (t) => <Badge size="xs" variant="filled" color={t.status === 'online' ? 'teal' : t.status === 'offline' ? 'red' : t.status === 'sbc' ? 'grape' : 'gray'}>{t.detail || (t.status === 'online' ? 'Conectada' : t.status === 'offline' ? 'Caída' : t.status === 'sbc' ? 'En el SBC' : 'Sin datos')}</Badge>;
   const glass = { background: 'rgba(255,255,255,.86)', backdropFilter: 'blur(10px)', border: '1px solid rgba(15,23,42,.08)', boxShadow: '0 10px 30px rgba(15,42,74,.10)' };
@@ -122,7 +125,7 @@ export default function Troncales() {
 
   return (
     <div style={{ position: 'relative', height: 'calc(100vh - 40px)', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(15,23,42,.10)', background: 'radial-gradient(820px 420px at 72% -12%, rgba(47,116,230,.06), transparent), #f6f8fb' }}>
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.18 }} defaultEdgeOptions={{ type: 'smoothstep' }} proOptions={{ hideAttribution: true }} nodesDraggable={false} nodesConnectable={false} onNodeClick={onNodeClick} minZoom={0.3} maxZoom={1.6}>
+      <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.18 }} defaultEdgeOptions={{ type: 'smoothstep' }} proOptions={{ hideAttribution: true }} nodesDraggable nodesConnectable={false} onNodeClick={onNodeClick} minZoom={0.3} maxZoom={1.6}>
         <Background color="#cdd7e4" gap={22} />
         <Controls showInteractive={false} />
       </ReactFlow>
