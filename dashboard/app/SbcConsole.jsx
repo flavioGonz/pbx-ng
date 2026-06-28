@@ -6,6 +6,7 @@ import { toast } from './notify';
 import SbcFlow from './SbcFlow';
 import Slot from './Slot';
 import SipLadder from './SipLadder';
+import Troncales from './troncales/page';
 import { useLive } from './useLive';
 import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug } from '@tabler/icons-react';
 
@@ -106,6 +107,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
+        <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
         <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>
@@ -193,6 +195,8 @@ function ConsoleBody({ sbc, load, hist }) {
               </Table.Tr>); })}</Table.Tbody></Table>
         </Card>
       </Tabs.Panel>
+
+      <Tabs.Panel value="trunks"><Troncales /></Tabs.Panel>
 
       <Tabs.Panel value="net">
         <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-cyan-light)' }}>

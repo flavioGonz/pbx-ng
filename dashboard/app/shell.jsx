@@ -25,7 +25,6 @@ const groups = [
     { href: '/sbc', label: 'SBC-NG', icon: IconShieldLock },
     { href: '/internos', label: 'Internos', icon: IconUsers },
     { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
-    { href: '/troncales', label: 'Troncales', icon: IconArrowsLeftRight },
     { href: '/rutas', label: 'Rutas', icon: IconRoute },
     { href: '/ivr', label: 'IVR', icon: IconArrowsSplit },
     { href: '/ia-voz', label: 'IA & Voz', icon: IconRobot },
