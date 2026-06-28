@@ -5,6 +5,7 @@ import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Button, Badge, Card, ActionIcon, Modal, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, ScrollArea, Divider, Tooltip, Box, Paper, FileButton } from '@mantine/core';
 import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers, IconDeviceLandlinePhone, IconTag, IconWorld, IconHash, IconUser, IconLock, IconPlugConnected, IconAdjustmentsAlt, IconWaveSine, IconArrowsExchange, IconRefresh, IconX, IconKey, IconBroadcast, IconPhoto } from '@tabler/icons-react';
 import { useLive } from '../useLive';
+import TrunkEditor from '../TrunkEditor';
 import { toast } from '../notify';
 
 const CODECS = ['ulaw', 'alaw', 'g722', 'g729', 'opus', 'gsm'];
@@ -54,7 +55,7 @@ const nodeTypes = { t: TNode };
 
 export default function Troncales() {
   const { snap } = useLive();
-  const [trunks, setTrunks] = useState([]); const [open, setOpen] = useState(false); const [f, setF] = useState(blank);
+  const [trunks, setTrunks] = useState([]); const [open, setOpen] = useState(false); const [editName, setEditName] = useState(null); const [f, setF] = useState(blank);
   const [saving, setSaving] = useState(false); const [editing, setEditing] = useState(false); const [showList, setShowList] = useState(true); const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [gwOpts, setGwOpts] = useState([]);
@@ -74,14 +75,8 @@ export default function Troncales() {
       URL.revokeObjectURL(url);
     } catch (_) { toast('No se pudo procesar el logo', 'bad'); }
   }
-  function openNew() { setEditing(false); setF(blank); setOpen(true); }
-  async function openEdit(t) {
-    setEditing(true);
-    let adv = {};
-    try { const d = await fetch('/backend/api/trunks/' + encodeURIComponent(t.name) + '/detail').then(r => r.json()); adv = d.adv || {}; } catch (_) {}
-    setF({ ...blank, ...adv, name: t.name, kind: t.kind || 'asterisk', password: '', provider_port: String(adv.provider_port || t.provider_port || '5060') });
-    setOpen(true);
-  }
+  function openNew() { setEditName(null); setOpen(true); }
+  function openEdit(t) { setEditName(t.name); setOpen(true); }
   async function create() {
     if (!f.name || !f.provider_host) { toast('Nombre y host del proveedor son obligatorios', 'bad'); return; }
     setSaving(true);
@@ -204,88 +199,7 @@ export default function Troncales() {
       )}
 
       {/* editor completo */}
-      <Modal opened={open} onClose={() => setOpen(false)} centered radius="lg" size="lg" scrollAreaComponent={ScrollArea.Autosize}
-        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color="teal"><IconDeviceLandlinePhone size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>{editing ? 'Configurar troncal' : 'Nueva troncal'}</Text><Text size="xs" c="dimmed">Enlace con tu operador SIP</Text></div></Group>}>
-        <Stack gap="md">
-          <Divider label="General" labelPosition="left" />
-          <div>
-            <Text size="sm" fw={500} mb={4}>¿Dónde vive la troncal?</Text>
-            <SegmentedControl fullWidth value={f.kind} onChange={v => set('kind', v)} disabled={editing} data={[{ value: 'asterisk', label: 'Asterisk (directo)' }, { value: 'kamailio', label: 'SBC-NG' }]} />
-          </div>
-          <Group grow>
-            <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="proveedor-1" value={f.name} onChange={e => set('name', e.target.value)} required disabled={editing} description={editing ? 'No se puede cambiar' : 'Identificador único'} />
-            <TextInput label="Caller ID saliente" leftSection={<IconUser size={15} />} placeholder='"Empresa" <099...>' value={f.callerid} onChange={e => set('callerid', e.target.value)} description="Identificación que verá el destino" />
-          </Group>
-          <Group gap="md" align="center" wrap="nowrap">
-            <div style={{ width: 56, height: 56, borderRadius: 12, border: '1px dashed var(--mantine-color-default-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--mantine-color-default-hover)', overflow: 'hidden', flex: 'none' }}>{f.logo ? <img src={f.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} /> : <IconPhoto size={22} style={{ opacity: .4 }} />}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Text size="sm" fw={500}>Logo del proveedor (PNG)</Text>
-              <Text size="xs" c="dimmed">Se muestra en la topología. PNG transparente recomendado.</Text>
-              <Group gap="xs" mt={6}>
-                <FileButton onChange={onLogo} accept="image/png,image/jpeg,image/svg+xml">{(props) => <Button {...props} size="xs" variant="light" leftSection={<IconPhoto size={14} />}>Subir logo</Button>}</FileButton>
-                {f.logo && <Button size="xs" variant="subtle" color="red" onClick={() => set('logo', '')}>Quitar</Button>}
-              </Group>
-            </div>
-          </Group>
-
-          <Divider label="Conexión" labelPosition="left" />
-          {isAst && <div>
-            <Text size="sm" fw={500} mb={4}>Modo de la troncal</Text>
-            <SegmentedControl fullWidth value={f.mode} onChange={v => set('mode', v)} data={[{ value: 'register', label: 'Registro (usuario/clave)' }, { value: 'ip', label: 'IP / Peer (sin registro)' }]} />
-            <Text size="xs" c="dimmed" mt={6}>{f.mode === 'ip' ? 'El operador autentica por dirección IP; la PBX no se registra. Típico en enlaces dedicados/SIP trunk por IP.' : 'La PBX se registra contra el operador con usuario y contraseña (lo más común).'}</Text>
-          </div>}
-          <Group grow>
-            <TextInput label="Host del proveedor" leftSection={<IconWorld size={15} />} placeholder="sip.proveedor.com" value={f.provider_host} onChange={e => set('provider_host', e.target.value)} required />
-            <TextInput label="Puerto" leftSection={<IconHash size={15} />} value={f.provider_port} onChange={e => set('provider_port', e.target.value)} w={110} />
-            <Select label="Transporte" value={f.transport} onChange={v => set('transport', v)} data={[{ value: 'udp', label: 'UDP' }, { value: 'tcp', label: 'TCP' }, { value: 'tls', label: 'TLS (cifrado)' }]} w={140} leftSection={<IconPlugConnected size={15} />} />
-          </Group>
-
-          {isAst && <>
-            <Divider label="Autenticación" labelPosition="left" />
-            <Group grow>
-              <TextInput label="Usuario" leftSection={<IconUser size={15} />} value={f.username} onChange={e => set('username', e.target.value)} description={f.mode === 'ip' ? 'Opcional en modo IP' : 'Usuario SIP del operador'} />
-              <PasswordInput label="Contraseña" leftSection={<IconLock size={15} />} placeholder={editing ? '(sin cambios)' : ''} value={f.password} onChange={e => set('password', e.target.value)} />
-            </Group>
-            <Group grow>
-              <TextInput label="From user" leftSection={<IconKey size={15} />} placeholder="(usuario)" value={f.from_user} onChange={e => set('from_user', e.target.value)} description="Identidad en el From (si el operador lo exige)" />
-              <TextInput label="From domain" leftSection={<IconWorld size={15} />} placeholder="(host del proveedor)" value={f.from_domain} onChange={e => set('from_domain', e.target.value)} />
-            </Group>
-
-            <Divider label="Medios y códecs" labelPosition="left" />
-            <MultiSelect label="Códecs permitidos (en orden de prioridad)" data={CODECS} value={f.codecs} onChange={v => set('codecs', v)} leftSection={<IconWaveSine size={15} />} clearable={false} />
-            <Group grow>
-              <Select label="DTMF" value={f.dtmf_mode} onChange={v => set('dtmf_mode', v)} data={[{ value: 'rfc4733', label: 'RFC 4733 (recomendado)' }, { value: 'inband', label: 'Inband' }, { value: 'info', label: 'SIP INFO' }, { value: 'auto', label: 'Auto' }]} leftSection={<IconBroadcast size={15} />} />
-              <NumberInput label="Qualify (s)" value={f.qualify_frequency} onChange={v => set('qualify_frequency', v)} min={0} max={300} description="Keepalive al proveedor" />
-            </Group>
-            <Group gap="xl">
-              <Switch label="Detrás de NAT (symmetric RTP)" checked={f.nat} onChange={e => set('nat', e.currentTarget.checked)} />
-              <Switch label="Direct media (RTP directo)" checked={f.direct_media} onChange={e => set('direct_media', e.currentTarget.checked)} />
-            </Group>
-
-            <Divider label="Números (DID) y capacidad" labelPosition="left" />
-            <Group grow align="flex-start">
-              <TagsInput label="Números del proveedor (DID)" placeholder="Escribí y Enter" value={f.dids} onChange={v => set('dids', v)} description="Números fijos que entrega esta troncal" leftSection={<IconDeviceLandlinePhone size={15} />} />
-              <NumberInput label="Canales (capacidad)" value={f.channels} onChange={v => set('channels', v)} min={0} max={1000} description="Llamadas simultáneas del proveedor" w={190} />
-            </Group>
-            <Select label="¿Por dónde se llega a esta troncal?" value={f.gateway || ''} onChange={v => set('gateway', v || '')} data={[{ value: '', label: 'Directa / Internet (ruta por defecto)' }, ...gwOpts]} leftSection={<IconRouteAltLeft size={15} />} description="Ruta estática del SBC (Red) por la que se alcanza el proveedor. Se dibuja en la topología." />
-            <Divider label="Avanzado" labelPosition="left" />
-            <Group grow>
-              <TextInput label="Contexto entrante" value={f.context} onChange={e => set('context', e.target.value)} description="Dónde caen las llamadas entrantes" />
-              {f.mode === 'register' && <NumberInput label="Expiración registro (s)" value={f.expiration} onChange={v => set('expiration', v)} min={60} max={7200} />}
-            </Group>
-            <div>
-              <Switch label="Crear ruta de salida automática" checked={f.outbound_enabled} onChange={e => set('outbound_enabled', e.currentTarget.checked)} />
-              {f.outbound_enabled && <Group grow mt="xs">
-                <TextInput label="Prefijo de salida" value={f.outbound_prefix} onChange={e => set('outbound_prefix', e.target.value)} placeholder="0" description="Discar prefijo + número (vacío = cualquier número)" />
-                <NumberInput label="Quitar dígitos" value={f.outbound_strip} onChange={v => set('outbound_strip', v)} min={0} max={10} description="Cuántos dígitos quitar antes de enviar" />
-              </Group>}
-            </div>
-          </>}
-          {!isAst && <Text size="xs" c="dimmed">La troncal se gestiona en el borde SBC-NG (registro/seguridad en el SBC). Los parámetros de códec/NAT se administran desde la consola del SBC.</Text>}
-
-          <Button onClick={create} loading={saving} mt="xs" size="md" color="teal">{editing ? 'Guardar cambios' : 'Crear troncal'}</Button>
-        </Stack>
-      </Modal>
+      <TrunkEditor opened={open} onClose={() => setOpen(false)} initialName={editName} onSaved={load} />
     </div>
   );
 }

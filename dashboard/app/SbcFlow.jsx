@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box, Button } from '@mantine/core';
-import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter, IconCloud } from '@tabler/icons-react';
+import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter, IconCloud, IconEdit, IconTrash, IconPlus, IconExternalLink } from '@tabler/icons-react';
 import { useLive } from './useLive';
+import TrunkEditor from './TrunkEditor';
 
 function Node({ data }) {
   const st = data.status;
@@ -107,12 +108,16 @@ export default function SbcFlow() {
   const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]);
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
+  const [menu, setMenu] = useState(null);
+  const [teOpen, setTeOpen] = useState(false);
+  const [teName, setTeName] = useState(null);
   async function load() {
     try { setSbc(await fetch('/backend/api/sbc').then(r => r.json())); } catch (_) {}
     try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {}
     try { setSys(await fetch('/backend/api/system').then(r => r.json())); } catch (_) {}
     try { const _r = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(_r)) setSbcRoutes(_r); } catch (_) {}
   }
+  async function delTrunk(name) { if (!confirm('¿Eliminar la troncal ' + name + '?')) return; try { await fetch('/backend/api/trunks/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} load(); }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
 
   const eps = snap?.extensions || []; const ch = snap?.channels || []; const qs = snap?.queues || [];
@@ -162,8 +167,9 @@ export default function SbcFlow() {
     e('e5', 'kamailio', 'asterisk', '#7c3aed', anyTrunkActive ? 'llamada por troncal' : 'trunk interno', anyTrunkActive ? callMode : false),
     e('e7', 'asterisk', 'internos', '#16a34a', internosActive ? '● en curso' : undefined, internosActive ? callMode : false),
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
-    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio'), t._empty ? '#94a3b8' : (t.status === 'online' ? '#16a34a' : t.status === 'offline' ? '#dc2626' : '#0e9488'), undefined, t._empty ? false : (t.status === 'offline' ? 'down' : trunkActive(t.name) ? callMode : t.status === 'online' ? 'ok' : false))),
+    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway === 'internet' ? 'wan' : (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio')), t._empty ? '#94a3b8' : (t.status === 'online' ? '#16a34a' : t.status === 'offline' ? '#dc2626' : '#0e9488'), undefined, t._empty ? false : (t.status === 'offline' ? 'down' : trunkActive(t.name) ? callMode : t.status === 'online' ? 'ok' : false))),
     ...(Array.isArray(sbcRoutes) ? sbcRoutes : []).map((rr) => e('gw-e-' + rr.id, 'gw-' + rr.id, 'kamailio', '#0891b2', undefined, false)),
+    ...(trunks.some((t) => t.gateway === 'internet') ? [e('wan-kam', 'wan', 'kamailio', '#0e9488', 'troncales SIP', false)] : []),
   ];
 
   const node = computedNodes.find(n => n.id === sel);
@@ -172,6 +178,21 @@ export default function SbcFlow() {
   const tk = isTrunk ? trunks.find(t => ('trk-' + t.name) === sel) : null;
   const stColor = (st) => st === 'ok' ? 'teal' : st === 'pending' ? 'orange' : st === 'down' ? 'red' : 'gray';
   const stLabel = (st) => st === 'ok' ? 'Operativo' : st === 'pending' ? 'Pendiente' : st === 'down' ? 'Caido' : '-';
+  const ico = { edit: <IconEdit size={15} />, det: <IconBolt size={15} />, del: <IconTrash size={15} />, add: <IconPlus size={15} />, link: <IconExternalLink size={15} /> };
+  function menuActions(id) {
+    if (String(id).startsWith('trk-')) { const name = id.slice(4); return [
+      { label: 'Editar troncal', icon: ico.edit, onClick: () => { setTeName(name); setTeOpen(true); } },
+      { label: 'Ver detalle', icon: ico.det, onClick: () => setSel(id) },
+      { label: 'Eliminar', icon: ico.del, color: '#dc2626', onClick: () => delTrunk(name) },
+    ]; }
+    if (id === 'kamailio') return [
+      { label: 'Nueva troncal', icon: ico.add, onClick: () => { setTeName(null); setTeOpen(true); } },
+      { label: 'Ver detalle', icon: ico.det, onClick: () => setSel(id) },
+    ];
+    if (id === 'internos') return [ { label: 'Ver detalle', icon: ico.det, onClick: () => setSel(id) }, { label: 'Ir a Internos', icon: ico.link, onClick: () => { window.location.href = '/internos'; } } ];
+    if (id === 'apps') return [ { label: 'Ver detalle', icon: ico.det, onClick: () => setSel(id) }, { label: 'Ir a Aplicaciones', icon: ico.link, onClick: () => { window.location.href = '/aplicaciones'; } } ];
+    return [ { label: 'Ver detalle', icon: ico.det, onClick: () => setSel(id) } ];
+  }
 
   return (
     <>
@@ -179,7 +200,7 @@ export default function SbcFlow() {
       <div className="sbc-flow" style={{ position: 'relative', height: 'calc(100vh - 210px)', minHeight: 520, borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)', background: 'radial-gradient(720px 360px at 72% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
         {ch.length > 0 && <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 5, background: 'rgba(22,163,74,.95)', color: '#fff', padding: '5px 12px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 4px 14px rgba(22,163,74,.4)' }}><span className="pbx-pip pbx-pulse" style={{ background: '#fff' }} /> EN VIVO · {callCount} llamada(s) · {ch.length} canal(es)</div>}
         <ReactFlow nodes={rfNodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView fitViewOptions={{ padding: 0.16 }} proOptions={{ hideAttribution: true }}
-          onNodeClick={(_, n) => setSel(n.id)} onNodeDragStop={() => setRfNodes((cur) => { const map = {}; cur.forEach((n) => { map[n.id] = n.position; }); try { localStorage.setItem('pbxng_sbc_nodepos', JSON.stringify(map)); } catch (_) {} return cur; })} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
+          onNodeClick={(_, n) => setSel(n.id)} onNodeContextMenu={(ev, n) => { ev.preventDefault(); setMenu({ x: ev.clientX, y: ev.clientY, id: n.id }); }} onPaneClick={() => setMenu(null)} onNodeDragStop={() => setRfNodes((cur) => { const map = {}; cur.forEach((n) => { map[n.id] = n.position; }); try { localStorage.setItem('pbxng_sbc_nodepos', JSON.stringify(map)); } catch (_) {} return cur; })} nodesDraggable nodesConnectable={false} minZoom={0.4} maxZoom={1.6}>
           <Background color="#cdd7e4" gap={22} />
           <Controls showInteractive={false} />
         </ReactFlow>
@@ -202,7 +223,7 @@ export default function SbcFlow() {
               <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Transporte</Text><Text fw={700}>{(tk?.transport || 'udp').toUpperCase()}</Text></Card>
               <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Ruteo</Text><Text fw={700}>{tk?.kind === 'kamailio' ? 'vía SBC-NG' : 'directa'}</Text></Card>
             </SimpleGrid>
-            <Button component="a" href="/troncales" variant="light" leftSection={<IconDeviceLandlinePhone size={16} />}>Configurar en Troncales</Button>
+            <Group grow><Button variant="light" leftSection={<IconEdit size={16} />} onClick={() => { setTeName(tk?.name); setTeOpen(true); setSel(null); }}>Editar troncal</Button><Button variant="light" color="red" leftSection={<IconTrash size={16} />} onClick={() => { delTrunk(tk?.name); setSel(null); }}>Eliminar</Button></Group>
           </Stack>}
         {info && node &&
           <Stack gap="md">
@@ -234,6 +255,17 @@ export default function SbcFlow() {
               </SimpleGrid></>}
           </Stack>}
       </Modal>
+
+      {menu && (<>
+        <div onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} style={{ position: 'fixed', inset: 0, zIndex: 200 }} />
+        <div style={{ position: 'fixed', left: Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 210), top: menu.y, zIndex: 201, background: '#fff', borderRadius: 12, boxShadow: '0 14px 38px rgba(15,42,74,.24)', border: '1px solid rgba(15,23,42,.08)', padding: 6, minWidth: 196 }}>
+          {menuActions(menu.id).map((a, i) => (
+            <button key={i} onClick={() => { a.onClick(); setMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', background: 'transparent', padding: '9px 11px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: a.color || '#1e293b', textAlign: 'left' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>{a.icon}{a.label}</button>
+          ))}
+        </div>
+      </>)}
+
+      <TrunkEditor opened={teOpen} onClose={() => setTeOpen(false)} initialName={teName} onSaved={load} />
     </>
   );
 }
