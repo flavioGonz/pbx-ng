@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Stack, Text, Group, Button, Badge, Card, ActionIcon, Modal, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, ThemeIcon, ScrollArea, Divider, Tooltip, Box, Paper, FileButton } from '@mantine/core';
+import { Stack, Text, Group, Button, Badge, Card, ActionIcon, Modal, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, ScrollArea, Divider, Tooltip, Box, Paper, FileButton } from '@mantine/core';
 import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers, IconDeviceLandlinePhone, IconTag, IconWorld, IconHash, IconUser, IconLock, IconPlugConnected, IconAdjustmentsAlt, IconWaveSine, IconArrowsExchange, IconRefresh, IconX, IconKey, IconBroadcast, IconPhoto } from '@tabler/icons-react';
 import { useLive } from '../useLive';
 import { toast } from '../notify';
@@ -14,7 +14,7 @@ const blank = {
   username: '', password: '', from_user: '', from_domain: '',
   codecs: ['ulaw', 'alaw'], dtmf_mode: 'rfc4733', nat: true, direct_media: false,
   qualify_frequency: 60, expiration: 3600, retry_interval: 60, context: 'from-trunk',
-  outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0, logo: '',
+  outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0, logo: '', dids: [], channels: 0,
 };
 
 function TNode({ data }) {
@@ -109,7 +109,7 @@ export default function Troncales() {
       const id = 'tk-' + it.t.name; const kind = it.kind; const stt = it.t.status;
       const on = stt === 'online'; const off = stt === 'offline';
       const ecol = off ? '#dc2626' : on ? '#2f74e6' : (kind === 'kamailio' ? '#7c3aed' : '#94a3b8');
-      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.logo || (it.t.adv && it.t.adv.logo), tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() } });
+      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.logo || (it.t.adv && it.t.adv.logo), tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() + (it.t.channels ? ' · ' + it.t.channels + ' ch' : '') } });
       es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'smoothstep', animated: off, label: it.t.rtt != null ? (Math.round(it.t.rtt) + ' ms') : (on ? 'levantada' : off ? 'caida' : undefined), labelStyle: { fontSize: 10, fontWeight: 700, fill: ecol }, labelBgStyle: { fill: 'var(--mantine-color-body)', fillOpacity: 0.85 }, labelBgPadding: [4, 2], labelBgBorderRadius: 6, style: { stroke: ecol, strokeWidth: 2.2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
     });
     return { nodes: ns, edges: es };
@@ -168,6 +168,8 @@ export default function Troncales() {
                   <Group gap={6} mt={6}>
                     <Badge size="xs" variant="light" color={t.mode === 'ip' ? 'indigo' : 'blue'}>{t.mode === 'ip' ? 'IP / Peer' : 'Registro'}</Badge>
                     <Badge size="xs" variant="light" color="gray">{(t.transport || 'udp').toUpperCase()}</Badge>
+                    {t.channels ? <Badge size="xs" variant="light" color="cyan">{t.channels} ch</Badge> : null}
+                    {t.dids && t.dids.length ? <Badge size="xs" variant="light" color="indigo">{t.dids.length} DID</Badge> : null}
                     {stBadge(t)}
                   </Group>
                 </Card>
@@ -188,6 +190,8 @@ export default function Troncales() {
             <Group justify="space-between"><Text fz="xs" c="dimmed">Proveedor</Text><Text fz="xs" ff="monospace">{sel.provider_host}:{sel.provider_port}</Text></Group>
             <Group justify="space-between"><Text fz="xs" c="dimmed">Modo</Text><Badge size="xs" variant="light" color={sel.mode === 'ip' ? 'indigo' : 'blue'}>{sel.mode === 'ip' ? 'IP / Peer' : 'Registro'}</Badge></Group>
             <Group justify="space-between"><Text fz="xs" c="dimmed">Transporte</Text><Badge size="xs" variant="light" color="gray">{(sel.transport || 'udp').toUpperCase()}</Badge></Group>
+            {sel.channels ? <Group justify="space-between"><Text fz="xs" c="dimmed">Canales</Text><Badge size="xs" variant="light" color="cyan">{sel.channels}</Badge></Group> : null}
+            {sel.dids && sel.dids.length > 0 && <div><Text fz="xs" c="dimmed" mb={3}>Números (DID)</Text><Group gap={4}>{sel.dids.map(d => <Badge key={d} size="xs" variant="light" color="indigo" ff="monospace">{d}</Badge>)}</Group></div>}
             {sel.username && <Group justify="space-between"><Text fz="xs" c="dimmed">Usuario</Text><Text fz="xs" ff="monospace">{sel.username}</Text></Group>}
           </Stack>
           <Group grow mt="sm"><Button size="xs" variant="light" leftSection={<IconEdit size={14} />} onClick={() => openEdit(sel)}>Configurar</Button><Button size="xs" variant="light" color="red" leftSection={<IconTrash size={14} />} onClick={() => del(sel)}>Eliminar</Button></Group>
@@ -253,6 +257,11 @@ export default function Troncales() {
               <Switch label="Direct media (RTP directo)" checked={f.direct_media} onChange={e => set('direct_media', e.currentTarget.checked)} />
             </Group>
 
+            <Divider label="Números (DID) y capacidad" labelPosition="left" />
+            <Group grow align="flex-start">
+              <TagsInput label="Números del proveedor (DID)" placeholder="Escribí y Enter" value={f.dids} onChange={v => set('dids', v)} description="Números fijos que entrega esta troncal" leftSection={<IconDeviceLandlinePhone size={15} />} />
+              <NumberInput label="Canales (capacidad)" value={f.channels} onChange={v => set('channels', v)} min={0} max={1000} description="Llamadas simultáneas del proveedor" w={190} />
+            </Group>
             <Divider label="Avanzado" labelPosition="left" />
             <Group grow>
               <TextInput label="Contexto entrante" value={f.context} onChange={e => set('context', e.target.value)} description="Dónde caen las llamadas entrantes" />
