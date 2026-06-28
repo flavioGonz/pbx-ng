@@ -120,20 +120,20 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
           <Stack gap="md" mt="md">
             <Group grow>
               <TextInput label="Usuario" leftSection={<IconUser size={15} />} value={f.username} onChange={(e) => set('username', e.target.value)} description={f.mode === 'ip' ? 'Opcional en modo IP' : 'Usuario SIP del operador'} />
-              <PasswordInput label="Contraseña" leftSection={<IconLock size={15} />} placeholder={editing ? '(sin cambios)' : ''} value={f.password} onChange={(e) => set('password', e.target.value)} />
+              <PasswordInput label="Contraseña" leftSection={<IconLock size={15} />} placeholder={editing ? '(sin cambios)' : ''} value={f.password} onChange={(e) => set('password', e.target.value)} description={editing ? 'Dejar vacío para no cambiarla' : 'Clave SIP del operador'} />
             </Group>
             <Group grow>
               <TextInput label="From user" leftSection={<IconKey size={15} />} placeholder="(usuario)" value={f.from_user} onChange={(e) => set('from_user', e.target.value)} description="Identidad en el From (si el operador lo exige)" />
-              <TextInput label="From domain" leftSection={<IconWorld size={15} />} placeholder="(host del proveedor)" value={f.from_domain} onChange={(e) => set('from_domain', e.target.value)} />
+              <TextInput label="From domain" leftSection={<IconWorld size={15} />} placeholder="(host del proveedor)" value={f.from_domain} onChange={(e) => set('from_domain', e.target.value)} description="Dominio en el From (por defecto, el host del proveedor)" />
             </Group>
           </Stack>
         </Stepper.Step>
 
         <Stepper.Step label="Medios" description="Códecs y NAT" icon={<IconWaveSine size={15} />}>
           <Stack gap="md" mt="md">
-            <MultiSelect label="Códecs permitidos (en orden de prioridad)" data={CODECS} value={f.codecs} onChange={(v) => set('codecs', v)} leftSection={<IconWaveSine size={15} />} clearable={false} />
+            <MultiSelect label="Códecs permitidos (en orden de prioridad)" data={CODECS} value={f.codecs} onChange={(v) => set('codecs', v)} leftSection={<IconWaveSine size={15} />} clearable={false} description="Formatos de audio que se ofrecen al proveedor" />
             <Group grow>
-              <Select label="DTMF" value={f.dtmf_mode} onChange={(v) => set('dtmf_mode', v)} data={[{ value: 'rfc4733', label: 'RFC 4733 (recomendado)' }, { value: 'inband', label: 'Inband' }, { value: 'info', label: 'SIP INFO' }, { value: 'auto', label: 'Auto' }]} leftSection={<IconBroadcast size={15} />} />
+              <Select label="DTMF" value={f.dtmf_mode} onChange={(v) => set('dtmf_mode', v)} data={[{ value: 'rfc4733', label: 'RFC 4733 (recomendado)' }, { value: 'inband', label: 'Inband' }, { value: 'info', label: 'SIP INFO' }, { value: 'auto', label: 'Auto' }]} leftSection={<IconBroadcast size={15} />} description="Cómo se envían los tonos del teclado" />
               <NumberInput label="Qualify (s)" value={f.qualify_frequency} onChange={(v) => set('qualify_frequency', v)} min={0} max={300} description="Keepalive al proveedor" />
             </Group>
             <Group gap="xl">
