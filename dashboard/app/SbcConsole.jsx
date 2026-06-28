@@ -7,6 +7,7 @@ import SbcFlow from './SbcFlow';
 import Slot from './Slot';
 import SipLadder from './SipLadder';
 import Troncales from './troncales/page';
+import TurnConsole from './TurnConsole';
 import { useLive } from './useLive';
 import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone } from '@tabler/icons-react';
 
@@ -110,6 +111,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
+        <Tabs.Tab value="turn" leftSection={<IconCloud size={16} />}>TURN</Tabs.Tab>
         <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>
         <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
       </Tabs.List>
@@ -266,6 +268,8 @@ function ConsoleBody({ sbc, load, hist }) {
         </Card>
         <Card withBorder radius="md" padding="md" style={{ background: 'var(--mantine-color-blue-light)' }}><Group gap="xs" mb={4}><IconInfoCircle size={16} /><Text fw={700} size="sm">¿Qué hace rtpengine?</Text></Group><Text size="sm" c="dimmed">Es el motor que <b>ancla y reenvía el RTP</b> (audio/video) en el borde: oculta a Asterisk de internet, resuelve NAT y puentea WebRTC↔SIP. Cada sesión = una llamada con medios pasando por el SBC. «Paquetes/s» y «Tráfico» son el rendimiento en vivo del relay; «Transcodif.» cuenta medios que se están convirtiendo de códec.</Text></Card>
       </Tabs.Panel>
+
+      <Tabs.Panel value="turn"><TurnConsole /></Tabs.Panel>
 
       <Tabs.Panel value="sip"><SipLadder /></Tabs.Panel>
 
