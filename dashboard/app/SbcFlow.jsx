@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, getBezierPath, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, List, Divider, Box, Button } from '@mantine/core';
-import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter, IconCloud, IconEdit, IconTrash, IconPlus, IconExternalLink } from '@tabler/icons-react';
+import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter, IconCloud, IconEdit, IconTrash, IconPlus, IconExternalLink, IconWaveSine } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import TrunkEditor from './TrunkEditor';
 
