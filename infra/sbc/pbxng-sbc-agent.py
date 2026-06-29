@@ -177,6 +177,7 @@ def apply_cmd(cmd, arg):
         if cmd == 'reload': kc('dispatcher.reload')
         elif cmd == 'unban_all': kc('htable.reset', 'ipban')
         elif cmd == 'unban' and arg: kc('htable.delete', 'ipban', arg)
+        elif cmd == 'secf_reload': kc('secfilter.reload')
         elif cmd == 'ban' and arg: kc('htable.seti', 'ipban', arg, '1')
         elif cmd == 'debug' and arg: kc('cfg.seti', 'core', 'debug', str(int(arg)))
         elif cmd == 'disable_target' and arg: kc('dispatcher.set_state', 'i', '1', arg)

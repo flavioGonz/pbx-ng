@@ -1796,6 +1796,9 @@ app.post('/api/sip/clear', async (req, res) => {
   try { await pool.query("DELETE FROM pbxng_sip_capture"); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.get('/api/sbc/secfilter', async (req, res) => { try { const { rows } = await pool.query('SELECT id, action, type, data FROM secfilter ORDER BY action, type, data'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/sbc/secfilter', async (req, res) => { const b = req.body || {}; if (!b.data) return res.status(400).json({ error: 'falta data' }); try { await pool.query('INSERT INTO secfilter(action,type,data) VALUES($1,$2,$3) ON CONFLICT (action,type,data) DO NOTHING', [(+b.action ? 1 : 0), (+b.type || 0), String(b.data).trim()]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('secf_reload')"); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.delete('/api/sbc/secfilter/:id', async (req, res) => { try { await pool.query('DELETE FROM secfilter WHERE id=$1', [+req.params.id]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('secf_reload')"); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/sbc/reload', async (req, res) => {
   try { await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('reload')"); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }

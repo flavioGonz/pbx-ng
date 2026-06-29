@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl, Switch } from '@mantine/core';
+import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl, Switch, Select } from '@mantine/core';
 import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap, IconServer2 } from '@tabler/icons-react';
 import { toast } from './notify';
 import SbcFlow from './SbcFlow';
@@ -13,6 +13,7 @@ import { useLive } from './useLive';
 import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const SECF_TYPE = { 0: 'User-Agent', 1: 'Pais', 2: 'Dominio', 3: 'IP', 4: 'Usuario', 5: 'Destino' };
 function fmtUptime(s) { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; }
 function Kpi({ icon, color, label, value, sub }) {
   return <Card withBorder radius="md" padding="sm"><Group gap="sm" wrap="nowrap"><ThemeIcon variant="light" color={color} size={38} radius="md">{icon}</ThemeIcon><div style={{ minWidth: 0 }}><Text size="xs" c="dimmed">{label}</Text><Text fw={700} fz="lg" lh={1.1} truncate><Slot value={value} /></Text>{sub && <Text size="xs" c="dimmed">{sub}</Text>}</div></Group></Card>;
@@ -55,9 +56,9 @@ function ConsoleBody({ sbc, load, hist }) {
   const [newTgt, setNewTgt] = useState(''); const [dlgOpen, setDlgOpen] = useState(false); const [dlgEdit, setDlgEdit] = useState(null); const [dtUri, setDtUri] = useState(''); const [dtPrio, setDtPrio] = useState(0);
   async function saveTgt() { const uri = dtUri.trim(); if (!uri) return; if (dlgEdit) await sendCmd('del_target', dlgEdit.uri); await sendCmd('add_target', uri + '|' + (dtPrio || 0)); setDlgOpen(false); }
   const [secView, setSecView] = useState('sbc'); const [featLimit, setFeatLimit] = useState(30);
-  async function applyFeats(next) { await sendCmd('feat_apply', JSON.stringify(next)); } const [f2b, setF2b] = useState(null);
+  async function applyFeats(next) { await sendCmd('feat_apply', JSON.stringify(next)); } const [f2b, setF2b] = useState(null); const [secf, setSecf] = useState([]); const [sfData, setSfData] = useState(''); const [sfType, setSfType] = useState('0'); const [sfBusy, setSfBusy] = useState(''); const loadSecf = useCallback(() => fetch('/backend/api/sbc/secfilter').then(r => r.json()).then(d => Array.isArray(d) && setSecf(d)).catch(() => {}), []); async function addSecf() { if (!sfData.trim()) return; setSfBusy('add'); await fetch('/backend/api/sbc/secfilter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 0, type: +sfType, data: sfData.trim() }) }).catch(() => {}); setSfData(''); setSfBusy(''); setTimeout(loadSecf, 500); toast('Regla agregada (SBC recargado)', 'ok'); } async function delSecf(id) { setSfBusy('d' + id); await fetch('/backend/api/sbc/secfilter/' + id, { method: 'DELETE' }).catch(() => {}); setSfBusy(''); setTimeout(loadSecf, 500); }
   useEffect(() => { const lf = () => fetch('/backend/api/extensions').then(r => r.json()).then(d => { if (Array.isArray(d)) setExtList(d); }).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
-  useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); loadSecf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
   const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' }); const [editId, setEditId] = useState(null);
   const loadRoutes = useCallback(async () => { try { const d = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(d)) setRoutes(d); } catch (_) {} }, []);
   useEffect(() => { loadRoutes(); }, [loadRoutes]);
@@ -171,6 +172,18 @@ function ConsoleBody({ sbc, load, hist }) {
           {banned.length === 0 ? <Text size="sm" c="dimmed">Sin IPs bloqueadas.</Text> :
             <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>IP</Table.Th><Table.Th ta="right">Accion</Table.Th></Table.Tr></Table.Thead>
               <Table.Tbody>{banned.map(ip => <Table.Tr key={ip}><Table.Td ff="monospace">{ip}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="teal" loading={busy === 'unban' + ip} onClick={() => sendCmd('unban', ip)}>Desbloquear</Button></Table.Td></Table.Tr>)}</Table.Tbody></Table>}
+        </Card>
+        <Card withBorder radius="md" padding="md" mb="md">
+          <Group justify="space-between" mb="sm"><Text fw={700}>Lista de bloqueo SIP (secfilter)</Text>
+            <Group gap="xs">
+              <Select size="xs" w={130} data={[{ value: '0', label: 'User-Agent' }, { value: '3', label: 'IP' }, { value: '4', label: 'Usuario' }, { value: '2', label: 'Dominio' }]} value={sfType} onChange={(v) => setSfType(v || '0')} />
+              <TextInput size="xs" w={200} placeholder="valor a bloquear" value={sfData} onChange={e => setSfData(e.target.value)} />
+              <Button size="xs" color="red" variant="light" leftSection={<IconBan size={14} />} loading={sfBusy === 'add'} disabled={!sfData.trim()} onClick={addSecf}>Bloquear</Button>
+            </Group>
+          </Group>
+          {secf.length === 0 ? <Text size="sm" c="dimmed">Sin reglas. Bloquea User-Agents de scanners, IPs o usuarios; se aplica al instante.</Text> :
+            <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Tipo</Table.Th><Table.Th>Valor</Table.Th><Table.Th ta="right">Accion</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{secf.map(r => <Table.Tr key={r.id}><Table.Td><Badge size="sm" variant="light" color={r.action ? 'teal' : 'red'}>{SECF_TYPE[r.type] || ('tipo ' + r.type)}{r.action ? ' (permitir)' : ''}</Badge></Table.Td><Table.Td ff="monospace" fz="xs">{r.data}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="gray" loading={sfBusy === 'd' + r.id} onClick={() => delSecf(r.id)}>Quitar</Button></Table.Td></Table.Tr>)}</Table.Tbody></Table>}
         </Card>
         <Card withBorder radius="md" padding="md">
           <Text fw={700} mb="xs">Anti-flood (pike)</Text>
