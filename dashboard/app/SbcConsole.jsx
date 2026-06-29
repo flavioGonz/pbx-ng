@@ -373,6 +373,7 @@ function ConsoleBody({ sbc, load, hist }) {
             { id: 'dialog_limits', mod: 'dialog', label: 'Límite de llamadas concurrentes', icon: <IconActivity size={18} />, desc: 'Máximo de llamadas simultáneas global y por troncal/IP (anti-fraude y capacidad).' },
             { id: 'acc', mod: 'acc', label: 'Accounting / CDR en el borde', icon: <IconFileCode size={18} />, desc: 'Registro de llamadas en el SBC, independiente de Asterisk.' },
             { id: 'topohide', label: 'Topology hiding (salientes)', icon: <IconShieldLock size={18} />, desc: 'En salientes a operadores anuncia la IP pública y oculta versión y headers internos.' },
+            { id: 'sst', label: 'Session Timers (anti-zombi)', icon: <IconClock size={18} />, desc: 'Refresco de sesión RFC 4028: detecta y limpia llamadas colgadas/zombi en el borde.' },
             { id: 'drouting', mod: 'drouting', label: 'Routing avanzado / LCR', icon: <IconRoute size={18} />, desc: 'Ruteo de salientes por prefijo con failover entre operadores.', manage: 'lcr' },
             { id: 'secfilter', mod: 'secfilter', label: 'Filtro de seguridad', icon: <IconBan size={18} />, desc: 'Bloqueo por patrones, User-Agent y país.', manage: 'sec' },
             { id: 'ratelimit', mod: 'ratelimit', label: 'Rate limiting', icon: <IconActivity size={18} />, desc: 'Límites de tasa por método, más finos que pike.' },
