@@ -80,7 +80,7 @@ function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   return (
     <>
       <path id={id} d={path} fill="none" stroke={down ? lc : base} strokeWidth={live ? 3 : 1.8} strokeOpacity={live ? (down ? 0.95 : 0.22) : 0.85} markerEnd={markerEnd} strokeLinecap="round" className={down ? 'flow-blink' : undefined} />
-      {live && !down && (
+      {live && (true) && (
         <>
           <path d={path} fill="none" stroke={lc} strokeWidth={3} strokeLinecap="round" strokeDasharray="2 12" className="flow-dash" style={{ filter: 'drop-shadow(0 0 4px ' + lc + 'cc)' }} />
           <circle r="4.5" fill={lc} style={{ filter: 'drop-shadow(0 0 6px ' + lc + ')' }}><animateMotion dur={live === 'ring' ? '2.2s' : live === 'ok' ? '2.6s' : '1.5s'} repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href={'#' + id} /></animateMotion></circle>
@@ -130,6 +130,8 @@ export default function SbcFlow({ fullBleed }) {
   const eps = snap?.extensions || []; const ch = snap?.channels || []; const qs = snap?.queues || [];
   const online = eps.filter(e => e.status === 'online').length;
   const trunkOnline = trunks.filter(t => t.status === 'online').length;
+  const opState = (host) => { if (!host) return null; const d = (sbc?.dispatcher || []).find(x => Number(x.set) === 2 && (x.uri || '').includes(host)); if (!d) return null; const f = d.flags || ''; return f.charAt(0) === 'A' ? 'up' : f.charAt(0) === 'I' ? 'down' : 'probing'; };
+  const trunkStatus = (t) => { if (t._empty) return 'pending'; const os = opState(t.provider_host); if (os) return os === 'up' ? 'online' : os === 'down' ? 'offline' : 'pending'; return t.status; };
   const comp = (g, n) => (sys?.components || []).find(c => c.group === g && c.name.includes(n))?.status;
 
   const computedNodes = useMemo(() => {
@@ -146,10 +148,10 @@ export default function SbcFlow({ fullBleed }) {
     ];
     const tr = trunks.length ? trunks : [{ name: 'Sin troncales', provider_host: 'agregá una en Troncales', status: 'pending', _empty: true }];
     const step = 172, startY = 250 - ((tr.length - 1) * step) / 2;
-    const tnodes = tr.map((t, i) => ({
+    const tnodes = tr.map((t, i) => { const ts = trunkStatus(t); return ({
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 20, y: startY + i * step },
-      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (t.status === 'online' ? 'ok' : t.status === 'offline' ? 'down' : 'pending'), pulse: t._empty ? null : (t.status === 'offline' ? 'down' : t.status === 'online' ? 'ok' : null), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }] },
-    }));
+      data: { title: t.name, ip: t.provider_host, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (ts === 'offline' ? 'down' : ts === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (ts === 'online' ? 'ok' : ts === 'offline' ? 'down' : 'pending'), pulse: t._empty ? null : (ts === 'offline' ? 'down' : ts === 'online' ? 'ok' : null), metrics: t._empty ? undefined : [{ label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }, ...(ts === 'offline' ? [{ label: 'Estado', value: 'CAÍDO' }] : ts === 'online' ? [{ label: 'Estado', value: 'Activo' }] : [])] },
+    }); });
     const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
     const hidden = new Set(); if (mods.sbc === false) hidden.add('kamailio'); if (mods.turn === false) hidden.add('coturn'); if (mods.voz === false) hidden.add('voz');
     return [...base, ...gwNodes, ...tnodes].filter((n) => !hidden.has(n.id));
@@ -182,7 +184,7 @@ export default function SbcFlow({ fullBleed }) {
     e('e8', 'asterisk', 'apps', '#64748b', undefined, false),
     e('e-voz', 'asterisk', 'voz', '#7c3aed', 'AudioSocket IA', false),
     e('e-db', 'asterisk', 'db', '#0e7490', 'realtime (ARA)', false),
-    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway === 'internet' ? 'wan' : (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio')), t._empty ? '#94a3b8' : (t.status === 'online' ? '#16a34a' : t.status === 'offline' ? '#dc2626' : '#0e9488'), undefined, t._empty ? false : (t.status === 'offline' ? 'down' : trunkActive(t.name) ? callMode : t.status === 'online' ? 'ok' : false))),
+    ...(trunks.length ? trunks : [{ name: 'Sin troncales', _empty: true }]).map((t, i) => { const ts = trunkStatus(t); return e('trk-e-' + (t.name || i), 'trk-' + (t.name || i), (t.gateway === 'internet' ? 'wan' : (t.gateway && (Array.isArray(sbcRoutes) ? sbcRoutes : []).some((rr) => String(rr.id) === String(t.gateway)) ? 'gw-' + t.gateway : 'kamailio')), t._empty ? '#94a3b8' : (ts === 'online' ? '#16a34a' : ts === 'offline' ? '#dc2626' : '#0e9488'), t._empty ? undefined : (ts === 'offline' ? 'caído' : trunkActive(t.name) ? '● en curso' : undefined), t._empty ? false : (ts === 'offline' ? 'down' : trunkActive(t.name) ? callMode : ts === 'online' ? 'ok' : false)); }),
     ...(Array.isArray(sbcRoutes) ? sbcRoutes : []).map((rr) => e('gw-e-' + rr.id, 'gw-' + rr.id, 'kamailio', '#0891b2', undefined, false)),
     ...(trunks.some((t) => t.gateway === 'internet') ? [e('wan-kam', 'wan', 'kamailio', '#0e9488', 'troncales SIP', false)] : []),
   ];
