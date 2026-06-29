@@ -103,7 +103,7 @@ function ConsoleBody({ sbc, load, hist }) {
   }, [load]);
 
   const stats = sbc?.stats || {}; const core = stats.core || {}; const sl = stats.sl || {}; const shm = stats.shmem || {}; const rates = stats.rates || {};
-  const disp = sbc?.dispatcher || []; const banned = sbc?.banned || []; const rtp = sbc?.rtpengine || {};
+  const disp = sbc?.dispatcher || []; const dispMain = disp.filter(d => Number(d.set || 1) !== 2); const opHealth = (addr) => { const d = disp.find(x => Number(x.set) === 2 && (x.uri || '').includes(addr)); if (!d) return null; const f = (d.flags || ''); return { state: f.charAt(0) === 'A' ? 'up' : f.charAt(0) === 'I' ? 'down' : 'probing', flags: f, latency: d.latency }; }; const banned = sbc?.banned || []; const rtp = sbc?.rtpengine || {};
   const net = stats.net || {}; const ifaces = net.ifaces || []; const liveRoutes = net.routes || [];
   const memPct = shm.total_size ? Math.round((shm.used_size / shm.total_size) * 100) : 0;
   const flagInfo = (f) => /A/.test(f) ? { c: 'teal', t: 'Activo' } : /I/.test(f) ? { c: 'orange', t: 'Inactivo' } : /D/.test(f) ? { c: 'red', t: 'Deshabilitado' } : { c: 'gray', t: f || '-' };
@@ -214,10 +214,10 @@ function ConsoleBody({ sbc, load, hist }) {
           <Button mt="sm" size="xs" variant="light" component="a" href="/asterisk" leftSection={<IconDeviceLandlinePhone size={14} />}>Ir a Asterisk &rarr; Troncal SBC</Button>
         </Card>
         <Card withBorder radius="md" padding="md">
-          <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher ({disp.length})</Text><Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar</Button></Group>
+          <Group justify="space-between" mb="sm"><Text fw={700}>Destinos del dispatcher ({dispMain.length})</Text><Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} loading={busy === 'reload'} onClick={() => sendCmd('reload')}>Recargar</Button></Group>
           <Group mb="md"><Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => { setDlgEdit(null); setDtUri(''); setDtPrio(0); setDlgOpen(true); }}>Nuevo destino</Button></Group>
           <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Destino</Table.Th><Table.Th>Prioridad</Table.Th><Table.Th>Latencia</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Acciones</Table.Th></Table.Tr></Table.Thead>
-            <Table.Tbody>{disp.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin destinos. Agregá tu primer Asterisk arriba.</Text></Table.Td></Table.Tr> : disp.map((d, i) => { const fi = flagInfo(d.flags); const active = /A/.test(d.flags || ''); return (
+            <Table.Tbody>{dispMain.length === 0 ? <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" ta="center" py="md" size="sm">Sin destinos. Agregá tu primer Asterisk arriba.</Text></Table.Td></Table.Tr> : dispMain.map((d, i) => { const fi = flagInfo(d.flags); const active = /A/.test(d.flags || ''); return (
               <Table.Tr key={i}>
                 <Table.Td ff="monospace" fz="sm">{d.uri}</Table.Td><Table.Td>{d.priority}</Table.Td><Table.Td>{d.latency != null ? <Badge size="sm" variant="dot" color={d.latency < 50 ? 'teal' : d.latency < 200 ? 'yellow' : 'red'}><Slot value={d.latency} /> ms</Badge> : '-'}</Table.Td>
                 <Table.Td><Badge variant="light" color={fi.c}>{fi.t}</Badge></Table.Td>
@@ -258,8 +258,8 @@ function ConsoleBody({ sbc, load, hist }) {
             </Group>
             {lcrGws.length === 0 ? <Text c="dimmed" size="sm">Sin operadores. Agrega al menos uno.</Text> :
             <Table striped highlightOnHover withTableBorder>
-              <Table.Thead><Table.Tr><Table.Th>ID</Table.Th><Table.Th>Direccion</Table.Th><Table.Th>Strip</Table.Th><Table.Th>Prefijo</Table.Th><Table.Th>Descripcion</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
-              <Table.Tbody>{lcrGws.map(g => <Table.Tr key={g.gwid}><Table.Td><Badge size="sm" variant="light">{g.gwid}</Badge></Table.Td><Table.Td ff="monospace" fz="xs">{g.address}</Table.Td><Table.Td>{g.strip}</Table.Td><Table.Td ff="monospace" fz="xs">{g.pri_prefix || '—'}</Table.Td><Table.Td fz="xs">{g.description}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="gray" loading={lcrBusy === 'g' + g.gwid} onClick={() => delGw(g.gwid)}>Quitar</Button></Table.Td></Table.Tr>)}</Table.Tbody>
+              <Table.Thead><Table.Tr><Table.Th>ID</Table.Th><Table.Th>Direccion</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Strip</Table.Th><Table.Th>Prefijo</Table.Th><Table.Th>Descripcion</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{lcrGws.map(g => <Table.Tr key={g.gwid}><Table.Td><Badge size="sm" variant="light">{g.gwid}</Badge></Table.Td><Table.Td ff="monospace" fz="xs">{g.address}</Table.Td>{(() => { const h = opHealth(g.address); return <Table.Td>{h ? <Badge size="sm" variant="light" color={h.state === 'up' ? 'teal' : h.state === 'down' ? 'red' : 'gray'} leftSection={<span className="pbx-pip" style={{ background: h.state === 'up' ? 'var(--mantine-color-teal-6)' : h.state === 'down' ? 'var(--mantine-color-red-6)' : 'var(--mantine-color-gray-5)' }} />}>{h.state === 'up' ? 'Activo' : h.state === 'down' ? 'Caído' : 'Probando'}</Badge> : <Badge size="sm" variant="light" color="gray">sin sonda</Badge>}</Table.Td>; })()}<Table.Td>{g.strip}</Table.Td><Table.Td ff="monospace" fz="xs">{g.pri_prefix || '—'}</Table.Td><Table.Td fz="xs">{g.description}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="gray" loading={lcrBusy === 'g' + g.gwid} onClick={() => delGw(g.gwid)}>Quitar</Button></Table.Td></Table.Tr>)}</Table.Tbody>
             </Table>}
           </Card>
           <Card withBorder radius="md" padding="lg">
