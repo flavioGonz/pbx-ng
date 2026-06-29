@@ -57,8 +57,18 @@ function ConsoleBody({ sbc, load, hist }) {
   async function saveTgt() { const uri = dtUri.trim(); if (!uri) return; if (dlgEdit) await sendCmd('del_target', dlgEdit.uri); await sendCmd('add_target', uri + '|' + (dtPrio || 0)); setDlgOpen(false); }
   const [secView, setSecView] = useState('sbc'); const [featLimit, setFeatLimit] = useState(30);
   async function applyFeats(next) { await sendCmd('feat_apply', JSON.stringify(next)); } const [f2b, setF2b] = useState(null); const [secf, setSecf] = useState([]); const [sfData, setSfData] = useState(''); const [sfType, setSfType] = useState('0'); const [sfBusy, setSfBusy] = useState(''); const loadSecf = useCallback(() => fetch('/backend/api/sbc/secfilter').then(r => r.json()).then(d => Array.isArray(d) && setSecf(d)).catch(() => {}), []); async function addSecf() { if (!sfData.trim()) return; setSfBusy('add'); await fetch('/backend/api/sbc/secfilter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 0, type: +sfType, data: sfData.trim() }) }).catch(() => {}); setSfData(''); setSfBusy(''); setTimeout(loadSecf, 500); toast('Regla agregada (SBC recargado)', 'ok'); } async function delSecf(id) { setSfBusy('d' + id); await fetch('/backend/api/sbc/secfilter/' + id, { method: 'DELETE' }).catch(() => {}); setSfBusy(''); setTimeout(loadSecf, 500); }
+  const [lcrGws, setLcrGws] = useState([]); const [lcrRules, setLcrRules] = useState([]);
+  const [gwForm, setGwForm] = useState({ address: '', strip: 0, pri_prefix: '', description: '' });
+  const [ruleForm, setRuleForm] = useState({ prefix: '', gwlist: '', description: '' });
+  const [lcrBusy, setLcrBusy] = useState('');
+  const loadLcrGw = useCallback(() => fetch('/backend/api/sbc/lcr/gateways').then(r => r.json()).then(d => Array.isArray(d) && setLcrGws(d)).catch(() => {}), []);
+  const loadLcrRules = useCallback(() => fetch('/backend/api/sbc/lcr/rules').then(r => r.json()).then(d => Array.isArray(d) && setLcrRules(d)).catch(() => {}), []);
+  async function addGw() { if (!gwForm.address.trim()) return; setLcrBusy('gw'); await fetch('/backend/api/sbc/lcr/gateways', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(gwForm) }).catch(() => {}); setGwForm({ address: '', strip: 0, pri_prefix: '', description: '' }); setLcrBusy(''); setTimeout(loadLcrGw, 600); toast('Operador agregado (SBC recargado)', 'ok'); }
+  async function delGw(id) { setLcrBusy('g' + id); await fetch('/backend/api/sbc/lcr/gateways/' + id, { method: 'DELETE' }).catch(() => {}); setLcrBusy(''); setTimeout(loadLcrGw, 600); }
+  async function addRule() { if (!ruleForm.gwlist.trim()) return; setLcrBusy('rule'); await fetch('/backend/api/sbc/lcr/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ruleForm) }).catch(() => {}); setRuleForm({ prefix: '', gwlist: '', description: '' }); setLcrBusy(''); setTimeout(loadLcrRules, 600); toast('Regla agregada (SBC recargado)', 'ok'); }
+  async function delRule(id) { setLcrBusy('r' + id); await fetch('/backend/api/sbc/lcr/rules/' + id, { method: 'DELETE' }).catch(() => {}); setLcrBusy(''); setTimeout(loadLcrRules, 600); }
   useEffect(() => { const lf = () => fetch('/backend/api/extensions').then(r => r.json()).then(d => { if (Array.isArray(d)) setExtList(d); }).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
-  useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); loadSecf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); loadSecf(); loadLcrGw(); loadLcrRules(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
   const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' }); const [editId, setEditId] = useState(null);
   const loadRoutes = useCallback(async () => { try { const d = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(d)) setRoutes(d); } catch (_) {} }, []);
   useEffect(() => { loadRoutes(); }, [loadRoutes]);
@@ -116,6 +126,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
         <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>
+        <Tabs.Tab value="lcr" leftSection={<IconRoute size={16} />}>Operadores</Tabs.Tab>
         <Tabs.Tab value="remext" leftSection={<IconWorld size={16} />}>Remotos {remExt.length > 0 && <Badge size="xs" color="grape" variant="filled" ml={4}>{remExt.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
@@ -228,6 +239,42 @@ function ConsoleBody({ sbc, load, hist }) {
       </Tabs.Panel>
 
       <Tabs.Panel value="trunks"><Troncales /></Tabs.Panel>
+      <Tabs.Panel value="lcr">
+        <Stack gap="md" mt="md">
+          <Card withBorder radius="md" padding="lg">
+            <Group justify="space-between" mb="sm">
+              <div><Text fw={700}>Operadores de salida (gateways)</Text><Text size="xs" c="dimmed">Las llamadas salientes se entregan a estos operadores en orden; si uno falla (timeout o 5xx), el SBC reintenta por el siguiente. Esto es el failover.</Text></div>
+              <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={() => { loadLcrGw(); loadLcrRules(); }}>Recargar</Button>
+            </Group>
+            <Group align="end" gap="xs" mb="sm" wrap="wrap">
+              <TextInput size="xs" label="Direccion (host:puerto)" placeholder="190.64.60.10:5060" w={190} value={gwForm.address} onChange={e => setGwForm(f => ({ ...f, address: e.target.value }))} />
+              <NumberInput size="xs" label="Strip" w={75} min={0} value={gwForm.strip} onChange={v => setGwForm(f => ({ ...f, strip: +v || 0 }))} />
+              <TextInput size="xs" label="Prefijo" placeholder="opcional" w={100} value={gwForm.pri_prefix} onChange={e => setGwForm(f => ({ ...f, pri_prefix: e.target.value }))} />
+              <TextInput size="xs" label="Descripcion" placeholder="Operador A" w={150} value={gwForm.description} onChange={e => setGwForm(f => ({ ...f, description: e.target.value }))} />
+              <Button size="xs" leftSection={<IconPlus size={14} />} loading={lcrBusy === 'gw'} onClick={addGw}>Agregar</Button>
+            </Group>
+            {lcrGws.length === 0 ? <Text c="dimmed" size="sm">Sin operadores. Agrega al menos uno.</Text> :
+            <Table striped highlightOnHover withTableBorder>
+              <Table.Thead><Table.Tr><Table.Th>ID</Table.Th><Table.Th>Direccion</Table.Th><Table.Th>Strip</Table.Th><Table.Th>Prefijo</Table.Th><Table.Th>Descripcion</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{lcrGws.map(g => <Table.Tr key={g.gwid}><Table.Td><Badge size="sm" variant="light">{g.gwid}</Badge></Table.Td><Table.Td ff="monospace" fz="xs">{g.address}</Table.Td><Table.Td>{g.strip}</Table.Td><Table.Td ff="monospace" fz="xs">{g.pri_prefix || '—'}</Table.Td><Table.Td fz="xs">{g.description}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="gray" loading={lcrBusy === 'g' + g.gwid} onClick={() => delGw(g.gwid)}>Quitar</Button></Table.Td></Table.Tr>)}</Table.Tbody>
+            </Table>}
+          </Card>
+          <Card withBorder radius="md" padding="lg">
+            <div><Text fw={700} mb={4}>Reglas de ruteo (LCR)</Text><Text size="xs" c="dimmed" mb="sm">Por prefijo del numero marcado, define el orden de operadores. La lista es por IDs separados por coma (ej "1,2") y ese es el orden de failover. Prefijo vacio = aplica a todos.</Text></div>
+            <Group align="end" gap="xs" mb="sm" wrap="wrap">
+              <TextInput size="xs" label="Prefijo" placeholder="vacio = todos" w={120} value={ruleForm.prefix} onChange={e => setRuleForm(f => ({ ...f, prefix: e.target.value }))} />
+              <TextInput size="xs" label="Operadores (IDs)" placeholder="1,2" w={120} value={ruleForm.gwlist} onChange={e => setRuleForm(f => ({ ...f, gwlist: e.target.value }))} />
+              <TextInput size="xs" label="Descripcion" placeholder="Default" w={170} value={ruleForm.description} onChange={e => setRuleForm(f => ({ ...f, description: e.target.value }))} />
+              <Button size="xs" leftSection={<IconPlus size={14} />} loading={lcrBusy === 'rule'} onClick={addRule}>Agregar</Button>
+            </Group>
+            {lcrRules.length === 0 ? <Text c="dimmed" size="sm">Sin reglas.</Text> :
+            <Table striped highlightOnHover withTableBorder>
+              <Table.Thead><Table.Tr><Table.Th>ID</Table.Th><Table.Th>Prefijo</Table.Th><Table.Th>Operadores</Table.Th><Table.Th>Descripcion</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{lcrRules.map(r => <Table.Tr key={r.ruleid}><Table.Td><Badge size="sm" variant="light">{r.ruleid}</Badge></Table.Td><Table.Td ff="monospace" fz="xs">{r.prefix || '(todos)'}</Table.Td><Table.Td ff="monospace" fz="xs">{r.gwlist}</Table.Td><Table.Td fz="xs">{r.description}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="gray" loading={lcrBusy === 'r' + r.ruleid} onClick={() => delRule(r.ruleid)}>Quitar</Button></Table.Td></Table.Tr>)}</Table.Tbody>
+            </Table>}
+          </Card>
+        </Stack>
+      </Tabs.Panel>
       <Tabs.Panel value="remext">
         <Stack gap="md" mt="md">
           <Card withBorder radius="md" padding="md">
