@@ -31,13 +31,14 @@ const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style=
 export default function Historial() {
   const { snap } = useLive();
   const [rows, setRows] = useState([]); const [recs, setRecs] = useState([]); const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState(''); const [tab, setTab] = useState('all'); const [playId, setPlayId] = useState(null);
+  const [q, setQ] = useState(''); const [tab, setTab] = useState('all'); const [playId, setPlayId] = useState(null); const [shown, setShown] = useState(80);
   async function load() {
     try { const d = await fetch('/backend/api/cdr?limit=300').then(r => r.json()); setRows(Array.isArray(d) ? d : []); } catch (_) { setRows([]); }
     try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setRecs(Array.isArray(d) ? d : []); } catch (_) {}
     setLoading(false);
   }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
+  useEffect(() => { setShown(80); }, [tab, q]);
 
   const eps = snap?.extensions || [];
   const internalSet = useMemo(() => new Set(eps.map(e => String(e.id))), [eps]);
@@ -45,12 +46,15 @@ export default function Historial() {
 
   const typeOf = (r) => {
     const la = (r.lastapp || '').toLowerCase(); const chans = ((r.channel || '') + ' ' + (r.dstchannel || '')).toLowerCase(); const dc = (r.dcontext || '').toLowerCase();
+    const src = String(r.src || ''); const dst = String(r.dst || '');
     if (la === 'stasis' || chans.includes('audiosocket') || dc.includes('ai') || dc.includes('c2c')) return 'ia';
-    if (dc.includes('ivr')) return 'ivr';
-    const sInt = internalSet.has(String(r.src)), dInt = internalSet.has(String(r.dst));
-    if (dc === 'from-trunk' || (!sInt && dInt && String(r.src || '').length > 5)) return 'inbound';
-    if (sInt && !dInt && String(r.dst || '').length > 5) return 'outbound';
+    if (dc.includes('ivr') || /^7[0-9]{3}$/.test(dst)) return 'ivr';
+    const sInt = internalSet.has(src), dInt = internalSet.has(dst);
+    const dstLong = dst.replace(/[^0-9]/g, '').length >= 6; const srcLong = src.replace(/[^0-9]/g, '').length >= 6;
+    if (dc.includes('trunk') || (!sInt && dInt) || (!sInt && srcLong && dInt)) return 'inbound';
+    if (sInt && !dInt && dstLong) return 'outbound';
     if (sInt && dInt) return 'internal';
+    if (sInt || dInt) return 'internal';
     return 'other';
   };
   const mediumOf = (r, t) => {
@@ -62,23 +66,27 @@ export default function Historial() {
 
   const enriched = useMemo(() => rows.map(r => { const t = typeOf(r); return { ...r, _t: t, _m: mediumOf(r, t) }; }), [rows, internalSet, webrtcSet]);
 
+  const recIndex = useMemo(() => { const m = new Map(); for (const rec of recs) { if (!rec.ext || !rec.started_at) continue; const k = String(rec.ext); if (!m.has(k)) m.set(k, []); m.get(k).push({ rec, t: new Date(rec.started_at).getTime() }); } return m; }, [recs]);
   const recFor = (r) => {
     const start = r.start ? new Date(r.start).getTime() : 0; if (!start) return null;
     const end = start + ((r.duration || 0) + 15) * 1000;
-    return recs.find(rec => { if (!rec.started_at) return false; const rt = new Date(rec.started_at).getTime(); const okExt = rec.ext && (rec.ext === String(r.src) || rec.ext === String(r.dst)); return okExt && rt >= start - 5000 && rt <= end; });
+    const cand = (recIndex.get(String(r.src)) || []).concat(recIndex.get(String(r.dst)) || []);
+    const hit = cand.find(x => x.t >= start - 5000 && x.t <= end);
+    return hit ? hit.rec : null;
   };
 
-  const fr = enriched.filter(r => {
+  const fr = useMemo(() => enriched.filter(r => {
     const okTab = tab === 'all' ? true : tab === 'missed' ? r.disposition !== 'ANSWERED' : r._t === tab;
     const okQ = !q || String(r.src || '').includes(q) || String(r.dst || '').includes(q) || (r.clid || '').toLowerCase().includes(q.toLowerCase());
     return okTab && okQ;
-  });
+  }), [enriched, tab, q]);
+  const counts = useMemo(() => { const c = { all: enriched.length, missed: 0 }; for (const r of enriched) { if (r.disposition !== 'ANSWERED') c.missed++; c[r._t] = (c[r._t] || 0) + 1; } return c; }, [enriched]);
 
   const answered = rows.filter(r => r.disposition === 'ANSWERED').length;
   const talkMin = Math.round(rows.reduce((a, r) => a + (r.billsec || 0), 0) / 60);
   const today = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return rows.filter(r => r.start && new Date(r.start) >= d).length; })();
   const kpis = [{ k: 'Llamadas', v: rows.length, icon: IconPhone, c: 'cyan' }, { k: 'Atendidas', v: answered, icon: IconPhoneCheck, c: 'teal' }, { k: 'Sin respuesta', v: rows.length - answered, icon: IconPhoneX, c: 'orange' }, { k: 'Minutos hablados', v: talkMin, icon: IconClock, c: 'grape' }, { k: 'Hoy', v: today, icon: IconCalendar, c: 'blue' }];
-  const count = (t) => t === 'all' ? enriched.length : t === 'missed' ? enriched.filter(r => r.disposition !== 'ANSWERED').length : enriched.filter(r => r._t === t).length;
+  const count = (t) => t === 'all' ? counts.all : (counts[t] || 0);
 
   function exportCSV() {
     const head = ['Fecha', 'Tipo', 'Medio', 'Origen', 'Nombre', 'Destino', 'Duracion_s', 'Hablado_s', 'Resultado'];
@@ -128,7 +136,7 @@ export default function Historial() {
                   <Th icon={<IconDeviceLandlinePhone size={13} />}>Medio</Th><Th icon={<IconClock size={13} />}>Duración</Th>
                   <Th icon={<IconCircleCheck size={13} />}>Resultado</Th><Th icon={<IconMicrophone2 size={13} />}>Grabación</Th>
                 </Table.Tr></Table.Thead>
-                <Table.Tbody>{fr.map((r, i) => {
+                <Table.Tbody>{fr.slice(0, shown).map((r, i) => {
                   const rec = recFor(r); const T = TYPES[r._t] || TYPES.other; const M = MEDIA[r._m] || MEDIA.sip; const nm = clidName(r.clid);
                   return (
                     <Fragment key={i}>
@@ -148,6 +156,7 @@ export default function Historial() {
                 })}</Table.Tbody>
               </Table>
             </Table.ScrollContainer>}
+        {fr.length > shown && <Group justify="center" mt="md"><Button variant="light" onClick={() => setShown(s => s + 100)}>Ver mas ({fr.length - shown})</Button></Group>}
       </Card>
     </Stack>
   );
