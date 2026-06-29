@@ -241,6 +241,9 @@ function ConsoleBody({ sbc, load, hist }) {
       <Tabs.Panel value="trunks"><Troncales /></Tabs.Panel>
       <Tabs.Panel value="lcr">
         <Stack gap="md" mt="md">
+          <Card withBorder radius="md" padding="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
+            <Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="blue" size="md"><IconInfoCircle size={16} /></ThemeIcon><Text size="xs">En las llamadas salientes a operadores, el SBC anuncia su IP publica y oculta la topologia interna (version de software y headers internos) para maxima interoperabilidad y privacidad. El failover entre operadores es automatico segun el orden de la regla.</Text></Group>
+          </Card>
           <Card withBorder radius="md" padding="lg">
             <Group justify="space-between" mb="sm">
               <div><Text fw={700}>Operadores de salida (gateways)</Text><Text size="xs" c="dimmed">Las llamadas salientes se entregan a estos operadores en orden; si uno falla (timeout o 5xx), el SBC reintenta por el siguiente. Esto es el failover.</Text></div>
