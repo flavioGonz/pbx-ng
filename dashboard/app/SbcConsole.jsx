@@ -50,12 +50,13 @@ function ConsoleBody({ sbc, load, hist }) {
   const [cfg, setCfg] = useState(''); const [cfgOrig, setCfgOrig] = useState(''); const [cfgMsg, setCfgMsg] = useState(''); const [cfgBusy, setCfgBusy] = useState(false);
   const [banIp, setBanIp] = useState(''); const [debug, setDebug] = useState(2); const [busy, setBusy] = useState('');
   const cfgLoaded = useRef(false);
-  const { snap } = useLive(); const ch = (snap && snap.channels) || []; const ext = (snap && snap.extensions) || []; const remExt = ext.filter(e => e.via === 'sbc');
+  const { snap } = useLive(); const ch = (snap && snap.channels) || []; const ext = (snap && snap.extensions) || []; const [extList, setExtList] = useState([]); const remExt = (extList.length ? extList : ext).filter(e => e.via === 'sbc');
   const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const [newTgt, setNewTgt] = useState(''); const [dlgOpen, setDlgOpen] = useState(false); const [dlgEdit, setDlgEdit] = useState(null); const [dtUri, setDtUri] = useState(''); const [dtPrio, setDtPrio] = useState(0);
   async function saveTgt() { const uri = dtUri.trim(); if (!uri) return; if (dlgEdit) await sendCmd('del_target', dlgEdit.uri); await sendCmd('add_target', uri + '|' + (dtPrio || 0)); setDlgOpen(false); }
   const [secView, setSecView] = useState('sbc'); const [featLimit, setFeatLimit] = useState(30);
   async function applyFeats(next) { await sendCmd('feat_apply', JSON.stringify(next)); } const [f2b, setF2b] = useState(null);
+  useEffect(() => { const lf = () => fetch('/backend/api/extensions').then(r => r.json()).then(d => { if (Array.isArray(d)) setExtList(d); }).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
   useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
   const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' }); const [editId, setEditId] = useState(null);
   const loadRoutes = useCallback(async () => { try { const d = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(d)) setRoutes(d); } catch (_) {} }, []);
