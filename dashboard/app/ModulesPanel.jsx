@@ -7,7 +7,7 @@ import { toast } from './notify';
 
 const MODS = [
   { id: 'sbc', label: 'SBC-NG (Kamailio)', desc: 'Borde SIP: seguridad perimetral, dispatcher y rtpengine. Apaga/enciende el servicio kamailio en el CT107.', infra: true, icon: IconShieldLock },
-  { id: 'turn', label: 'TURN / STUN (Coturn)', desc: 'Relay de medios WebRTC para clientes detrás de NAT. Apaga/enciende coturn en el CT106.', infra: true, icon: IconArrowsLeftRight },
+  { id: 'turn', label: 'TURN / STUN (Turn-NG)', desc: 'Relay de medios WebRTC para clientes detrás de NAT. Apaga/enciende el servidor TURN en el CT106.', infra: true, icon: IconArrowsLeftRight },
   { id: 'voz', label: 'Voz IA (TTS / STT)', desc: 'Síntesis y reconocimiento de voz del IVR conversacional (CT108).', infra: true, icon: IconWaveSine },
   { id: 'ai', label: 'Agentes IA & Voz', desc: 'Recepcionista IA y pipeline conversacional. Oculta la sección IA & Voz.', icon: IconRobot },
   { id: 'clicktocall', label: 'Click-to-Call', desc: 'Llamadas web públicas por enlace o QR, sin registro.', icon: IconWorldShare },

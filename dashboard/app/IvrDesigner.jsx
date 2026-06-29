@@ -106,10 +106,12 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
     if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(ivr?.id ? 'IVR actualizado' : 'IVR creado (acceso ' + exten + ')', 'ok'); onSaved && onSaved(); onClose && onClose(); }
   }
 
-  function playGreeting() {
+  async function playGreeting() {
     const p = prompts.find(x => x.name === greeting);
-    if (!p) { toast('Ese audio no esta en la biblioteca (audio de sistema)', 'info'); return; }
-    if (audioRef.current) { audioRef.current.src = '/backend/api/prompts/' + p.id + '/audio'; audioRef.current.play().catch(() => {}); }
+    if (p) { if (audioRef.current) { audioRef.current.src = '/backend/api/prompts/' + p.id + '/audio'; audioRef.current.play().catch(() => {}); } return; }
+    const a = ivrAudios.find(x => x.ref === greeting);
+    if (a) { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: a.text, voice: a.voice }) }); const b = await r.blob(); if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); } } catch (_) {} return; }
+    toast('Audio de sistema: se escucha en la llamada (sin preview acá)', 'info');
   }
   async function uploadAudio(file) {
     if (!file) return;

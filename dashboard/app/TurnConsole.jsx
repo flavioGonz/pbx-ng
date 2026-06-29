@@ -28,14 +28,14 @@ export default function TurnConsole() {
     const r = await fetch('/backend/api/turn/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => ({ error: 1 }));
     setBusy('');
     if (r.error) { toast('No se pudo guardar: ' + r.error, 'bad'); return; }
-    toast('Configuración aplicada (Coturn reiniciado)' + (cfg.user_password ? ' · recordá que cambiar la credencial obliga a recargar los softphones' : ''), 'ok');
+    toast('Configuración aplicada (Turn-NG reiniciado)' + (cfg.user_password ? ' · recordá que cambiar la credencial obliga a recargar los softphones' : ''), 'ok');
     setCfg((c) => ({ ...c, user_password: '' })); setTimeout(load, 800);
   }
-  async function restart() { setBusy('restart'); const r = await fetch('/backend/api/turn/restart', { method: 'POST' }).then((x) => x.json()).catch(() => ({})); setBusy(''); toast(r.ok ? 'Coturn reiniciado' : 'No se pudo reiniciar', r.ok ? 'ok' : 'bad'); setTimeout(load, 800); }
+  async function restart() { setBusy('restart'); const r = await fetch('/backend/api/turn/restart', { method: 'POST' }).then((x) => x.json()).catch(() => ({})); setBusy(''); toast(r.ok ? 'Turn-NG reiniciado' : 'No se pudo reiniciar', r.ok ? 'ok' : 'bad'); setTimeout(load, 800); }
   async function test() { setBusy('test'); setTestOut(''); const r = await fetch('/backend/api/turn/test', { method: 'POST' }).then((x) => x.json()).catch(() => ({ out: 'error' })); setBusy(''); setTestOut(r.out || JSON.stringify(r)); }
   async function showLogs() { setBusy('logs'); const r = await fetch('/backend/api/turn/logs').then((x) => x.json()).catch(() => ({ log: 'error' })); setBusy(''); setLogs(r.log || ''); }
 
-  if (!d) return <Center mih={360}><Stack align="center" gap="sm"><Loader size="lg" color="cyan" /><Text c="dimmed" size="sm">Cargando estado de Coturn…</Text></Stack></Center>;
+  if (!d) return <Center mih={360}><Stack align="center" gap="sm"><Loader size="lg" color="cyan" /><Text c="dimmed" size="sm">Cargando estado de Turn-NG…</Text></Stack></Center>;
   if (d.error) return <Card withBorder radius="md" padding="lg"><Text c="red" fw={600}>No se pudo contactar el agente TURN (CT106:8091).</Text><Text size="sm" c="dimmed" mt={4}>Verificá que el servicio pbxng-turn esté activo.</Text></Card>;
 
   const m = d.metrics || {};
@@ -47,7 +47,7 @@ export default function TurnConsole() {
         <Group justify="space-between" mb="xs">
           <Group gap="sm">
             <ThemeIcon size={40} radius="md" variant="light" color="cyan"><IconArrowsLeftRight size={22} /></ThemeIcon>
-            <div><Text fw={800} lh={1.1}>Coturn — TURN / STUN</Text><Text size="xs" c="dimmed">Relay de medios WebRTC · 172.26.20.204 · v{d.version || '?'}</Text></div>
+            <div><Text fw={800} lh={1.1}>Turn-NG Server</Text><Text size="xs" c="dimmed">Relay de medios WebRTC (TURN/STUN) · 172.26.20.204</Text></div>
           </Group>
           <Group gap="xs">
             <Badge size="lg" variant="filled" color={d.active === 'active' ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{d.active === 'active' ? 'Operativo' : 'Caído'}</Badge>
@@ -78,7 +78,7 @@ export default function TurnConsole() {
 
       <Card withBorder radius="md" padding="md">
         <Text fw={700} mb={4}>Configuración</Text>
-        <Text size="xs" c="dimmed" mb="sm">Al guardar se reescribe turnserver.conf (con backup) y se reinicia Coturn. Cambiar la credencial obliga a recargar los softphones.</Text>
+        <Text size="xs" c="dimmed" mb="sm">Al guardar se reescribe turnserver.conf (con backup) y se reinicia el servidor TURN. Cambiar la credencial obliga a recargar los softphones.</Text>
         <Stack gap="sm">
           <Group grow>
             <TextInput label="Realm" leftSection={<IconWorld size={15} />} value={cfg.realm} onChange={(e) => setCfg({ ...cfg, realm: e.target.value })} description="Dominio de autenticación TURN" />
@@ -88,14 +88,14 @@ export default function TurnConsole() {
             <NumberInput label="Relay puerto mínimo" value={Number(cfg.min_port) || 0} onChange={(v) => setCfg({ ...cfg, min_port: String(v) })} description="Inicio del rango RTP relay" />
             <NumberInput label="Relay puerto máximo" value={Number(cfg.max_port) || 0} onChange={(v) => setCfg({ ...cfg, max_port: String(v) })} description="Fin del rango RTP relay" />
           </Group>
-          <TextInput label="IP externa" leftSection={<IconCloud size={15} />} value={cfg.external_ip} onChange={(e) => setCfg({ ...cfg, external_ip: e.target.value })} description="IP pública (o pública/privada) que anuncia Coturn" />
+          <TextInput label="IP externa" leftSection={<IconCloud size={15} />} value={cfg.external_ip} onChange={(e) => setCfg({ ...cfg, external_ip: e.target.value })} description="IP pública (o pública/privada) que anuncia el servidor TURN" />
           <Group grow>
             <TextInput label="Usuario TURN" leftSection={<IconKey size={15} />} value={cfg.user_name} onChange={(e) => setCfg({ ...cfg, user_name: e.target.value })} description="Credencial estática (lt-cred)" />
             <PasswordInput label="Contraseña TURN" leftSection={<IconKey size={15} />} placeholder="(sin cambios)" value={cfg.user_password} onChange={(e) => setCfg({ ...cfg, user_password: e.target.value })} description="Dejar vacío para no cambiarla" />
           </Group>
           <Group>
             <Button leftSection={<IconDeviceFloppy size={16} />} loading={busy === 'save'} onClick={save} color="teal">Guardar y aplicar</Button>
-            <Button variant="light" color="orange" leftSection={<IconReload size={16} />} loading={busy === 'restart'} onClick={restart}>Reiniciar Coturn</Button>
+            <Button variant="light" color="orange" leftSection={<IconReload size={16} />} loading={busy === 'restart'} onClick={restart}>Reiniciar Turn-NG</Button>
             <Button variant="light" leftSection={<IconTestPipe size={16} />} loading={busy === 'test'} onClick={test}>Probar TURN</Button>
             <Button variant="subtle" color="gray" loading={busy === 'logs'} onClick={showLogs}>Ver logs</Button>
           </Group>
