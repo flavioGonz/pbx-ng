@@ -1231,14 +1231,14 @@ app.get('/api/routes/outbound', async (req, res) => {
 });
 app.post('/api/routes/outbound', async (req, res) => {
   const { name, pattern, trunk, strip = 0, prepend = '', callerid = '' } = req.body || {};
-  if (!pattern || !trunk) return res.status(400).json({ error: 'patrón y troncal requeridos' });
+  if (!pattern) return res.status(400).json({ error: 'patrón requerido' });
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    await c.query('INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ($1,$2,$3,$4,$5,$6)', [name || pattern, pattern, trunk, +strip || 0, prepend || null, callerid || null]);
+    await c.query('INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ($1,$2,$3,$4,$5,$6)', [name || pattern, pattern, 'to-sbc', +strip || 0, prepend || null, callerid || null]);
     const rows = []; let p = 1;
     if (callerid) rows.push([p++, 'Set', 'CALLERID(num)=' + callerid]);
-    rows.push([p++, 'Dial', 'PJSIP/' + (prepend || '') + '${EXTEN:' + (+strip || 0) + '}@' + trunk + ',60']);
+    rows.push([p++, 'Dial', 'PJSIP/' + (prepend || '') + '${EXTEN:' + (+strip || 0) + '}@to-sbc,60']);
     rows.push([p++, 'Hangup', '']);
     await setDialplan(c, 'internal', outExten(pattern), rows);
     await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: pattern });

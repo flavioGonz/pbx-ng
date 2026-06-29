@@ -39,12 +39,12 @@ export default function Rutas() {
         </Tabs.Panel>
 
         <Tabs.Panel value="salientes">
-          <CrudPanel title="Rutas salientes" subtitle="Patrón de marcado → troncal (ej: marcar 0 + número)" color="teal" icon={<IconArrowUpRight size={18} />}
+          <CrudPanel title="Rutas salientes" subtitle="Patrón de marcado → salida por el SBC. El operador y el formato del carrier se eligen en SBC → Operadores." color="teal" icon={<IconArrowUpRight size={18} />}
             idKey="id" fetchUrl="/backend/api/routes/outbound" createUrl="/backend/api/routes/outbound" deleteUrl={(r) => '/backend/api/routes/outbound/' + r.id}
             columns={[
               { key: 'name', label: 'Nombre', icon: <IconTag size={13} /> },
               { key: 'pattern', label: 'Patrón', icon: <IconAsterisk size={13} />, render: (r) => <Badge variant="light" color="pbx" ff="monospace">_{r.pattern}</Badge> },
-              { key: 'trunk', label: 'Troncal', mono: true, icon: <IconDeviceLandlinePhone size={13} /> },
+              { key: 'trunk', label: 'Salida', mono: true, icon: <IconDeviceLandlinePhone size={13} /> },
               { key: 'strip', label: 'Quita', icon: <IconBackspace size={13} /> },
               { key: 'prepend', label: 'Antepone', icon: <IconPlus size={13} /> },
               { key: 'callerid', label: 'CallerID', icon: <IconId size={13} /> },
@@ -52,9 +52,8 @@ export default function Rutas() {
             fields={[
               { name: 'name', label: 'Nombre', icon: <IconTag size={15} />, placeholder: 'Salida nacional', description: 'Etiqueta de la regla. Ej: Salida nacional, Celulares.' },
               { name: 'pattern', label: 'Patrón (sin el _)', required: true, icon: <IconAsterisk size={15} />, placeholder: '0X.', description: 'Patrón de marcado de Asterisk. Ej: 0X. = un 0 seguido de uno o más dígitos. X = un dígito 0-9, . = uno o más.' },
-              { name: 'trunk', label: 'Troncal', required: true, type: 'select', data: trunkOpts, icon: <IconDeviceLandlinePhone size={15} />, description: 'Elegí la troncal por la que sale la llamada.' },
-              { name: 'strip', label: 'Quitar dígitos iniciales', icon: <IconBackspace size={15} />, placeholder: '1', description: 'Cuántos dígitos del principio sacar antes de enviar. Ej: 1 (quita el 0 que marcó el usuario).' },
-              { name: 'prepend', label: 'Anteponer (opcional)', icon: <IconPlus size={15} />, placeholder: '+598', description: 'Texto a agregar adelante del número. Ej: +598 o 0.' },
+              { name: 'strip', label: 'Quitar dígitos iniciales', icon: <IconBackspace size={15} />, placeholder: '1', description: 'Quita el prefijo de salida que marca el usuario (ej: 1 saca el 0). La normalización del formato del carrier va en SBC → Operadores.' },
+              { name: 'prepend', label: 'Anteponer (opcional)', icon: <IconPlus size={15} />, placeholder: '+598', description: 'Opcional. Para el formato del operador usá SBC → Operadores y evitá transformar el número en dos lugares.' },
               { name: 'callerid', label: 'CallerID saliente (opcional)', icon: <IconId size={15} />, placeholder: '59824000000', description: 'Número que verá el destinatario. Ej: 59824000000.' },
             ]} emptyText="Sin rutas de salida. Creá una para llamar a números externos." />
         </Tabs.Panel>
