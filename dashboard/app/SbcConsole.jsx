@@ -55,7 +55,7 @@ function ConsoleBody({ sbc, load, hist }) {
   const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const [newTgt, setNewTgt] = useState(''); const [dlgOpen, setDlgOpen] = useState(false); const [dlgEdit, setDlgEdit] = useState(null); const [dtUri, setDtUri] = useState(''); const [dtPrio, setDtPrio] = useState(0);
   async function saveTgt() { const uri = dtUri.trim(); if (!uri) return; if (dlgEdit) await sendCmd('del_target', dlgEdit.uri); await sendCmd('add_target', uri + '|' + (dtPrio || 0)); setDlgOpen(false); }
-  const [secView, setSecView] = useState('sbc'); const [featLimit, setFeatLimit] = useState(30);
+  const [tab, setTab] = useState('mon'); const [secView, setSecView] = useState('sbc'); const [featLimit, setFeatLimit] = useState(30);
   async function applyFeats(next) { await sendCmd('feat_apply', JSON.stringify(next)); } const [f2b, setF2b] = useState(null); const [secf, setSecf] = useState([]); const [sfData, setSfData] = useState(''); const [sfType, setSfType] = useState('0'); const [sfBusy, setSfBusy] = useState(''); const loadSecf = useCallback(() => fetch('/backend/api/sbc/secfilter').then(r => r.json()).then(d => Array.isArray(d) && setSecf(d)).catch(() => {}), []); async function addSecf() { if (!sfData.trim()) return; setSfBusy('add'); await fetch('/backend/api/sbc/secfilter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 0, type: +sfType, data: sfData.trim() }) }).catch(() => {}); setSfData(''); setSfBusy(''); setTimeout(loadSecf, 500); toast('Regla agregada (SBC recargado)', 'ok'); } async function delSecf(id) { setSfBusy('d' + id); await fetch('/backend/api/sbc/secfilter/' + id, { method: 'DELETE' }).catch(() => {}); setSfBusy(''); setTimeout(loadSecf, 500); }
   const [lcrGws, setLcrGws] = useState([]); const [lcrRules, setLcrRules] = useState([]);
   const [gwForm, setGwForm] = useState({ address: '', strip: 0, pri_prefix: '', description: '' });
@@ -120,7 +120,7 @@ function ConsoleBody({ sbc, load, hist }) {
   const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace"><Slot value={(core[k] ?? 0).toLocaleString()} /></Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? <><Slot value={rates[k]} />/s</> : ''}</Table.Td></Table.Tr>;
 
   return (
-    <Tabs defaultValue="mon" variant="pills" radius="md" keepMounted={false}>
+    <Tabs value={tab} onChange={setTab} variant="pills" radius="md" keepMounted={false}>
       <Tabs.List mb="md">
         <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
@@ -131,7 +131,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
         <Tabs.Tab value="turn" leftSection={<IconCloud size={16} />}>TURN</Tabs.Tab>
-        <Tabs.Tab value="adv" leftSection={<IconCpu size={16} />}>Avanzado</Tabs.Tab>
+        <Tabs.Tab value="adv" leftSection={<IconCpu size={16} />}>Módulos</Tabs.Tab>
         <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>
         <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
       </Tabs.List>
@@ -372,18 +372,19 @@ function ConsoleBody({ sbc, load, hist }) {
           {[{ id: 'topos', mod: 'topos', label: 'Topology hiding', icon: <IconShieldLock size={18} />, desc: 'Oculta IPs y rutas internas a proveedores y clientes (privacidad/seguridad).' },
             { id: 'dialog_limits', mod: 'dialog', label: 'Límite de llamadas concurrentes', icon: <IconActivity size={18} />, desc: 'Máximo de llamadas simultáneas global y por troncal/IP (anti-fraude y capacidad).' },
             { id: 'acc', mod: 'acc', label: 'Accounting / CDR en el borde', icon: <IconFileCode size={18} />, desc: 'Registro de llamadas en el SBC, independiente de Asterisk.' },
-            { id: 'drouting', mod: 'drouting', label: 'Routing avanzado / LCR', icon: <IconRoute size={18} />, desc: 'Ruteo de salientes por prefijo y costo, con failover entre troncales.' },
-            { id: 'secfilter', mod: 'secfilter', label: 'Filtro de seguridad', icon: <IconBan size={18} />, desc: 'Bloqueo por patrones, User-Agent y país.' },
+            { id: 'topohide', label: 'Topology hiding (salientes)', icon: <IconShieldLock size={18} />, desc: 'En salientes a operadores anuncia la IP pública y oculta versión y headers internos.' },
+            { id: 'drouting', mod: 'drouting', label: 'Routing avanzado / LCR', icon: <IconRoute size={18} />, desc: 'Ruteo de salientes por prefijo con failover entre operadores.', manage: 'lcr' },
+            { id: 'secfilter', mod: 'secfilter', label: 'Filtro de seguridad', icon: <IconBan size={18} />, desc: 'Bloqueo por patrones, User-Agent y país.', manage: 'sec' },
             { id: 'ratelimit', mod: 'ratelimit', label: 'Rate limiting', icon: <IconActivity size={18} />, desc: 'Límites de tasa por método, más finos que pike.' },
             { id: 'tls', mod: 'tls', label: 'TLS troncales', icon: <IconShieldLock size={18} />, desc: 'Cifrado de la señalización SIP de las troncales del operador.' }].map((f) => {
-            const av = (stats.modules?.avail || {})[f.mod]; const on = (stats.modules?.features || {})[f.id];
+            const av = f.mod ? (stats.modules?.avail || {})[f.mod] : true; const on = (stats.modules?.features || {})[f.id];
             return (<Card key={f.id} withBorder radius="md" padding="md">
               <Group justify="space-between" wrap="nowrap" mb={4}><Group gap="sm" wrap="nowrap"><ThemeIcon size={36} radius="md" variant="light" color={on ? 'teal' : av ? 'grape' : 'gray'}>{f.icon}</ThemeIcon><Text fw={700} size="sm">{f.label}</Text></Group>
                 {on ? <Badge color="teal" variant="filled" size="sm">Activo</Badge> : av ? <Badge color="grape" variant="light" size="sm">Disponible</Badge> : <Badge color="gray" variant="light" size="sm">No instalado</Badge>}</Group>
               <Text size="xs" c="dimmed">{f.desc}</Text>
               {!av && f.id === 'tls' && <Text size="xs" c="orange" mt={4}>Requiere instalar kamailio-tls-modules en el CT107.</Text>}
               {av && ['topoh','dialog_limits','acc'].includes(f.id) && <Group mt="sm" gap="sm" align="center" wrap="wrap"><Switch checked={!!on} onChange={(e) => applyFeats({ ...(stats.modules?.feats_cfg || {}), [f.id]: { ...(((stats.modules?.feats_cfg || {})[f.id]) || {}), on: e.currentTarget.checked, ...(f.id === 'dialog_limits' ? { limit: featLimit } : {}) } })} onLabel="ON" offLabel="OFF" />{f.id === 'dialog_limits' && <Group gap={6} align="center"><Text size="xs" c="dimmed">Máx. simultáneas</Text><NumberInput size="xs" w={90} value={featLimit} onChange={setFeatLimit} min={1} max={2000} /><Button size="xs" variant="light" onClick={() => applyFeats({ ...(stats.modules?.feats_cfg || {}), dialog_limits: { on: true, limit: featLimit } })}>Aplicar</Button></Group>}</Group>}
-              {av && !['topoh','dialog_limits','acc'].includes(f.id) && <Badge mt="sm" variant="dot" color="gray">Activación próximamente</Badge>}
+              {av && !['topoh','dialog_limits','acc'].includes(f.id) && (f.manage ? <Button mt="sm" size="compact-xs" variant="light" leftSection={<IconRouteAltLeft size={13} />} onClick={() => setTab(f.manage)}>Gestionar</Button> : <Badge mt="sm" variant="dot" color={on ? 'teal' : 'gray'}>{on ? 'Gestionado en configuración' : 'Activación próximamente'}</Badge>)}
             </Card>);
           })}
         </SimpleGrid>
