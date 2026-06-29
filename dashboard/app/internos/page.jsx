@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2 } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useLive } from '../useLive';
 import { toast } from '../notify';
@@ -10,6 +10,12 @@ import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
 import Slot from '../Slot';
 
+const VIA = {
+  direct: { label: 'Directo', color: 'blue', icon: <IconServer size={12} /> },
+  sbc: { label: 'SBC', color: 'grape', icon: <IconShieldHalf size={12} /> },
+  webrtc: { label: 'WebRTC', color: 'teal', icon: <IconWorld size={12} /> },
+};
+const ViaBadge = ({ v, origin }) => { const i = VIA[v]; if (!i) return <Text c="dimmed" size="sm">—</Text>; return <Tooltip label={origin ? ('Origen real: ' + origin) : i.label} disabled={!origin}><Badge variant="light" color={i.color} leftSection={i.icon}>{i.label}</Badge></Tooltip>; };
 const EMPTY = { id: '', name: '', pass: '', video: false, record: false, type: 'webrtc', max_contacts: 2, tenant_id: 1 };
 const rttColor = (r) => r == null ? 'gray' : r < 80 ? 'teal' : r < 200 ? 'yellow' : 'red';
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
@@ -97,13 +103,13 @@ export default function Internos() {
           list.length === 0 ? <Text c="dimmed" ta="center" py="xl">Sin internos.</Text> :
             <Table.ScrollContainer minWidth={760}>
               <Table striped highlightOnHover verticalSpacing="sm">
-                <Table.Thead><Table.Tr><Th icon={<IconHash size={13} />}>Interno</Th><Th icon={<IconUser size={13} />}>Nombre</Th><Th icon={<IconActivity size={13} />}>Estado</Th><Th icon={<IconWorld size={13} />}>IP</Th><Th icon={<IconClock size={13} />}>RTT</Th><Th icon={<IconDeviceLandlinePhone size={13} />}>Tipo</Th><Th icon={<IconVideo size={13} />}>Video</Th><Table.Th /></Table.Tr></Table.Thead>
+                <Table.Thead><Table.Tr><Th icon={<IconHash size={13} />}>Interno</Th><Th icon={<IconUser size={13} />}>Nombre</Th><Th icon={<IconActivity size={13} />}>Estado</Th><Th icon={<IconRouteAltLeft size={13} />}>Vía</Th><Th icon={<IconWorld size={13} />}>IP</Th><Th icon={<IconClock size={13} />}>RTT</Th><Th icon={<IconDeviceLandlinePhone size={13} />}>Tipo</Th><Th icon={<IconVideo size={13} />}>Video</Th><Table.Th /></Table.Tr></Table.Thead>
                 <Table.Tbody>{fl.map(e => (
                   <Table.Tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => openEdit(e)}>
                     <Table.Td ff="monospace" fw={600}>{e.id}</Table.Td>
                     <Table.Td>{e.name || <Text c="dimmed" size="sm">—</Text>}</Table.Td>
-                    <Table.Td><Badge variant="light" color={e.channels > 0 ? 'orange' : e.status === 'online' ? 'teal' : 'gray'} leftSection={<span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: e.channels > 0 ? '#f59e0b' : e.status === 'online' ? '#22c55e' : '#9aa3b2' }} />}>{e.channels > 0 ? 'En llamada' : e.status === 'online' ? 'Registrado' : 'Desconectado'}</Badge></Table.Td>
-                    <Table.Td>{e.ip ? <Text ff="monospace" size="xs">{e.ip}</Text> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
+                    <Table.Td><Badge variant="light" color={e.channels > 0 ? 'orange' : e.status === 'online' ? 'teal' : 'gray'} leftSection={<span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: e.channels > 0 ? '#f59e0b' : e.status === 'online' ? '#22c55e' : '#9aa3b2' }} />}>{e.channels > 0 ? 'En llamada' : e.status === 'online' ? 'Registrado' : 'Desconectado'}</Badge></Table.Td><Table.Td><ViaBadge v={e.via} origin={e.origin} /></Table.Td>
+                    <Table.Td>{(e.origin || e.ip) ? <Text ff="monospace" size="xs">{e.origin || e.ip}</Text> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
                     <Table.Td>{e.rtt != null ? <Badge size="sm" variant="dot" color={rttColor(e.rtt)}><Slot value={e.rtt.toFixed(0)} /> ms</Badge> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
                     <Table.Td><Badge variant="dot" color={e.webrtc ? 'pbx' : 'gray'}>{e.webrtc ? 'WebRTC' : 'SIP'}</Badge></Table.Td>
                     <Table.Td>{e.video ? <Badge color="violet" variant="light" leftSection={<IconVideo size={12} />}>Sí</Badge> : <Text c="dimmed">—</Text>}</Table.Td>

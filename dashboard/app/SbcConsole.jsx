@@ -50,7 +50,7 @@ function ConsoleBody({ sbc, load, hist }) {
   const [cfg, setCfg] = useState(''); const [cfgOrig, setCfgOrig] = useState(''); const [cfgMsg, setCfgMsg] = useState(''); const [cfgBusy, setCfgBusy] = useState(false);
   const [banIp, setBanIp] = useState(''); const [debug, setDebug] = useState(2); const [busy, setBusy] = useState('');
   const cfgLoaded = useRef(false);
-  const { snap } = useLive(); const ch = (snap && snap.channels) || [];
+  const { snap } = useLive(); const ch = (snap && snap.channels) || []; const ext = (snap && snap.extensions) || []; const remExt = ext.filter(e => e.via === 'sbc');
   const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const [newTgt, setNewTgt] = useState(''); const [dlgOpen, setDlgOpen] = useState(false); const [dlgEdit, setDlgEdit] = useState(null); const [dtUri, setDtUri] = useState(''); const [dtPrio, setDtPrio] = useState(0);
   async function saveTgt() { const uri = dtUri.trim(); if (!uri) return; if (dlgEdit) await sendCmd('del_target', dlgEdit.uri); await sendCmd('add_target', uri + '|' + (dtPrio || 0)); setDlgOpen(false); }
@@ -114,6 +114,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
         <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>
+        <Tabs.Tab value="remext" leftSection={<IconWorld size={16} />}>Remotos {remExt.length > 0 && <Badge size="xs" color="grape" variant="filled" ml={4}>{remExt.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
         <Tabs.Tab value="turn" leftSection={<IconCloud size={16} />}>TURN</Tabs.Tab>
@@ -213,6 +214,32 @@ function ConsoleBody({ sbc, load, hist }) {
       </Tabs.Panel>
 
       <Tabs.Panel value="trunks"><Troncales /></Tabs.Panel>
+      <Tabs.Panel value="remext">
+        <Stack gap="md" mt="md">
+          <Card withBorder radius="md" padding="md">
+            <Group justify="space-between" mb="sm">
+              <Group gap="xs"><Text fw={700}>Extensiones remotas (por el SBC)</Text><Badge color="grape" variant="light">{remExt.length}</Badge></Group>
+              <Text size="xs" c="dimmed">Internos que registran a través de SBC-NG (no directo a Asterisk)</Text>
+            </Group>
+            {remExt.length === 0
+              ? <Text c="dimmed" size="sm" py="md" ta="center">Ningún interno registrado por el SBC en este momento.</Text>
+              : <Table striped highlightOnHover verticalSpacing="sm">
+                  <Table.Thead><Table.Tr><Table.Th>Interno</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Origen real</Table.Th><Table.Th>Proto</Table.Th><Table.Th>RTT</Table.Th></Table.Tr></Table.Thead>
+                  <Table.Tbody>
+                    {remExt.map(e => <Table.Tr key={e.id}>
+                      <Table.Td ff="monospace" fw={600}>{e.id}</Table.Td>
+                      <Table.Td>{e.name || <Text c="dimmed" size="sm">—</Text>}</Table.Td>
+                      <Table.Td><Badge variant="light" color={e.channels > 0 ? 'orange' : e.status === 'online' ? 'teal' : 'gray'} leftSection={<span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: e.channels > 0 ? '#f59e0b' : e.status === 'online' ? '#22c55e' : '#9aa3b2' }} />}>{e.channels > 0 ? 'En llamada' : e.status === 'online' ? 'Registrado' : 'Desconectado'}</Badge></Table.Td>
+                      <Table.Td><Text ff="monospace" size="xs">{e.origin || '—'}</Text></Table.Td>
+                      <Table.Td><Badge size="sm" variant="dot" color="blue">{(e.vproto || 'udp').toUpperCase()}</Badge></Table.Td>
+                      <Table.Td>{e.rtt != null ? <Badge size="sm" variant="dot" color="teal"><Slot value={e.rtt.toFixed(0)} /> ms</Badge> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
+                    </Table.Tr>)}
+                  </Table.Tbody>
+                </Table>}
+          </Card>
+        </Stack>
+      </Tabs.Panel>
+
 
       <Tabs.Panel value="net">
         <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-cyan-light)' }}>

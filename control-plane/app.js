@@ -184,7 +184,24 @@ async function getExtensions() {
       if (aorM && ipM) contacts[aorM[1].trim()] = { ip: ipM[1], rtt };
     }
   } catch (_) {}
-  return rows.map(r => ({ id: r.id, name: names[r.id] || null, context: r.context, allow: r.allow, tenant_id: r.tenant_id, status: st[r.id] ? st[r.id].state : 'offline', channels: st[r.id] ? st[r.id].channels : 0, ip: contacts[r.id] ? contacts[r.id].ip : null, rtt: contacts[r.id] ? contacts[r.id].rtt : null, video: /vp8|h264/i.test(r.allow || ''), webrtc: r.transport === 'transport-ws', record: r.pbxng_record === true || r.pbxng_record === 'yes' || r.pbxng_record === 't' }));
+  const viaMap = {};
+  try {
+    const { rows: cc } = await pool.query("SELECT endpoint, uri, via_addr, via_port FROM ps_contacts");
+    const SBC = '172.26.20.205', NPM = '172.26.20.17';
+    const pmap = { '1': 'udp', '2': 'tcp', '3': 'tls', '4': 'sctp', '5': 'ws', '6': 'wss' };
+    for (const c of cc) {
+      const uri = c.uri || '';
+      const hm = /@([^:;>]+)/.exec(uri); const host = hm ? hm[1] : null;
+      const al = /alias=([0-9.]+)~([0-9]+)~([0-9]+)/.exec(uri);
+      const isWS = /transport=ws/i.test(uri);
+      let via = 'direct', origin = null, proto = 'udp';
+      if (isWS || host === NPM) { via = 'webrtc'; proto = 'ws'; origin = host; }
+      else if (host === SBC || al) { via = 'sbc'; if (al) { origin = al[1] + ':' + al[2]; proto = pmap[al[3]] || 'udp'; } else if (c.via_addr) { origin = c.via_addr + (c.via_port ? (':' + c.via_port) : ''); } }
+      else { via = 'direct'; origin = c.via_addr ? (c.via_addr + (c.via_port ? (':' + c.via_port) : '')) : host; }
+      viaMap[c.endpoint] = { via, origin, proto };
+    }
+  } catch (_) {}
+  return rows.map(r => ({ id: r.id, name: names[r.id] || null, context: r.context, allow: r.allow, tenant_id: r.tenant_id, status: st[r.id] ? st[r.id].state : 'offline', channels: st[r.id] ? st[r.id].channels : 0, ip: contacts[r.id] ? contacts[r.id].ip : null, rtt: contacts[r.id] ? contacts[r.id].rtt : null, via: (viaMap[r.id]||{}).via || null, origin: (viaMap[r.id]||{}).origin || null, vproto: (viaMap[r.id]||{}).proto || null, video: /vp8|h264/i.test(r.allow || ''), webrtc: r.transport === 'transport-ws', record: r.pbxng_record === true || r.pbxng_record === 'yes' || r.pbxng_record === 't' }));
 }
 async function getChannels() {
   if (!ari) return [];
