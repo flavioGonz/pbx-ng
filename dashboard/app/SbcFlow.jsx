@@ -166,11 +166,14 @@ export default function SbcFlow({ fullBleed }) {
   const trunkActive = (nm) => ch.some((c) => chName(c) === nm);
   const anyTrunkActive = trunks.some((t) => trunkActive(t.name));
   const internosActive = ch.some((c) => extSet.has(chName(c)));
+  const hasRemote = eps.some((x) => x.via === 'sbc');
+  const remoteActive = ch.some((c) => { const ex = eps.find((x) => x.id === chName(c)); return ex && ex.via === 'sbc'; });
   const webrtcActive = ch.some((c) => wrtcSet.has(chName(c)));
   const lcOf = (live) => live === 'down' ? '#dc2626' : live === 'ring' ? '#f59e0b' : '#16a34a';
   const e = (id, s, t, color, label, live) => ({ id, source: s, target: t, type: 'flow', data: { color, live: live || false }, label, markerEnd: { type: MarkerType.ArrowClosed, color: live ? lcOf(live) : color } });
   const edges = [
     e('e1', 'wan', 'npm', '#1d4ed8', 'HTTPS/WSS', webrtcActive ? callMode : false),
+    e('wan-sip', 'wan', 'kamailio', '#0e9488', 'SIP remoto :5060', remoteActive ? callMode : (hasRemote ? 'ok' : false)),
     e('e3', 'wan', 'coturn', '#0891b2', 'TURN', webrtcActive ? callMode : false),
     e('eC', 'coturn', 'asterisk', '#0891b2', 'media RTP', webrtcActive ? callMode : false),
     e('e4', 'npm', 'asterisk', '#1d4ed8', '/ws', webrtcActive ? callMode : false),
