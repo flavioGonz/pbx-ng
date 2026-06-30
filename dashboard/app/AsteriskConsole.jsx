@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, ThemeIcon, Table, Loader, Center, TextInput, NumberInput, Button, MultiSelect, Alert } from '@mantine/core';
-import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, IconPlugConnected, IconBolt, IconInfoCircle, IconRouter, IconDeviceLandlinePhone, IconDeviceFloppy, IconTrash } from '@tabler/icons-react';
+import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, IconPlugConnected, IconBolt, IconInfoCircle, IconRouter, IconDeviceLandlinePhone, IconDeviceFloppy, IconTrash, IconUsers, IconCircleCheck, IconCircleX } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import RoutesPanel from './RoutesPanel';
 import Dialplan from './dialplan/page';
@@ -12,11 +12,12 @@ export default function AsteriskConsole() {
   const { snap } = useLive();
   const [health, setHealth] = useState(null);
   const [core, setCore] = useState(null); const [net, setNet] = useState(null); const [f2b, setF2b] = useState(null);
-  const [trunk, setTrunk] = useState(null); const [tf, setTf] = useState({ sbc_ip: '172.26.20.205', sbc_port: 5060, context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'] }); const [tbusy, setTbusy] = useState('');
+  const [exts, setExts] = useState([]); const [trunk, setTrunk] = useState(null); const [tf, setTf] = useState({ sbc_ip: '172.26.20.205', sbc_port: 5060, context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'] }); const [tbusy, setTbusy] = useState('');
   async function load() { try { setHealth(await fetch('/backend/health').then((r) => r.json())); } catch (_) {} try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {}
     try { const tk = await fetch('/backend/api/asterisk/sbc-trunk').then((r) => r.json()); setTrunk(tk); if (tk && tk.exists) setTf((f) => ({ ...f, sbc_ip: (tk.identify && tk.identify.match) || f.sbc_ip, context: (tk.endpoint && tk.endpoint.context) || f.context, codecs: (tk.endpoint && tk.endpoint.allow) ? tk.endpoint.allow.split(',') : f.codecs })); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, []);
   useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { const lf = () => fetch('/backend/api/extensions').then((r) => r.json()).then((d) => Array.isArray(d) && setExts(d)).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
   async function saveTrunk() { setTbusy('save'); const r = await fetch('/backend/api/asterisk/sbc-trunk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tf) }).then((x) => x.json()).catch(() => ({ error: 1 })); setTbusy(''); toast(r.error ? 'Error al guardar' : 'Troncal hacia el SBC guardada (pjsip recargado)', r.error ? 'bad' : 'ok'); setTimeout(load, 700); }
   async function delTrunk() { if (!confirm('¿Eliminar la troncal interna hacia el SBC?')) return; setTbusy('del'); await fetch('/backend/api/asterisk/sbc-trunk', { method: 'DELETE' }).catch(() => {}); setTbusy(''); toast('Troncal eliminada', 'info'); setTimeout(load, 700); }
   const ch = (snap && snap.channels) || []; const m = (core && core.metrics) || {};
@@ -26,6 +27,7 @@ export default function AsteriskConsole() {
     <Tabs defaultValue="core" variant="pills" radius="md" keepMounted={false}>
       <Tabs.List mb="md">
         <Tabs.Tab value="core" leftSection={<IconActivity size={16} />}>Núcleo</Tabs.Tab>
+        <Tabs.Tab value="ext" leftSection={<IconUsers size={16} />}>Internos</Tabs.Tab>
         <Tabs.Tab value="trunk" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncal SBC</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="dialplan" leftSection={<IconTerminal2 size={16} />}>Dialplan</Tabs.Tab>
@@ -48,6 +50,44 @@ export default function AsteriskConsole() {
           <Card withBorder radius="md" padding="md"><Text fw={700} mb="xs">Transportes PJSIP</Text><Group gap="xs">{(core.transports || []).map((t) => <Badge key={t.id} variant="light" color="blue" leftSection={<IconPlugConnected size={12} />}>{t.id} · {(t.proto || '').toUpperCase()}</Badge>)}</Group></Card>
           <Card withBorder radius="md" padding="md"><Text fw={700} mb="xs">Módulos clave</Text><Group gap="xs">{Object.entries(core.modules || {}).map(([k, v]) => <Badge key={k} variant="light" color={v ? 'teal' : 'red'}>{k}: {v ? 'cargado' : 'no'}</Badge>)}</Group></Card>
         </Stack>}
+      </Tabs.Panel>
+
+
+      <Tabs.Panel value="ext">
+        <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
+          <Group gap="xs" mb={4}><IconUsers size={16} /><Text fw={700} size="sm">Verificación de internos</Text></Group>
+          <Text size="sm" c="dimmed">Cruza los internos definidos en la base contra su estado real en Asterisk (registrado / offline, contacto, IP, RTT, vía). Gestión completa en Telefonía → Internos.</Text>
+        </Card>
+        {(() => {
+          const isReg = (e) => !!e.ip || (e.status && !/offline|unavail/i.test(e.status));
+          const reg = exts.filter(isReg); const off = exts.filter((e) => !isReg(e)); const web = exts.filter((e) => e.webrtc);
+          const viaLabel = { sbc: 'SBC', webrtc: 'WebRTC', direct: 'Directo' };
+          return (<Stack gap="md">
+            <SimpleGrid cols={{ base: 2, sm: 4 }}>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Definidos</Text><Text fw={800} size="xl">{exts.length}</Text></Card>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Registrados</Text><Text fw={800} size="xl" c="teal">{reg.length}</Text></Card>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Offline</Text><Text fw={800} size="xl" c={off.length ? 'red' : 'dimmed'}>{off.length}</Text></Card>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">WebRTC</Text><Text fw={800} size="xl" c="grape">{web.length}</Text></Card>
+            </SimpleGrid>
+            <Card withBorder radius="md" padding="md">
+              <Group justify="space-between" mb="sm"><Text fw={700}>Internos definidos ({exts.length})</Text></Group>
+              {exts.length === 0 ? <Text c="dimmed" size="sm">Sin internos definidos.</Text> :
+              <Table striped highlightOnHover withTableBorder verticalSpacing={6}>
+                <Table.Thead><Table.Tr><Table.Th>Interno</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Vía</Table.Th><Table.Th>IP</Table.Th><Table.Th>RTT</Table.Th><Table.Th>Tipo</Table.Th></Table.Tr></Table.Thead>
+                <Table.Tbody>{exts.map((e) => { const r = isReg(e); return (
+                  <Table.Tr key={e.id}>
+                    <Table.Td><Text fw={700} ff="monospace">{e.id}</Text></Table.Td>
+                    <Table.Td fz="xs">{e.name || '—'}</Table.Td>
+                    <Table.Td><Badge size="sm" variant={r ? 'filled' : 'light'} color={r ? 'teal' : 'red'} leftSection={r ? <IconCircleCheck size={12} /> : <IconCircleX size={12} />}>{r ? 'Registrado' : 'Offline'}</Badge></Table.Td>
+                    <Table.Td><Badge size="sm" variant="light" color={e.via === 'sbc' ? 'grape' : e.via === 'webrtc' ? 'blue' : 'gray'}>{viaLabel[e.via] || '—'}</Badge></Table.Td>
+                    <Table.Td ff="monospace" fz="xs">{e.ip || '—'}</Table.Td>
+                    <Table.Td fz="xs">{e.rtt != null ? e.rtt + ' ms' : '—'}</Table.Td>
+                    <Table.Td>{e.webrtc ? <Badge size="xs" variant="light" color="blue">WebRTC</Badge> : <Badge size="xs" variant="light" color="gray">SIP</Badge>}{e.video ? <Badge size="xs" variant="light" color="grape" ml={4}>video</Badge> : null}</Table.Td>
+                  </Table.Tr>); })}</Table.Tbody>
+              </Table>}
+            </Card>
+          </Stack>);
+        })()}
       </Tabs.Panel>
 
       <Tabs.Panel value="trunk">
