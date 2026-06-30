@@ -10,7 +10,7 @@ import Troncales from './troncales/page';
 import RoutesPanel from './RoutesPanel';
 import TurnConsole from './TurnConsole';
 import { useLive } from './useLive';
-import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud } from '@tabler/icons-react';
+import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud, IconReplace } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const SECF_TYPE = { 0: 'User-Agent', 1: 'Pais', 2: 'Dominio', 3: 'IP', 4: 'Usuario', 5: 'Destino' };
@@ -58,6 +58,14 @@ function ConsoleBody({ sbc, load, hist }) {
   const [tab, setTab] = useState('mon'); const [secView, setSecView] = useState('sbc'); const [featLimit, setFeatLimit] = useState(30);
   async function applyFeats(next) { await sendCmd('feat_apply', JSON.stringify(next)); } const [f2b, setF2b] = useState(null); const [secf, setSecf] = useState([]); const [sfData, setSfData] = useState(''); const [sfType, setSfType] = useState('0'); const [sfBusy, setSfBusy] = useState(''); const loadSecf = useCallback(() => fetch('/backend/api/sbc/secfilter').then(r => r.json()).then(d => Array.isArray(d) && setSecf(d)).catch(() => {}), []); async function addSecf() { if (!sfData.trim()) return; setSfBusy('add'); await fetch('/backend/api/sbc/secfilter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 0, type: +sfType, data: sfData.trim() }) }).catch(() => {}); setSfData(''); setSfBusy(''); setTimeout(loadSecf, 500); toast('Regla agregada (SBC recargado)', 'ok'); } async function delSecf(id) { setSfBusy('d' + id); await fetch('/backend/api/sbc/secfilter/' + id, { method: 'DELETE' }).catch(() => {}); setSfBusy(''); setTimeout(loadSecf, 500); }
   const [lcrGws, setLcrGws] = useState([]); const [lcrRules, setLcrRules] = useState([]);
+  const [smRules, setSmRules] = useState([]); const [smForm, setSmForm] = useState({ action: 'remove_header', scope: 'all', header: '', value: '', match: '', description: '' }); const [smBusy, setSmBusy] = useState('');
+  const loadSm = useCallback(() => fetch('/backend/api/sbc/sipmanip').then(r => r.json()).then(d => Array.isArray(d) && setSmRules(d)).catch(() => {}), []);
+  async function addSm() { if (!smForm.action) return; setSmBusy('add'); await fetch('/backend/api/sbc/sipmanip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(smForm) }).catch(() => {}); setSmForm(f => ({ ...f, header: '', value: '', match: '', description: '' })); setSmBusy(''); setTimeout(loadSm, 900); toast('Regla agregada (SBC recargado)', 'ok'); }
+  async function delSm(id) { setSmBusy('d' + id); await fetch('/backend/api/sbc/sipmanip/' + id, { method: 'DELETE' }).catch(() => {}); setSmBusy(''); setTimeout(loadSm, 900); }
+  async function toggleSm(id) { setSmBusy('t' + id); await fetch('/backend/api/sbc/sipmanip/' + id + '/toggle', { method: 'POST' }).catch(() => {}); setSmBusy(''); setTimeout(loadSm, 900); }
+  async function presetsSm() { setSmBusy('pre'); await fetch('/backend/api/sbc/sipmanip/presets', { method: 'POST' }).catch(() => {}); setSmBusy(''); setTimeout(loadSm, 900); toast('Presets compatibles agregados (revisá cuáles activar)', 'ok'); }
+  async function resetSm() { if (!confirm('¿Borrar todas las reglas y volver a SIN manipulación?')) return; setSmBusy('reset'); await fetch('/backend/api/sbc/sipmanip/reset', { method: 'POST' }).catch(() => {}); setSmBusy(''); setTimeout(loadSm, 900); toast('Restaurado: sin manipulación', 'info'); }
+  const SM_ACTION_LABEL = { remove_header: 'Quitar header', add_header: 'Agregar header', set_from_user: 'Forzar From-user', set_ppi: 'P-Preferred-Identity', set_pai: 'P-Asserted-Identity', set_diversion: 'Diversion', modify_header: 'Modificar (regex)' };
   const [gwForm, setGwForm] = useState({ address: '', strip: 0, pri_prefix: '', description: '' });
   const [ruleForm, setRuleForm] = useState({ prefix: '', gwlist: '', description: '' });
   const [lcrBusy, setLcrBusy] = useState('');
@@ -68,7 +76,7 @@ function ConsoleBody({ sbc, load, hist }) {
   async function addRule() { if (!ruleForm.gwlist.trim()) return; setLcrBusy('rule'); await fetch('/backend/api/sbc/lcr/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ruleForm) }).catch(() => {}); setRuleForm({ prefix: '', gwlist: '', description: '' }); setLcrBusy(''); setTimeout(loadLcrRules, 600); toast('Regla agregada (SBC recargado)', 'ok'); }
   async function delRule(id) { setLcrBusy('r' + id); await fetch('/backend/api/sbc/lcr/rules/' + id, { method: 'DELETE' }).catch(() => {}); setLcrBusy(''); setTimeout(loadLcrRules, 600); }
   useEffect(() => { const lf = () => fetch('/backend/api/extensions').then(r => r.json()).then(d => { if (Array.isArray(d)) setExtList(d); }).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
-  useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); loadSecf(); loadLcrGw(); loadLcrRules(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); loadSecf(); loadLcrGw(); loadLcrRules(); loadSm(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
   const [routes, setRoutes] = useState([]); const [rt, setRt] = useState({ dest: '', gw: '', dev: '', note: '' }); const [editId, setEditId] = useState(null);
   const loadRoutes = useCallback(async () => { try { const d = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(d)) setRoutes(d); } catch (_) {} }, []);
   useEffect(() => { loadRoutes(); }, [loadRoutes]);
@@ -127,6 +135,7 @@ function ConsoleBody({ sbc, load, hist }) {
         <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
         <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>
         <Tabs.Tab value="lcr" leftSection={<IconRoute size={16} />}>Operadores</Tabs.Tab>
+        <Tabs.Tab value="smanip" leftSection={<IconReplace size={16} />}>Manipulación SIP</Tabs.Tab>
         <Tabs.Tab value="remext" leftSection={<IconWorld size={16} />}>Remotos {remExt.length > 0 && <Badge size="xs" color="grape" variant="filled" ml={4}>{remExt.length}</Badge>}</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
@@ -239,6 +248,47 @@ function ConsoleBody({ sbc, load, hist }) {
       </Tabs.Panel>
 
       <Tabs.Panel value="trunks"><Troncales /></Tabs.Panel>
+
+      <Tabs.Panel value="smanip">
+        <Stack gap="md" mt="md">
+          <Card withBorder radius="md" padding="md" style={{ background: 'var(--mantine-color-grape-light)' }}>
+            <Group gap="xs" mb={4}><IconReplace size={16} /><Text fw={700} size="sm">Manipulación SIP avanzada (salientes a operadores)</Text></Group>
+            <Text size="xs" c="dimmed">Reescribe headers SIP por operador para cumplir formatos propietarios (P-Preferred/Asserted-Identity, Diversion, From, etc.). Por defecto NO hay manipulación (no rompe nada). Usá "Reglas compatibles" para cargar una librería de reglas comunes (vienen desactivadas salvo las 100% seguras) y activá solo las que tu operador exija.</Text>
+            <Group gap="xs" mt="sm">
+              <Button size="xs" variant="light" color="grape" leftSection={<IconPlus size={14} />} loading={smBusy === 'pre'} onClick={presetsSm}>Generar reglas compatibles</Button>
+              <Button size="xs" variant="subtle" color="gray" loading={smBusy === 'reset'} onClick={resetSm}>Restaurar sin manipulación</Button>
+            </Group>
+          </Card>
+          <Card withBorder radius="md" padding="lg">
+            <Text fw={700} mb="sm">Nueva regla</Text>
+            <Group align="end" gap="xs" wrap="wrap">
+              <Select size="xs" label="Acción" w={180} data={[{ value: 'remove_header', label: 'Quitar header' }, { value: 'add_header', label: 'Agregar header' }, { value: 'set_from_user', label: 'Forzar From-user' }, { value: 'set_ppi', label: 'P-Preferred-Identity' }, { value: 'set_pai', label: 'P-Asserted-Identity' }, { value: 'set_diversion', label: 'Diversion (desvío)' }, { value: 'modify_header', label: 'Modificar (regex)' }]} value={smForm.action} onChange={(v) => setSmForm(f => ({ ...f, action: v || 'remove_header' }))} />
+              <Select size="xs" label="Operador" w={200} data={[{ value: 'all', label: 'Todos los operadores' }, ...lcrGws.map(g => ({ value: (g.address || '').split(':')[0], label: g.description || g.address }))]} value={smForm.scope} onChange={(v) => setSmForm(f => ({ ...f, scope: v || 'all' }))} />
+              {['remove_header', 'add_header', 'modify_header'].includes(smForm.action) && <TextInput size="xs" label="Header" placeholder="P-Asserted-Identity" w={170} value={smForm.header} onChange={(e) => setSmForm(f => ({ ...f, header: e.target.value }))} />}
+              {smForm.action === 'modify_header' && <TextInput size="xs" label="Buscar (regex)" placeholder="patrón" w={130} value={smForm.match} onChange={(e) => setSmForm(f => ({ ...f, match: e.target.value }))} />}
+              {smForm.action !== 'remove_header' && <TextInput size="xs" label="Valor" placeholder="$fU o texto" w={160} value={smForm.value} onChange={(e) => setSmForm(f => ({ ...f, value: e.target.value }))} />}
+              <Button size="xs" leftSection={<IconPlus size={14} />} loading={smBusy === 'add'} onClick={addSm}>Agregar</Button>
+            </Group>
+            <Text size="xs" c="dimmed" mt={6}>Variables: $fU (usuario From / origen), $rU (número marcado). El operador se matchea por su IP; "Todos" aplica global.</Text>
+          </Card>
+          <Card withBorder radius="md" padding="lg">
+            <Text fw={700} mb="sm">Reglas ({smRules.length})</Text>
+            {smRules.length === 0 ? <Text c="dimmed" size="sm">Sin reglas — sin manipulación (default seguro).</Text> :
+            <Table striped highlightOnHover withTableBorder verticalSpacing={6}>
+              <Table.Thead><Table.Tr><Table.Th>Operador</Table.Th><Table.Th>Acción</Table.Th><Table.Th>Header / Valor</Table.Th><Table.Th>Descripción</Table.Th><Table.Th>Estado</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{smRules.map(r => <Table.Tr key={r.id} style={{ opacity: r.enabled ? 1 : 0.5 }}>
+                <Table.Td><Badge size="sm" variant="light" color={r.scope === 'all' ? 'gray' : 'grape'}>{r.scope === 'all' ? 'Todos' : r.scope}</Badge></Table.Td>
+                <Table.Td fz="xs">{SM_ACTION_LABEL[r.action] || r.action}</Table.Td>
+                <Table.Td ff="monospace" fz="xs">{[r.header, r.value].filter(Boolean).join(': ') || '—'}</Table.Td>
+                <Table.Td fz="xs" c="dimmed" maw={260}>{r.description || ''}</Table.Td>
+                <Table.Td><Switch size="sm" checked={!!r.enabled} disabled={smBusy === 't' + r.id} onChange={() => toggleSm(r.id)} /></Table.Td>
+                <Table.Td ta="right"><Button size="compact-xs" variant="subtle" color="red" loading={smBusy === 'd' + r.id} onClick={() => delSm(r.id)}>Quitar</Button></Table.Td>
+              </Table.Tr>)}</Table.Tbody>
+            </Table>}
+          </Card>
+        </Stack>
+      </Tabs.Panel>
+
       <Tabs.Panel value="lcr">
         <Stack gap="md" mt="md">
           <Card withBorder radius="md" padding="md" style={{ background: 'var(--mantine-color-blue-light)' }}>

@@ -1845,6 +1845,51 @@ app.delete('/api/sbc/lcr/gateways/:gwid', async (req, res) => { try { await pool
 app.get('/api/sbc/lcr/rules', async (req, res) => { try { const { rows } = await pool.query('SELECT ruleid, groupid, prefix, gwlist, priority, description FROM dr_rules ORDER BY priority, ruleid'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/sbc/lcr/rules', async (req, res) => { const b = req.body || {}; if (!b.gwlist) return res.status(400).json({ error: 'falta gwlist' }); try { const { rows } = await pool.query("INSERT INTO dr_rules(groupid,prefix,timerec,priority,routeid,gwlist,description) VALUES($1,$2,'',$3,'',$4,$5) RETURNING ruleid", [String(b.groupid||'0'), String(b.prefix||''), (+b.priority||0), String(b.gwlist).trim(), String(b.description||'')]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('dr_reload')"); res.json({ ok: true, ruleid: rows[0].ruleid }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.delete('/api/sbc/lcr/rules/:ruleid', async (req, res) => { try { await pool.query('DELETE FROM dr_rules WHERE ruleid=$1', [+req.params.ruleid]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('dr_reload')"); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+// --- Manipulacion SIP avanzada (por operador, saliente) ---
+function smEsc(v) { return String(v == null ? '' : v).replace(/[\r\n"]/g, '').slice(0, 300); }
+function smStmt(r) {
+  const h = smEsc(r.header), val = smEsc(r.value), mt = smEsc(r.match).replace(/\//g, '.');
+  switch (r.action) {
+    case 'remove_header': return h ? ('remove_hf("' + h + '");') : '';
+    case 'add_header': return h ? ('remove_hf("' + h + '"); append_hf("' + h + ': ' + val + '\\r\\n");') : '';
+    case 'set_from_user': return val ? ('uac_replace_from("", "sip:' + val + '@$rd");') : '';
+    case 'set_ppi': return val ? ('remove_hf("P-Preferred-Identity"); append_hf("P-Preferred-Identity: <sip:' + val + '@$rd>\\r\\n");') : '';
+    case 'set_pai': return val ? ('remove_hf("P-Asserted-Identity"); append_hf("P-Asserted-Identity: <sip:' + val + '@$rd>\\r\\n");') : '';
+    case 'set_diversion': return val ? ('append_hf("Diversion: <sip:' + val + '@$rd>;reason=unconditional;privacy=off\\r\\n");') : '';
+    case 'modify_header': return (h && mt) ? ('subst_hf("' + h + '", "/' + mt + '/' + val + '/", "a");') : '';
+    default: return '';
+  }
+}
+function smBuildBody(rules) {
+  const en = rules.filter((r) => r.enabled);
+  const glob = en.filter((r) => !r.scope || r.scope === 'all').map(smStmt).filter(Boolean);
+  const byGw = {}; en.filter((r) => r.scope && r.scope !== 'all').forEach((r) => { const s = smStmt(r); if (s) { (byGw[r.scope] = byGw[r.scope] || []).push(s); } });
+  if (!glob.length && !Object.keys(byGw).length) return '    return;';
+  const out = []; glob.forEach((s) => out.push('    ' + s));
+  for (const gw of Object.keys(byGw)) { out.push('    if ($rd == "' + smEsc(gw) + '") {'); byGw[gw].forEach((s) => out.push('        ' + s)); out.push('    }'); }
+  out.push('    return;');
+  return out.join('\n');
+}
+async function smApply() {
+  const { rows } = await pool.query('SELECT * FROM pbxng_sip_manip ORDER BY priority, id');
+  const body = smBuildBody(rows);
+  await pool.query("INSERT INTO pbxng_sbc_cmd (cmd, arg) VALUES ('sipmanip_apply', $1)", [Buffer.from(body).toString('base64')]);
+}
+const SM_PRESETS = [
+  { action: 'remove_header', header: 'Remote-Party-ID', value: '', scope: 'all', enabled: true, description: 'Quitar Remote-Party-ID (header legacy que muchos operadores rechazan). Seguro.' },
+  { action: 'remove_header', header: 'P-Asserted-Identity', value: '', scope: 'all', enabled: false, description: 'Quitar P-Asserted-Identity si el operador no lo acepta.' },
+  { action: 'set_ppi', header: '', value: '$fU', scope: 'all', enabled: false, description: 'Agregar P-Preferred-Identity con el numero de origen (operadores que lo exigen).' },
+  { action: 'set_pai', header: '', value: '$fU', scope: 'all', enabled: false, description: 'Agregar P-Asserted-Identity con el numero de origen.' },
+  { action: 'set_from_user', header: '', value: 'CUENTA_SIP', scope: 'all', enabled: false, description: 'Forzar el usuario del From al numero de cuenta del operador (editar el valor).' },
+  { action: 'set_diversion', header: '', value: '$fU', scope: 'all', enabled: false, description: 'Agregar header Diversion (desvios). Editar valor segun caso.' },
+  { action: 'remove_header', header: 'Allow', value: '', scope: 'all', enabled: false, description: 'Quitar Allow (reduce verbosidad; algunos operadores lo prefieren).' },
+];
+app.get('/api/sbc/sipmanip', async (req, res) => { try { const { rows } = await pool.query('SELECT id,scope,direction,action,header,match,value,priority,enabled,description FROM pbxng_sip_manip ORDER BY priority, id'); res.json(rows); } catch (e) { res.status(500).json({ error: 'error' }); } });
+app.post('/api/sbc/sipmanip', async (req, res) => { const b = req.body || {}; if (!b.action) return res.status(400).json({ error: 'falta action' }); try { await pool.query('INSERT INTO pbxng_sip_manip (scope,direction,action,header,match,value,priority,enabled,description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [b.scope || 'all', 'out', String(b.action), b.header || null, b.match || null, b.value || null, +b.priority || 100, b.enabled !== false, b.description || null]); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
+app.post('/api/sbc/sipmanip/:id/toggle', async (req, res) => { try { await pool.query('UPDATE pbxng_sip_manip SET enabled = NOT enabled WHERE id=$1', [+req.params.id]); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
+app.delete('/api/sbc/sipmanip/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_sip_manip WHERE id=$1', [+req.params.id]); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
+app.post('/api/sbc/sipmanip/presets', async (req, res) => { try { for (const p of SM_PRESETS) { await pool.query('INSERT INTO pbxng_sip_manip (scope,direction,action,header,match,value,priority,enabled,description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [p.scope, 'out', p.action, p.header || null, null, p.value || null, 100, p.enabled, p.description]); } await smApply(); res.json({ ok: true, added: SM_PRESETS.length }); } catch (e) { res.status(500).json({ error: 'error' }); } });
+app.post('/api/sbc/sipmanip/reset', async (req, res) => { try { await pool.query('DELETE FROM pbxng_sip_manip'); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
 app.post('/api/sbc/reload', async (req, res) => {
   try { await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('reload')"); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
