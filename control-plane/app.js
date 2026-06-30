@@ -417,7 +417,7 @@ app.post('/api/push/unsubscribe', async (req, res) => {
   try { await pool.query('DELETE FROM pbxng_push_subs WHERE endpoint=$1', [req.body?.endpoint]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/push/test', async (req, res) => {
+app.post('/api/push/test', auth, async (req, res) => {
   const ext = req.body?.ext;
   const sent = await sendPushToExt(ext, { type: 'info', title: 'PBX-NG', body: 'Notificaciones activadas para el interno ' + ext, url: '/phone' });
   res.json({ ok: true, sent });
@@ -438,7 +438,7 @@ app.post('/api/calls/record', async (req, res) => {
 });
 
 // Conferencia a 3: arma un bridge mixing con la llamada activa del interno + un tercero
-app.post('/api/calls/spy', async (req, res) => {
+app.post('/api/calls/spy', auth, async (req, res) => {
   const { sup, target, mode } = req.body || {};
   if (!sup || !target) return res.status(400).json({ error: 'supervisor y destino requeridos' });
   let opt = 'q';
