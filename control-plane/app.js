@@ -886,6 +886,20 @@ async function astFwd(method, path, body, ms) { const opt = { method, signal: Ab
 app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd('GET', '/core'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+const CLI_ALLOW = /^(pjsip (show|list)|core show|dialplan show|queue show|confbridge (list|show)|module show|database (show|get)|rtp show|http show|manager show|stir_shaken show|version|uptime)\b/i;
+app.post('/api/asterisk/cli', async (req, res) => {
+  const cmd = String((req.body && req.body.cmd) || '').trim();
+  if (!cmd) return res.status(400).json({ error: 'comando vacio' });
+  if (!CLI_ALLOW.test(cmd)) return res.status(403).json({ error: 'Comando no permitido. Solo lectura: pjsip show/list, core show, dialplan show, queue show, module show, database show/get, rtp show, etc.' });
+  try { const out = await amiCommand(cmd); res.json({ cmd, output: String(out || '') }); }
+  catch (e) { res.status(500).json({ error: 'No se pudo ejecutar' }); }
+});
+app.post('/api/asterisk/hangup', async (req, res) => {
+  const channel = String((req.body && req.body.channel) || '').trim();
+  if (!channel) return res.status(400).json({ error: 'canal requerido' });
+  try { await amiAction({ Action: 'Hangup', Channel: channel }); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: 'No se pudo colgar' }); }
+});
 
 // --- Troncal interna Asterisk <-> SBC (modelo borde) ---
 app.get('/api/asterisk/sbc-trunk', async (req, res) => {
