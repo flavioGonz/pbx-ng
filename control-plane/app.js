@@ -232,6 +232,30 @@ function auth(req, res, next) {
   if (!t) return res.status(401).json({ error: 'no autenticado' });
   try { req.user = jwt.verify(t, SECRET); next(); } catch (e) { res.status(401).json({ error: 'sesión inválida' }); }
 }
+// --- Gate de autenticacion deny-by-default: TODA /api requiere JWT salvo la allowlist publica explicita ---
+const PUBLIC_API = [
+  ['POST', /^\/api\/auth\/login$/],
+  ['GET',  /^\/api\/branding$/],
+  ['GET',  /^\/api\/enroll\/[^/]+$/],
+  ['GET',  /^\/api\/recordings\/[^/]+\/(audio|peaks|transcript)$/],
+  ['POST', /^\/api\/recordings\/[^/]+\/transcribe$/],
+  ['GET',  /^\/api\/prompts\/[^/]+\/audio$/],
+  ['GET',  /^\/api\/push\/vapid$/],
+  ['POST', /^\/api\/push\/(subscribe|register|unsubscribe)$/],
+  ['POST', /^\/api\/calls\/(record|conference)$/],
+  ['GET',  /^\/api\/directory$/],
+  ['GET',  /^\/api\/presence$/],
+  ['GET',  /^\/api\/internal\/wake$/],
+  ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
+  ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
+  ['POST', /^\/api\/geo\/report$/],
+  ['GET',  /^\/api\/vm$/],
+  ['GET',  /^\/api\/vm\/audio$/],
+  ['POST', /^\/api\/vm\/(del|read)$/],
+];
+function isPublicApi(req) { const full = (req.baseUrl || '') + req.path; return PUBLIC_API.some(([m, re]) => m === req.method && re.test(full)); }
+app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, next));
+
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   try {
@@ -621,7 +645,7 @@ app.post('/api/vm/read', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/branding', async (req, res) => { try { const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; }; res.json({ name: (await g('brand_name')) || 'PBX-NG', subtitle: (await g('brand_subtitle')) || 'Comunicaciones', tagline: (await g('brand_tagline')) || '', logo: (await g('brand_logo')) || '' }); } catch (e) { res.json({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' }); } });
-app.use('/api', auth);
+// auth ahora se aplica via gate deny-by-default arriba (isPublicApi)
 app.post('/api/branding', async (req, res) => { try { const b = req.body || {}; const setk = async (k, v) => { if (v === undefined) return; await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", [k, v || '']); }; await setk('brand_name', b.name); await setk('brand_subtitle', b.subtitle); await setk('brand_tagline', b.tagline); await setk('brand_logo', b.logo); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/geo', async (req, res) => {
   const hours = Math.min(+(req.query.hours || 168), 720);
