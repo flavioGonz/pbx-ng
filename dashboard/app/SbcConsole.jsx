@@ -127,22 +127,27 @@ function ConsoleBody({ sbc, load, hist }) {
   }
   const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace"><Slot value={(core[k] ?? 0).toLocaleString()} /></Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? <><Slot value={rates[k]} />/s</> : ''}</Table.Td></Table.Tr>;
 
+  const SBC_GROUPS = { mon: { label: 'Monitoreo', tabs: ['mon', 'rtp', 'turn', 'sip'] }, route: { label: 'Ruteo', tabs: ['lcr', 'smanip', 'trunks', 'disp', 'remext'] }, netsec: { label: 'Red y Seguridad', tabs: ['net', 'sec'] }, sys: { label: 'Sistema', tabs: ['adv', 'cfg'] } };
+  const sbcGrp = Object.keys(SBC_GROUPS).find((k) => SBC_GROUPS[k].tabs.includes(tab)) || 'mon';
+  const inG = (t) => SBC_GROUPS[sbcGrp].tabs.includes(t);
+
   return (
     <Tabs value={tab} onChange={setTab} variant="pills" radius="md" keepMounted={false}>
+      <SegmentedControl size="sm" mb="sm" radius="md" value={sbcGrp} onChange={(g) => setTab(SBC_GROUPS[g].tabs[0])} data={Object.keys(SBC_GROUPS).map((k) => ({ value: k, label: SBC_GROUPS[k].label }))} />
       <Tabs.List mb="md">
-        <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>
-        <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>
-        <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>
-        <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>
-        <Tabs.Tab value="lcr" leftSection={<IconRoute size={16} />}>Operadores</Tabs.Tab>
-        <Tabs.Tab value="smanip" leftSection={<IconReplace size={16} />}>Manipulación SIP</Tabs.Tab>
-        <Tabs.Tab value="remext" leftSection={<IconWorld size={16} />}>Remotos {remExt.length > 0 && <Badge size="xs" color="grape" variant="filled" ml={4}>{remExt.length}</Badge>}</Tabs.Tab>
-        <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
-        <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>
-        <Tabs.Tab value="turn" leftSection={<IconCloud size={16} />}>TURN</Tabs.Tab>
-        <Tabs.Tab value="adv" leftSection={<IconCpu size={16} />}>Módulos</Tabs.Tab>
-        <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>
-        <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>
+        {inG('mon') && <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>}
+        {inG('sec') && <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>}
+        {inG('disp') && <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>}
+        {inG('trunks') && <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>}
+        {inG('lcr') && <Tabs.Tab value="lcr" leftSection={<IconRoute size={16} />}>Operadores</Tabs.Tab>}
+        {inG('smanip') && <Tabs.Tab value="smanip" leftSection={<IconReplace size={16} />}>Manipulación SIP</Tabs.Tab>}
+        {inG('remext') && <Tabs.Tab value="remext" leftSection={<IconWorld size={16} />}>Remotos {remExt.length > 0 && <Badge size="xs" color="grape" variant="filled" ml={4}>{remExt.length}</Badge>}</Tabs.Tab>}
+        {inG('net') && <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>}
+        {inG('rtp') && <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>}
+        {inG('turn') && <Tabs.Tab value="turn" leftSection={<IconCloud size={16} />}>TURN</Tabs.Tab>}
+        {inG('adv') && <Tabs.Tab value="adv" leftSection={<IconCpu size={16} />}>Módulos</Tabs.Tab>}
+        {inG('sip') && <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>}
+        {inG('cfg') && <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>}
       </Tabs.List>
 
       <Tabs.Panel value="mon">
