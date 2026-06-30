@@ -73,6 +73,7 @@ const CFG = {
 };
 const pool = new Pool(CFG.db);
 const app = express();
+const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
 app.use(express.json());
 const state = { ari: false, ami: false };
 let ari = null;
@@ -311,7 +312,7 @@ app.get('/api/recordings/:id/audio', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT filename FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
     if (!rows[0]) return res.status(404).end();
-    const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename));
+    const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
     if (!r.ok) return res.status(502).end();
     res.set('Content-Type', 'audio/wav');
     res.set('Content-Disposition', 'inline; filename="' + rows[0].filename + '"');
@@ -364,7 +365,7 @@ function analyzeText(text, durSec) {
 async function doTranscribe(id) {
   const { rows } = await pool.query('SELECT filename, duration FROM pbxng_recordings WHERE id=$1 AND deleted=false', [id]);
   if (!rows[0]) throw new Error('grabacion no existe');
-  const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename));
+  const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
   if (!r.ok) throw new Error('audio no disponible');
   const wav = Buffer.from(await r.arrayBuffer());
   const pc = wavToPcm(wav);
@@ -399,7 +400,7 @@ app.get('/api/recordings/:id/peaks', async (req, res) => {
     const { rows } = await pool.query('SELECT filename, peaks FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'no existe' });
     if (rows[0].peaks) return res.json(rows[0].peaks);
-    const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename));
+    const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
     if (!r.ok) return res.json({ peaks: [], silent: true });
     const pc = wavToPcm(Buffer.from(await r.arrayBuffer()));
     if (!pc) return res.json({ peaks: [], silent: true });
@@ -629,19 +630,19 @@ app.post('/api/geo/report', async (req, res) => {
 });
 const VM_AGENT = 'http://172.26.20.183:8089';
 app.get('/api/vm', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(req.query.ext || '')); res.json(await r.json()); }
+  try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(req.query.ext || ''), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); res.json(await r.json()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/vm/audio', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(req.query.ext || '') + '&folder=' + encodeURIComponent(req.query.folder || 'INBOX') + '&id=' + encodeURIComponent(req.query.id || '')); if (!r.ok) return res.status(404).end(); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); }
+  try { const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(req.query.ext || '') + '&folder=' + encodeURIComponent(req.query.folder || 'INBOX') + '&id=' + encodeURIComponent(req.query.id || ''), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); if (!r.ok) return res.status(404).end(); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/vm/del', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
+  try { const r = await fetch(VM_AGENT + '/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PBXNG-Token': AGENT_TOKEN }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/vm/read', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
+  try { const r = await fetch(VM_AGENT + '/vm/read', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PBXNG-Token': AGENT_TOKEN }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/branding', async (req, res) => { try { const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; }; res.json({ name: (await g('brand_name')) || 'PBX-NG', subtitle: (await g('brand_subtitle')) || 'Comunicaciones', tagline: (await g('brand_tagline')) || '', logo: (await g('brand_logo')) || '' }); } catch (e) { res.json({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' }); } });
@@ -840,7 +841,7 @@ app.get('/api/voz', async (req, res) => {
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 async function vozBase() { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='voz_url'"); return (rows[0] && rows[0].value) || 'http://172.26.20.219:8080'; }
-async function vozFwd(method, path, body, ms) { const u = await vozBase(); const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } const r = await fetch(u + path, opt); return r; }
+async function vozFwd(method, path, body, ms) { const u = await vozBase(); const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); const r = await fetch(u + path, opt); return r; }
 app.get('/api/voz/logs', async (req, res) => { try { const r = await vozFwd('GET', '/admin/logs'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/voz/restart', async (req, res) => { try { const r = await vozFwd('POST', '/admin/restart', {}); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/voz/voices', async (req, res) => { try { const r = await vozFwd('GET', '/admin/voices'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -852,7 +853,7 @@ app.post('/api/voz/test', async (req, res) => { try { const u = await vozBase();
 
 // --- TURN / Coturn (agente CT106) ---
 const TURN_BASE = process.env.TURN_AGENT || 'http://172.26.20.204:8091';
-async function turnFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } return fetch(TURN_BASE + path, opt); }
+async function turnFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); return fetch(TURN_BASE + path, opt); }
 app.get('/api/turn', async (req, res) => { try { const r = await turnFwd('GET', '/health'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/turn/config', async (req, res) => { try { const r = await turnFwd('GET', '/config'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/turn/config', async (req, res) => { try { const r = await turnFwd('POST', '/config', req.body || {}, 15000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -881,7 +882,7 @@ app.get('/api/npm/cert', async (req, res) => { try { res.json(await npmCertInfo(
 
 // --- Asterisk core agent (CT103) ---
 const AST_AGENT = process.env.AST_AGENT || 'http://172.26.20.183:8092';
-async function astFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } return fetch(AST_AGENT + path, opt); }
+async function astFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); return fetch(AST_AGENT + path, opt); }
 app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd('GET', '/core'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
