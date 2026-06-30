@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl, Switch, Select } from '@mantine/core';
+import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl, Switch, Select, Menu } from '@mantine/core';
 import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap, IconServer2 } from '@tabler/icons-react';
 import { toast } from './notify';
 import SbcFlow from './SbcFlow';
@@ -10,7 +10,7 @@ import Troncales from './troncales/page';
 import RoutesPanel from './RoutesPanel';
 import TurnConsole from './TurnConsole';
 import { useLive } from './useLive';
-import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud, IconReplace } from '@tabler/icons-react';
+import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud, IconReplace, IconChevronDown } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const SECF_TYPE = { 0: 'User-Agent', 1: 'Pais', 2: 'Dominio', 3: 'IP', 4: 'Usuario', 5: 'Destino' };
@@ -127,28 +127,41 @@ function ConsoleBody({ sbc, load, hist }) {
   }
   const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace"><Slot value={(core[k] ?? 0).toLocaleString()} /></Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? <><Slot value={rates[k]} />/s</> : ''}</Table.Td></Table.Tr>;
 
-  const SBC_GROUPS = { mon: { label: 'Monitoreo', tabs: ['mon', 'rtp', 'turn', 'sip'] }, route: { label: 'Ruteo', tabs: ['lcr', 'smanip', 'trunks', 'disp', 'remext'] }, netsec: { label: 'Red y Seguridad', tabs: ['net', 'sec'] }, sys: { label: 'Sistema', tabs: ['adv', 'cfg'] } };
-  const sbcGrp = Object.keys(SBC_GROUPS).find((k) => SBC_GROUPS[k].tabs.includes(tab)) || 'mon';
-  const inG = (t) => SBC_GROUPS[sbcGrp].tabs.includes(t);
+  const SBC_NAV = [
+    { key: 'mon', label: 'Monitoreo', icon: <IconActivity size={16} />, items: [
+      { v: 'mon', label: 'Monitoreo', icon: <IconActivity size={15} /> },
+      { v: 'rtp', label: 'rtpengine', icon: <IconArrowsLeftRight size={15} /> },
+      { v: 'turn', label: 'TURN', icon: <IconCloud size={15} /> },
+      { v: 'sip', label: 'SIP debug', icon: <IconBug size={15} /> },
+    ] },
+    { key: 'route', label: 'Ruteo', icon: <IconRoute size={16} />, items: [
+      { v: 'lcr', label: 'Operadores', icon: <IconRoute size={15} /> },
+      { v: 'smanip', label: 'Manipulación SIP', icon: <IconReplace size={15} /> },
+      { v: 'trunks', label: 'Troncales', icon: <IconDeviceLandlinePhone size={15} /> },
+      { v: 'disp', label: 'Dispatcher', icon: <IconRouteAltLeft size={15} /> },
+      { v: 'remext', label: 'Remotos', icon: <IconWorld size={15} />, badge: remExt.length || 0, bcolor: 'grape' },
+    ] },
+    { key: 'netsec', label: 'Red y Seguridad', icon: <IconShieldLock size={16} />, items: [
+      { v: 'net', label: 'Red', icon: <IconNetwork size={15} /> },
+      { v: 'sec', label: 'Seguridad', icon: <IconShieldLock size={15} />, badge: banned.length || 0, bcolor: 'red' },
+    ] },
+    { key: 'sys', label: 'Sistema', icon: <IconCpu size={16} />, items: [
+      { v: 'adv', label: 'Módulos', icon: <IconCpu size={15} /> },
+      { v: 'cfg', label: 'Configuración', icon: <IconFileCode size={15} /> },
+    ] },
+  ];
 
   return (
     <Tabs value={tab} onChange={setTab} variant="pills" radius="md" keepMounted={false}>
-      <SegmentedControl size="sm" mb="sm" radius="md" value={sbcGrp} onChange={(g) => setTab(SBC_GROUPS[g].tabs[0])} data={Object.keys(SBC_GROUPS).map((k) => ({ value: k, label: SBC_GROUPS[k].label }))} />
-      <Tabs.List mb="md">
-        {inG('mon') && <Tabs.Tab value="mon" leftSection={<IconActivity size={16} />}>Monitoreo</Tabs.Tab>}
-        {inG('sec') && <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad {banned.length > 0 && <Badge size="xs" color="red" variant="filled" ml={4}>{banned.length}</Badge>}</Tabs.Tab>}
-        {inG('disp') && <Tabs.Tab value="disp" leftSection={<IconRouteAltLeft size={16} />}>Dispatcher</Tabs.Tab>}
-        {inG('trunks') && <Tabs.Tab value="trunks" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncales</Tabs.Tab>}
-        {inG('lcr') && <Tabs.Tab value="lcr" leftSection={<IconRoute size={16} />}>Operadores</Tabs.Tab>}
-        {inG('smanip') && <Tabs.Tab value="smanip" leftSection={<IconReplace size={16} />}>Manipulación SIP</Tabs.Tab>}
-        {inG('remext') && <Tabs.Tab value="remext" leftSection={<IconWorld size={16} />}>Remotos {remExt.length > 0 && <Badge size="xs" color="grape" variant="filled" ml={4}>{remExt.length}</Badge>}</Tabs.Tab>}
-        {inG('net') && <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>}
-        {inG('rtp') && <Tabs.Tab value="rtp" leftSection={<IconArrowsLeftRight size={16} />}>rtpengine</Tabs.Tab>}
-        {inG('turn') && <Tabs.Tab value="turn" leftSection={<IconCloud size={16} />}>TURN</Tabs.Tab>}
-        {inG('adv') && <Tabs.Tab value="adv" leftSection={<IconCpu size={16} />}>Módulos</Tabs.Tab>}
-        {inG('sip') && <Tabs.Tab value="sip" leftSection={<IconBug size={16} />}>SIP debug</Tabs.Tab>}
-        {inG('cfg') && <Tabs.Tab value="cfg" leftSection={<IconFileCode size={16} />}>Configuracion</Tabs.Tab>}
-      </Tabs.List>
+      <Group gap="xs" mb="md">
+        {SBC_NAV.map((g) => { const active = g.items.some((it) => it.v === tab); return (
+          <Menu key={g.key} trigger="click-hover" openDelay={60} closeDelay={140} position="bottom-start" radius="md" shadow="md" withinPortal>
+            <Menu.Target><Button variant={active ? 'filled' : 'light'} color={active ? 'blue' : 'gray'} size="sm" radius="md" leftSection={g.icon} rightSection={<IconChevronDown size={14} />}>{g.label}</Button></Menu.Target>
+            <Menu.Dropdown>
+              {g.items.map((it) => <Menu.Item key={it.v} leftSection={it.icon} onClick={() => setTab(it.v)} style={it.v === tab ? { background: 'var(--mantine-color-blue-light)', fontWeight: 600 } : undefined} rightSection={it.badge ? <Badge size="xs" color={it.bcolor || 'red'} variant="filled">{it.badge}</Badge> : null}>{it.label}</Menu.Item>)}
+            </Menu.Dropdown>
+          </Menu>); })}
+      </Group>
 
       <Tabs.Panel value="mon">
         <SimpleGrid cols={{ base: 1, sm: 3 }} mb="md">
