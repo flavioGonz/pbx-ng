@@ -34,7 +34,8 @@ RUN make menuselect.makeopts \
        --disable BUILD_NATIVE \
        menuselect.makeopts
 
-RUN make -j2 && make install && make install-headers
+# pjproject (bundled) puede fallar en pjnath con build paralelo bajo presion de RAM -> compilar en serie
+RUN make -j1 && make install && make install-headers
 
 # ---------- runtime ----------
 FROM debian:12-slim

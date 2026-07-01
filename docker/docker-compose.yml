@@ -136,7 +136,15 @@ services:
     profiles: ["sbc"]
     restart: unless-stopped
     network_mode: host
-    command: ["rtpengine", "--interface", "${PUBLIC_IP:-127.0.0.1}", "--listen-ng", "127.0.0.1:2223", "--port-min", "30000", "--port-max", "40000"]
+    environment:
+      PUBLIC_IP: ${PUBLIC_IP:-pbx01.infratec.com.uy}
+    entrypoint: ["/bin/sh","-c"]
+    command:
+      - |
+        PUB=$$(getent hosts "$$PUBLIC_IP" | awk '{print $$1}'); [ -z "$$PUB" ] && PUB="$$PUBLIC_IP"
+        LAN=$$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $$7; exit}'); [ -z "$$LAN" ] && LAN=$$(hostname -I | awk '{print $$1}')
+        echo "rtpengine: bind $$LAN advertise $$PUB"
+        exec rtpengine --foreground --interface "$$LAN!$$PUB" --listen-ng 127.0.0.1:2223 --port-min 30000 --port-max 40000
 
   coturn:
     build:

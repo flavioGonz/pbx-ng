@@ -1,0 +1,8 @@
+[Unit]
+Description=PBX-NG DDNS IP watcher (rtpengine/coturn re-advertise)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/pbx-ng/scripts/pbxng-ip-watch.sh
