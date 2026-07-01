@@ -236,6 +236,7 @@ function auth(req, res, next) {
 // --- Gate de autenticacion deny-by-default: TODA /api requiere JWT salvo la allowlist publica explicita ---
 const PUBLIC_API = [
   ['POST', /^\/api\/auth\/login$/],
+  ['GET',  /^\/api\/auth\/setup$/],
   ['GET',  /^\/api\/branding$/],
   ['GET',  /^\/api\/enroll\/[^/]+$/],
   ['GET',  /^\/api\/recordings\/[^/]+\/(audio|peaks|transcript)$/],
@@ -260,12 +261,24 @@ app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, n
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   try {
-    const { rows } = await pool.query('SELECT id,username,name,role,password_hash FROM pbxng_users WHERE username=$1', [username]);
+    const { rows } = await pool.query('SELECT id,username,name,role,password_hash,must_change FROM pbxng_users WHERE username=$1', [username]);
     const u = rows[0];
     if (!u || !bcrypt.compareSync(password || '', u.password_hash)) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     const token = jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name }, SECRET, { expiresIn: '12h' });
-    res.json({ token, user: { username: u.username, name: u.name, role: u.role } });
+    res.json({ token, user: { username: u.username, name: u.name, role: u.role }, must_change: !!u.must_change });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Estado de setup (publico): si el admin sigue con la clave por defecto, el login lo sugiere
+app.get('/api/auth/setup', async (req, res) => {
+  try { const { rows } = await pool.query("SELECT must_change FROM pbxng_users WHERE username='admin'"); res.json({ defaultAdmin: !!(rows[0] && rows[0].must_change), user: 'admin' }); }
+  catch (e) { res.json({ defaultAdmin: false }); }
+});
+// Cambio de contrasena propia (autenticado); limpia el flag must_change
+app.post('/api/auth/password', auth, async (req, res) => {
+  const { password } = req.body || {};
+  if (!password || String(password).length < 4) return res.status(400).json({ error: 'contrasena minima 4 caracteres' });
+  try { await pool.query('UPDATE pbxng_users SET password_hash=$1, must_change=false WHERE id=$2', [bcrypt.hashSync(String(password), 10), req.user.uid]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: { username: req.user.username, name: req.user.name, role: req.user.role } }));
 
@@ -275,6 +288,15 @@ pool.query(`CREATE TABLE IF NOT EXISTS pbxng_push_subs (
   p256dh text NOT NULL, auth text NOT NULL, ua text, created_at timestamptz DEFAULT now())`).catch(e => console.error('[PUSH] table', e.message));
 try { pushProviders.init(pool); } catch (e) { console.error('[PUSH] init', e.message); }
 
+// --- Bootstrap primer arranque: columna must_change + admin por defecto si no hay usuarios ---
+pool.query("ALTER TABLE pbxng_users ADD COLUMN IF NOT EXISTS must_change boolean DEFAULT false").then(async () => {
+  const { rows } = await pool.query('SELECT count(*)::int n FROM pbxng_users');
+  if (rows[0].n === 0) {
+    const pass = process.env.ADMIN_DEFAULT_PASS || 'admin';
+    await pool.query("INSERT INTO pbxng_users (username,password_hash,name,role,must_change) VALUES ('admin',$1,'Administrador','admin',true)", [bcrypt.hashSync(pass, 10)]);
+    console.log("[BOOTSTRAP] usuario 'admin' creado (clave por defecto: '" + pass + "') - cambiala en el primer ingreso");
+  }
+}).catch(e => console.error('[BOOTSTRAP] admin', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_enroll (token text PRIMARY KEY, ext text, password text, label text, created_at timestamptz DEFAULT now(), expires_at timestamptz, used_at timestamptz)").catch(e => console.error('[ENROLL] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban (jail text PRIMARY KEY, banned jsonb DEFAULT '[]', total_failed int DEFAULT 0, total_banned int DEFAULT 0, updated_at timestamptz DEFAULT now())").catch(e => console.error('[F2B] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban_cmd (id serial PRIMARY KEY, cmd text, ip text, jail text, created_at timestamptz DEFAULT now(), done_at timestamptz)").catch(e => console.error('[F2B] cmd', e.message));

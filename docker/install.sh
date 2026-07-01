@@ -81,18 +81,32 @@ echo "   3) Solo nucleo (DB + Redis + Asterisk + API + Dashboard)"
 MODE=$(ask "Elegi" "1")
 PROFILES=()
 case "$MODE" in
-  1) PROFILES=(core sbc media ai proxy) ;;
+  1) PROFILES=(core sbc media ai) ;;
   3) PROFILES=(core) ;;
   2)
      yn "Nucleo (DB/Redis/Asterisk/API/Dashboard)" && PROFILES+=(core)
      yn "SBC (Kamailio + rtpengine)"               && PROFILES+=(sbc)
      yn "Media (Coturn TURN/STUN)"                 && PROFILES+=(media)
      yn "Voz IA (TTS/STT)"                         && PROFILES+=(ai)
-     yn "Proxy inverso (Nginx Proxy Manager)"      && PROFILES+=(proxy)
      ;;
   *) r "Opcion invalida"; exit 1 ;;
 esac
 [[ ${#PROFILES[@]} -gt 0 ]] || { r "No elegiste ningun servicio."; exit 1; }
+echo
+
+# ---------------- 2b) Reverse proxy / TLS ----------------
+c "2b) Reverse proxy (TLS/WSS)"
+echo "   1) Desplegar Nginx Proxy Manager (contenedor 'npm' en este stack)"
+echo "   2) Ya tengo un reverse proxy (NO desplegar NPM, solo apunto el mio)"
+echo "   3) Ninguno por ahora"
+RPROXY=$(ask "Elegi" "1")
+PROXY_URL=""
+case "$RPROXY" in
+  1) [[ " ${PROFILES[*]} " == *" proxy "* ]] || PROFILES+=(proxy) ;;
+  2) PROXY_URL=$(ask "URL/host de tu proxy existente (informativo)" "") ;;
+  3) : ;;
+  *) r "Opcion invalida"; exit 1 ;;
+esac
 echo
 
 # ---------------- 3) Configuracion (.env) ----------------
@@ -139,5 +153,13 @@ g "  PBX-NG desplegado."
 g "  Dashboard : http://localhost:3001"
 g "  API       : http://localhost:3000"
 [[ " ${PROFILES[*]} " == *" proxy "* ]] && g "  Proxy NPM : http://localhost:81  (admin@example.com / changeme)"
+if [[ "${RPROXY:-}" == "2" ]]; then
+  HOST_IP=$(hostname -I 2>/dev/null | awk "{print \$1}"); HOST_IP="${HOST_IP:-<IP-de-este-host>}"
+  y "  Reverse proxy existente ${PROXY_URL:+($PROXY_URL)}: apuntá tu proxy a:"
+  echo "     • Panel web (HTTP)      -> http://$HOST_IP:3001"
+  echo "     • WebSocket softphone   -> http://$HOST_IP:3001  (mismo host; el panel proxya /socket.io y /backend a la API)"
+  echo "     • WSS Asterisk (WebRTC) -> ws://$HOST_IP:8088     (location /ws o /asterisk, upgrade a WebSocket)"
+  echo "     Publicá con TLS: dominio -> :3001 (panel) y el WSS de Asterisk :8088 detrás de tu proxy."
+fi
 g "  Publica el dominio con TLS/WSS desde el proxy inverso."
 g "================================================================"

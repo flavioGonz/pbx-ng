@@ -124,6 +124,29 @@ case "$SHAPE" in
   *) die "Opción inválida" ;;
 esac
 
+# ---------- 1b) politica de reverse proxy (NPM) ----------
+c "1b) Reverse proxy (Nginx Proxy Manager)"
+echo "   1) NPM en su propio contenedor (separado)"
+echo "   2) NPM como en la forma elegida (junto al borde/app)"
+echo "   3) Ya tengo un reverse proxy (NO desplegar NPM)"
+PROXYPOL=$(ask "Elegí" "2")
+if [[ "$PROXYPOL" != "2" ]]; then
+  for role in "${ROLES[@]}"; do
+    ROLE_PROFILES[$role]="$(echo " ${ROLE_PROFILES[$role]} " | sed 's/ proxy / /g' | xargs)"
+  done
+  newroles=(); for role in "${ROLES[@]}"; do
+    if [[ -n "${ROLE_PROFILES[$role]}" ]]; then newroles+=("$role"); else unset 'ROLE_PROFILES[$role]'; fi
+  done
+  ROLES=("${newroles[@]}")
+  if [[ "$PROXYPOL" == "1" ]]; then
+    ROLES+=(proxy); ROLE_PROFILES[proxy]="proxy"; ROLE_DESC[proxy]="Proxy inverso: Nginx Proxy Manager (contenedor aparte)"
+    g "  NPM se desplegará en su propio contenedor 'pbxng-proxy'."
+  else
+    y "  NPM no se desplegará (usás un reverse proxy existente)."
+  fi
+fi
+echo
+
 # rol que contiene el núcleo (DB+Asterisk+API): los demás CTs apuntan a su IP
 CORE_ROLE=""
 for role in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$role]} " == *" core "* ]] && CORE_ROLE="$role"; done
