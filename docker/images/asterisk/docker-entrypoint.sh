@@ -73,4 +73,7 @@ for i in $(seq 1 30); do
   echo "esperando Postgres ${DB_HOST}:${DB_PORT} ($i)…"; sleep 2
 done
 
+# --- resolver la URL de la API en el dialplan (wake webhook, etc.) ---
+sed -i "s|@@API_URL@@|${API_URL:-127.0.0.1:3000}|g" /etc/asterisk/extensions.conf 2>/dev/null || true
+
 exec "$@"

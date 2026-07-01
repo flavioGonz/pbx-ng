@@ -51,6 +51,8 @@ COPY --from=build /usr/lib/asterisk /usr/lib/asterisk
 COPY --from=build /var/lib/asterisk /var/lib/asterisk
 COPY --from=build /var/spool/asterisk /var/spool/asterisk
 COPY --from=build /usr/sbin/astgenkey /usr/sbin/astgenkey
+COPY --from=build /usr/lib/libasterisk*.so* /usr/lib/
+RUN ldconfig
 RUN useradd -r -d /var/lib/asterisk asterisk 2>/dev/null || true \
     && mkdir -p /var/run/asterisk /var/log/asterisk /etc/asterisk/keys \
     && chown -R asterisk:asterisk /var/lib/asterisk /var/spool/asterisk /var/run/asterisk /var/log/asterisk /etc/asterisk

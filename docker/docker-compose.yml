@@ -71,6 +71,7 @@ services:
       ARI_PASS: ${ARI_PASS:?set ARI_PASS in .env}
       AMI_USER: ${AMI_USER:-pbxng-ami}
       AMI_PASS: ${AMI_PASS:?set AMI_PASS in .env}
+      API_URL: ${API_URL:-127.0.0.1:3000}
       DOMAIN: ${DOMAIN:-pbx.local}
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
