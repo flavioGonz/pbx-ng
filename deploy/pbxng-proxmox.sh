@@ -137,7 +137,20 @@ if [[ "$NET_MODE" == "static" ]]; then
   GW=$(ask "Gateway" "192.168.1.1")
   STATIC_BASE=$(ask "IP base (se asigna secuencial /24, ej 192.168.1.50)" "192.168.1.50")
 fi
-TEMPLATE=$(ask "Plantilla LXC" "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst")
+# detectar plantilla Debian ya descargada en 'local'; si no hay, ofrecer descargarla
+DETECTED_TPL=$(pveam list local 2>/dev/null | awk '/debian-12-standard/{print $1; exit}')
+if [[ -z "$DETECTED_TPL" ]]; then
+  pveam update >/dev/null 2>&1 || true
+  AVAIL=$(pveam available --section system 2>/dev/null | awk '/debian-12-standard/{print $2}' | sort -V | tail -1)
+  if [[ -n "$AVAIL" ]]; then
+    y "No hay plantilla Debian 12 en 'local'. Disponible: $AVAIL"
+    if yn "¿La descargo ahora?" "s"; then
+      c "Descargando $AVAIL (una vez)…"
+      pveam download local "$AVAIL" && DETECTED_TPL="local:vztmpl/$AVAIL"
+    fi
+  fi
+fi
+TEMPLATE=$(ask "Plantilla LXC" "${DETECTED_TPL:-local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst}")
 while :; do
   STORAGE=$(ask "Storage/pool para discos (nombre, ej. local-lvm)" "local-lvm")
   if pvesm status 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$STORAGE"; then break; fi
