@@ -62,6 +62,17 @@ done
 BEST_NODE="${NODES[0]}"   # el de mas RAM libre
 NEXTID=$(pvesh get /cluster/nextid 2>/dev/null || echo 200)
 LOCAL_NODE=$(hostname -s)
+# VMIDs ya usados en el cluster (para no chocar al asignar IDs)
+cat > /tmp/pbxng_ids.py <<'PYIDS'
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(" ".join(str(x.get("vmid","")) for x in data if x.get("vmid")))
+except Exception:
+    print("")
+PYIDS
+USED_IDS=" $(pvesh get /cluster/resources --type vm --output-format json 2>/dev/null | python3 /tmp/pbxng_ids.py) "
+is_used(){ [[ "$USED_IDS" == *" $1 "* ]]; }
 echo
 
 # recomienda el nodo con mas RAM libre entre los online
@@ -176,6 +187,7 @@ for role in "${ROLES[@]}"; do
   echo
   y "   • ${role}  — ${ROLE_DESC[$role]}"
   echo "     perfiles: ${ROLE_PROFILES[$role]}   recursos: ${rc} vCPU / ${rm} MB / ${rd} GB"
+  while is_used "$id"; do id=$((id+1)); done
   ROLE_ID[$role]=$id
   ROLE_NODE[$role]="$LOCAL_NODE"
   ROLE_CORES[$role]=$rc; ROLE_RAM[$role]=$rm; ROLE_DISK[$role]=$rd
