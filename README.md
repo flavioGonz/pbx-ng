@@ -141,7 +141,7 @@ Instalación nativa sobre Debian/Ubuntu (o contenedores LXC en Proxmox), un serv
 
 Para un cluster **Proxmox VE**: un script que corre en cualquier nodo y **crea
 por sí mismo** todos los LXC del stack, preguntando la forma de despliegue
-(compacto / híbrido / separado), el modo de la app (PBX simple o multi-tenant) y
+(compacto / standalone / híbrido / separado / personalizado), el modo de la app (PBX simple o multi-tenant) y
 **dónde ubicar cada componente** (recomienda el nodo con más RAM libre). Cada
 contenedor corre Docker y levanta sus perfiles.
 

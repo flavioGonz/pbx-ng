@@ -4,7 +4,7 @@
 #  ----------------------------------------------------------------------------
 #  Corre EN un nodo Proxmox (o cualquier nodo quorate del cluster) y crea por
 #  si mismo todos los contenedores LXC necesarios, preguntando:
-#    - forma de despliegue (compacto / hibrido / separado por componente)
+#    - forma de despliegue (compacto / standalone / hibrido / separado / custom)
 #    - modo de la app (PBX simple / multi-tenant)
 #    - donde ubicar cada componente (recomienda el nodo con mas RAM libre)
 #  Cada CT corre Docker y levanta su(s) perfil(es) del docker-compose de PBX-NG.
@@ -68,9 +68,11 @@ recommend_node(){ echo "$BEST_NODE"; }
 
 # ---------- 1) forma de despliegue ----------
 c "1) Forma de despliegue"
-echo "   1) Compacto  · 1 contenedor con TODO el stack        (PBX simple / demo)"
-echo "   2) Híbrido   · 3 contenedores: núcleo / borde / voz  (RECOMENDADO)"
-echo "   3) Separado  · 1 contenedor por componente           (aislamiento máx.)"
+echo "   1) Compacto      · 1 contenedor con TODO el stack                    (demo)"
+echo "   2) Standalone    · 2 CTs: app+telefonía (DB+Asterisk+App) / SBC aparte  (RECOMENDADO stand-alone)"
+echo "   3) Híbrido       · 3 CTs: núcleo / borde / voz"
+echo "   4) Separado      · 1 contenedor por componente                       (aislamiento máx.)"
+echo "   5) Personalizado · vos agrupás los servicios en los contenedores que quieras"
 SHAPE=$(ask "Elegí" "2")
 echo
 
@@ -79,19 +81,41 @@ declare -A ROLE_PROFILES ROLE_DESC
 ROLES=()
 case "$SHAPE" in
   1) ROLES=(all)
-     ROLE_PROFILES[all]="core sbc media ai proxy"; ROLE_DESC[all]="Stack completo" ;;
-  2) ROLES=(core edge ai)
-     ROLE_PROFILES[core]="core";          ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
+     ROLE_PROFILES[all]="core sbc media ai proxy"; ROLE_DESC[all]="Stack completo (DB+Asterisk+App+SBC+media+voz)" ;;
+  2) ROLES=(main sbc)
+     ROLE_PROFILES[main]="core media ai proxy"; ROLE_DESC[main]="App+telefonía: DB, Redis, Asterisk, API, Dashboard, media, voz, proxy"
+     ROLE_PROFILES[sbc]="sbc";                  ROLE_DESC[sbc]="SBC: Kamailio + rtpengine (borde, aparte)" ;;
+  3) ROLES=(core edge ai)
+     ROLE_PROFILES[core]="core";            ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
      ROLE_PROFILES[edge]="sbc media proxy"; ROLE_DESC[edge]="Borde: SBC Kamailio, rtpengine, TURN, Proxy"
-     ROLE_PROFILES[ai]="ai";              ROLE_DESC[ai]="Voz IA: TTS/STT (pesado, aislado)" ;;
-  3) ROLES=(core sbc media ai proxy)
+     ROLE_PROFILES[ai]="ai";                ROLE_DESC[ai]="Voz IA: TTS/STT (pesado, aislado)" ;;
+  4) ROLES=(core sbc media ai proxy)
      ROLE_PROFILES[core]="core";   ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
      ROLE_PROFILES[sbc]="sbc";     ROLE_DESC[sbc]="SBC: Kamailio + rtpengine"
      ROLE_PROFILES[media]="media"; ROLE_DESC[media]="Media: Coturn (TURN/STUN)"
      ROLE_PROFILES[ai]="ai";       ROLE_DESC[ai]="Voz IA: TTS/STT"
      ROLE_PROFILES[proxy]="proxy"; ROLE_DESC[proxy]="Proxy inverso: Nginx Proxy Manager" ;;
+  5) # personalizado: el usuario agrupa los 5 perfiles en N contenedores
+     c "Modo personalizado — agrupá los servicios en contenedores"
+     echo "   Perfiles: core (DB+Asterisk+App) · sbc · media (TURN) · ai (voz) · proxy (NPM)"
+     echo "   Poné un número de grupo a cada uno (mismo número = mismo contenedor)."
+     echo
+     declare -A GRP SEEN
+     for p in core sbc media ai proxy; do GRP[$p]=$(ask "   Grupo para '$p'" "1"); done
+     for p in core sbc media ai proxy; do
+       gid="${GRP[$p]}"; rname="g${gid}"
+       if [[ -z "${SEEN[$gid]:-}" ]]; then ROLES+=("$rname"); ROLE_PROFILES[$rname]="$p"; SEEN[$gid]=1
+       else ROLE_PROFILES[$rname]="${ROLE_PROFILES[$rname]} $p"; fi
+       ROLE_DESC[$rname]="Grupo $gid"
+     done
+     [[ ${#ROLES[@]} -gt 0 ]] || die "No definiste ningún grupo." ;;
   *) die "Opción inválida" ;;
 esac
+
+# rol que contiene el núcleo (DB+Asterisk+API): los demás CTs apuntan a su IP
+CORE_ROLE=""
+for role in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$role]} " == *" core "* ]] && CORE_ROLE="$role"; done
+[[ -n "$CORE_ROLE" ]] || die "Ningún contenedor incluye el perfil 'core' (DB/Asterisk/App)."
 
 # ---------- 2) modo de la aplicacion ----------
 c "2) Modo de la aplicación"
@@ -116,15 +140,14 @@ TEMPLATE=$(ask "Plantilla LXC" "local:vztmpl/debian-12-standard_12.7-1_amd64.tar
 STORAGE=$(ask "Storage para discos" "local-lvm")
 echo
 
-# recursos por rol (cores/RAM MB/disco GB)
-res_for(){ case "$1" in
-  all)   echo "4 6144 30" ;;
-  core)  echo "4 4096 20" ;;
-  edge|sbc) echo "2 2048 12" ;;
-  media|proxy) echo "1 1024 8" ;;
-  ai)    echo "4 4096 20" ;;
-  *)     echo "2 2048 12" ;;
-esac; }
+# recursos por rol, derivados de los PERFILES que agrupa (cores/RAM MB/disco GB)
+res_for(){
+  local p=" ${ROLE_PROFILES[$1]} " cores=1 ram=1024 disk=8
+  [[ "$p" == *" core "* ]]  && { cores=4; ram=4096; disk=20; }
+  [[ "$p" == *" ai "*   ]]  && { (( cores<4 )) && cores=4; ram=$((ram+2048)); disk=$((disk+8)); }
+  [[ "$p" == *" sbc "*  ]]  && { (( cores<2 )) && cores=2; (( ram<2048 )) && ram=2048; (( disk<12 )) && disk=12; }
+  echo "$cores $ram $disk"
+}
 
 # ---------- 4) planificar: VMID, nodo, recursos por rol ----------
 c "4) Ubicación de cada componente (Enter = recomendado)"
@@ -211,7 +234,7 @@ create_ct(){
 provision_ct(){
   local role="$1" ctid="${ROLE_ID[$role]}"
   local profiles="${ROLE_PROFILES[$role]}"
-  local core_ip="${ROLE_IP[core]:-${ROLE_IP[all]:-127.0.0.1}}"
+  local core_ip="${ROLE_IP[$CORE_ROLE]:-127.0.0.1}"
 
   c "→ Aprovisionando CT $ctid (perfiles: $profiles)…"
   # instalar dependencias + docker
@@ -269,9 +292,8 @@ EOF
 }
 
 # ---------- ejecutar: primero el nucleo (para tener su IP), luego el resto ----------
-ORDER=()
-for pref in core all; do for role in "${ROLES[@]}"; do [[ "$role" == "$pref" ]] && ORDER+=("$role"); done; done
-for role in "${ROLES[@]}"; do [[ "$role" == core || "$role" == all ]] || ORDER+=("$role"); done
+ORDER=("$CORE_ROLE")
+for role in "${ROLES[@]}"; do [[ "$role" == "$CORE_ROLE" ]] || ORDER+=("$role"); done
 
 for role in "${ORDER[@]}"; do create_ct "$role"; done
 for role in "${ORDER[@]}"; do provision_ct "$role"; done
@@ -293,14 +315,12 @@ g "================================================================"
 for role in "${ROLES[@]}"; do
   printf "  %-6s CT %-4s  %s\n" "$role" "${ROLE_ID[$role]}" "${ROLE_IP[$role]}"
 done
-CORE_IP="${ROLE_IP[core]:-${ROLE_IP[all]:-}}"
+CORE_IP="${ROLE_IP[$CORE_ROLE]:-}"
 echo "  ---------------------------------------------------------------"
 g "  Dashboard : http://$CORE_IP:3001"
 g "  API       : http://$CORE_IP:3000"
-if [[ "$SHAPE" != 1 ]]; then
-  EDGE_IP="${ROLE_IP[edge]:-${ROLE_IP[proxy]:-}}"
-  [[ -n "$EDGE_IP" ]] && g "  Proxy NPM : http://$EDGE_IP:81  (admin@example.com / changeme)"
-fi
+PROXY_ROLE=""; for role in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$role]} " == *" proxy "* ]] && PROXY_ROLE="$role"; done
+[[ -n "$PROXY_ROLE" ]] && g "  Proxy NPM : http://${ROLE_IP[$PROXY_ROLE]}:81  (admin@example.com / changeme)"
 g "  Modo app  : $TENANT_MODE   Plan guardado en $PLAN_FILE"
 y "  Publicá el dominio con TLS/WSS desde el proxy inverso y abrí los"
 y "  puertos SIP/RTP/TURN en tu firewall/NAT."

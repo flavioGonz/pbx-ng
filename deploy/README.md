@@ -9,9 +9,11 @@ componentes por el cluster según los recursos libres.
 
 1. **Descubre** los nodos online del cluster y su RAM libre.
 2. Pregunta la **forma de despliegue**:
-   - **Compacto** — 1 contenedor con todo el stack (PBX simple / demo).
-   - **Híbrido** — 3 contenedores: `núcleo` / `borde` / `voz` (recomendado).
+   - **Compacto** — 1 contenedor con todo el stack (demo).
+   - **Standalone** — 2 contenedores: `app+telefonía` (DB+Asterisk+App) / `SBC` aparte (recomendado stand-alone).
+   - **Híbrido** — 3 contenedores: `núcleo` / `borde` / `voz`.
    - **Separado** — 1 contenedor por componente (aislamiento máximo).
+   - **Personalizado** — vos agrupás los 5 perfiles (core/sbc/media/ai/proxy) en los contenedores que quieras (mismo número de grupo = mismo contenedor).
 3. Pregunta el **modo de la aplicación**: PBX simple (single-tenant) o
    multi-tenant (SaaS). Se guarda como `TENANT_MODE` en el `.env` de cada CT.
 4. Para cada componente, **recomienda el nodo** con más RAM libre y te deja
@@ -44,8 +46,14 @@ Es interactivo; los valores por defecto (entre corchetes) son los recomendados.
 | Forma | Contenedores | Perfiles docker-compose por CT |
 |---|---|---|
 | Compacto | `pbxng-all` | `core sbc media ai proxy` |
+| Standalone | `pbxng-main`, `pbxng-sbc` | `core media ai proxy` / `sbc` |
 | Híbrido | `pbxng-core`, `pbxng-edge`, `pbxng-ai` | `core` / `sbc media proxy` / `ai` |
 | Separado | `pbxng-core`, `pbxng-sbc`, `pbxng-media`, `pbxng-ai`, `pbxng-proxy` | uno por perfil |
+| Personalizado | `pbxng-g1`, `pbxng-g2`, … | los grupos que definas |
+
+El contenedor que incluye el perfil **`core`** (DB+Asterisk+App) se crea primero;
+los recursos de cada CT se dimensionan solos según los perfiles que agrupa
+(core→4 vCPU/4 GB, +voz→+2 GB, +sbc→mín 2 vCPU/2 GB).
 
 El **núcleo se crea primero** para conocer su IP; los demás CTs la reciben en su
 `.env` (`DB_HOST`, `ARI_URL`, `AMI_HOST`, `ASTERISK_HOST`, `REDIS_HOST`) porque
