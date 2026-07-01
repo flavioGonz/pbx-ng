@@ -20,6 +20,15 @@ c "   UCaaS: Asterisk 22 + WebRTC + SBC Kamailio + IVR IA"
 c "================================================================"
 echo
 
+# ---------------- 0) Modo de la aplicacion ----------------
+c "Modo de la aplicacion"
+echo "   1) PBX simple (single-tenant)  · una sola empresa   (RECOMENDADO)"
+echo "   2) Multi-tenant (SaaS)         · varias empresas aisladas"
+TMODE_SEL=$(ask "Elegi" "1")
+[[ "$TMODE_SEL" == "2" ]] && TENANT_MODE="multi" || TENANT_MODE="single"
+g "  Modo: $TENANT_MODE"
+echo
+
 # ---------------- 1) Topologia ----------------
 c "1) Topologia de despliegue"
 echo "   1) Docker · un contenedor por servicio   (RECOMENDADO, produccion)"
@@ -51,7 +60,7 @@ case "$TOPO" in
     docker build -f Dockerfile.allinone -t pbxng/allinone:latest ..
     docker run -d --name pbxng --restart unless-stopped \
       -p 3000:3000 -p 3001:3001 -p 5060:5060/udp -p 5060:5060/tcp -p 8088:8088 \
-      -p 10000-10200:10000-10200/udp -e DOMAIN="$DOMAIN" pbxng/allinone:latest
+      -p 10000-10200:10000-10200/udp -e DOMAIN="$DOMAIN" -e TENANT_MODE="$TENANT_MODE" pbxng/allinone:latest
     g "Listo. Dashboard: http://localhost:3001 · API: http://localhost:3000"
     y "Nota: modo demo. Para produccion usa 'un contenedor por servicio'."
     exit 0
@@ -95,6 +104,7 @@ if [[ ! -f .env ]]; then
   JWT_SECRET=$(openssl rand -hex 24 2>/dev/null || echo "jwt_$RANDOM$RANDOM$RANDOM")
   cp -n .env.example .env 2>/dev/null || cp .env.example .env
   sed -i "s|^DB_PASS=.*|DB_PASS=$DB_PASS|; s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|; s|^DOMAIN=.*|DOMAIN=$DOMAIN|; s|^PUBLIC_IP=.*|PUBLIC_IP=$PUBLIC_IP|" .env
+  grep -q "^TENANT_MODE=" .env && sed -i "s|^TENANT_MODE=.*|TENANT_MODE=$TENANT_MODE|" .env || echo "TENANT_MODE=$TENANT_MODE" >> .env
   g "  .env creado (secretos generados automaticamente)."
 else
   y "3) Usando .env existente (borralo para reconfigurar)."

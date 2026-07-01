@@ -104,6 +104,19 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 - Un dominio apuntando al servidor y puertos SIP/RTP/TURN abiertos.
 - 2+ vCPU y 4+ GB RAM para el stack completo (más si vas a transcodificar muchas llamadas).
 
+### Modos de la aplicación
+
+En la instalación se elige el **modo**, que la app respeta en toda la UI y el ruteo:
+
+- **PBX simple (single-tenant)** — una sola empresa, panel plano, sin gestión de
+  inquilinos. Es lo recomendado para una central única o una *virtual appliance*.
+- **Multi-tenant (SaaS)** — varias empresas aisladas (contextos PJSIP separados,
+  branding y numeración por inquilino). Para ofrecer PBX como servicio.
+
+El modo se guarda como `TENANT_MODE` (`single` | `multi`) en el `.env`. El esquema
+de base de datos es *tenant-ready* en ambos casos: en modo simple todo usa un
+inquilino por defecto, sin duplicar esquema.
+
 ### Opción A — Docker, un contenedor por servicio (recomendado)
 
 Es la topología de producción: cada servicio corre aislado y escala por separado.
@@ -124,6 +137,22 @@ Para levantar rápido en un solo contenedor (no recomendado para producción). E
 
 Instalación nativa sobre Debian/Ubuntu (o contenedores LXC en Proxmox), un servicio por host. Ver [`docs/`](docs/) para la guía paso a paso de cada componente.
 
+### Opción D — Orquestador Proxmox (crea los contenedores solo)
+
+Para un cluster **Proxmox VE**: un script que corre en cualquier nodo y **crea
+por sí mismo** todos los LXC del stack, preguntando la forma de despliegue
+(compacto / híbrido / separado), el modo de la app (PBX simple o multi-tenant) y
+**dónde ubicar cada componente** (recomienda el nodo con más RAM libre). Cada
+contenedor corre Docker y levanta sus perfiles.
+
+```bash
+# En un nodo Proxmox, como root:
+curl -fsSLO https://raw.githubusercontent.com/flavioGonz/pbx-ng/main/deploy/pbxng-proxmox.sh
+chmod +x pbxng-proxmox.sh && ./pbxng-proxmox.sh
+```
+
+Ver [`deploy/`](deploy/) para el detalle (mapa de roles→perfiles, red, requisitos).
+
 ## Configuración
 
 - **Secretos**: nunca se versionan. El instalador genera `.env` con contraseñas y JWT aleatorios. Claves de OpenAI (IVR IA), FCM/APNs (push nativo) y SMTP se cargan **cifradas desde el panel** (no en `.env`).
@@ -137,6 +166,7 @@ control-plane/     API Node/Express (ARI+AMI, Socket.io, auth JWT)
 dashboard/         Frontend Next.js (admin + softphone + PWA)
 voice-service/     Microservicio de voz IA (Piper TTS + faster-whisper STT)
 docker/            docker-compose, install.sh interactivo, imágenes
+deploy/            orquestador de despliegue en Proxmox (pbxng-proxmox.sh)
 docs/              Documentación por componente
 scripts/           Utilidades (sync-and-push, etc.)
 ```
@@ -162,7 +192,7 @@ Defensa en capas:
 
 - TURN TLS/DTLS (5349) + credenciales efímeras.
 - Alta disponibilidad (estado en Redis, multi-instancia de la API).
-- Multi-tenant + RBAC.
+- Multi-tenant + RBAC (modo elegible en la instalación; RBAC en curso).
 - Observabilidad (Prometheus/Grafana, métricas de calidad de llamada).
 - STIR/SHAKEN, T.38 fax, SIP TLS para teléfonos.
 
