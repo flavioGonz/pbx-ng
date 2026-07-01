@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src
-RUN wget -q https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${AST_VERSION}.tar.gz \
+RUN wget -q https://downloads.asterisk.org/pub/telephony/asterisk/releases/asterisk-${AST_VERSION}.tar.gz \
     && tar xzf asterisk-${AST_VERSION}.tar.gz
 WORKDIR /usr/src/asterisk-${AST_VERSION}
 
