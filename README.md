@@ -1,224 +1,173 @@
 <div align="center">
 
-# ☎️ PBX-NG
+# PBX-NG
 
-### Plataforma de Comunicaciones Unificadas (UCaaS) de nueva generación
-
-**VoIP tradicional + WebRTC · IVR conversacional con IA · multi-dispositivo · alta disponibilidad**
-
-![Asterisk](https://img.shields.io/badge/Asterisk-22_LTS-FF5500?logo=asterisk&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-20-339933?logo=nodedotjs&logoColor=white)
-![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Realtime-4169E1?logo=postgresql&logoColor=white)
-![Kamailio](https://img.shields.io/badge/Kamailio-SBC-009?logo=kamailio&logoColor=white)
-![WebRTC](https://img.shields.io/badge/WebRTC-SRTP%2FDTLS-333333?logo=webrtc&logoColor=white)
-![License](https://img.shields.io/badge/licencia-propietaria-lightgrey)
+**Plataforma de comunicaciones unificadas (UCaaS) de nueva generación**
+Asterisk 22 · WebRTC · SBC Kamailio · IVR con IA · PWA softphone · Multi-WAN
 
 </div>
 
 ---
 
-## 📑 Índice
+PBX-NG es una central telefónica IP profesional, "todo-terreno" y lista para la nube: une la telefonía VoIP clásica (chan_pjsip) con tecnologías web modernas (WebRTC) para llamar desde el navegador, el móvil o un teléfono físico, con un **SBC** (Session Border Controller) propio al frente que aporta seguridad perimetral, enrutamiento por operador (LCR) con failover, manipulación SIP avanzada y ocultamiento de topología.
 
-- [Visión general](#-visión-general)
-- [Características](#-características)
-- [Arquitectura](#-arquitectura)
-- [Stack tecnológico](#-stack-tecnológico)
-- [Estructura del repositorio](#-estructura-del-repositorio)
-- [Puesta en marcha](#-puesta-en-marcha)
-- [Configuración](#-configuración)
-- [Módulos destacados](#-módulos-destacados)
-- [Seguridad](#-seguridad)
-- [Roadmap](#-roadmap)
-- [Licencia](#-licencia)
+Todo se administra desde un **dashboard web** en tiempo real.
 
----
+## Índice
 
-## 🎯 Visión general
+- [Arquitectura](#arquitectura)
+- [Características](#características)
+- [Instalación](#instalación)
+- [Configuración](#configuración)
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Operación y mantenimiento](#operación-y-mantenimiento)
+- [Seguridad](#seguridad)
+- [Roadmap](#roadmap)
 
-**PBX-NG** es una central telefónica IP moderna y modular que une la telefonía VoIP clásica (teléfonos físicos SIP) con la web (WebRTC), permitiendo comunicarse desde el navegador o el celular **sin plugins ni instalaciones**. Está pensada como servicio multi-empresa (UCaaS), con un plano de control por API, un panel de administración en tiempo real y un softphone PWA instalable.
+## Arquitectura
 
-Todo el plan de marcado, los internos y la configuración viven en **PostgreSQL** mediante *Asterisk Realtime Architecture (ARA)*, por lo que la operación es 100% dinámica desde el panel, sin tocar archivos en el servidor.
-
----
-
-## ✨ Características
-
-| Área | Funcionalidades |
-|------|-----------------|
-| **Telefonía core** | Asterisk 22 LTS · `chan_pjsip` · Realtime sobre PostgreSQL · CDR · transcoding G.711/G.722/Opus |
-| **WebRTC** | Softphone en el panel y PWA instalable (SIP.js) · SRTP/DTLS sobre WSS · STUN/TURN (Coturn) |
-| **Internos** | WebRTC y SIP físico · estado en vivo (registrado / en llamada / offline) · IP + RTT · QR de alta |
-| **Aplicaciones** | Colas/ACD · IVR visual (React Flow) · conferencias · ring groups · paging · buzón de voz |
-| **IVR con IA** 🤖 | Conversacional voz-a-voz (STT→LLM→TTS) · **voz neural self-hosted** (Piper + faster-whisper) u OpenAI · transferencia y CRM por *function-calling* |
-| **Click-to-Call** 🌐 | Enlaces y QR públicos para llamar por WebRTC sin registro · invitados efímeros · metadatos del cliente |
-| **Push (RFC 8599)** 🔔 | Despertar dispositivos dormidos · Web Push (VAPID) + FCM + APNs (VoIP) |
-| **Auto-provisioning** 📞 | Teléfonos físicos (Yealink / Grandstream) configurados solos por dirección MAC |
-| **Troncales** | Registro contra operadores SIP · rutas entrantes (DID) y salientes por prefijo |
-| **SBC** | Kamailio + RTPEngine de borde · dispatcher · anti-flood (pike) · gestión desde el panel |
-| **Monitoreo** | Wallboard de colas · monitor de llamadas en vivo (escuchar / susurrar / irrumpir) · grabaciones |
-| **Seguridad** | TLS/WSS · SRTP · Fail2Ban + geolocalización de ataques · JWT · defensa en capas |
-
----
-
-## 🏗 Arquitectura
-
-```mermaid
-flowchart LR
-    subgraph Internet
-      U[Clientes WebRTC / PWA] 
-      T[Operadores SIP]
-    end
-    NPM[Nginx Proxy Manager\nTLS / WSS · Let's Encrypt]
-    COTURN[Coturn\nSTUN / TURN]
-    SBC[Kamailio SBC\n+ RTPEngine]
-    AST[Asterisk 22\nchan_pjsip · ARI · AMI]
-    API[Control Plane\nNode.js · Express · Socket.io]
-    WEB[Dashboard + Softphone\nNext.js · React]
-    PG[(PostgreSQL\nRealtime · CDR)]
-    REDIS[(Redis\ncaché / sesiones)]
-    AI[Pipeline IA\nVosk · LLM · TTS]
-
-    U -->|HTTPS/WSS| NPM --> WEB
-    U -->|SIP/WSS| NPM --> AST
-    U -. media .-> COTURN
-    T -->|SIP| SBC --> AST
-    WEB -->|/backend| API
-    API -->|ARI/AMI| AST
-    API --> PG
-    API --> REDIS
-    AST -->|Realtime| PG
-    AST -->|AudioSocket| AI --> API
-```
-
-El **plano de medios** puede ir directo entre puntos o relayarse por Coturn/RTPEngine según la red (NAT). El **plano de señalización** entra por NPM (WebRTC) o por el SBC (troncales).
-
----
-
-## 🧰 Stack tecnológico
-
-- **Core de comunicaciones:** Asterisk 22 LTS (`chan_pjsip`, SRTP, DTLS, AudioSocket).
-- **Control plane:** Node.js + Express + Socket.io, consumiendo **ARI** (control de llamadas) y **AMI** (eventos).
-- **Frontend:** Next.js 14 + React + Mantine UI (panel, softphone WebRTC y PWA).
-- **Base de datos:** PostgreSQL (Realtime + CDR + config) y Redis (caché/estado).
-- **SBC / escala:** Kamailio + RTPEngine.
-- **Borde / TLS:** Nginx Proxy Manager (Let's Encrypt) + Coturn (STUN/TURN).
-- **IA de voz:** Vosk (STT offline ES) · espeak-ng (TTS offline) · OpenAI (Whisper/GPT/TTS) opcional.
-
----
-
-## 📂 Estructura del repositorio
+Diseño modular; cada servicio es independiente y puede correr en su propio contenedor/host.
 
 ```
-pbx-ng/
-├── control-plane/          # API Node.js (ARI/AMI + Socket.io)
-│   ├── app.js              #   API principal, endpoints, realtime
-│   ├── ai-pipeline.js      #   IVR conversacional (AudioSocket + STT/LLM/TTS)
-│   ├── push-providers.js   #   Push RFC 8599 (FCM + APNs)
-│   └── ai/vosk_stt.py      #   Sidecar STT offline (Vosk)
-├── dashboard/              # Panel + softphone (Next.js)
-│   ├── app/                #   Páginas y componentes (App Router)
-│   ├── public/             #   PWA, service worker, assets
-│   └── next.config.js
-├── voice-service/          # Microservicio de voz IA (Piper TTS + faster-whisper STT)
-├── infra/
-│   ├── asterisk/           # Configs Asterisk (realtime, pjsip, ari, http, rtp…)
-│   ├── sbc/                # Notas del SBC (Kamailio/RTPEngine)
-│   └── systemd/            # Unidades systemd de los servicios
-├── docs/
-├── .env.example
-└── README.md
+                 Internet
+                    │
+        ┌───────────┴───────────┐
+        │  Nginx Proxy Manager  │  TLS/WSS (Let's Encrypt)
+        └───────────┬───────────┘
+                    │
+   ┌────────────┬───┴────┬─────────────┐
+   │            │        │             │
+┌──▼──┐   ┌─────▼────┐ ┌─▼────┐   ┌────▼─────┐
+│ SBC │   │ Dashboard│ │ API  │   │  TURN    │
+│Kamai│   │ Next.js  │ │Node  │   │ Coturn   │
+│lio +│   └──────────┘ │ARI/  │   └──────────┘
+│rtpe │◄───────────────┤AMI   │
+│ngine│                └──┬───┘
+└──┬──┘                   │
+   │      ┌───────────────┼───────────────┐
+   ▼      ▼               ▼               ▼
+┌──────────────┐   ┌────────────┐   ┌──────────┐
+│  Asterisk 22 │   │ PostgreSQL │   │  Voz IA  │
+│  chan_pjsip  │◄──┤ Realtime   │   │ TTS/STT  │
+│  (Realtime)  │   │ + CDR      │   └──────────┘
+└──────────────┘   │ + Redis    │
+                   └────────────┘
 ```
 
----
+### Componentes y puertos
 
-## 🚀 Puesta en marcha
+| Servicio | Rol | Puertos |
+|---|---|---|
+| **Asterisk 22** | Núcleo PBX (chan_pjsip, realtime ARA, transcoding) | 5060 UDP/TCP, 5061 TLS, 8088 WS, 10000-20000 RTP |
+| **PostgreSQL 16** | Config realtime + CDR + datos de la app | 5432 |
+| **Redis** | Caché / sesiones | 6379 |
+| **Control Plane (API)** | Node/Express, ARI+AMI, Socket.io, JWT | 3000 |
+| **Dashboard** | Next.js (admin + softphone WebRTC + PWA) | 3001 |
+| **SBC (Kamailio 5.6)** | Borde SIP: seguridad, LCR, manipulación SIP | 5060, 8088 WS |
+| **rtpengine** | Relay/anclaje de medios, aislamiento de RTP | 30000-40000 |
+| **Coturn (TURN/STUN)** | Traversía NAT para WebRTC | 3478, 49152-65535 |
+| **Voz IA** | TTS (Piper/Edge) + STT (faster-whisper) | 8080 |
+| **Nginx Proxy Manager** | Terminación TLS/WSS + certificados | 80, 443, 81 |
 
-> Topología de referencia: contenedores LXC/VM en un hipervisor (Proxmox). Asterisk, PostgreSQL/Redis, el control plane + panel, el SBC y Coturn pueden ir separados.
+## Características
 
-### 1. Base de datos
-PostgreSQL con el esquema de **Asterisk Realtime** (`ps_endpoints`, `ps_aors`, `ps_auths`, `extensions`…), CDR y las tablas de la app (`pbxng_*`).
+**Telefonía y WebRTC**
+- Internos WebRTC (navegador/PWA, sin plugins) y SIP físicos (Yealink, Grandstream, Cisco).
+- Softphone PWA instalable con push RFC 8599 (FCM/APNs), ringtone, transferencia, conferencia, DND, PiP.
+- Códecs: Opus, G.711 (ulaw/alaw), G.722; video VP8/H264; SRTP/DTLS en WebRTC.
+- Click-to-Call público por link/QR (sin registro), con geolocalización.
 
-### 2. Asterisk
-Asterisk 22 con `res_config_pgsql` cableado (ver `infra/asterisk/`): `sorcery.conf`, `extconfig.conf`, `res_pgsql.conf`. Habilitar ARI (`ari.conf` + `http.conf`) y AMI (`manager.conf`) restringidos a la LAN.
+**SBC (estilo AudioCodes)**
+- LCR / enrutamiento por operador con **failover** automático.
+- **Salud de operadores** por OPTIONS keepalive (UP/DOWN en vivo).
+- **Manipulación SIP** avanzada por operador (reescribe From/PPI/PAI/Diversion/headers) con presets compatibles.
+- Topology hiding, Session Timers (anti-zombi), accounting en el borde.
+- Anti-flood (pike), lista de bloqueo (secfilter), auto-ban.
 
-### 3. Control plane (API)
+**Aplicaciones**
+- IVR visual (React Flow) + **IVR conversacional con IA** (STT→LLM→TTS).
+- Colas/ACD, conferencias, grupos de timbrado, buzón visual, paging.
+- Grabación por interno o global (local/NAS/S3) con transcripción y análisis.
+- Auto-aprovisionamiento de teléfonos por MAC (Yealink/Grandstream).
+- Rutas entrantes (DID) y salientes, dialplan realtime, wallboard TV-ready, mapa de llamadas.
+
+**Operación**
+- Dashboard en tiempo real (Socket.io + AMI), topología animada con salud.
+- Fail2Ban con geolocalización de ataques, gestión de bloqueos.
+- Watchdog de agentes (auto-recuperación de cuelgues).
+
+## Instalación
+
+### Requisitos
+
+- **Docker + Docker Compose** (opción recomendada), o un host Debian/Ubuntu (bare-metal / LXC).
+- Un dominio apuntando al servidor y puertos SIP/RTP/TURN abiertos.
+- 2+ vCPU y 4+ GB RAM para el stack completo (más si vas a transcodificar muchas llamadas).
+
+### Opción A — Docker, un contenedor por servicio (recomendado)
+
+Es la topología de producción: cada servicio corre aislado y escala por separado.
+
 ```bash
-cd control-plane
-cp ../.env.example .env     # completá credenciales
-npm install
-node app.js                 # o vía systemd: infra/systemd/pbxng-api.service
+git clone https://github.com/flavioGonz/pbx-ng.git
+cd pbx-ng/docker
+./install.sh
 ```
 
-### 4. Dashboard
-```bash
-cd dashboard
-npm install
-npm run build && npm start  # o vía systemd: infra/systemd/pbxng-dashboard.service
+El instalador es **interactivo**: te pregunta la topología, qué servicios levantar (núcleo / SBC / media / IA / proxy), el dominio y genera los secretos automáticamente en `.env`. Al terminar deja el stack corriendo y te muestra las URLs.
+
+### Opción B — Docker, todo en un contenedor (demo/pruebas)
+
+Para levantar rápido en un solo contenedor (no recomendado para producción). El instalador lo ofrece como opción; usa `Dockerfile.allinone`.
+
+### Opción C — Bare-metal / LXC (sin Docker)
+
+Instalación nativa sobre Debian/Ubuntu (o contenedores LXC en Proxmox), un servicio por host. Ver [`docs/`](docs/) para la guía paso a paso de cada componente.
+
+## Configuración
+
+- **Secretos**: nunca se versionan. El instalador genera `.env` con contraseñas y JWT aleatorios. Claves de OpenAI (IVR IA), FCM/APNs (push nativo) y SMTP se cargan **cifradas desde el panel** (no en `.env`).
+- **Variables clave** (`.env`): `DOMAIN`, `DB_PASS`, `JWT_SECRET`, `PUBLIC_IP`, `VAPID_*`. Ver [`.env.example`](.env.example).
+- **Primer acceso**: el dashboard corre en `:3001`; publicá el dominio con TLS/WSS vía Nginx Proxy Manager (`:81`).
+
+## Estructura del repositorio
+
+```
+control-plane/     API Node/Express (ARI+AMI, Socket.io, auth JWT)
+dashboard/         Frontend Next.js (admin + softphone + PWA)
+voice-service/     Microservicio de voz IA (Piper TTS + faster-whisper STT)
+docker/            docker-compose, install.sh interactivo, imágenes
+docs/              Documentación por componente
+scripts/           Utilidades (sync-and-push, etc.)
 ```
 
-### 5. Borde
-NPM publica el dominio con TLS/WSS y enruta `/` → panel, `/backend` → API, `/ws` → Asterisk, `/socket.io` → API, `/prov` → API. Coturn para NAT traversal.
+## Operación y mantenimiento
+
+- **Servicios**: cada componente corre bajo systemd (bare-metal) o como contenedor (Docker), con `Restart=always`.
+- **Watchdog**: un timer detecta agentes colgados (por heartbeat) y los reinicia solos.
+- **Backups**: se recomienda `pg_dump` periódico de la base `pbxng` (config + CDR).
+- **Logs**: dashboard `journalctl`, SBC en `/var/log`, watchdog en `/var/log/pbxng-watchdog.log`.
+
+## Seguridad
+
+Defensa en capas:
+
+- **API**: autenticación **deny-by-default** (todo `/api` requiere JWT salvo una allowlist pública explícita).
+- **SBC**: anti-flood (pike), lista de bloqueo gestionable (secfilter), auto-ban, ocultamiento de topología, cifrado TLS/SRTP.
+- **Fail2Ban** sobre logs PJSIP con geolocalización y gestión de bloqueos/lista blanca.
+- **Agentes internos** protegidos por token compartido; comandos de sistema con validación (sin `shell=True`).
+- **Recomendado en producción**: rotar todos los secretos, activar TLS en teléfonos, y RBAC multi-tenant.
+
+## Roadmap
+
+- TURN TLS/DTLS (5349) + credenciales efímeras.
+- Alta disponibilidad (estado en Redis, multi-instancia de la API).
+- Multi-tenant + RBAC.
+- Observabilidad (Prometheus/Grafana, métricas de calidad de llamada).
+- STIR/SHAKEN, T.38 fax, SIP TLS para teléfonos.
 
 ---
-
-## ⚙️ Configuración
-
-- **`.env`** (control plane): conexión a DB, ARI, AMI, JWT y VAPID. Ver [`.env.example`](.env.example).
-- **Panel → Configuración / Notificaciones:** las claves sensibles que dependen del cliente **no van en `.env`**; se cargan cifradas en la tabla `pbxng_settings`:
-  - **OpenAI** (IVR con IA), **FCM / APNs** (push nativo), **SMTP por empresa** (email), **servidor de provisioning**.
-
----
-
-## 🌟 Módulos destacados
-
-### 🤖 IVR conversacional con IA
-Las llamadas a un agente IA pasan por un pipeline **STT → LLM → TTS** sobre **AudioSocket**. Funciona 100% **offline** con **voz neural Piper + faster-whisper** (en un CT dedicado, gratis), o con **OpenAI** (Whisper + GPT + TTS) cargando la key. Soporta *barge-in* (interrumpir al bot) y **function-calling**: transferir a un área/persona y consultar un CRM por webhook.
-
-### 🌐 Click-to-Call público
-Generás un enlace/QR apuntado a un interno, cola, IVR o agente IA. El cliente externo llama por **WebRTC desde el navegador, sin instalar ni registrarse**; se crea un invitado SIP efímero aislado y su nombre/geo viajan con la llamada.
-
-### 🔔 Push RFC 8599
-Despierta dispositivos en segundo plano al entrar una llamada. Capa multi-proveedor: **Web Push (VAPID)** para la PWA y **FCM (Android)** + **APNs VoIP (iOS)** listos para app nativa, leyendo los parámetros `pn-provider/pn-prid/pn-param`.
-
-### 📞 Auto-provisioning de teléfonos
-Los teléfonos **Yealink** y **Grandstream** se configuran solos: piden su archivo por MAC (`<mac>.cfg` / `cfg<mac>.xml`) al servidor de provisioning y reciben su cuenta SIP, codecs y etiquetas. El usuario solo enchufa el teléfono (DHCP opción 66).
-
-### 🛡 SBC (Kamailio)
-Proxy SIP de borde con **dispatcher**, **anti-flood (pike/ipban)** y **RTPEngine** para relay de medios. Administrable desde el panel (`/sbc`) con gráficas en vivo y editor de `kamailio.cfg` validado.
-
----
-
-## 🔒 Seguridad
-
-- **Cifrado total:** TLS para señalización SIP/WSS y SRTP/DTLS para el medio (RTP).
-- **Perímetro:** Fail2Ban adaptado a logs PJSIP + geolocalización de ataques; pike/ipban en el SBC.
-- **Acceso:** panel con JWT; rutas públicas acotadas (enrolamiento, click-to-call, provisioning).
-- **Secretos:** credenciales fuera del código (`.env` + `pbxng_settings`); este repo no contiene claves reales.
-
----
-
-## 🗺 Roadmap
-
-- [x] Core PJSIP + Realtime + CDR
-- [x] WebRTC (panel + PWA) con TURN
-- [x] Colas, IVR visual, conferencias, grupos, buzón
-- [x] SBC Kamailio + RTPEngine
-- [x] IVR conversacional con IA (offline / OpenAI)
-- [x] Voz neural self-hosted (Piper TTS + faster-whisper STT) en CT dedicado
-- [x] Click-to-Call público (WebRTC + QR)
-- [x] Push RFC 8599 (Web Push / FCM / APNs)
-- [x] Auto-provisioning Yealink / Grandstream
-- [ ] SSO / OAuth2 para el panel + credenciales PJSIP temporales
-- [ ] Analítica post-llamada (transcripción + sentimiento + resumen)
-- [ ] Multi-tenant a nivel core (aislamiento por contextos)
-
----
-
-## 📄 Licencia
-
-Proyecto propietario de **IES**. Todos los derechos reservados.
 
 <div align="center">
-<sub>Construido con ❤️ para comunicaciones unificadas modernas.</sub>
+Hecho con foco en robustez, seguridad y compatibilidad universal de dispositivos.
 </div>

@@ -1,38 +1,35 @@
 # PBX-NG · Despliegue con Docker
 
-Stack completo de la plataforma en contenedores, con instalador interactivo.
+El instalador interactivo te pregunta la **topología** y levanta el stack.
 
-## Requisitos
-- Docker Engine + plugin `docker compose`
-- Para SIP/RTP/TURN: el host debe exponer los puertos (Asterisk/Kamailio/Coturn usan `network_mode: host`).
-
-## Instalación rápida
 ```bash
 cd docker
 ./install.sh
 ```
-El script pregunta el modo (todo en uno / elegir servicios / solo núcleo), crea `.env` y levanta los contenedores.
 
-## Servicios (perfiles)
-| Perfil | Contenedores | Para qué |
-|--------|--------------|----------|
-| core   | postgres, redis, asterisk, api, dashboard | Núcleo PBX |
-| sbc    | kamailio, rtpengine | Borde SIP (SBC) |
-| media  | coturn | TURN/STUN WebRTC |
-| ai     | voz | TTS/STT (IVR con IA) |
-| proxy  | npm | Reverse proxy + TLS |
+## Topologías
 
-Separado o junto: cada perfil se puede levantar en hosts distintos (ajustando `.env` con las IPs) o todos juntos en un solo host.
+1. **Un contenedor por servicio** (recomendado, producción)
+   Usa `docker-compose.yml` con perfiles: `core` (DB/Redis/Asterisk/API/Dashboard), `sbc` (Kamailio+rtpengine), `media` (Coturn), `ai` (Voz), `proxy` (Nginx Proxy Manager). Cada servicio aislado y escalable.
 
-## Manual
+2. **Todo en un contenedor** (experimental, demos)
+   `Dockerfile.allinone` corre todo el stack con supervisord en un único contenedor. Rápido para probar; no recomendado en producción.
+
+3. **Bare-metal / LXC** (sin Docker)
+   Instalación nativa por componente (ver `docs/`).
+
+## Perfiles (compose)
+
 ```bash
-docker compose --profile core --profile sbc up -d --build   # núcleo + SBC
-docker compose --profile ai up -d                            # solo IA de voz
-docker compose ps
-docker compose logs -f api
+docker compose --profile core --profile sbc --profile media up -d --build
 ```
 
-## Notas
-- `images/asterisk`, `images/kamailio`, `images/voz` son contextos de build (Dockerfiles a completar según versiones).
-- `config/` monta las configuraciones (asterisk, kamailio, coturn).
-- Producción: cambiá `DB_PASS` y `JWT_SECRET`, y configurá el certificado en NPM.
+## Configuración
+
+`.env` se genera automáticamente con secretos aleatorios (o copiá `.env.example`). Las claves de OpenAI/FCM/APNs/SMTP se cargan cifradas desde el panel, no en `.env`.
+
+## URLs
+
+- Dashboard: `http://localhost:3001`
+- API: `http://localhost:3000`
+- Nginx Proxy Manager: `http://localhost:81` (admin@example.com / changeme)

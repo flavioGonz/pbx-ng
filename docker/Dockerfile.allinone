@@ -1,0 +1,38 @@
+# ============================================================
+#  PBX-NG · Imagen all-in-one (EXPERIMENTAL / DEMO)
+#  Corre TODO el stack en un solo contenedor via supervisord.
+#  Pensado para pruebas/demos rapidas. Para produccion usa la
+#  topologia "un contenedor por servicio" (docker-compose).
+#  Usa las versiones de Asterisk/Kamailio del repo de Debian.
+# ============================================================
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive DOMAIN=pbx.local
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      postgresql redis-server asterisk kamailio kamailio-postgres-modules \
+      kamailio-websocket-modules kamailio-tls-modules rtpengine-daemon \
+      curl ca-certificates gnupg supervisor openssl \
+ && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y nodejs \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# --- Control plane (API) ---
+WORKDIR /opt/api
+COPY control-plane/package*.json ./
+RUN npm ci --omit=dev || npm install --omit=dev
+COPY control-plane/ ./
+
+# --- Dashboard (build) ---
+WORKDIR /opt/dashboard
+COPY dashboard/package*.json ./
+RUN npm ci || npm install
+COPY dashboard/ ./
+RUN npm run build || echo "dashboard build best-effort"
+
+# --- supervisord + entrypoint ---
+COPY docker/supervisord.allinone.conf /etc/supervisor/conf.d/pbxng.conf
+COPY docker/entrypoint.allinone.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 3000 3001 5060/udp 5060/tcp 8088 10000-10200/udp
+ENTRYPOINT ["/entrypoint.sh"]
