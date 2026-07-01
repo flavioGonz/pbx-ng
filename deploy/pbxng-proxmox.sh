@@ -252,6 +252,8 @@ DB_PASS=$(openssl rand -hex 12)
 JWT_SECRET=$(openssl rand -hex 24)
 ARI_PASS=$(openssl rand -hex 8)
 AMI_PASS=$(openssl rand -hex 8)
+TURN_PASS=$(openssl rand -hex 8)
+COMPANY="$(ask 'Nombre de la empresa (empresa por defecto)' 'Mi Empresa')"
 
 # ---------- helper: crear un CT ----------
 create_ct(){
@@ -306,6 +308,14 @@ provision_ct(){
     set -e
     [[ -d /opt/pbx-ng ]] || git clone -q --branch '$REPO_BRANCH' '$REPO_URL' /opt/pbx-ng
   "
+  # IPs de los nodos por perfil (todos los CT ya fueron creados: ROLE_IP está poblado)
+  ip_for_profile(){ local p="$1" r; for r in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$r]} " == *" $p "* ]] && { echo "${ROLE_IP[$r]}"; return; }; done; }
+  local sbc_ip turn_ip voz_ip npm_ip media_ip
+  sbc_ip="$(ip_for_profile sbc)"
+  turn_ip="$(ip_for_profile media)"; [[ -n "$turn_ip" ]] || turn_ip="$sbc_ip"
+  voz_ip="$(ip_for_profile ai)"
+  npm_ip="$(ip_for_profile proxy)"
+  media_ip="${voz_ip:-$core_ip}"
   # escribir .env (inyecta la IP del núcleo para servicios que viven en otro CT)
   pct exec "$ctid" -- bash -lc "
     set -e
@@ -329,6 +339,14 @@ AMI_USER=pbxng-ami
 AMI_PASS=$AMI_PASS
 ASTERISK_HOST=$core_ip
 REDIS_HOST=$core_ip
+SBC_HOST=$sbc_ip
+TURN_HOST=$turn_ip
+VOZ_HOST=$voz_ip
+NPM_HOST=$npm_ip
+MEDIA_HOST=$media_ip
+TURN_USER=pbxng
+TURN_PASS=$TURN_PASS
+DEFAULT_COMPANY=$COMPANY
 JWT_SECRET=$JWT_SECRET
 EOF
   "
