@@ -1,15 +1,20 @@
-# PBX-NG · stack Docker completo (todos los nodos).
-# Perfiles (profiles) para instalar separado o junto:
+# PBX-NG · stack Docker completo. Perfiles (profiles) para instalar separado o junto:
 #   core  -> postgres, redis, asterisk, api, dashboard
 #   sbc   -> kamailio, rtpengine
 #   media -> coturn
 #   ai    -> voz (TTS/STT)
 #   proxy -> nginx-proxy-manager
-# Uso:  docker compose --profile core --profile sbc up -d   (o usar install.sh)
+# Uso:  docker compose --profile core --profile sbc up -d --build   (o usar install.sh)
+#
+# NOTA: asterisk/kamailio/coturn usan network_mode: host (SIP/RTP necesitan la red
+# real). Para que alcancen a Postgres, éste publica 5432 en el host; por eso
+# DB_HOST para esos servicios es la IP del host (o 127.0.0.1 en single-node).
 name: pbxng
+
 networks:
   pbxng:
     driver: bridge
+
 volumes:
   pg_data:
   redis_data:
@@ -29,6 +34,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
     volumes:
       - pg_data:/var/lib/postgresql/data
+      - ./config/initdb:/docker-entrypoint-initdb.d:ro   # esquema realtime + app (primer arranque)
+    ports: ["5432:5432"]                                  # host-net asterisk/kamailio alcanzan la DB
     networks: [pbxng]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
@@ -41,46 +48,61 @@ services:
     profiles: ["core"]
     restart: unless-stopped
     volumes: [redis_data:/data]
+    ports: ["6379:6379"]
     networks: [pbxng]
 
   asterisk:
-    build: ./images/asterisk          # Asterisk 22 LTS + res_config_pgsql
+    build:
+      context: .
+      dockerfile: images/asterisk/Dockerfile
     image: pbxng/asterisk:22
     profiles: ["core"]
     restart: unless-stopped
-    network_mode: host                # SIP/RTP necesitan red del host
+    network_mode: host                 # SIP/RTP necesitan red del host
     depends_on:
       postgres: { condition: service_healthy }
     environment:
       DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-pbxng}
       DB_USER: ${DB_USER:-pbxng}
-      DB_PASS: ${DB_PASS}
+      DB_PASS: ${DB_PASS:?}
+      ARI_USER: ${ARI_USER:-pbxng}
+      ARI_PASS: ${ARI_PASS:?set ARI_PASS in .env}
+      AMI_USER: ${AMI_USER:-pbxng-ami}
+      AMI_PASS: ${AMI_PASS:?set AMI_PASS in .env}
+      DOMAIN: ${DOMAIN:-pbx.local}
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
-      - ./config/asterisk:/etc/asterisk/pbxng
 
   api:
-    build: ../control-plane           # Node/Express ARI+AMI
+    build: ../control-plane
     image: pbxng/api
     profiles: ["core"]
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
     environment:
-      PGHOST: postgres
-      PGDATABASE: ${DB_NAME:-pbxng}
-      PGUSER: ${DB_USER:-pbxng}
-      PGPASSWORD: ${DB_PASS}
-      ARI_URL: http://${ASTERISK_HOST:-asterisk}:8088
-      AST_AGENT: http://${ASTERISK_HOST:-asterisk}:8092
-      TURN_AGENT: http://coturn-agent:8091
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS:?}
+      ARI_URL: http://${ASTERISK_HOST:-127.0.0.1}:8088
+      ARI_USER: ${ARI_USER:-pbxng}
+      ARI_PASS: ${ARI_PASS:?}
+      AMI_HOST: ${ASTERISK_HOST:-127.0.0.1}
+      AMI_PORT: 5038
+      AMI_USER: ${AMI_USER:-pbxng-ami}
+      AMI_PASS: ${AMI_PASS:?}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      TENANT_MODE: ${TENANT_MODE:-single}
     ports: ["3000:3000"]
     networks: [pbxng]
 
   dashboard:
-    build: ../dashboard               # Next.js
+    build: ../dashboard
     image: pbxng/dashboard
     profiles: ["core"]
     restart: unless-stopped
@@ -91,17 +113,22 @@ services:
     networks: [pbxng]
 
   kamailio:
-    build: ./images/kamailio          # Kamailio 5.6 + modulos SBC
+    build:
+      context: .
+      dockerfile: images/kamailio/Dockerfile
     image: pbxng/kamailio:5.6
     profiles: ["sbc"]
     restart: unless-stopped
     network_mode: host
-    depends_on:
-      postgres: { condition: service_healthy }
-    volumes:
-      - ./config/kamailio:/etc/kamailio
     environment:
-      DB_URL: postgres://${DB_USER:-pbxng}:${DB_PASS}@${DB_HOST:-127.0.0.1}/${DB_NAME:-pbxng}
+      DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS:?}
+      ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+      TRUSTED_NET: ${TRUSTED_NET:-}
 
   rtpengine:
     image: drachtio/rtpengine:latest
@@ -111,15 +138,25 @@ services:
     command: ["rtpengine", "--interface", "${PUBLIC_IP:-127.0.0.1}", "--listen-ng", "127.0.0.1:2223", "--port-min", "30000", "--port-max", "40000"]
 
   coturn:
-    image: coturn/coturn:latest
+    build:
+      context: .
+      dockerfile: images/coturn/Dockerfile
+    image: pbxng/coturn
     profiles: ["media"]
     restart: unless-stopped
     network_mode: host
-    volumes:
-      - ./config/coturn/turnserver.conf:/etc/turnserver.conf:ro
+    environment:
+      DOMAIN: ${DOMAIN:-pbx.local}
+      TURN_REALM: ${TURN_REALM:-${DOMAIN:-pbx.local}}
+      TURN_USER: ${TURN_USER:-pbxng}
+      TURN_PASS: ${TURN_PASS:-pbxng-turn-changeme}
+      TURN_CLI_PASS: ${TURN_CLI_PASS:-pbxng-cli}
+      PUBLIC_IP: ${PUBLIC_IP:-}
 
   voz:
-    build: ./images/voz               # Piper TTS + faster-whisper
+    build:
+      context: ../voice-service
+      dockerfile: ../docker/images/voz/Dockerfile
     image: pbxng/voz
     profiles: ["ai"]
     restart: unless-stopped

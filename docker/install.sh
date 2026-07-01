@@ -105,6 +105,11 @@ if [[ ! -f .env ]]; then
   cp -n .env.example .env 2>/dev/null || cp .env.example .env
   sed -i "s|^DB_PASS=.*|DB_PASS=$DB_PASS|; s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|; s|^DOMAIN=.*|DOMAIN=$DOMAIN|; s|^PUBLIC_IP=.*|PUBLIC_IP=$PUBLIC_IP|" .env
   grep -q "^TENANT_MODE=" .env && sed -i "s|^TENANT_MODE=.*|TENANT_MODE=$TENANT_MODE|" .env || echo "TENANT_MODE=$TENANT_MODE" >> .env
+  HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}'); HOST_IP="${HOST_IP:-127.0.0.1}"
+  for kv in "DB_HOST=$HOST_IP" "ASTERISK_HOST=$HOST_IP" "ARI_USER=pbxng" "AMI_USER=pbxng-ami" \
+            "ARI_PASS=$(openssl rand -hex 8)" "AMI_PASS=$(openssl rand -hex 8)" "TURN_PASS=$(openssl rand -hex 8)"; do
+    k="${kv%%=*}"; grep -q "^$k=" .env && sed -i "s|^$k=.*|$kv|" .env || echo "$kv" >> .env
+  done
   g "  .env creado (secretos generados automaticamente)."
 else
   y "3) Usando .env existente (borralo para reconfigurar)."

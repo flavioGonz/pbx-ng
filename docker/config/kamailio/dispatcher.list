@@ -1,0 +1,4 @@
+# setid destino flags prioridad
+1 sip:@@ASTERISK_IP@@:5060 0 0
+2 sip:190.64.60.10:5060 8 0
+2 sip:190.64.60.17:5060 8 0
