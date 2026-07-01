@@ -23,7 +23,7 @@ const fmtDur = (s) => { s = s || 0; const m = Math.floor(s / 60); return m ? m +
 const dispEs = (d) => ({ ANSWERED: 'Atendida', 'NO ANSWER': 'Sin respuesta', BUSY: 'Ocupado', FAILED: 'Fallida' }[d] || d || '—');
 
 export default function Mapa() {
-  const scheme = useComputedColorScheme('light');
+  const scheme = useComputedColorScheme('dark');
   const mapEl = useRef(null); const map = useRef(null); const layer = useRef(null); const L = useRef(null); const tileRef = useRef(null);
   const [hours, setHours] = useState('168'); const [pts, setPts] = useState([]); const [cdr, setCdr] = useState([]); const [ready, setReady] = useState(false);
   const [sel, setSel] = useState(null);

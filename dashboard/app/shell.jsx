@@ -81,7 +81,7 @@ export default function Shell({ children }) {
   const { connected } = useLive();
   const { user } = useAuth();
   const { setColorScheme } = useMantineColorScheme();
-  const scheme = useComputedColorScheme('light');
+  const scheme = useComputedColorScheme('dark');
   const toggleScheme = () => setColorScheme(scheme === 'dark' ? 'light' : 'dark');
 
   const navItem = (it) => {
