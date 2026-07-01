@@ -23,7 +23,7 @@ SET row_security = off;
 --
 
 COPY public.version (id, table_name, table_version) FROM stdin;
-1	uacreg	4
+1	uacreg	5
 2	secfilter	1
 3	dr_gateways	3
 4	dr_rules	3
