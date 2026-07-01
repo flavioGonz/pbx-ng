@@ -109,7 +109,7 @@ services:
     restart: unless-stopped
     depends_on: [api]
     environment:
-      BACKEND_URL: http://api:3000
+      API_URL: http://api:3000
     ports: ["3001:3001"]
     networks: [pbxng]
 
