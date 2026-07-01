@@ -34,7 +34,7 @@ RUN make menuselect.makeopts \
        --disable BUILD_NATIVE \
        menuselect.makeopts
 
-RUN make -j"$(nproc)" && make install && make install-headers
+RUN make -j2 && make install && make install-headers
 
 # ---------- runtime ----------
 FROM debian:12-slim

@@ -312,6 +312,11 @@ EOF
   # levantar los perfiles de este rol
   local args=""
   for p in $profiles; do args="$args --profile $p"; done
+  # compilar asterisk SOLO primero (evita OOM por builds en paralelo)
+  if [[ " $profiles " == *" core "* ]]; then
+    pct exec "$ctid" -- bash -lc "cd /opt/pbx-ng/docker && docker compose build asterisk" \
+      || y "   (build de asterisk con warnings)"
+  fi
   pct exec "$ctid" -- bash -lc "cd /opt/pbx-ng/docker && docker compose $args up -d --build" \
     || y "   (algunos servicios pueden tardar en construir; revisá con 'docker compose ps')"
   g "   CT $ctid aprovisionado."
