@@ -61,6 +61,7 @@ for row in "${NODE_ROWS[@]}"; do
 done
 BEST_NODE="${NODES[0]}"   # el de mas RAM libre
 NEXTID=$(pvesh get /cluster/nextid 2>/dev/null || echo 200)
+LOCAL_NODE=$(hostname -s)
 echo
 
 # recomienda el nodo con mas RAM libre entre los online
@@ -150,19 +151,16 @@ res_for(){
 }
 
 # ---------- 4) planificar: VMID, nodo, recursos por rol ----------
-c "4) Ubicación de cada componente (Enter = recomendado)"
+c "4) Recursos por componente (todos los CTs se crean en este nodo: $LOCAL_NODE)"
 declare -A ROLE_ID ROLE_NODE ROLE_CORES ROLE_RAM ROLE_DISK ROLE_IP
 id=$NEXTID; idx=0
 for role in "${ROLES[@]}"; do
   read -r rc rm rd <<<"$(res_for "$role")"
-  rec_node=$(recommend_node)
   echo
   y "   • ${role}  — ${ROLE_DESC[$role]}"
   echo "     perfiles: ${ROLE_PROFILES[$role]}   recursos: ${rc} vCPU / ${rm} MB / ${rd} GB"
-  node=$(ask "     Nodo destino" "$rec_node")
-  [[ -n "${NODE_FREE[$node]:-}" ]] || die "Nodo '$node' no existe o no está online."
   ROLE_ID[$role]=$id
-  ROLE_NODE[$role]=$node
+  ROLE_NODE[$role]="$LOCAL_NODE"
   ROLE_CORES[$role]=$rc; ROLE_RAM[$role]=$rm; ROLE_DISK[$role]=$rd
   if [[ "$NET_MODE" == "static" ]]; then
     base_last="${STATIC_BASE##*.}"; base_net="${STATIC_BASE%.*}"
@@ -217,8 +215,7 @@ create_ct(){
     --rootfs "${STORAGE}:${ROLE_DISK[$role]}" \
     --net0 "$net" \
     --features nesting=1,keyctl=1 \
-    --unprivileged 1 --onboot 1 --start 1 \
-    --node "$node" >/dev/null
+    --unprivileged 1 --onboot 1 --start 1 >/dev/null
   # esperar arranque + IP
   local ip="" tries=0
   while [[ -z "$ip" && $tries -lt 30 ]]; do
