@@ -333,6 +333,7 @@ def main():
         cu.execute("CREATE TABLE IF NOT EXISTS pbxng_sbc_routes (id serial PRIMARY KEY, dest text, gw text, dev text, note text, created_at timestamptz DEFAULT now())")
         cu.execute("CREATE TABLE IF NOT EXISTS pbxng_sip_capture (id bigserial PRIMARY KEY, ts timestamptz DEFAULT now(), host text, src text, dst text, method text, status int, callid text, cseq text, from_uri text, to_uri text, ruri text, raw text)")
         cu.execute("CREATE TABLE IF NOT EXISTS pbxng_settings (key text PRIMARY KEY, value text)")
+        cu.execute("INSERT INTO pbxng_sbc (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
         c.commit(); cu.close(); c.close()
     except Exception as e:
         print('alter err', e, flush=True)
