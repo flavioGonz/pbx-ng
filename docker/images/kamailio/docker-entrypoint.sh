@@ -32,4 +32,7 @@ for i in $(seq 1 30); do
   echo "esperando Postgres ${DB_HOST}:${DB_PORT} ($i)…"; sleep 2
 done
 
+# agente SBC: reporta estado kamailio/rtpengine a la DB y procesa comandos
+python3 /usr/local/bin/pbxng-sbc-agent.py &
+
 exec "$@"

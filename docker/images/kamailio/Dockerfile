@@ -3,6 +3,7 @@ FROM debian:12-slim
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates gnupg wget iproute2 gettext-base postgresql-client \
+      python3 python3-psycopg2 tcpdump \
     && wget -qO- https://deb.kamailio.org/kamailiodebkey.gpg | gpg --dearmor > /usr/share/keyrings/kamailio.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/kamailio.gpg] http://deb.kamailio.org/kamailio56 bookworm main" > /etc/apt/sources.list.d/kamailio.list \
     && apt-get update && apt-get install -y --no-install-recommends \
@@ -11,7 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY config/kamailio/ /etc/kamailio/
 COPY images/kamailio/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY images/kamailio/pbxng-sbc-agent.py /usr/local/bin/pbxng-sbc-agent.py
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/pbxng-sbc-agent.py
 EXPOSE 5060/udp 5060/tcp 8088/tcp
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["kamailio", "-DD", "-E", "-m", "64", "-M", "8"]
