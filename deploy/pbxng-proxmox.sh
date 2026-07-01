@@ -138,7 +138,11 @@ if [[ "$NET_MODE" == "static" ]]; then
   STATIC_BASE=$(ask "IP base (se asigna secuencial /24, ej 192.168.1.50)" "192.168.1.50")
 fi
 TEMPLATE=$(ask "Plantilla LXC" "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst")
-STORAGE=$(ask "Storage para discos" "local-lvm")
+while :; do
+  STORAGE=$(ask "Storage/pool para discos (nombre, ej. local-lvm)" "local-lvm")
+  if pvesm status 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$STORAGE"; then break; fi
+  r "  Storage '$STORAGE' no existe. Disponibles: $(pvesm status 2>/dev/null | awk 'NR>1{print $1}' | paste -sd, -)"
+done
 echo
 
 # recursos por rol, derivados de los PERFILES que agrupa (cores/RAM MB/disco GB)
