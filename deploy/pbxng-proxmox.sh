@@ -49,7 +49,7 @@ import sys,json
 for n in json.load(sys.stdin):
     if n.get("status")!="online": continue
     free=(n.get("maxmem",0)-n.get("mem",0))//(1024*1024)
-    print(f"{n[\"node\"]} {free} {n.get(\"maxcpu\",0)}")
+    print(f"{n['node']} {free} {n.get('maxcpu',0)}")
 ' | sort -k2 -nr)
 [[ ${#NODE_ROWS[@]} -gt 0 ]] || die "No pude listar nodos online."
 NODES=(); declare -A NODE_FREE
