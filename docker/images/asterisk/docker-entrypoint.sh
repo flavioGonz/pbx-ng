@@ -76,4 +76,10 @@ done
 # --- resolver la URL de la API en el dialplan (wake webhook, etc.) ---
 sed -i "s|@@API_URL@@|${API_URL:-127.0.0.1:3000}|g" /etc/asterisk/extensions.conf 2>/dev/null || true
 
+# --- agente HTTP PBX-NG (:8092) en background ---
+# El script no usa token (la API le manda X-PBXNG-Token pero el agente no lo valida).
+# Se arranca antes de Asterisk; las llamadas a "asterisk -rx" responderan vacio
+# hasta que el core este arriba, sin romper el arranque.
+python3 /usr/local/bin/pbxng-ast-agent.py &
+
 exec "$@"

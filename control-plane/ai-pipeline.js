@@ -18,7 +18,7 @@ const BARGE_MS = 280;                 // ms de voz sostenida para cortar TTS
 const SPEECH_RMS = 500;               // umbral de voz para VAD
 const END_SILENCE_MS = 750;           // silencio que cierra una frase
 
-let ARI = null, POOL = null, APP = 'pbxng', MEDIA_HOST = '172.26.20.185';
+let ARI = null, POOL = null, APP = 'pbxng', MEDIA_HOST = process.env.MEDIA_HOST || '127.0.0.1';
 const sessions = new Map();           // uuid -> session
 const pendingByUuid = new Map();      // uuid -> session (antes de conectar AudioSocket)
 
@@ -360,7 +360,7 @@ async function startAiSession(channel, agent) {
   if (!ARI) { try { await channel.hangup(); } catch (_) {} return; }
   const uuid = crypto.randomUUID();
   const keys = { openai: await getSetting('openai_api_key') };
-  const vozUrl = (await getSetting('voz_url')) || 'http://172.26.20.219:8080';
+  const vozUrl = (await getSetting('voz_url')) || (process.env.VOZ_HOST ? 'http://' + process.env.VOZ_HOST + ':8080' : 'http://127.0.0.1:8080');
   const vozSpeed = (await getSetting('voz_length_scale')) || '1.0';
   const useOpenAI = (agent.provider === 'openai') && !!keys.openai;
   const session = {

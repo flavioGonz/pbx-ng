@@ -67,17 +67,32 @@ async function geoLookup(ips) {
 
 const CFG = {
   port: process.env.PORT || 3000,
-  db: { host: process.env.DB_HOST || '172.26.20.184', port: +(process.env.DB_PORT || 5432), database: process.env.DB_NAME || 'pbxng', user: process.env.DB_USER || 'pbxng', password: process.env.DB_PASS || '__SET_DB_PASS__' },
-  ari: { url: process.env.ARI_URL || 'http://172.26.20.183:8088', user: process.env.ARI_USER || 'pbxng', pass: process.env.ARI_PASS || '__SET_ARI_PASS__', app: process.env.ARI_APP || 'pbxng' },
-  ami: { host: process.env.AMI_HOST || '172.26.20.183', port: +(process.env.AMI_PORT || 5038), user: process.env.AMI_USER || 'pbxng-ami', pass: process.env.AMI_PASS || '__SET_AMI_PASS__' },
+  db: { host: process.env.DB_HOST || '127.0.0.1', port: +(process.env.DB_PORT || 5432), database: process.env.DB_NAME || 'pbxng', user: process.env.DB_USER || 'pbxng', password: process.env.DB_PASS || '__SET_DB_PASS__' },
+  ari: { url: process.env.ARI_URL || 'http://127.0.0.1:8088', user: process.env.ARI_USER || 'pbxng', pass: process.env.ARI_PASS || '__SET_ARI_PASS__', app: process.env.ARI_APP || 'pbxng' },
+  ami: { host: process.env.AMI_HOST || '127.0.0.1', port: +(process.env.AMI_PORT || 5038), user: process.env.AMI_USER || 'pbxng-ami', pass: process.env.AMI_PASS || '__SET_AMI_PASS__' },
 };
+
+// Direcciones de los nodos del despliegue (parametrizables por env; sin hardcodear el lab viejo)
+const NODES = {
+  asterisk: process.env.ASTERISK_HOST || process.env.AMI_HOST || '127.0.0.1',
+  db:       process.env.DB_HOST || '127.0.0.1',
+  sbc:      process.env.SBC_HOST || '',
+  npm:      process.env.NPM_HOST || '',
+  turn:     process.env.TURN_HOST || process.env.PUBLIC_IP || '',
+  voz:      process.env.VOZ_HOST || '',
+  media:    process.env.MEDIA_HOST || process.env.ASTERISK_HOST || '127.0.0.1',
+  domain:   process.env.DOMAIN || process.env.PUBLIC_IP || '',
+  public_ip: process.env.PUBLIC_IP || process.env.DOMAIN || '',
+};
+// VM_AGENT se define aca (arriba de su primer uso en los fetch de grabaciones/vm)
+const VM_AGENT = process.env.VM_AGENT || ('http://' + NODES.asterisk + ':8089');
 const pool = new Pool(CFG.db);
 const app = express();
 const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
 app.use(express.json());
 const state = { ari: false, ami: false };
 let ari = null;
-(async () => { try { ari = await AriClient.connect(CFG.ari.url, CFG.ari.user, CFG.ari.pass); await ari.start(CFG.ari.app); state.ari = true; console.log('[ARI] ok'); try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: '172.26.20.185' }); } catch (e) { console.error('[AI] init', e.message); } } catch (e) { console.error('[ARI]', e.message); } })();
+(async () => { try { ari = await AriClient.connect(CFG.ari.url, CFG.ari.user, CFG.ari.pass); await ari.start(CFG.ari.app); state.ari = true; console.log('[ARI] ok'); try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { console.error('[AI] init', e.message); } } catch (e) { console.error('[ARI]', e.message); } })();
 const pendingConf = {};
 (function wireStasis() {
   const tryWire = () => {
@@ -188,7 +203,7 @@ async function getExtensions() {
   const viaMap = {};
   try {
     const { rows: cc } = await pool.query("SELECT endpoint, uri, via_addr, via_port FROM ps_contacts");
-    const SBC = '172.26.20.205', NPM = '172.26.20.17';
+    const SBC = NODES.sbc, NPM = NODES.npm;
     const pmap = { '1': 'udp', '2': 'tcp', '3': 'tls', '4': 'sctp', '5': 'ws', '6': 'wss' };
     for (const c of cc) {
       const uri = c.uri || '';
@@ -237,6 +252,7 @@ function auth(req, res, next) {
 const PUBLIC_API = [
   ['POST', /^\/api\/auth\/login$/],
   ['GET',  /^\/api\/auth\/setup$/],
+  ['GET',  /^\/api\/ice$/],
   ['GET',  /^\/api\/branding$/],
   ['GET',  /^\/api\/enroll\/[^/]+$/],
   ['GET',  /^\/api\/recordings\/[^/]+\/(audio|peaks|transcript)$/],
@@ -269,6 +285,19 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Estado de setup (publico): si el admin sigue con la clave por defecto, el login lo sugiere
+// ICE/TURN para el softphone WebRTC: se arma con el dominio y las credenciales de coturn (no hardcodear)
+app.get('/api/ice', (req, res) => {
+  const domain = process.env.PUBLIC_IP || process.env.DOMAIN || '';
+  const tuser = process.env.TURN_USER || 'pbxng';
+  const tpass = process.env.TURN_PASS || '';
+  const stun = process.env.STUN_URL || 'stun:stun.l.google.com:19302';
+  const ice = [{ urls: stun }];
+  if (domain && tpass) {
+    ice.push({ urls: 'turn:' + domain + ':3478?transport=udp', username: tuser, credential: tpass });
+    ice.push({ urls: 'turn:' + domain + ':3478?transport=tcp', username: tuser, credential: tpass });
+  }
+  res.json({ iceServers: ice });
+});
 app.get('/api/auth/setup', async (req, res) => {
   try { const { rows } = await pool.query("SELECT must_change FROM pbxng_users WHERE username='admin'"); res.json({ defaultAdmin: !!(rows[0] && rows[0].must_change), user: 'admin' }); }
   catch (e) { res.json({ defaultAdmin: false }); }
@@ -297,6 +326,15 @@ pool.query("ALTER TABLE pbxng_users ADD COLUMN IF NOT EXISTS must_change boolean
     console.log("[BOOTSTRAP] usuario 'admin' creado (clave por defecto: '" + pass + "') - cambiala en el primer ingreso");
   }
 }).catch(e => console.error('[BOOTSTRAP] admin', e.message));
+// --- Empresa (tenant) por defecto si no existe ninguna ---
+pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
+  if (rows[0].n === 0) {
+    const name = process.env.DEFAULT_COMPANY || 'Mi Empresa';
+    await pool.query("INSERT INTO tenants (id,name,slug,context_prefix,active) VALUES (1,$1,'default','',true) ON CONFLICT (id) DO NOTHING", [name]);
+    await pool.query("SELECT setval('tenants_id_seq', (SELECT GREATEST(COALESCE(MAX(id),1),1) FROM tenants))");
+    console.log('[BOOTSTRAP] empresa por defecto creada: ' + name);
+  }
+}).catch(e => console.error('[BOOTSTRAP] tenant', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_enroll (token text PRIMARY KEY, ext text, password text, label text, created_at timestamptz DEFAULT now(), expires_at timestamptz, used_at timestamptz)").catch(e => console.error('[ENROLL] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban (jail text PRIMARY KEY, banned jsonb DEFAULT '[]', total_failed int DEFAULT 0, total_banned int DEFAULT 0, updated_at timestamptz DEFAULT now())").catch(e => console.error('[F2B] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban_cmd (id serial PRIMARY KEY, cmd text, ip text, jail text, created_at timestamptz DEFAULT now(), done_at timestamptz)").catch(e => console.error('[F2B] cmd', e.message));
@@ -326,7 +364,7 @@ app.get('/api/enroll/:token', async (req, res) => {
     if (!e) return res.status(404).json({ error: 'token invalido' });
     if (e.expires_at && new Date(e.expires_at) < new Date()) return res.status(410).json({ error: 'token expirado' });
     await pool.query('UPDATE pbxng_enroll SET used_at=COALESCE(used_at, now()) WHERE token=$1', [req.params.token]);
-    res.json({ ext: e.ext, password: e.password, server: 'pbx.ies.com.uy' });
+    res.json({ ext: e.ext, password: e.password, server: NODES.domain });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -334,7 +372,7 @@ app.get('/api/recordings/:id/audio', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT filename FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
     if (!rows[0]) return res.status(404).end();
-    const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
+    const r = await fetch(VM_AGENT + '/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
     if (!r.ok) return res.status(502).end();
     res.set('Content-Type', 'audio/wav');
     res.set('Content-Disposition', 'inline; filename="' + rows[0].filename + '"');
@@ -387,7 +425,7 @@ function analyzeText(text, durSec) {
 async function doTranscribe(id) {
   const { rows } = await pool.query('SELECT filename, duration FROM pbxng_recordings WHERE id=$1 AND deleted=false', [id]);
   if (!rows[0]) throw new Error('grabacion no existe');
-  const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
+  const r = await fetch(VM_AGENT + '/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
   if (!r.ok) throw new Error('audio no disponible');
   const wav = Buffer.from(await r.arrayBuffer());
   const pc = wavToPcm(wav);
@@ -422,7 +460,7 @@ app.get('/api/recordings/:id/peaks', async (req, res) => {
     const { rows } = await pool.query('SELECT filename, peaks FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'no existe' });
     if (rows[0].peaks) return res.json(rows[0].peaks);
-    const r = await fetch('http://172.26.20.183:8089/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
+    const r = await fetch(VM_AGENT + '/' + encodeURIComponent(rows[0].filename), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
     if (!r.ok) return res.json({ peaks: [], silent: true });
     const pc = wavToPcm(Buffer.from(await r.arrayBuffer()));
     if (!pc) return res.json({ peaks: [], silent: true });
@@ -631,7 +669,7 @@ async function serveProv(req, res, file) {
     const { rows } = await pool.query('SELECT * FROM pbxng_phones WHERE mac=$1', [mac]);
     const ph = rows[0]; if (!ph) return res.status(404).type('text/plain').send('not provisioned');
     pool.query('UPDATE pbxng_phones SET last_seen=now() WHERE id=$1', [ph.id]).catch(() => {});
-    const server = await getProvSetting('prov_sip_server', '172.26.20.183');
+    const server = await getProvSetting('prov_sip_server', NODES.asterisk);
     const port = await getProvSetting('prov_sip_port', '5060');
     if (vendor === 'yealink') res.type('text/plain').send(yealinkCfg(ph, server, port));
     else res.type('application/xml').send(grandstreamXml(ph, server, port));
@@ -650,7 +688,6 @@ app.post('/api/geo/report', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-const VM_AGENT = 'http://172.26.20.183:8089';
 app.get('/api/vm', async (req, res) => {
   try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(req.query.ext || ''), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); res.json(await r.json()); }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -811,7 +848,7 @@ app.post('/api/enroll/email', async (req, res) => {
     const token = crypto.randomBytes(18).toString('hex');
     await c.query("INSERT INTO pbxng_enroll (token,ext,password,expires_at) VALUES ($1,$2,$3, now() + interval '24 hours')", [token, String(ext), password]);
     await c.query('COMMIT');
-    const url = 'https://pbx.ies.com.uy/enroll?token=' + token;
+    const url = (NODES.domain ? 'https://' + NODES.domain : '') + '/enroll?token=' + token;
     const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenant_id]);
     const cfg = rows[0];
     if (!cfg || !cfg.enabled || !cfg.host) return res.status(400).json({ error: 'Configurá y activá el email de la empresa en Configuración' });
@@ -855,14 +892,14 @@ app.delete('/api/phones/:id', async (req, res) => { try { await pool.query('DELE
 app.get('/api/voz', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='voz_url'");
-    const url = (rows[0] && rows[0].value) || 'http://172.26.20.219:8080';
+    const url = (rows[0] && rows[0].value) || (NODES.voz ? 'http://' + NODES.voz + ':8080' : 'http://127.0.0.1:8080');
     const t = Date.now();
     const r = await fetch(url + '/health', { signal: AbortSignal.timeout(4000) });
     const h = await r.json();
     res.json({ ok: true, url, latency_ms: Date.now() - t, ...h });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
-async function vozBase() { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='voz_url'"); return (rows[0] && rows[0].value) || 'http://172.26.20.219:8080'; }
+async function vozBase() { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='voz_url'"); return (rows[0] && rows[0].value) || (NODES.voz ? 'http://' + NODES.voz + ':8080' : 'http://127.0.0.1:8080'); }
 async function vozFwd(method, path, body, ms) { const u = await vozBase(); const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); const r = await fetch(u + path, opt); return r; }
 app.get('/api/voz/logs', async (req, res) => { try { const r = await vozFwd('GET', '/admin/logs'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/voz/restart', async (req, res) => { try { const r = await vozFwd('POST', '/admin/restart', {}); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -874,7 +911,7 @@ app.post('/api/voz/config', async (req, res) => { try { const r = await vozFwd('
 app.post('/api/voz/test', async (req, res) => { try { const u = await vozBase(); const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: (req.body && req.body.text) || 'Hola, esta es una prueba de la voz seleccionada.', voice: req.body && req.body.voice, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(20000) }); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // --- TURN / Coturn (agente CT106) ---
-const TURN_BASE = process.env.TURN_AGENT || 'http://172.26.20.204:8091';
+const TURN_BASE = process.env.TURN_AGENT || (NODES.turn ? 'http://' + NODES.turn + ':8091' : 'http://127.0.0.1:8091');
 async function turnFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); return fetch(TURN_BASE + path, opt); }
 app.get('/api/turn', async (req, res) => { try { const r = await turnFwd('GET', '/health'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/turn/config', async (req, res) => { try { const r = await turnFwd('GET', '/config'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -888,13 +925,13 @@ let _npmCertCache = null;
 async function npmCertInfo() {
   if (_npmCertCache && Date.now() - _npmCertCache.t < 1800000) return _npmCertCache.d;
   const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; };
-  const url = (await g('npm_url')) || 'http://172.26.20.17:81';
+  const url = (await g('npm_url')) || (NODES.npm ? 'http://' + NODES.npm + ':81' : '');
   const id = await g('npm_identity'); const sec = await g('npm_secret');
   if (!id || !sec) return { error: 'npm-creds-missing' };
   const tk = await fetch(url + '/api/tokens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity: id, secret: sec }), signal: AbortSignal.timeout(8000) }).then((r) => r.json());
   if (!tk.token) return { error: 'npm-auth-failed' };
   const certs = await fetch(url + '/api/nginx/certificates', { headers: { Authorization: 'Bearer ' + tk.token }, signal: AbortSignal.timeout(8000) }).then((r) => r.json());
-  const dom = 'pbx.ies.com.uy';
+  const dom = NODES.domain;
   const c = (Array.isArray(certs) ? certs : []).find((x) => (x.domain_names || []).includes(dom));
   const d = c ? { domain: dom, expires_on: c.expires_on, days_left: Math.round((new Date(c.expires_on).getTime() - Date.now()) / 86400000) } : { error: 'cert-not-found' };
   _npmCertCache = { t: Date.now(), d };
@@ -903,7 +940,7 @@ async function npmCertInfo() {
 app.get('/api/npm/cert', async (req, res) => { try { res.json(await npmCertInfo()); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // --- Asterisk core agent (CT103) ---
-const AST_AGENT = process.env.AST_AGENT || 'http://172.26.20.183:8092';
+const AST_AGENT = process.env.AST_AGENT || ('http://' + NODES.asterisk + ':8092');
 async function astFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); return fetch(AST_AGENT + path, opt); }
 app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd('GET', '/core'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -935,7 +972,7 @@ app.get('/api/asterisk/sbc-trunk', async (req, res) => {
 app.post('/api/asterisk/sbc-trunk', async (req, res) => {
   try {
     const b = req.body || {};
-    const ip = (b.sbc_ip || '172.26.20.205').trim();
+    const ip = (b.sbc_ip || NODES.sbc).trim();
     const port = +b.sbc_port || 5060;
     const ctx = (b.context || 'from-trunk').trim();
     const codecs = (Array.isArray(b.codecs) && b.codecs.length ? b.codecs : ['ulaw', 'alaw', 'g722']).join(',');
@@ -1224,16 +1261,26 @@ app.get('/api/system', async (req, res) => {
     { group: 'Datos', name: 'CDR', detail: 'cdr_pgsql', status: has('cdr_pgsql\\.so') ? 'ok' : 'off' },
     { group: 'Transporte', name: 'SIP UDP 5060', detail: 'telefonos / softphones', status: /udp/i.test(transports) ? 'ok' : 'off' },
     { group: 'Transporte', name: 'ARI / AMI', detail: 'control plane (LAN)', status: state.ari && state.ami ? 'ok' : 'down' },
-    { group: 'WebRTC', name: 'Transporte WebSocket (ws)', detail: 'pbx.ies.com.uy/ws', status: wss ? 'ok' : 'off' },
-    { group: 'WebRTC', name: 'WSS + certificado (NPM/LE)', detail: 'pbx.ies.com.uy', status: 'ok' },
+    { group: 'WebRTC', name: 'Transporte WebSocket (ws)', detail: (NODES.domain + '/ws'), status: wss ? 'ok' : 'off' },
+    { group: 'WebRTC', name: 'WSS + certificado (NPM/LE)', detail: NODES.domain, status: 'ok' },
     { group: 'WebRTC', name: 'STUN', detail: 'stun.l.google.com:19302', status: 'ok' },
-    { group: 'WebRTC', name: 'TURN (Coturn)', detail: 'CT 172.26.20.204 - forward publico activo', status: 'ok' },
-    { group: 'Escalado', name: 'SBC de borde (Kamailio)', detail: 'CT 172.26.20.205 - dispatcher a Asterisk', status: 'ok' },
+    { group: 'WebRTC', name: 'TURN (Coturn)', detail: ('TURN ' + (NODES.turn||'-')), status: 'ok' },
+    { group: 'Escalado', name: 'SBC de borde (Kamailio)', detail: ('SBC ' + (NODES.sbc||'-')), status: 'ok' },
     { group: 'Escalado', name: 'Relay de medios (rtpengine)', detail: 'userspace · ancla RTP en el borde', status: state.ami ? 'ok' : 'ok' },
     { group: 'Seguridad', name: 'Fail2Ban', detail: 'anti fuerza bruta PJSIP', status: 'ok' },
-    { group: 'Seguridad', name: 'Proxy inverso (NPM + LE)', detail: '172.26.20.17 - TLS', status: 'ok' },
+    { group: 'Seguridad', name: 'Proxy inverso (NPM + LE)', detail: ((NODES.npm||'-') + ' - TLS'), status: 'ok' },
   ];
   res.json({ asterisk: astVer, components: comps });
+});
+
+app.get('/api/topology', (req, res) => {
+  res.json({
+    domain: NODES.domain, public_ip: NODES.public_ip,
+    nodes: {
+      asterisk: NODES.asterisk, db: NODES.db, sbc: NODES.sbc,
+      npm: NODES.npm, turn: NODES.turn, voz: NODES.voz,
+    },
+  });
 });
 
 app.get('/api/extensions', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { res.status(500).json({ error: e.message }); } });

@@ -1,11 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-const ICE = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'turn:pbx.ies.com.uy:3478?transport=udp', username: 'pbxng', credential: '__SET_TURN_SECRET__' },
-  { urls: 'turn:pbx.ies.com.uy:3478?transport=tcp', username: 'pbxng', credential: '__SET_TURN_SECRET__' },
-];
+let ICE = [{ urls: 'stun:stun.l.google.com:19302' }];   // se completa desde /backend/api/ice al conectar
 const LS = 'pbxng_softphone';
 const HIST = 'pbxng_softphone_hist';
 
@@ -150,6 +146,7 @@ export function useSoftphone() {
     wantConnected.current = true;
     setReg('connecting');
     try {
+      try { const ir = await fetch('/backend/api/ice'); if (ir.ok) { const id = await ir.json(); if (id && Array.isArray(id.iceServers) && id.iceServers.length) ICE = id.iceServers; } } catch (_) {}
       const SIP = await import('sip.js');
       const { UserAgent, Registerer } = SIP;
       const uri = UserAgent.makeURI(`sip:${ext}@${location.hostname}`);

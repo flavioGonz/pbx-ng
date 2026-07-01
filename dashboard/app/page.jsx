@@ -49,6 +49,7 @@ function Bar({ label, value, total, color = 'pbx' }) {
 export default function Resumen() {
   const { snap, connected } = useLive();
   const [m, setM] = useState(null); const [sys, setSys] = useState(null); const [trunks, setTrunks] = useState([]);
+  const [topo, setTopo] = useState(null);
   const [hist, setHist] = useState({ cpu: [], mem: [] });
   const histRef = useRef({ cpu: [], mem: [] });
 
@@ -66,6 +67,7 @@ export default function Resumen() {
     };
     tick(); const t = setInterval(tick, 3000);
     fetch('/backend/api/system').then(r => r.json()).then(d => alive && setSys(d)).catch(() => {});
+    fetch('/backend/api/topology').then(r => r.json()).then(d => alive && setTopo(d)).catch(() => {});
     fetch('/backend/api/trunks').then(r => r.json()).then(d => alive && setTrunks(Array.isArray(d) ? d : [])).catch(() => {});
     const ts = setInterval(() => { fetch('/backend/api/trunks').then(r => r.json()).then(d => alive && setTrunks(Array.isArray(d) ? d : [])).catch(() => {}); }, 10000);
     return () => { alive = false; clearInterval(t); clearInterval(ts); };
@@ -83,11 +85,11 @@ export default function Resumen() {
 
   const comps = sys?.components || [];
   const svcList = [
-    { n: 'Asterisk (AMI/ARI)', ok: h.ari && h.ami, ip: '172.26.20.183' },
-    { n: 'Base de datos', ok: h.db, ip: '172.26.20.184' },
-    { n: 'SBC-NG', ok: true, ip: '172.26.20.205' },
-    { n: 'Turn-NG Server', ok: (comps.find(c => /TURN/i.test(c.name)) || {}).status !== 'down', ip: '172.26.20.204' },
-    { n: 'Proxy NPM (TLS/WSS)', ok: (comps.find(c => /Proxy/i.test(c.name)) || {}).status !== 'down', ip: '172.26.20.17' },
+    { n: 'Asterisk (AMI/ARI)', ok: h.ari && h.ami, ip: topo?.nodes?.asterisk || '-' },
+    { n: 'Base de datos', ok: h.db, ip: topo?.nodes?.db || '-' },
+    { n: 'SBC-NG', ok: true, ip: topo?.nodes?.sbc || '-' },
+    { n: 'Turn-NG Server', ok: (comps.find(c => /TURN/i.test(c.name)) || {}).status !== 'down', ip: topo?.nodes?.turn || '-' },
+    { n: 'Proxy NPM (TLS/WSS)', ok: (comps.find(c => /Proxy/i.test(c.name)) || {}).status !== 'down', ip: topo?.nodes?.npm || '-' },
   ];
 
   return (

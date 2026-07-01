@@ -14,7 +14,7 @@ const online = (t) => t && (Date.now() - new Date(t).getTime()) < 10 * 60 * 1000
 export default function Telefonos() {
   const [list, setList] = useState([]); const [opened, setOpened] = useState(false); const [form, setForm] = useState(empty); const [saving, setSaving] = useState(false);
   const [srv, setSrv] = useState(''); const [srvSaving, setSrvSaving] = useState(false);
-  const base = typeof window !== 'undefined' ? window.location.origin : 'https://pbx.ies.com.uy';
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
   async function load() { try { setList(await fetch('/backend/api/phones').then(r => r.json())); } catch (_) {} }
   async function loadSrv() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setSrv(s.prov_sip_server || ''); } catch (_) {} }
   useEffect(() => { load(); loadSrv(); const t = setInterval(load, 10000); return () => clearInterval(t); }, []);
@@ -48,7 +48,7 @@ export default function Telefonos() {
 
       <Card withBorder radius="lg" padding="md">
         <Group align="flex-end" gap="sm">
-          <TextInput label="Servidor SIP para los teléfonos" description="IP/host que se inyecta en la config (registro UDP/5060)" value={srv} onChange={e => setSrv(e.currentTarget.value)} placeholder="172.26.20.183" style={{ flex: 1, maxWidth: 360 }} leftSection={<IconServer2 size={15} />} />
+          <TextInput label="Servidor SIP para los teléfonos" description="IP/host que se inyecta en la config (registro UDP/5060)" value={srv} onChange={e => setSrv(e.currentTarget.value)} placeholder="ip-del-asterisk" style={{ flex: 1, maxWidth: 360 }} leftSection={<IconServer2 size={15} />} />
           <Button variant="light" leftSection={<IconDeviceFloppy size={16} />} loading={srvSaving} onClick={saveSrv}>Guardar</Button>
         </Group>
       </Card>

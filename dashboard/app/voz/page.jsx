@@ -27,7 +27,7 @@ const fmtUp = (s) => { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h 
 export default function VozConsole() {
   const [voz, setVoz] = useState(null); const [hist, setHist] = useState([]);
   const [voices, setVoices] = useState(null); const [cfg, setCfg] = useState({ whisper: 'small', default_voice: '', models: [] });
-  const [url, setUrl] = useState('http://172.26.20.219:8080'); const [speed, setSpeed] = useState('1.0');
+  const [url, setUrl] = useState(''); const [speed, setSpeed] = useState('1.0');
   const [logs, setLogs] = useState(''); const [busy, setBusy] = useState('');
   const [testText, setTestText] = useState('Hola, gracias por comunicarte con IES. ¿En qué puedo ayudarte?'); const [testVoice, setTestVoice] = useState(''); const audioRef = useRef(null);
   const [sp, setSp] = useState([]); const [spVoice, setSpVoice] = useState('es-UY-ValentinaNeural'); const [spProg, setSpProg] = useState(null); const [spFilter, setSpFilter] = useState(''); const spRef = useRef(null);

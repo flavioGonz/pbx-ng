@@ -16,7 +16,7 @@ export default function DbConsole() {
   return (
     <Stack gap="lg">
       <Card withBorder radius="md" padding="md">
-        <Group justify="space-between"><Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="cyan"><IconDatabase size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>PostgreSQL</Text><Text size="xs" c="dimmed">172.26.20.184 · {d.version || ''}</Text></div></Group><Group gap="xs"><Badge size="lg" variant="filled" color="teal" leftSection={<IconBolt size={12} />}>Operativa</Badge><Tooltip label="Refrescar"><ActionIcon variant="default" onClick={load}><IconRefresh size={16} /></ActionIcon></Tooltip></Group></Group>
+        <Group justify="space-between"><Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="cyan"><IconDatabase size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>PostgreSQL</Text><Text size="xs" c="dimmed">{d.version || ''}</Text></div></Group><Group gap="xs"><Badge size="lg" variant="filled" color="teal" leftSection={<IconBolt size={12} />}>Operativa</Badge><Tooltip label="Refrescar"><ActionIcon variant="default" onClick={load}><IconRefresh size={16} /></ActionIcon></Tooltip></Group></Group>
       </Card>
       <SimpleGrid cols={{ base: 2, sm: 4 }}>
         <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Tamaño</Text><Text fw={700} size="xl">{d.size || '-'}</Text></Card>

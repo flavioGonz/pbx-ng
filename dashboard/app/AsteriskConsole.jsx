@@ -12,7 +12,7 @@ export default function AsteriskConsole() {
   const { snap } = useLive();
   const [health, setHealth] = useState(null);
   const [core, setCore] = useState(null); const [net, setNet] = useState(null); const [f2b, setF2b] = useState(null);
-  const [exts, setExts] = useState([]); const [trunk, setTrunk] = useState(null); const [tf, setTf] = useState({ sbc_ip: '172.26.20.205', sbc_port: 5060, context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'] }); const [tbusy, setTbusy] = useState('');
+  const [exts, setExts] = useState([]); const [trunk, setTrunk] = useState(null); const [tf, setTf] = useState({ sbc_ip: '', sbc_port: 5060, context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'] }); const [tbusy, setTbusy] = useState('');
   async function load() { try { setHealth(await fetch('/backend/health').then((r) => r.json())); } catch (_) {} try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {}
     try { const tk = await fetch('/backend/api/asterisk/sbc-trunk').then((r) => r.json()); setTrunk(tk); if (tk && tk.exists) setTf((f) => ({ ...f, sbc_ip: (tk.identify && tk.identify.match) || f.sbc_ip, context: (tk.endpoint && tk.endpoint.context) || f.context, codecs: (tk.endpoint && tk.endpoint.allow) ? tk.endpoint.allow.split(',') : f.codecs })); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, []);
@@ -36,7 +36,7 @@ export default function AsteriskConsole() {
 
       <Tabs.Panel value="core">
         {!core ? <Center mih={360}><Stack align="center" gap="sm"><Loader size="lg" color="blue" /><Text c="dimmed" size="sm">Cargando estado de Asterisk…</Text></Stack></Center> : core.error ? <Card withBorder radius="md" padding="lg"><Text c="red" fw={600}>No se pudo contactar el agente de Asterisk (CT103:8092).</Text></Card> : <Stack gap="lg">
-          <Card withBorder radius="md" padding="md"><Group justify="space-between"><Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="blue"><IconServer2 size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>Asterisk PBX</Text><Text size="xs" c="dimmed">172.26.20.183 · {core.version}</Text></div></Group><Badge size="lg" variant="filled" color={amiUp ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{amiUp ? 'Operativo' : 'Sin AMI'}</Badge></Group></Card>
+          <Card withBorder radius="md" padding="md"><Group justify="space-between"><Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="blue"><IconServer2 size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>Asterisk PBX</Text><Text size="xs" c="dimmed">{core.version}</Text></div></Group><Badge size="lg" variant="filled" color={amiUp ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{amiUp ? 'Operativo' : 'Sin AMI'}</Badge></Group></Card>
           <SimpleGrid cols={{ base: 2, sm: 4 }}>
             <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Versión</Text><Text fw={700} size="sm">{core.version || '-'}</Text></Card>
             <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Uptime</Text><Text fw={700} size="sm">{core.uptime || '-'}</Text></Card>

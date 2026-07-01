@@ -14,7 +14,7 @@ const empty = { name: '', dest_type: 'extension', dest_value: '', intro: '', req
 export default function Click2Call() {
   const [list, setList] = useState([]); const [opened, setOpened] = useState(false); const [form, setForm] = useState(empty); const [saving, setSaving] = useState(false);
   const [qr, setQr] = useState(null);
-  const base = typeof window !== 'undefined' ? window.location.origin : 'https://pbx.ies.com.uy';
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
   const urlOf = (t) => base + '/call/' + t;
   async function load() { try { setList(await fetch('/backend/api/c2c').then(r => r.json())); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, []);

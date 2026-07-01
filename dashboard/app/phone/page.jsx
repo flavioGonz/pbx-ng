@@ -311,7 +311,7 @@ export default function Phone() {
               <div style={S.aRow}><span>Interno</span><b>{sp.creds?.ext}</b></div>
               <div style={S.aRow}><span>Estado</span><b style={{ color: '#34c759' }}>{registered ? 'En línea' : sp.reg}</b></div>
               <div style={S.aRow}><span>Video</span><b>{sp.creds?.video ? 'Sí' : 'No'}</b></div>
-              <div style={S.aRow}><span>Servidor</span><b style={{ fontSize: 12 }}>pbx.ies.com.uy</b></div>
+              <div style={S.aRow}><span>Servidor</span><b style={{ fontSize: 12 }}>{typeof window!=='undefined' ? window.location.hostname : ''}</b></div>
               <div style={{ ...S.aRow, borderBottom: 'none' }}><span>Versión</span><b style={{ fontSize: 12, color: '#8e8e93' }}>{appVer || '—'}</b></div>
             </div>
             <button style={{ ...S.logout, color: '#007aff', marginBottom: 10 }} onClick={buscarUpdate}><IconRefresh size={18} /> Buscar actualizaciones</button>

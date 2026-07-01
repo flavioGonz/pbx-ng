@@ -32,4 +32,11 @@ sed -e "s|@@TURN_REALM@@|${TURN_REALM}|g" \
 [ -n "${TURN_EXT_IP}" ] || sed -i '/^external-ip=/d' /etc/turnserver.conf
 sed -i 's|^log-file=.*|log-file=stdout|' /etc/turnserver.conf
 
+# --- agente HTTP PBX-NG (:8091) en background ---
+# El script no valida token (la API manda X-PBXNG-Token pero el agente lo ignora).
+# NOTA: el agente usa "systemctl" para restart/estado de coturn, que NO existe en
+# el contenedor; /health, /config (GET) y /logs funcionan, pero restart/apply de
+# config y el flag "active" no operan bajo Docker (coturn corre como PID 1 via exec).
+python3 /usr/local/bin/pbxng-turn-agent.py &
+
 exec "$@"

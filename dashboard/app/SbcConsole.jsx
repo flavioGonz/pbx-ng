@@ -258,7 +258,7 @@ function ConsoleBody({ sbc, load, hist }) {
               <Modal opened={dlgOpen} onClose={() => setDlgOpen(false)} centered radius="lg" title={<Group gap="sm"><ThemeIcon size={34} radius="md" variant="light" color="grape"><IconRouteAltLeft size={18} /></ThemeIcon><Text fw={800}>{dlgEdit ? 'Editar destino' : 'Nuevo destino del dispatcher'}</Text></Group>}>
           <Stack gap="md">
             {dlgEdit && (() => { const fi = flagInfo(dlgEdit.flags); const active = /A/.test(dlgEdit.flags || ''); return <Group gap="xs"><Badge variant="light" color={fi.c}>{fi.t}</Badge>{active && dlgEdit.latency != null && <Badge variant="dot" color={dlgEdit.latency < 50 ? 'teal' : dlgEdit.latency < 200 ? 'yellow' : 'red'}>{Math.round(dlgEdit.latency)} ms</Badge>}</Group>; })()}
-            <TextInput label="Destino (Asterisk)" description="IP o sip:host:puerto. Ej: 172.26.20.183 o sip:172.26.20.183:5060" placeholder="172.26.20.183" value={dtUri} onChange={(e) => setDtUri(e.target.value)} leftSection={<IconServer2 size={15} />} required />
+            <TextInput label="Destino (Asterisk)" description="IP o sip:host:puerto. Ej: ip-del-asterisk o sip:ip-del-asterisk:5060" placeholder="ip-del-asterisk" value={dtUri} onChange={(e) => setDtUri(e.target.value)} leftSection={<IconServer2 size={15} />} required />
             <NumberInput label="Prioridad" description="Mayor = se prefiere primero (failover al resto)" value={dtPrio} onChange={setDtPrio} min={0} max={100} w={160} />
             <Group justify="space-between"><Text size="xs" c="dimmed">Se mide latencia con OPTIONS automáticamente tras agregar.</Text><Button color="grape" onClick={saveTgt}>{dlgEdit ? 'Guardar' : 'Agregar destino'}</Button></Group>
           </Stack>
@@ -508,7 +508,7 @@ export default function SbcConsole({ opened, onClose, inline = false }) {
         <Group justify="space-between" px="lg" py="sm" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)', background: 'linear-gradient(120deg,#1d2540,#243a6b)', color: '#fff' }}>
           <Group gap="sm">
             <ThemeIcon size={40} radius="md" variant="light" color="grape"><IconRouteAltLeft size={22} /></ThemeIcon>
-            <div><Text fw={800} lh={1.1}>Consola SBC-NG</Text><Text size="xs" style={{ opacity: .75 }}>{sbc?.version || 'kamailio'} - 172.26.20.205 - uptime {fmtUptime(sbc?.uptime)}</Text></div>
+            <div><Text fw={800} lh={1.1}>Consola SBC-NG</Text><Text size="xs" style={{ opacity: .75 }}>{sbc?.version || 'kamailio'} - uptime {fmtUptime(sbc?.uptime)}</Text></div>
             <Badge ml="sm" variant="light" color={sbc && !sbc.error ? 'teal' : 'red'}>{sbc && !sbc.error ? 'En linea' : 'Sin datos'}</Badge>
           </Group>
           <Group gap="xs"><Tooltip label="Refrescar"><ActionIcon variant="light" color="gray" onClick={load}><IconRefresh size={18} /></ActionIcon></Tooltip><Button variant="white" color="dark" onClick={onClose}>Cerrar</Button></Group>

@@ -97,7 +97,7 @@ export default function Configuracion() {
               </Group>
               <Text size="xs" c="dimmed" mb="sm">Vía instancia openwa (Docker). Indicá la URL de su API REST, la api_key y el destinatario (número@c.us o id de grupo).</Text>
               <Stack gap="sm">
-                <TextInput label="URL de la API openwa" placeholder="http://172.26.20.x:8002" value={intForm.whatsapp?.url ?? ints.whatsapp?.url ?? ''} onChange={e => setIF('whatsapp', 'url', e.target.value)} />
+                <TextInput label="URL de la API openwa" placeholder="http://10.0.0.x:8002" value={intForm.whatsapp?.url ?? ints.whatsapp?.url ?? ''} onChange={e => setIF('whatsapp', 'url', e.target.value)} />
                 <PasswordInput label="API key" placeholder={ints.whatsapp?.has_apikey ? '•••••• (guardada, dejá vacío para mantener)' : 'tu api_key'} value={intForm.whatsapp?.apikey || ''} onChange={e => setIF('whatsapp', 'apikey', e.target.value)} />
                 <TextInput label="Destinatario" placeholder="59899123456@c.us" value={intForm.whatsapp?.to ?? ints.whatsapp?.to ?? ''} onChange={e => setIF('whatsapp', 'to', e.target.value)} />
                 <Group><Button leftSection={<IconDeviceFloppy size={16} />} onClick={() => saveInt('whatsapp')}>Guardar</Button><Button variant="light" leftSection={<IconSend size={16} />} onClick={() => testInt('whatsapp')} disabled={!ints.whatsapp?.configured}>Probar</Button></Group>

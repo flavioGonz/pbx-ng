@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libjansson4 libxml2 libsqlite3-0 libedit2 libssl3 libpq5 libsrtp2-1 \
       libcurl4 libspeex1 libspeexdsp1 libogg0 libvorbis0a libgsm1 libuuid1 \
       openssl ca-certificates gettext-base postgresql-client procps \
+      python3 iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # binarios + módulos + datos de Asterisk desde el build
@@ -62,7 +63,10 @@ RUN useradd -r -d /var/lib/asterisk asterisk 2>/dev/null || true \
 # los genera el entrypoint desde variables de entorno.
 COPY config/asterisk/ /etc/asterisk/
 COPY images/asterisk/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Agente HTTP :8092 (estado nucleo + red + rutas). El script vive en infra/asterisk/,
+# pero el build context de compose es docker/, por eso se copia a docker/images/asterisk/.
+COPY images/asterisk/pbxng-ast-agent.py /usr/local/bin/pbxng-ast-agent.py
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/pbxng-ast-agent.py
 
 EXPOSE 5060/udp 5060/tcp 5061/tcp 8088/tcp 10000-20000/udp
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

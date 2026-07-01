@@ -47,7 +47,7 @@ export default function TurnConsole() {
         <Group justify="space-between" mb="xs">
           <Group gap="sm">
             <ThemeIcon size={40} radius="md" variant="light" color="cyan"><IconArrowsLeftRight size={22} /></ThemeIcon>
-            <div><Text fw={800} lh={1.1}>Turn-NG Server</Text><Text size="xs" c="dimmed">Relay de medios WebRTC (TURN/STUN) · 172.26.20.204</Text></div>
+            <div><Text fw={800} lh={1.1}>Turn-NG Server</Text><Text size="xs" c="dimmed">Relay de medios WebRTC (TURN/STUN)</Text></div>
           </Group>
           <Group gap="xs">
             <Badge size="lg" variant="filled" color={d.active === 'active' ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{d.active === 'active' ? 'Operativo' : 'Caído'}</Badge>

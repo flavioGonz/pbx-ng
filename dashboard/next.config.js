@@ -9,13 +9,16 @@ const SECURITY_HEADERS = [
 ];
 const nextConfig = {
   reactStrictMode: true,
+  skipTrailingSlashRedirect: true,   // no redirigir /socket.io/ -> /socket.io (rompe el handshake socket.io)
   async headers() {
     return [{ source: '/:path*', headers: SECURITY_HEADERS }];
   },
   async rewrites() {
     return [
       { source: '/backend/:path*', destination: `${API}/:path*` },
+      { source: '/socket.io/', destination: `${API}/socket.io/` },
       { source: '/socket.io/:path*', destination: `${API}/socket.io/:path*` },
+      { source: '/socket.io', destination: `${API}/socket.io/` },
       { source: '/prov/:path*', destination: `${API}/prov/:path*` },
     ];
   },
