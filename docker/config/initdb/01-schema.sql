@@ -2627,6 +2627,7 @@ CREATE TABLE public.uacreg (
     expires integer DEFAULT 0 NOT NULL,
     flags integer DEFAULT 0 NOT NULL,
     reg_delay integer DEFAULT 0 NOT NULL,
+    contact_addr character varying(255) DEFAULT ''::character varying NOT NULL,
     socket character varying(128) DEFAULT ''::character varying NOT NULL
 );
 
