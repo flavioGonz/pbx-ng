@@ -127,23 +127,22 @@ function ConsoleBody({ sbc, load, hist }) {
   }
   const reqRow = (label, k) => <Table.Tr><Table.Td>{label}</Table.Td><Table.Td ta="right" ff="monospace"><Slot value={(core[k] ?? 0).toLocaleString()} /></Table.Td><Table.Td ta="right" c="dimmed">{rates[k] != null ? <><Slot value={rates[k]} />/s</> : ''}</Table.Td></Table.Tr>;
 
+  // Accesos directos (los más usados) + grupos desplegables para el resto
   const SBC_NAV = [
-    { key: 'mon', label: 'Monitoreo', icon: <IconActivity size={16} />, items: [
-      { v: 'mon', label: 'Monitoreo', icon: <IconActivity size={15} /> },
-      { v: 'rtp', label: 'rtpengine', icon: <IconArrowsLeftRight size={15} /> },
-      { v: 'turn', label: 'TURN', icon: <IconCloud size={15} /> },
-      { v: 'sip', label: 'SIP debug', icon: <IconBug size={15} /> },
-    ] },
+    { v: 'mon', label: 'Monitoreo', icon: <IconActivity size={16} /> },
+    { v: 'trunks', label: 'Troncales', icon: <IconDeviceLandlinePhone size={16} /> },
+    { v: 'turn', label: 'TURN', icon: <IconCloud size={16} /> },
+    { v: 'sec', label: 'Seguridad', icon: <IconShieldLock size={16} />, badge: banned.length || 0, bcolor: 'red' },
     { key: 'route', label: 'Ruteo', icon: <IconRoute size={16} />, items: [
       { v: 'lcr', label: 'Operadores', icon: <IconRoute size={15} /> },
       { v: 'smanip', label: 'Manipulación SIP', icon: <IconReplace size={15} /> },
-      { v: 'trunks', label: 'Troncales', icon: <IconDeviceLandlinePhone size={15} /> },
       { v: 'disp', label: 'Dispatcher', icon: <IconRouteAltLeft size={15} /> },
       { v: 'remext', label: 'Remotos', icon: <IconWorld size={15} />, badge: remExt.length || 0, bcolor: 'grape' },
     ] },
-    { key: 'netsec', label: 'Red y Seguridad', icon: <IconShieldLock size={16} />, items: [
+    { key: 'netmedia', label: 'Red y Media', icon: <IconNetwork size={16} />, items: [
       { v: 'net', label: 'Red', icon: <IconNetwork size={15} /> },
-      { v: 'sec', label: 'Seguridad', icon: <IconShieldLock size={15} />, badge: banned.length || 0, bcolor: 'red' },
+      { v: 'rtp', label: 'rtpengine', icon: <IconArrowsLeftRight size={15} /> },
+      { v: 'sip', label: 'SIP debug', icon: <IconBug size={15} /> },
     ] },
     { key: 'sys', label: 'Sistema', icon: <IconCpu size={16} />, items: [
       { v: 'adv', label: 'Módulos', icon: <IconCpu size={15} /> },
@@ -154,9 +153,14 @@ function ConsoleBody({ sbc, load, hist }) {
   return (
     <Tabs value={tab} onChange={setTab} variant="pills" radius="md" keepMounted={false}>
       <Group gap="xs" mb="md">
-        {SBC_NAV.map((g) => { const active = g.items.some((it) => it.v === tab); return (
+        {SBC_NAV.map((g) => {
+          if (!g.items) { const active = tab === g.v; return (
+            <Button key={g.v} variant={active ? 'filled' : 'subtle'} color={active ? 'blue' : 'gray'} size="sm" radius="md" leftSection={g.icon}
+              rightSection={g.badge ? <Badge size="xs" color={g.bcolor || 'red'} variant="filled">{g.badge}</Badge> : null}
+              onClick={() => setTab(g.v)}>{g.label}</Button>); }
+          const active = g.items.some((it) => it.v === tab); return (
           <Menu key={g.key} trigger="click-hover" openDelay={60} closeDelay={140} position="bottom-start" radius="md" shadow="md" withinPortal>
-            <Menu.Target><Button variant={active ? 'filled' : 'light'} color={active ? 'blue' : 'gray'} size="sm" radius="md" leftSection={g.icon} rightSection={<IconChevronDown size={14} />}>{g.label}</Button></Menu.Target>
+            <Menu.Target><Button variant={active ? 'filled' : 'subtle'} color={active ? 'blue' : 'gray'} size="sm" radius="md" leftSection={g.icon} rightSection={<IconChevronDown size={14} />}>{g.label}</Button></Menu.Target>
             <Menu.Dropdown>
               {g.items.map((it) => <Menu.Item key={it.v} leftSection={it.icon} onClick={() => setTab(it.v)} style={it.v === tab ? { background: 'var(--mantine-color-blue-light)', fontWeight: 600 } : undefined} rightSection={it.badge ? <Badge size="xs" color={it.bcolor || 'red'} variant="filled">{it.badge}</Badge> : null}>{it.label}</Menu.Item>)}
             </Menu.Dropdown>
