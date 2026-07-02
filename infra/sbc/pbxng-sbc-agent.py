@@ -41,9 +41,22 @@ def pike_list():
     out = kc('pike.list'); ips = re.findall(r'(\d+\.\d+\.\d+\.\d+)', out)
     return sorted(set(ips))
 
+def _port_open(host, port):
+    import socket as _s
+    try:
+        x=_s.socket(_s.AF_INET,_s.SOCK_STREAM); x.settimeout(1.5); x.connect((host,int(port))); x.close(); return True
+    except Exception:
+        try:
+            # ng de rtpengine es UDP; probamos un ping bencode simple
+            u=_s.socket(_s.AF_INET,_s.SOCK_DGRAM); u.settimeout(1.2)
+            u.sendto(b'd6:cookie4:ping7:command4:pinge', (host,int(port)))
+            u.recvfrom(1024); u.close(); return True
+        except Exception:
+            return False
+
 def rtpe():
     out = kc('rtpengine.show', 'all')
-    up = ('disabled: 0' in out)
+    up = ('disabled: 0' in out) or _port_open('127.0.0.1', 2223)
     t = rctl('list', 'totals')
     def g(rx):
         m = re.search(rx, t, re.I); return int(m.group(1)) if m else None

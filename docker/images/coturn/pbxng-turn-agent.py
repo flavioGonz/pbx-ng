@@ -81,7 +81,9 @@ def sessions():
 
 def health():
     d, raw = parse_conf()
-    active = sh("systemctl is-active coturn") or sh("systemctl is-active coturn-turnserver")
+    # Sin systemd en el contenedor: coturn corre como PID1; si respondemos y leemos su version, está activo
+    _sys = sh("systemctl is-active coturn 2>/dev/null") or sh("systemctl is-active coturn-turnserver 2>/dev/null")
+    active = _sys if _sys else ("active" if sh("turnserver --version 2>&1 | head -1") else "inactive")
     ver = sh("turnserver --version 2>&1 | head -1") or sh("turnserver -h 2>&1 | grep -i version | head -1")
     relay_sockets = sh("ss -lun 2>/dev/null | grep -cE '0.0.0.0|::'")
     user = d.get("user", ""); uname = user.split(":")[0] if user else ""
