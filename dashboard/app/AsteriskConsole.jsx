@@ -2,10 +2,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, ThemeIcon, Table, Loader, Center, TextInput, NumberInput, Button, MultiSelect, Alert } from '@mantine/core';
-import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, IconPlugConnected, IconBolt, IconInfoCircle, IconRouter, IconDeviceLandlinePhone, IconDeviceFloppy, IconTrash, IconUsers, IconCircleCheck, IconCircleX } from '@tabler/icons-react';
+import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, IconPlugConnected, IconBolt, IconInfoCircle, IconRouter, IconDeviceLandlinePhone, IconDeviceFloppy, IconTrash, IconUsers, IconCircleCheck, IconCircleX, IconRoute } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import RoutesPanel from './RoutesPanel';
 import Dialplan from './dialplan/page';
+import Rutas from './rutas/page';
 import { toast } from './notify';
 
 export default function AsteriskConsole() {
@@ -31,6 +32,7 @@ export default function AsteriskConsole() {
         <Tabs.Tab value="trunk" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncal SBC</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="dialplan" leftSection={<IconTerminal2 size={16} />}>Dialplan</Tabs.Tab>
+        <Tabs.Tab value="rutas" leftSection={<IconRoute size={16} />}>Rutas</Tabs.Tab>
         <Tabs.Tab value="sec" leftSection={<IconShieldLock size={16} />}>Seguridad</Tabs.Tab>
       </Tabs.List>
 
@@ -115,6 +117,7 @@ export default function AsteriskConsole() {
       </Tabs.Panel>
 
       <Tabs.Panel value="dialplan"><Dialplan /></Tabs.Panel>
+      <Tabs.Panel value="rutas"><Rutas embedded /></Tabs.Panel>
 
       <Tabs.Panel value="sec">
         <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-blue-light)' }}><Group gap="xs" mb={4}><IconShieldLock size={16} /><Text fw={700} size="sm">Fail2Ban del núcleo (Asterisk)</Text></Group><Text size="sm" c="dimmed">Jails de Fail2Ban analizando los logs de PJSIP. Gestión completa (whitelist, mapa, política) en Sistema → Seguridad.</Text></Card>

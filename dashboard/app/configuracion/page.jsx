@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Card, Title, Text, Stack, SimpleGrid, Group, Badge, Tabs, Button, Skeleton, Select, TextInput, PasswordInput, NumberInput, Switch, ThemeIcon, Divider, Table, ActionIcon, FileButton, Tooltip, Code, Alert } from '@mantine/core';
-import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle } from '@tabler/icons-react';
+import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle, IconShieldLock } from '@tabler/icons-react';
 import { toast } from '../notify';
 import ModulesPanel from '../ModulesPanel';
 import BrandingPanel from '../BrandingPanel';
+import ProxyPanel from '../ProxyPanel';
 const STMAP = { ok: ['teal', 'Activo'], pending: ['yellow', 'Pendiente'], optional: ['gray', 'Opcional'], down: ['red', 'Caído'], off: ['gray', 'Inactivo'] };
 
 export default function Configuracion() {
@@ -12,6 +13,8 @@ export default function Configuracion() {
   const [mails, setMails] = useState([]); const [tid, setTid] = useState(null); const [mform, setMform] = useState({}); const [msaving, setMsaving] = useState(false); const [testTo, setTestTo] = useState('');
   const [prompts, setPrompts] = useState([]); const [pname, setPname] = useState(''); const [pup, setPup] = useState(false);
   const [ints, setInts] = useState({}); const [intForm, setIntForm] = useState({ telegram: {}, whatsapp: {} });
+  const [tab, setTab] = useState('componentes');
+  useEffect(() => { try { const t = new URLSearchParams(window.location.search).get('tab'); if (t) setTab(t); } catch (_) {} }, []);
   async function load() { setLoading(true); try { setData(await fetch('/backend/api/system').then(r => r.json())); } catch (_) { setData(null); } setLoading(false); }
   async function loadMail() { try { const d = await fetch('/backend/api/email/config').then(r => r.json()); const arr = Array.isArray(d) ? d : []; setMails(arr); if (arr.length && tid == null) { setTid(String(arr[0].tenant_id)); setMform(arr[0]); } } catch (_) {} }
   async function loadPrompts() { try { const d = await fetch('/backend/api/prompts').then(r => r.json()); setPrompts(Array.isArray(d) ? d : []); } catch (_) {} }
@@ -44,10 +47,11 @@ export default function Configuracion() {
       <Group justify="space-between"><div className="pbx-pagehead"><span className="pbx-acc-bar" style={{ background: 'linear-gradient(180deg,var(--mantine-color-pbx-5),var(--mantine-color-pbx-8))' }} /><ThemeIcon size={44} radius="md" variant="gradient" gradient={{ from: 'pbx.5', to: 'pbx.8', deg: 135 }}><IconAdjustments size={24} /></ThemeIcon><div><Title order={2} lh={1.1}>Configuración</Title><Text c="dimmed" size="sm">Componentes, email y audios · Asterisk {data?.asterisk || ''}</Text></div></div>
         <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={load}>Recargar</Button></Group>
 
-      <Tabs defaultValue="componentes" variant="pills" radius="md" keepMounted={false}>
+      <Tabs value={tab} onChange={setTab} variant="pills" radius="md" keepMounted={false}>
         <Tabs.List mb="md">
           <Tabs.Tab value="modulos" leftSection={<IconAdjustments size={16} />}>Módulos</Tabs.Tab>
           <Tabs.Tab value="branding" leftSection={<IconAdjustments size={16} />}>Branding</Tabs.Tab>
+          <Tabs.Tab value="proxy" leftSection={<IconShieldLock size={16} />}>Proxy / TLS</Tabs.Tab>
           <Tabs.Tab value="componentes" leftSection={<IconServer2 size={16} />}>Componentes</Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={16} />}>Email por empresa</Tabs.Tab>
           <Tabs.Tab value="audios" leftSection={<IconMicrophone2 size={16} />}>Audios</Tabs.Tab>
@@ -57,6 +61,8 @@ export default function Configuracion() {
         <Tabs.Panel value="modulos"><ModulesPanel /></Tabs.Panel>
 
         <Tabs.Panel value="branding"><BrandingPanel /></Tabs.Panel>
+
+        <Tabs.Panel value="proxy"><ProxyPanel /></Tabs.Panel>
 
         <Tabs.Panel value="componentes">
           {loading ?

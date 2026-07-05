@@ -34,7 +34,10 @@ export function AuthProvider({ children }) {
     if (isPhone(path) || path === '/login' || (path && path.startsWith('/enroll')) || (path && path.startsWith('/call'))) { setUser(null); return; }
     const t = typeof window !== 'undefined' ? localStorage.getItem('pbxng_jwt') : null;
     if (!t) { setUser(null); router.replace('/login'); return; }
-    fetch('/backend/api/auth/me').then(r => r.ok ? r.json() : Promise.reject()).then(d => setUser(d.user))
+    fetch('/backend/api/auth/me').then(r => r.ok ? r.json() : Promise.reject()).then(d => { setUser(d.user); const rl = d.user && d.user.role;
+        if (rl === 'agente' && !path.startsWith('/agente') && !path.startsWith('/phone') && !path.startsWith('/call')) router.replace('/agente');
+        else if (rl === 'supervisor' && !path.startsWith('/supervisor') && !path.startsWith('/phone') && !path.startsWith('/call')) router.replace('/supervisor');
+        else if (rl === 'admin' && (path.startsWith('/agente') || path.startsWith('/supervisor'))) router.replace('/'); })
       .catch(() => { localStorage.removeItem('pbxng_jwt'); setUser(null); router.replace('/login'); });
   }, [path]);
   return <Ctx.Provider value={{ user, setUser }}>{children}</Ctx.Provider>;

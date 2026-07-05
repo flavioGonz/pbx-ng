@@ -1,0 +1,9 @@
+[Unit]
+Description=PBX-NG · reconciliador de modulos (dashboard -> contenedores)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=PBXNG_DIR=/opt/pbx-ng/docker
+ExecStart=/usr/local/bin/pbxng-reconciler.sh

@@ -66,10 +66,14 @@ export function releaseMedia(s) {
 
 // Pide permiso de micrófono (y cámara si video) UNA vez y libera de inmediato.
 let primed = false;
+function _pbxDev(k){ try { return (typeof localStorage!=='undefined' && localStorage.getItem(k)) || ''; } catch(e){ return ''; } }
+function devC(video){ const mic=_pbxDev('pbxng_dev_mic'), cam=_pbxDev('pbxng_dev_cam'); return { audio: mic ? { deviceId:{ ideal: mic } } : true, video: video ? (cam ? { deviceId:{ ideal: cam } } : true) : false }; }
+function videoDev(){ const cam=_pbxDev('pbxng_dev_cam'); return { video: cam ? { deviceId:{ ideal: cam } } : true }; }
+
 export async function primeMedia(video) {
   if (primed) return;
   try {
-    const st = await navigator.mediaDevices.getUserMedia({ audio: true, video: !!video });
+    const st = await navigator.mediaDevices.getUserMedia(devC(!!video));
     st.getTracks().forEach(t => t.stop());
     primed = true;
   } catch (_) {}
@@ -189,7 +193,7 @@ export function useSoftphone() {
     if (useVid) await primeMedia(true);
     const SIP = await import('sip.js');
     const uri = SIP.UserAgent.makeURI(`sip:${target}@${location.hostname}`);
-    const inviter = new SIP.Inviter(ua.current, uri, { sessionDescriptionHandlerOptions: { constraints: { audio: true, video: useVid }, iceGatheringTimeout: 1500 }, earlyMedia: true });
+    const inviter = new SIP.Inviter(ua.current, uri, { sessionDescriptionHandlerOptions: { constraints: devC(useVid), iceGatheringTimeout: 1500 }, earlyMedia: true });
     wire(inviter, { dir: 'out', number: target, start: Date.now(), video: useVid });
     reportGeo(creds && creds.ext, target, 'out');
     await inviter.invite();
@@ -201,7 +205,7 @@ export function useSoftphone() {
     const from = (inv.remoteIdentity && inv.remoteIdentity.uri && inv.remoteIdentity.uri.user) || 'desconocido';
     wire(inv, { dir: 'in', number: from, start: Date.now(), video: useVid });
     reportGeo(creds && creds.ext, from, 'in');
-    await inv.accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: useVid }, iceGatheringTimeout: 1500 } });
+    await inv.accept({ sessionDescriptionHandlerOptions: { constraints: devC(useVid), iceGatheringTimeout: 1500 } });
   }, [incoming, incomingVideo, creds, wire]);
 
   const rejectIncoming = useCallback(() => {
@@ -249,7 +253,7 @@ export function useSoftphone() {
     try {
       const SIP = await import('sip.js');
       const uri = SIP.UserAgent.makeURI(`sip:${t}@${location.hostname}`);
-      const inv = new SIP.Inviter(ua.current, uri, { sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } });
+      const inv = new SIP.Inviter(ua.current, uri, { sessionDescriptionHandlerOptions: { constraints: devC(false) } });
       consult.current = inv;
       setAttended({ number: t, state: 'calling' });
       inv.stateChange.addListener((st) => {
@@ -285,7 +289,7 @@ export function useSoftphone() {
     try {
       const pc = s.sessionDescriptionHandler.peerConnection;
       const sender = pc.getSenders().find((se) => se.track && se.track.kind === 'video');
-      const cam = await navigator.mediaDevices.getUserMedia({ video: true });
+      const cam = await navigator.mediaDevices.getUserMedia(videoDev());
       const t = cam.getVideoTracks()[0];
       if (sender) await sender.replaceTrack(t);
       if (localVideoRef.current) localVideoRef.current.srcObject = new MediaStream([t]);
@@ -320,7 +324,7 @@ export function useSoftphone() {
         const pc = s.sessionDescriptionHandler.peerConnection;
         const aSender = pc.getSenders().find((se) => se.track && se.track.kind === 'audio');
         const vSender = pc.getSenders().find((se) => se.track && se.track.kind === 'video');
-        const cam = await navigator.mediaDevices.getUserMedia({ audio: true, video: !!vSender });
+        const cam = await navigator.mediaDevices.getUserMedia(devC(!!vSender));
         if (aSender && cam.getAudioTracks()[0]) await aSender.replaceTrack(cam.getAudioTracks()[0]);
         if (vSender && cam.getVideoTracks()[0]) { await vSender.replaceTrack(cam.getVideoTracks()[0]); if (localVideoRef.current) localVideoRef.current.srcObject = new MediaStream([cam.getVideoTracks()[0]]); }
       } catch (_) {}

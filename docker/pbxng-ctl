@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  pbxng-ctl · gestiona MODULOS = PERFILES = CONTENEDORES del stack PBX-NG.
+#  Un contenedor existe SOLO si su modulo esta activo (COMPOSE_PROFILES en .env).
+#
+#  pbxng-ctl status                 perfiles activos + contenedores
+#  pbxng-ctl enable  <modulo>       agrega el perfil y CREA sus contenedores
+#  pbxng-ctl disable <modulo>       DESTRUYE los contenedores del modulo y saca el perfil
+#  pbxng-ctl up | down | ps         aplica el COMPOSE_PROFILES actual
+#  pbxng-ctl reconcile              sincroniza contenedores <-> COMPOSE_PROFILES del .env
+#  Modulos: core(siempre) sbc turn ai intercom proxy
+# ============================================================================
+set -euo pipefail
+DIR="${PBXNG_DIR:-/opt/pbx-ng/docker}"
+[ -f "$DIR/docker-compose.yml" ] || { echo "No encuentro $DIR/docker-compose.yml (exporta PBXNG_DIR)"; exit 1; }
+cd "$DIR"
+ENVF="$DIR/.env"
+MODULES="core sbc turn ai intercom proxy"
+
+svcs_of(){ case "$1" in
+  core)     echo "postgres redis asterisk api dashboard" ;;
+  sbc)      echo "kamailio rtpengine wsbridge" ;;
+  turn)     echo "coturn" ;;
+  ai)       echo "voz" ;;
+  intercom) echo "go2rtc" ;;
+  proxy)    echo "npm" ;;
+  *)        echo "" ;; esac ; }
+
+get_profiles(){ grep -E '^COMPOSE_PROFILES=' "$ENVF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d ' ' ; }
+set_profiles(){ local v="$1"
+  if grep -q '^COMPOSE_PROFILES=' "$ENVF" 2>/dev/null; then sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=$v|" "$ENVF"
+  else echo "COMPOSE_PROFILES=$v" >> "$ENVF"; fi ; }
+has(){ echo ",$1," | grep -q ",$2," ; }
+add(){ local cur="$1" m="$2"; has "$cur" "$m" && { echo "$cur"; return; }; [ -z "$cur" ] && echo "$m" || echo "$cur,$m" ; }
+del(){ echo "$1" | tr ',' '\n' | grep -vx "$2" | paste -sd, - ; }
+valid(){ echo "$MODULES" | grep -qw "$1" ; }
+
+cmd="${1:-status}"; mod="${2:-}"
+case "$cmd" in
+  status)
+    echo "COMPOSE_PROFILES=$(get_profiles)"
+    COMPOSE_PROFILES="$(get_profiles)" docker compose ps 2>/dev/null || true ;;
+  enable)
+    [ -n "$mod" ] && valid "$mod" || { echo "modulo invalido. usa: $MODULES"; exit 1; }
+    new="$(add "$(get_profiles)" "$mod")"; set_profiles "$new"
+    echo "→ activando '$mod' (perfiles: $new)"
+    COMPOSE_PROFILES="$new" docker compose up -d ;;
+  disable)
+    [ -n "$mod" ] && valid "$mod" || { echo "modulo invalido. usa: $MODULES"; exit 1; }
+    [ "$mod" = core ] && { echo "core no se puede desactivar"; exit 1; }
+    echo "→ desactivando '$mod' (destruyo: $(svcs_of "$mod"))"
+    for s in $(svcs_of "$mod"); do docker compose --profile "$mod" rm -sf "$s" 2>/dev/null || true; done
+    new="$(del "$(get_profiles)" "$mod")"; set_profiles "$new" ;;
+  up)   COMPOSE_PROFILES="$(get_profiles)" docker compose up -d ;;
+  down) COMPOSE_PROFILES="$(get_profiles)" docker compose down ;;
+  ps)   COMPOSE_PROFILES="$(get_profiles)" docker compose ps ;;
+  reconcile)
+    active="$(get_profiles)"
+    COMPOSE_PROFILES="$active" docker compose up -d
+    for m in $MODULES; do
+      [ "$m" = core ] && continue
+      if ! has "$active" "$m"; then
+        for s in $(svcs_of "$m"); do docker compose --profile "$m" rm -sf "$s" 2>/dev/null || true; done
+      fi
+    done ;;
+  *) echo "uso: pbxng-ctl {status|enable <m>|disable <m>|up|down|ps|reconcile}  ·  modulos: $MODULES"; exit 1 ;;
+esac

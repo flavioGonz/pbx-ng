@@ -1,0 +1,12 @@
+{
+  "name": "pbxng-wsbridge",
+  "version": "0.1.0",
+  "description": "PBX-NG WebRTC client bridge - SIP-over-WSS <-> SIP/UDP relay to Kamailio",
+  "main": "index.js",
+  "private": true,
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "pg": "^8.13.0"
+  }
+}

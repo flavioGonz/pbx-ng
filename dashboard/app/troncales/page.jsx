@@ -47,7 +47,7 @@ function TNode({ data }) {
         <div style={{ lineHeight: 1.15, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.title}</div>{data.sub && <div style={{ fontSize: 10.5, opacity: .7, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.sub}</div>}</div>
         {data.dot !== false && <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: col, boxShadow: '0 0 0 3px ' + col + '22', flex: 'none' }} />}
       </Group>
-      {data.badge && <div style={{ marginTop: 8 }}><span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 999, background: accent ? 'rgba(255,255,255,.16)' : 'rgba(47,116,230,.16)', color: accent ? '#fff' : '#2f74e6', fontWeight: 600 }}>{data.badge}</span></div>}
+      {(data.badge || data.tag) && <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>{data.badge && <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 999, background: accent ? 'rgba(255,255,255,.16)' : 'rgba(47,116,230,.16)', color: accent ? '#fff' : '#2f74e6', fontWeight: 600 }}>{data.badge}</span>}{data.tag && <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 999, background: accent ? 'rgba(196,181,253,.35)' : 'rgba(124,58,237,.16)', color: accent ? '#fff' : '#7c3aed', fontWeight: 700 }}>{data.tag}</span>}</div>}
     </div>
   );
 }
@@ -98,7 +98,7 @@ export default function Troncales() {
   const { nodes: computedNodes, edges } = useMemo(() => {
     const ns = [], es = [];
     const COL_T = 40, COL_KAM = 380, COL_AST = 660, COL_INT = 940; const ROW = 230, STEP = 160;
-    ns.push({ id: 'kam', type: 't', position: { x: COL_KAM, y: ROW }, data: { title: 'SBC-NG', sub: topo?.nodes?.sbc || '-', icon: <IconRouteAltLeft size={16} />, accent: 'kam', status: 'sbc', badge: kamTrunks.length + ' troncal(es)' } });
+    ns.push({ id: 'kam', type: 't', position: { x: COL_KAM, y: ROW }, data: { title: 'SBC-NG', sub: topo?.nodes?.sbc || '-', icon: <IconRouteAltLeft size={16} />, accent: 'kam', status: 'sbc', badge: kamTrunks.length + ' troncal(es)', tag: trunks.some((t) => t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'WebRTC WSS' : undefined } });
     ns.push({ id: 'ast', type: 't', position: { x: COL_AST, y: ROW }, data: { title: 'Asterisk PBX', sub: topo?.nodes?.asterisk || '-', icon: <IconServer2 size={16} />, accent: 'ast', status: snap?.health?.ami ? 'online' : 'down', badge: ch + ' llamada(s)' } });
     ns.push({ id: 'int', type: 't', position: { x: COL_INT, y: ROW }, data: { title: 'Internos', icon: <IconUsers size={16} />, dot: false, badge: (snap?.extensions || []).length + ' extensiones' } });
     es.push({ id: 'k-a', source: 'kam', target: 'ast', type: 'default', animated: true, label: 'dispatcher', style: { stroke: '#7c3aed', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c3aed' } });
@@ -109,8 +109,8 @@ export default function Troncales() {
       const id = 'tk-' + it.t.name; const kind = it.kind; const stt = it.t.status;
       const on = stt === 'online'; const off = stt === 'offline';
       const ecol = off ? '#dc2626' : on ? '#2f74e6' : (kind === 'kamailio' ? '#7c3aed' : '#94a3b8');
-      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.logo || (it.t.adv && it.t.adv.logo), tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: (it.t.mode === 'ip' ? 'IP' : 'Registro') + ' · ' + (it.t.transport || 'udp').toUpperCase() + (it.t.channels ? ' · ' + it.t.channels + ' ch' : '') } });
-      es.push({ id: 'e-' + id, source: id, target: kind === 'kamailio' ? 'kam' : 'ast', type: 'default', animated: true, label: it.t.rtt != null ? (Math.round(it.t.rtt) + ' ms') : (on ? 'levantada' : off ? 'caida' : undefined), labelStyle: { fontSize: 10, fontWeight: 700, fill: ecol }, labelBgStyle: { fill: 'var(--mantine-color-body)', fillOpacity: 0.85 }, labelBgPadding: [4, 2], labelBgBorderRadius: 6, style: { stroke: ecol, strokeWidth: 2.2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
+      ns.push({ id, type: 't', position: { x: COL_T, y: start + i * STEP }, data: { name: it.t.name, clickable: true, title: it.t.name, sub: it.t.provider_host, icon: <IconDeviceLandlinePhone size={16} />, logo: it.t.logo || (it.t.adv && it.t.adv.logo), tint: stt === 'offline' ? 'down' : stt === 'online' ? 'up' : undefined, status: stt, badge: ((it.t.kind === 'webrtc' || it.t.kind === 'webrtc-client') ? 'WebRTC' : (it.t.mode === 'ip' ? 'IP' : 'Registro')) + ' · ' + (it.t.transport || 'udp').toUpperCase() + (it.t.channels ? ' · ' + it.t.channels + ' ch' : '') } });
+      es.push({ id: 'e-' + id, source: id, target: (kind === 'kamailio' || it.t.kind === 'webrtc' || it.t.kind === 'webrtc-client') ? 'kam' : 'ast', type: 'default', animated: true, label: it.t.rtt != null ? (Math.round(it.t.rtt) + ' ms') : (on ? 'levantada' : off ? 'caida' : undefined), labelStyle: { fontSize: 10, fontWeight: 700, fill: ecol }, labelBgStyle: { fill: 'var(--mantine-color-body)', fillOpacity: 0.85 }, labelBgPadding: [4, 2], labelBgBorderRadius: 6, style: { stroke: ecol, strokeWidth: 2.2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
     });
     return { nodes: ns, edges: es };
   }, [trunks, snap, topo]);
@@ -163,12 +163,12 @@ export default function Troncales() {
                   <Group justify="space-between" wrap="nowrap" gap={6}>
                     <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
                       {t.logo ? <div style={{ width: 28, height: 28, borderRadius: 8, background: '#fff', border: '1px solid var(--mantine-color-default-border)', overflow: 'hidden', flex: 'none', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src={t.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></div> : <ThemeIcon size={28} radius="md" variant="light" color={t.kind === 'kamailio' ? 'grape' : 'blue'}>{t.kind === 'kamailio' ? <IconRouteAltLeft size={15} /> : <IconServer2 size={15} />}</ThemeIcon>}
-                      <div style={{ minWidth: 0 }}><Text fw={600} fz="sm" truncate>{t.name}</Text><Text fz={11} c="dimmed" ff="monospace" truncate>{t.provider_host}:{t.provider_port}</Text></div>
+                      <div style={{ minWidth: 0 }}><Text fw={600} fz="sm" truncate>{t.name}</Text><Text fz={11} c="dimmed" ff="monospace" truncate>{(t.kind === 'webrtc' || t.kind === 'webrtc-client') ? (t.link || ('wss://' + t.provider_host + '/ws')) : (t.provider_host + ':' + t.provider_port)}</Text></div>
                     </Group>
                     <Group gap={2} wrap="nowrap"><ActionIcon variant="subtle" color="gray" size="sm" onClick={e => { e.stopPropagation(); openEdit(t); }}><IconEdit size={15} /></ActionIcon><ActionIcon variant="subtle" color="red" size="sm" onClick={e => { e.stopPropagation(); del(t); }}><IconTrash size={15} /></ActionIcon></Group>
                   </Group>
                   <Group gap={6} mt={6}>
-                    <Badge size="xs" variant="light" color={t.mode === 'ip' ? 'indigo' : 'blue'}>{t.mode === 'ip' ? 'IP / Peer' : 'Registro'}</Badge>
+                    <Badge size="xs" variant="light" color={(t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'grape' : (t.mode === 'ip' ? 'indigo' : 'blue')}>{t.kind === 'webrtc-client' ? 'WebRTC cliente' : t.kind === 'webrtc' ? 'WebRTC servidor' : (t.mode === 'ip' ? 'IP / Peer' : 'Registro')}</Badge>
                     <Badge size="xs" variant="light" color="gray">{(t.transport || 'udp').toUpperCase()}</Badge>
                     {t.channels ? <Badge size="xs" variant="light" color="cyan">{t.channels} ch</Badge> : null}
                     {t.dids && t.dids.length ? <Badge size="xs" variant="light" color="indigo">{t.dids.length} DID</Badge> : null}
@@ -189,8 +189,8 @@ export default function Troncales() {
           </Group>
           <Stack gap={5}>
             <Group justify="space-between"><Text fz="xs" c="dimmed">Estado</Text>{stBadge(sel)}</Group>
-            <Group justify="space-between"><Text fz="xs" c="dimmed">Proveedor</Text><Text fz="xs" ff="monospace">{sel.provider_host}:{sel.provider_port}</Text></Group>
-            <Group justify="space-between"><Text fz="xs" c="dimmed">Modo</Text><Badge size="xs" variant="light" color={sel.mode === 'ip' ? 'indigo' : 'blue'}>{sel.mode === 'ip' ? 'IP / Peer' : 'Registro'}</Badge></Group>
+            <Group justify="space-between"><Text fz="xs" c="dimmed">{(sel.kind === 'webrtc' || sel.kind === 'webrtc-client') ? 'Destino' : 'Proveedor'}</Text><Text fz="xs" ff="monospace">{(sel.kind === 'webrtc' || sel.kind === 'webrtc-client') ? (sel.link || ('wss://' + sel.provider_host + '/ws')) : (sel.provider_host + ':' + sel.provider_port)}</Text></Group>
+            <Group justify="space-between"><Text fz="xs" c="dimmed">Modo</Text><Badge size="xs" variant="light" color={(sel.kind === 'webrtc' || sel.kind === 'webrtc-client') ? 'grape' : (sel.mode === 'ip' ? 'indigo' : 'blue')}>{sel.kind === 'webrtc-client' ? 'WebRTC cliente' : sel.kind === 'webrtc' ? 'WebRTC servidor' : (sel.mode === 'ip' ? 'IP / Peer' : 'Registro')}</Badge></Group>
             <Group justify="space-between"><Text fz="xs" c="dimmed">Transporte</Text><Badge size="xs" variant="light" color="gray">{(sel.transport || 'udp').toUpperCase()}</Badge></Group>
             {sel.channels ? <Group justify="space-between"><Text fz="xs" c="dimmed">Canales</Text><Badge size="xs" variant="light" color="cyan">{sel.channels}</Badge></Group> : null}
             {sel.dids && sel.dids.length > 0 && <div><Text fz="xs" c="dimmed" mb={3}>Números (DID)</Text><Group gap={4}>{sel.dids.map(d => <Badge key={d} size="xs" variant="light" color="indigo" ff="monospace">{d}</Badge>)}</Group></div>}

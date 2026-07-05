@@ -8,6 +8,7 @@ import {
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute,
   IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2,
+  IconDeviceCctv, IconAddressBook,
 } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
@@ -29,19 +30,20 @@ const groups = [
     { href: '/asterisk', label: 'Asterisk', icon: IconServer2 },
     { href: '/internos', label: 'Internos', icon: IconUsers },
     { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
-    { href: '/rutas', label: 'Rutas', icon: IconRoute },
     { href: '/ivr', label: 'IVR', icon: IconArrowsSplit },
     { href: '/ia-voz', label: 'IA & Voz', icon: IconRobot },
     { href: '/click-to-call', label: 'Click-to-Call', icon: IconWorldShare },
     { href: '/aplicaciones', label: 'Aplicaciones', icon: IconApps },
     { href: '/historial', label: 'Historial', icon: IconHistory },
     { href: '/grabaciones', label: 'Grabaciones', icon: IconMicrophone2 },
+    { href: '/intercom', label: 'Intercom', icon: IconDeviceCctv },
   ] },
   { label: 'Operación', icon: IconDeviceAnalytics, items: [
     { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
     { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
     { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
     { href: '/mapa', label: 'Mapa', icon: IconMap2 },
+    { href: '/clientes', label: 'Clientes', icon: IconAddressBook },
   ] },
   { label: 'Sistema', icon: IconAdjustmentsCog, items: [
     { href: '/dialplan', label: 'Dialplan', icon: IconTerminal2 },
@@ -60,7 +62,7 @@ export default function Shell({ children }) {
   const [openG, setOpenG] = useState({});
   const [mods, setMods] = useState({});
   useEffect(() => { fetch('/backend/api/modules').then((r) => r.json()).then(setMods).catch(() => {}); }, []);
-  const MOD_MAP = { '/sbc': 'sbc', '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai' };
+  const MOD_MAP = { '/sbc': 'sbc', '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/intercom': 'intercom' };
   const visibleItem = (it) => !MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false;
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
   useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then((bb) => { setBrand(bb); if (bb && bb.name && typeof document !== 'undefined') document.title = bb.name; }).catch(() => {}); }, []);
@@ -77,7 +79,7 @@ export default function Shell({ children }) {
   const toggleRail = () => setRail(v => { const n = !v; try { localStorage.setItem('pbxng_rail', n ? '1' : '0'); } catch (_) {} return n; });
   const toggleGroup = (l) => setOpenG(s => ({ ...s, [l]: !s[l] }));
 
-  if (path && (path.startsWith('/phone') || path.startsWith('/enroll') || path.startsWith('/call') || path === '/login')) return children;
+  if (path && (path.startsWith('/phone') || path.startsWith('/enroll') || path.startsWith('/call') || path.startsWith('/agente') || path.startsWith('/supervisor') || path === '/login')) return children;
   const { connected } = useLive();
   const { user } = useAuth();
   const { setColorScheme } = useMantineColorScheme();

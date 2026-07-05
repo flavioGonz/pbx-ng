@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CONF = "/etc/turnserver.conf"
 CLI_HOST, CLI_PORT = "127.0.0.1", 5766
-CLI_PASS = os.environ.get("TURN_CLI_PASS", "pbxng-cli")
+CLI_PASS = "pbxngturn"
 
 def sh(cmd, t=8):
     try: return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=t).stdout.strip()

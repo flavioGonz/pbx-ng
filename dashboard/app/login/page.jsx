@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const ROLES = {
   admin: { label: 'Administrador', icon: 'admin_panel_settings', heading: 'Panel de administración' },
@@ -26,8 +26,10 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [role, setRole] = useState('admin');
+  const videoRef = useRef(null); const [muted, setMuted] = useState(true);
+  const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted; if (!v.muted) { try { v.play(); } catch (_) {} } setMuted(v.muted); };
 
-  const [brand, setBrand] = useState({ name: 'HORIZON', subtitle: 'SEGURIDAD', tagline: 'Panel de control unificado', logo: '' });
+  const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', tagline: 'Central telefónica unificada', logo: '' });
   const [setup, setSetup] = useState(null);
 
   const [tok, setTok] = useState('');
@@ -54,8 +56,7 @@ export default function Login() {
       if (!r.ok) { setErr(d.error || 'Error'); setLoading(false); return; }
       if (d.must_change) { setTok(d.token); setLoading(false); return; }
       localStorage.setItem('pbxng_jwt', d.token);
-      // TODO: cuando existan, redirigir agente->/agente y supervisor->/supervisor
-      window.location.href = '/';
+      window.location.href = dest(d.user && d.user.role);
     } catch (e) {
       setErr('No se pudo conectar');
       setLoading(false);
@@ -77,7 +78,6 @@ export default function Login() {
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'Error'); setLoading(false); return; }
       localStorage.setItem('pbxng_jwt', tok);
-      // TODO: cuando existan, redirigir agente->/agente y supervisor->/supervisor
       window.location.href = '/';
     } catch (e) {
       setErr('No se pudo conectar');
@@ -85,8 +85,10 @@ export default function Login() {
     }
   }
 
-  const brandName = brand.name || 'HORIZON';
-  const brandSub = brand.subtitle || 'SEGURIDAD';
+  useEffect(() => { if (!brand.callcenter && role !== 'admin') setRole('admin'); }, [brand.callcenter, role]);
+  const dest = (rl) => (rl === 'agente' ? '/agente' : rl === 'supervisor' ? '/supervisor' : '/');
+  const brandName = brand.name || 'PBX-NG';
+  const brandSub = brand.subtitle || 'Comunicaciones';
 
   return (
     <div className="hzn-login-root">
@@ -109,7 +111,7 @@ export default function Login() {
 
               {/* Role tabs (3): Administrador · Agente · Supervisor */}
               <div className="hzn-role-tabs">
-                {Object.keys(ROLES).map((k) => (
+                {Object.keys(ROLES).filter((k) => k === 'admin' || brand.callcenter).map((k) => (
                   <button
                     key={k}
                     type="button"
@@ -241,7 +243,7 @@ export default function Login() {
           )}
 
           <div className="hzn-login-footer">
-            <span>TeleFlow v18</span>
+            <span>PBX-NG</span>
             <span className="hzn-dot">·</span>
             <span>© Infratec 2026</span>
           </div>
@@ -250,8 +252,9 @@ export default function Login() {
 
       {/* HERO (derecha) */}
       <div className="hzn-login-hero">
-        <div className="hzn-login-hero-image" style={{ backgroundImage: HERO_IMAGE }} />
+        <video ref={videoRef} className="hzn-login-hero-video" autoPlay loop muted playsInline preload="auto"><source src="/background-login.mp4" type="video/mp4" /></video>
         <div className="hzn-login-hero-overlay" />
+        <button type="button" className="hzn-hero-mute" onClick={toggleMute} aria-label={muted ? 'Activar sonido' : 'Silenciar'}><span className="material-icons-round">{muted ? 'volume_off' : 'volume_up'}</span></button>
         <div className="hzn-login-hero-content">
           <div className="hzn-logo">
             <div style={{ textAlign: 'right' }}>
@@ -268,9 +271,9 @@ export default function Login() {
           <div className="hzn-login-tagline">
             <span className="hzn-role-pill">
               <span className="material-icons-round">verified_user</span>
-              Teleflow Horizon
+              PBX-NG
             </span>
-            <h1>{brand.tagline || 'Panel de control unificado'}</h1>
+            <h1>{brand.tagline || 'Central telefónica unificada'}</h1>
             <p>
               Internos WebRTC, troncales SIP, colas, IVR, conferencias y monitoreo en tiempo real,
               en una sola consola centralizada.
@@ -345,6 +348,20 @@ export default function Login() {
           background-repeat: no-repeat;
           filter: saturate(1.05);
         }
+        .hzn-login-hero-video {
+          position: absolute; inset: 0; width: 100%; height: 100%;
+          object-fit: cover; z-index: 0; filter: saturate(1.06) contrast(1.03);
+          animation: heroZoom 34s ease-in-out infinite alternate;
+        }
+        @keyframes heroZoom { from { transform: scale(1); } to { transform: scale(1.09); } }
+        .hzn-hero-mute {
+          position: absolute; bottom: 22px; left: 22px; z-index: 3;
+          width: 44px; height: 44px; border-radius: 50%;
+          border: 1px solid rgba(255,255,255,.25); background: rgba(18,18,18,.5);
+          backdrop-filter: blur(6px); color: #fff; display: flex; align-items: center; justify-content: center;
+          cursor: pointer; transition: background .2s, transform .2s; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+        }
+        .hzn-hero-mute:hover { background: rgba(17,179,40,.6); transform: scale(1.06); }
         .hzn-login-hero-overlay {
           position: absolute; inset: 0;
           background:

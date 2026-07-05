@@ -93,28 +93,29 @@ declare -A ROLE_PROFILES ROLE_DESC
 ROLES=()
 case "$SHAPE" in
   1) ROLES=(all)
-     ROLE_PROFILES[all]="core sbc media ai proxy"; ROLE_DESC[all]="Stack completo (DB+Asterisk+App+SBC+media+voz)" ;;
+     ROLE_PROFILES[all]="core sbc turn ai intercom proxy"; ROLE_DESC[all]="Stack completo (DB+Asterisk+App+SBC+media+voz)" ;;
   2) ROLES=(main sbc)
-     ROLE_PROFILES[main]="core media ai proxy"; ROLE_DESC[main]="App+telefonía: DB, Redis, Asterisk, API, Dashboard, media, voz, proxy"
+     ROLE_PROFILES[main]="core turn ai intercom proxy"; ROLE_DESC[main]="App+telefonía: DB, Redis, Asterisk, API, Dashboard, media, voz, proxy"
      ROLE_PROFILES[sbc]="sbc";                  ROLE_DESC[sbc]="SBC: Kamailio + rtpengine (borde, aparte)" ;;
   3) ROLES=(core edge ai)
-     ROLE_PROFILES[core]="core";            ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
-     ROLE_PROFILES[edge]="sbc media proxy"; ROLE_DESC[edge]="Borde: SBC Kamailio, rtpengine, TURN, Proxy"
+     ROLE_PROFILES[core]="core intercom";   ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard, Intercom"
+     ROLE_PROFILES[edge]="sbc turn proxy"; ROLE_DESC[edge]="Borde: SBC Kamailio, rtpengine, TURN, Proxy"
      ROLE_PROFILES[ai]="ai";                ROLE_DESC[ai]="Voz IA: TTS/STT (pesado, aislado)" ;;
-  4) ROLES=(core sbc media ai proxy)
-     ROLE_PROFILES[core]="core";   ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
-     ROLE_PROFILES[sbc]="sbc";     ROLE_DESC[sbc]="SBC: Kamailio + rtpengine"
-     ROLE_PROFILES[media]="media"; ROLE_DESC[media]="Media: Coturn (TURN/STUN)"
-     ROLE_PROFILES[ai]="ai";       ROLE_DESC[ai]="Voz IA: TTS/STT"
-     ROLE_PROFILES[proxy]="proxy"; ROLE_DESC[proxy]="Proxy inverso: Nginx Proxy Manager" ;;
+  4) ROLES=(core sbc turn ai intercom proxy)
+     ROLE_PROFILES[core]="core";         ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
+     ROLE_PROFILES[sbc]="sbc";           ROLE_DESC[sbc]="SBC: Kamailio + rtpengine + wsbridge"
+     ROLE_PROFILES[turn]="turn";         ROLE_DESC[turn]="TURN: Coturn (TURN/STUN)"
+     ROLE_PROFILES[ai]="ai";             ROLE_DESC[ai]="Voz IA: TTS/STT"
+     ROLE_PROFILES[intercom]="intercom"; ROLE_DESC[intercom]="Intercom: go2rtc (RTSP->WebRTC/MSE)"
+     ROLE_PROFILES[proxy]="proxy";       ROLE_DESC[proxy]="Proxy inverso: Nginx Proxy Manager" ;;
   5) # personalizado: el usuario agrupa los 5 perfiles en N contenedores
      c "Modo personalizado — agrupá los servicios en contenedores"
-     echo "   Perfiles: core (DB+Asterisk+App) · sbc · media (TURN) · ai (voz) · proxy (NPM)"
+     echo "   Perfiles: core (DB+Asterisk+App) · sbc · turn (Coturn) · ai (voz) · intercom (go2rtc) · proxy (NPM)"
      echo "   Poné un número de grupo a cada uno (mismo número = mismo contenedor)."
      echo
      declare -A GRP SEEN
-     for p in core sbc media ai proxy; do GRP[$p]=$(ask "   Grupo para '$p'" "1"); done
-     for p in core sbc media ai proxy; do
+     for p in core sbc turn ai intercom proxy; do GRP[$p]=$(ask "   Grupo para '$p'" "1"); done
+     for p in core sbc turn ai intercom proxy; do
        gid="${GRP[$p]}"; rname="g${gid}"
        if [[ -z "${SEEN[$gid]:-}" ]]; then ROLES+=("$rname"); ROLE_PROFILES[$rname]="$p"; SEEN[$gid]=1
        else ROLE_PROFILES[$rname]="${ROLE_PROFILES[$rname]} $p"; fi
@@ -312,7 +313,7 @@ provision_ct(){
   ip_for_profile(){ local p="$1" r; for r in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$r]} " == *" $p "* ]] && { echo "${ROLE_IP[$r]}"; return; }; done; }
   local sbc_ip turn_ip voz_ip npm_ip media_ip
   sbc_ip="$(ip_for_profile sbc)"
-  turn_ip="$(ip_for_profile media)"; [[ -n "$turn_ip" ]] || turn_ip="$sbc_ip"
+  turn_ip="$(ip_for_profile turn)"; [[ -n "$turn_ip" ]] || turn_ip="$sbc_ip"
   voz_ip="$(ip_for_profile ai)"
   npm_ip="$(ip_for_profile proxy)"
   media_ip="${voz_ip:-$core_ip}"
@@ -348,6 +349,8 @@ TURN_USER=pbxng
 TURN_PASS=$TURN_PASS
 DEFAULT_COMPANY=$COMPANY
 JWT_SECRET=$JWT_SECRET
+GO2RTC_MGMT=http://go2rtc:1984
+COMPOSE_PROFILES=$(echo $profiles | tr " " ",")
 EOF
   "
   # levantar los perfiles de este rol
@@ -360,6 +363,18 @@ EOF
   fi
   pct exec "$ctid" -- bash -lc "cd /opt/pbx-ng/docker && docker compose $args up -d --build" \
     || y "   (algunos servicios pueden tardar en construir; revisá con 'docker compose ps')"
+  # instalar pbxng-ctl + reconciliador de modulos en el CT
+  pct exec "$ctid" -- bash -lc '
+    set -e
+    D=/opt/pbx-ng/docker
+    if [ -f "$D/pbxng-ctl" ]; then install -m 0755 "$D/pbxng-ctl" /usr/local/bin/pbxng-ctl; sed -i "s|^DIR=.*|DIR=\\"\${PBXNG_DIR:-$D}\\"|" /usr/local/bin/pbxng-ctl; fi
+    if [ -f "$D/pbxng-reconciler.sh" ]; then
+      install -m 0755 "$D/pbxng-reconciler.sh" /usr/local/bin/pbxng-reconciler.sh
+      sed "s|/opt/pbx-ng/docker|$D|g" "$D/pbxng-reconciler.service" > /etc/systemd/system/pbxng-reconciler.service 2>/dev/null || true
+      cp "$D/pbxng-reconciler.timer" /etc/systemd/system/pbxng-reconciler.timer 2>/dev/null || true
+      systemctl daemon-reload 2>/dev/null && systemctl enable --now pbxng-reconciler.timer 2>/dev/null || true
+    fi
+  ' || y "   (pbxng-ctl/reconciliador no instalado en CT $ctid)"
   g "   CT $ctid aprovisionado."
 }
 

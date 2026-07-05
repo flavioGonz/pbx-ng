@@ -1,0 +1,209 @@
+# PBX-NG · Compose de RELEASE (appliance on-prem).
+# Deploy por IMAGEN versionada — NO construye nada. Las imagenes se obtienen por
+# 'docker compose pull' (con registry) o 'docker load' del bundle (air-gapped).
+# Perfiles = MODULOS, igual que el compose canonico. Uso:
+#   export PBXNG_VERSION=1.0.0 PBXNG_REGISTRY=pbxng     # air-gapped (nombres locales)
+#   export COMPOSE_PROFILES=core,sbc,turn,intercom
+#   docker compose -f docker-compose.release.yml up -d
+# Variables:
+#   PBXNG_REGISTRY  prefijo de imagen (def: pbxng). Para registry: ghcr.io/tuorg/pbx-ng
+#   PBXNG_VERSION   tag de version (def: latest). Debe coincidir con el bundle/registry.
+name: pbxng
+
+networks:
+  pbxng: { driver: bridge }
+
+volumes:
+  pg_data: {}
+  redis_data: {}
+  npm_data: {}
+  npm_letsencrypt: {}
+  asterisk_sounds: {}
+  voz_models: {}
+  go2rtc_config: {}
+  recordings: {}
+
+x-reg: &REG ${PBXNG_REGISTRY:-pbxng}
+x-ver: &VER ${PBXNG_VERSION:-latest}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["core"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-pbxng}
+      POSTGRES_USER: ${DB_USER:-pbxng}
+      POSTGRES_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./config/initdb:/docker-entrypoint-initdb.d:ro
+    ports: ["5432:5432"]
+    networks: [pbxng]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["core"]
+    restart: unless-stopped
+    volumes: [redis_data:/data]
+    ports: ["6379:6379"]
+    networks: [pbxng]
+
+  asterisk:
+    image: ${PBXNG_REGISTRY:-pbxng}/asterisk:${PBXNG_VERSION:-latest}
+    profiles: ["core"]
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS:?}
+      ARI_USER: ${ARI_USER:-pbxng}
+      ARI_PASS: ${ARI_PASS:?set ARI_PASS in .env}
+      AMI_USER: ${AMI_USER:-pbxng-ami}
+      AMI_PASS: ${AMI_PASS:?set AMI_PASS in .env}
+      API_URL: ${API_URL:-127.0.0.1:3000}
+      DOMAIN: ${DOMAIN:-pbx.local}
+    volumes:
+      - asterisk_sounds:/var/lib/asterisk/sounds/custom
+      - recordings:/var/spool/asterisk/monitor
+
+  api:
+    image: ${PBXNG_REGISTRY:-pbxng}/api:${PBXNG_VERSION:-latest}
+    profiles: ["core"]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS:?}
+      ARI_URL: http://${ASTERISK_HOST:-127.0.0.1}:8088
+      ARI_USER: ${ARI_USER:-pbxng}
+      ARI_PASS: ${ARI_PASS:?}
+      AMI_HOST: ${ASTERISK_HOST:-127.0.0.1}
+      AMI_PORT: 5038
+      AMI_USER: ${AMI_USER:-pbxng-ami}
+      AMI_PASS: ${AMI_PASS:?}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      TENANT_MODE: ${TENANT_MODE:-single}
+      DOMAIN: ${DOMAIN:-}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+      TURN_USER: ${TURN_USER:-pbxng}
+      TURN_PASS: ${TURN_PASS:-}
+      DEFAULT_COMPANY: ${DEFAULT_COMPANY:-Mi Empresa}
+      SBC_HOST: ${SBC_HOST:-}
+      NPM_HOST: ${NPM_HOST:-}
+      TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
+      VOZ_HOST: ${VOZ_HOST:-}
+      MEDIA_HOST: ${MEDIA_HOST:-${ASTERISK_HOST:-}}
+      GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}
+    volumes:
+      - recordings:/recordings:ro
+    ports: ["3000:3000"]
+    networks: [pbxng]
+
+  dashboard:
+    image: ${PBXNG_REGISTRY:-pbxng}/dashboard:${PBXNG_VERSION:-latest}
+    profiles: ["core"]
+    restart: unless-stopped
+    depends_on: [api]
+    environment:
+      API_URL: http://api:3000
+    ports: ["3001:3001"]
+    networks: [pbxng]
+
+  kamailio:
+    image: ${PBXNG_REGISTRY:-pbxng}/kamailio:${PBXNG_VERSION:-latest}
+    profiles: ["sbc"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS:?}
+      ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+      TRUSTED_NET: ${TRUSTED_NET:-}
+
+  rtpengine:
+    image: drachtio/rtpengine:latest
+    profiles: ["sbc"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PUBLIC_IP: ${PUBLIC_IP:-}
+    entrypoint: ["/bin/sh","-c"]
+    command:
+      - |
+        PUB=$$(getent hosts "$$PUBLIC_IP" | awk '{print $$1}'); [ -z "$$PUB" ] && PUB="$$PUBLIC_IP"
+        LAN=$$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $$7; exit}'); [ -z "$$LAN" ] && LAN=$$(hostname -I | awk '{print $$1}')
+        exec rtpengine --foreground --interface "$$LAN!$$PUB" --listen-ng 127.0.0.1:2223 --port-min 30000 --port-max 40000
+
+  wsbridge:
+    image: ${PBXNG_REGISTRY:-pbxng}/wsbridge:${PBXNG_VERSION:-latest}
+    profiles: ["sbc"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS:?}
+      ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
+      KAM_HOST: ${KAM_HOST:-127.0.0.1}
+      KAM_PORT: ${KAM_PORT:-5060}
+
+  coturn:
+    image: ${PBXNG_REGISTRY:-pbxng}/coturn:${PBXNG_VERSION:-latest}
+    profiles: ["turn"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DOMAIN: ${DOMAIN:-pbx.local}
+      TURN_REALM: ${TURN_REALM:-${DOMAIN:-pbx.local}}
+      TURN_USER: ${TURN_USER:-pbxng}
+      TURN_PASS: ${TURN_PASS:-pbxng-turn-changeme}
+      TURN_CLI_PASS: ${TURN_CLI_PASS:-pbxng-cli}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+
+  voz:
+    image: ${PBXNG_REGISTRY:-pbxng}/voz:${PBXNG_VERSION:-latest}
+    profiles: ["ai"]
+    restart: unless-stopped
+    volumes: [voz_models:/opt/voz/models]
+    ports: ["8080:8080"]
+    networks: [pbxng]
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    profiles: ["intercom"]
+    restart: unless-stopped
+    volumes: [go2rtc_config:/config]
+    ports: ["1984:1984", "8555:8555/tcp", "8555:8555/udp"]
+    networks: [pbxng]
+
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "81:81"]
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    networks: [pbxng]

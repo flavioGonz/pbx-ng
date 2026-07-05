@@ -14,6 +14,7 @@ import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const SECF_TYPE = { 0: 'User-Agent', 1: 'Pais', 2: 'Dominio', 3: 'IP', 4: 'Usuario', 5: 'Destino' };
+const Flag = ({ cc }) => cc ? <img src={`https://flagcdn.com/20x15/${String(cc).toLowerCase()}.png`} width={20} height={15} alt={cc} style={{ borderRadius: 2, boxShadow: '0 0 0 1px rgba(0,0,0,.12)', objectFit: 'cover', flex: 'none' }} /> : <IconWorld size={15} style={{ opacity: .35 }} />;
 function fmtUptime(s) { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; }
 function Kpi({ icon, color, label, value, sub }) {
   return <Card withBorder radius="md" padding="sm"><Group gap="sm" wrap="nowrap"><ThemeIcon variant="light" color={color} size={38} radius="md">{icon}</ThemeIcon><div style={{ minWidth: 0 }}><Text size="xs" c="dimmed">{label}</Text><Text fw={700} fz="lg" lh={1.1} truncate><Slot value={value} /></Text>{sub && <Text size="xs" c="dimmed">{sub}</Text>}</div></Group></Card>;
@@ -50,7 +51,14 @@ function Spark({ data, color, label, unit, accent }) {
 function ConsoleBody({ sbc, load, hist }) {
   const [cfg, setCfg] = useState(''); const [cfgOrig, setCfgOrig] = useState(''); const [cfgMsg, setCfgMsg] = useState(''); const [cfgBusy, setCfgBusy] = useState(false);
   const [banIp, setBanIp] = useState(''); const [debug, setDebug] = useState(2); const [busy, setBusy] = useState('');
+  const [geo, setGeo] = useState({});
   const cfgLoaded = useRef(false);
+  const bannedKey = (sbc?.banned || []).join(',');
+  useEffect(() => {
+    const ips = (sbc?.banned || []).filter((ip) => !geo[ip]);
+    if (!ips.length) return;
+    fetch('/backend/api/ipgeo?ips=' + encodeURIComponent(ips.join(','))).then((r) => r.json()).then((d) => { if (d && !d.error) setGeo((g) => ({ ...g, ...d })); }).catch(() => {});
+  }, [bannedKey]);
   const { snap } = useLive(); const ch = (snap && snap.channels) || []; const ext = (snap && snap.extensions) || []; const [extList, setExtList] = useState([]); const remExt = (extList.length ? extList : ext).filter(e => e.via === 'sbc');
   const [now, setNow] = useState(Date.now()); useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const [newTgt, setNewTgt] = useState(''); const [dlgOpen, setDlgOpen] = useState(false); const [dlgEdit, setDlgEdit] = useState(null); const [dtUri, setDtUri] = useState(''); const [dtPrio, setDtPrio] = useState(0);
@@ -110,6 +118,13 @@ function ConsoleBody({ sbc, load, hist }) {
     return res;
   }, [load]);
 
+  const blockCountry = async (cc, name) => {
+    if (!cc) return;
+    if (!confirm('¿Bloquear todo el país ' + (name || cc) + ' (' + cc + ') en el filtro de seguridad del SBC?')) return;
+    const r = await fetch('/backend/api/sbc/secfilter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 1, type: 1, data: cc }) }).then((x) => x.json()).catch(() => ({ error: 1 }));
+    toast(r.error ? 'No se pudo agregar la regla' : 'País ' + cc + ' agregado al filtro de seguridad (requiere módulo secfilter activo en el SBC)', r.error ? 'bad' : 'ok');
+    load();
+  };
   const stats = sbc?.stats || {}; const core = stats.core || {}; const sl = stats.sl || {}; const shm = stats.shmem || {}; const rates = stats.rates || {};
   const disp = sbc?.dispatcher || []; const dispMain = disp.filter(d => Number(d.set || 1) !== 2); const opHealth = (addr) => { const d = disp.find(x => Number(x.set) === 2 && (x.uri || '').includes(addr)); if (!d) return null; const f = (d.flags || ''); return { state: f.charAt(0) === 'A' ? 'up' : f.charAt(0) === 'I' ? 'down' : 'probing', flags: f, latency: d.latency }; }; const banned = sbc?.banned || []; const rtp = sbc?.rtpengine || {};
   const net = stats.net || {}; const ifaces = net.ifaces || []; const liveRoutes = net.routes || [];
@@ -212,8 +227,13 @@ function ConsoleBody({ sbc, load, hist }) {
             </Group>
           </Group>
           {banned.length === 0 ? <Text size="sm" c="dimmed">Sin IPs bloqueadas.</Text> :
-            <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>IP</Table.Th><Table.Th ta="right">Accion</Table.Th></Table.Tr></Table.Thead>
-              <Table.Tbody>{banned.map(ip => <Table.Tr key={ip}><Table.Td ff="monospace">{ip}</Table.Td><Table.Td ta="right"><Button size="compact-xs" variant="light" color="teal" loading={busy === 'unban' + ip} onClick={() => sendCmd('unban', ip)}>Desbloquear</Button></Table.Td></Table.Tr>)}</Table.Tbody></Table>}
+            <Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>País</Table.Th><Table.Th>IP</Table.Th><Table.Th>Ciudad / ISP</Table.Th><Table.Th ta="right">Acción</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{banned.map(ip => { const g = geo[ip] || {}; return <Table.Tr key={ip}>
+                <Table.Td><Group gap={7} wrap="nowrap"><Flag cc={g.cc} /><Text fz="sm">{g.country || '—'}</Text></Group></Table.Td>
+                <Table.Td ff="monospace">{ip}</Table.Td>
+                <Table.Td><Text fz="xs" c="dimmed" lineClamp={1} maw={240}>{[g.city, g.isp].filter(Boolean).join(' · ') || '—'}</Text></Table.Td>
+                <Table.Td ta="right"><Group gap={6} justify="flex-end" wrap="nowrap">{g.cc && <Tooltip label={'Bloquear todo el país (' + g.country + ') vía filtro de seguridad'}><Button size="compact-xs" variant="subtle" color="red" onClick={() => blockCountry(g.cc, g.country)}>Bloquear país</Button></Tooltip>}<Button size="compact-xs" variant="light" color="teal" loading={busy === 'unban' + ip} onClick={() => sendCmd('unban', ip)}>Desbloquear</Button></Group></Table.Td>
+              </Table.Tr>; })}</Table.Tbody></Table>}
         </Card>
         <Card withBorder radius="md" padding="md" mb="md">
           <Group justify="space-between" mb="sm"><Text fw={700}>Lista de bloqueo SIP (secfilter)</Text>
@@ -403,6 +423,7 @@ function ConsoleBody({ sbc, load, hist }) {
       </Tabs.Panel>
 
       <Tabs.Panel value="rtp">
+        <RtpeConfig />
         <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} mb="md">
           <Kpi icon={<IconArrowsLeftRight size={20} />} color={rtp.up ? 'teal' : 'red'} label="Estado" value={rtp.up ? 'Activo' : 'Inactivo'} />
           <Kpi icon={<IconActivity size={20} />} color="blue" label="Sesiones media" value={rtp.sessions ?? 0} />
@@ -488,6 +509,37 @@ function ConsoleBody({ sbc, load, hist }) {
         </Card>
       </Tabs.Panel>
     </Tabs>
+  );
+}
+
+function RtpeConfig() {
+  const [cfg, setCfg] = useState({ portmin: '', portmax: '', timeout: '', silent_timeout: '', loglevel: '' });
+  const [live, setLive] = useState({}); const [busy, setBusy] = useState(false); const [loaded, setLoaded] = useState(false);
+  useEffect(() => { fetch('/backend/api/sbc/rtpengine').then((r) => r.json()).then((d) => { setCfg({ portmin: d.portmin || '', portmax: d.portmax || '', timeout: d.timeout || '', silent_timeout: d.silent_timeout || '', loglevel: d.loglevel || '' }); setLive(d.live || {}); setLoaded(true); }).catch(() => setLoaded(true)); }, []);
+  const set = (k, v) => setCfg((x) => ({ ...x, [k]: v }));
+  async function save() {
+    setBusy(true);
+    const r = await fetch('/backend/api/sbc/rtpengine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
+    setBusy(false);
+    if (r.error) { toast('Error: ' + r.error, 'bad'); return; }
+    toast('Configuración guardada — rtpengine se reinicia con los nuevos valores', 'ok');
+  }
+  return (
+    <Card withBorder radius="md" padding="md" mb="md">
+      <Group gap="xs" mb={4}><IconDeviceFloppy size={16} /><Text fw={700} size="sm">Configuración de rtpengine</Text></Group>
+      <Text size="xs" c="dimmed" mb="md">Ajustes del motor de medios del borde. Al guardar y aplicar, rtpengine se reinicia con la nueva configuración (breve corte de audio en llamadas activas).</Text>
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+        <NumberInput label="Puerto RTP mínimo" description="Inicio del rango RTP" value={cfg.portmin ? +cfg.portmin : ''} onChange={(v) => set('portmin', v)} min={1024} max={65535} placeholder="30000" />
+        <NumberInput label="Puerto RTP máximo" description="Fin del rango RTP" value={cfg.portmax ? +cfg.portmax : ''} onChange={(v) => set('portmax', v)} min={1024} max={65535} placeholder="40000" />
+        <NumberInput label="Timeout (s)" description="Sin RTP en N s → corta" value={cfg.timeout ? +cfg.timeout : ''} onChange={(v) => set('timeout', v)} min={0} placeholder="60" />
+        <NumberInput label="Silent timeout (s)" description="Solo silencio → corta" value={cfg.silent_timeout ? +cfg.silent_timeout : ''} onChange={(v) => set('silent_timeout', v)} min={0} placeholder="3600" />
+        <Select label="Log level" description="Verbosidad del motor" value={cfg.loglevel || ''} onChange={(v) => set('loglevel', v)} data={[{ value: '3', label: '3 · Errores' }, { value: '5', label: '5 · Info' }, { value: '6', label: '6 · Normal' }, { value: '7', label: '7 · Debug' }]} placeholder="6" clearable />
+      </SimpleGrid>
+      <Group justify="space-between" mt="md">
+        <Text size="xs" c="dimmed">Estado motor: <b>{live.up ? 'activo' : 'inactivo'}</b> · Sesiones: <b>{live.sessions ?? 0}</b></Text>
+        <Button size="sm" color="teal" leftSection={<IconDeviceFloppy size={16} />} loading={busy} onClick={save} disabled={!loaded}>Guardar y aplicar</Button>
+      </Group>
+    </Card>
   );
 }
 

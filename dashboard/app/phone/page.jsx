@@ -1,4 +1,10 @@
 'use client';
+if (typeof window !== 'undefined' && !window.__vibInit) {
+  window.__vibInit = true; window.__uiInteracted = false;
+  const _mk = () => { window.__uiInteracted = true; };
+  window.addEventListener('pointerdown', _mk, { once: true, passive: true });
+  window.addEventListener('keydown', _mk, { once: true });
+}
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { IconRefresh } from '@tabler/icons-react';
 import { useSoftphone } from '../useSoftphone';
@@ -73,8 +79,8 @@ export default function Phone() {
       else if (!faceDown && faceRef.current.down) { faceRef.current.down = false; }
       if (faceDown && faceRef.current.down && faceRef.current.t && now - faceRef.current.t > 700) {
         faceRef.current.t = 0; // disparar una vez por giro
-        if (sp.incoming || pendIn) { wantAccept.current = false; sp.rejectIncoming?.(); setPendIn(null); try { navigator.vibrate && navigator.vibrate(120); } catch (_) {} notify('Llamada rechazada (boca abajo)'); }
-        else if (established && !sp.muted) { sp.toggleMute(); try { navigator.vibrate && navigator.vibrate(60); } catch (_) {} notify('Micrófono silenciado (boca abajo)'); }
+        if (sp.incoming || pendIn) { wantAccept.current = false; sp.rejectIncoming?.(); setPendIn(null); try { window.__uiInteracted && navigator.vibrate && navigator.vibrate(120); } catch (_) {} notify('Llamada rechazada (boca abajo)'); }
+        else if (established && !sp.muted) { sp.toggleMute(); try { window.__uiInteracted && navigator.vibrate && navigator.vibrate(60); } catch (_) {} notify('Micrófono silenciado (boca abajo)'); }
       }
     };
     window.addEventListener('devicemotion', onMotion);
@@ -107,12 +113,12 @@ export default function Phone() {
   useEffect(() => {
     if (!pendIn || pendIn.missed || sp.incoming) return;
     let stop = false; let ac = null;
-    const vib = () => { if (!stop) { try { navigator.vibrate && navigator.vibrate([500, 250, 500, 250, 700]); } catch (_) {} } };
+    const vib = () => { if (!stop) { try { window.__uiInteracted && navigator.vibrate && navigator.vibrate([500, 250, 500, 250, 700]); } catch (_) {} } };
     const beep = () => { try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); const o = ac.createOscillator(); const g = ac.createGain(); o.frequency.value = 480; o.connect(g); g.connect(ac.destination); g.gain.setValueAtTime(0.0001, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.18, ac.currentTime + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.9); o.start(); o.stop(ac.currentTime + 1); } catch (_) {} };
     vib(); beep();
     const iv = setInterval(() => { vib(); beep(); }, 2600);
     const to = setTimeout(() => setPendIn(p => p ? { ...p, missed: true } : p), 35000);
-    return () => { stop = true; clearInterval(iv); clearTimeout(to); try { navigator.vibrate && navigator.vibrate(0); } catch (_) {} try { ac && ac.close(); } catch (_) {} };
+    return () => { stop = true; clearInterval(iv); clearTimeout(to); try { window.__uiInteracted && navigator.vibrate && navigator.vibrate(0); } catch (_) {} try { ac && ac.close(); } catch (_) {} };
   }, [pendIn, sp.incoming]);
   async function buscarUpdate() { try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch (_) {} try { const r = await navigator.serviceWorker?.getRegistration(); await r?.update(); } catch (_) {} notify('Buscando actualización…'); setTimeout(() => { try { location.reload(); } catch (_) {} }, 600); }
 

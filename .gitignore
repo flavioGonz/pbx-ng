@@ -1,5 +1,7 @@
 # deps & build
 node_modules/
+__pycache__/
+*.pyc
 .next/
 out/
 dist/
@@ -7,11 +9,18 @@ dist/
 .env
 .env.local
 .env.*.local
+edge-join.env
+docker/edge-join.env
 *.pem
 *.key
 *.p8
 *_rsa
 *_ed25519
+# backups locales (no versionar)
+*.bak
+*.bak.*
+*.v1.bak
+*.pre-*
 # runtime
 *.log
 recordings/

@@ -1,19 +1,44 @@
 'use client';
-import { Stack, Title, Text, Badge, Tabs } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconTag, IconPhoneIncoming, IconArrowsSplit, IconTarget, IconAsterisk, IconDeviceLandlinePhone, IconBackspace, IconPlus, IconId, IconRoute } from '@tabler/icons-react';
+import { Stack, Title, Text, Badge, Tabs, Alert, Code, Button, Group } from '@mantine/core';
+import { IconArrowDownLeft, IconArrowUpRight, IconTag, IconPhoneIncoming, IconArrowsSplit, IconTarget, IconAsterisk, IconDeviceLandlinePhone, IconBackspace, IconPlus, IconId, IconRoute, IconRouteAltLeft, IconShieldLock } from '@tabler/icons-react';
 import CrudPanel from '../CrudPanel';
+import { toast } from '../notify';
 import { useEffect, useState } from 'react';
 import PageHeader from '../PageHeader';
 import DidOverview from '../DidOverview';
 
 const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación' };
 
-export default function Rutas() {
+export default function Rutas({ embedded } = {}) {
   const [trunkOpts, setTrunkOpts] = useState([]);
+  const [gen, setGen] = useState(false); const [rk, setRk] = useState(0);
+  async function generar() {
+    setGen(true);
+    try {
+      const [inb, outb] = await Promise.all([
+        fetch('/backend/api/routes/inbound').then((r) => r.json()).catch(() => []),
+        fetch('/backend/api/routes/outbound').then((r) => r.json()).catch(() => []),
+      ]);
+      let n = 0;
+      if (!(Array.isArray(outb) && outb.some((o) => (o.pattern || '').replace(/^_/, '') === '0X.'))) {
+        await fetch('/backend/api/routes/outbound', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Salida por 0 (SBC)', pattern: '0X.', strip: 1 }) }); n++;
+      }
+      if (!(Array.isArray(inb) && inb.length)) {
+        await fetch('/backend/api/routes/inbound', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ did: '_X.', name: 'Entrada por defecto (ajustar interno)', dest_type: 'interno', dest_value: '1001' }) }); n++;
+      }
+      toast(n ? ('Generadas ' + n + ' ruta(s) sugerida(s) hacia el SBC \u2014 revis\u00e1 y ajust\u00e1 el destino') : 'Ya hab\u00eda rutas; no se gener\u00f3 nada nuevo', 'ok');
+      setRk((k) => k + 1);
+    } catch (e) { toast('No se pudo generar', 'bad'); }
+    setGen(false);
+  }
   useEffect(() => { fetch('/backend/api/trunks').then((r) => r.json()).then((d) => Array.isArray(d) && setTrunkOpts(d.map((t) => ({ value: t.name, label: t.name + (t.provider_host ? ' (' + t.provider_host + ')' : '') })))).catch(() => {}); }, []);
   return (
     <Stack gap="lg">
-      <PageHeader icon={<IconRoute size={24} />} title="Rutas" subtitle="Enrutamiento de llamadas de las troncales · entrantes (DID) y salientes" color="indigo" />
+      {!embedded && <PageHeader icon={<IconRoute size={24} />} title="Rutas" subtitle="Enrutamiento de llamadas de las troncales · entrantes (DID) y salientes" color="indigo" />}
+      <Alert color="grape" variant="light" radius="md" icon={<IconRouteAltLeft size={18} />} title="Todo entra y sale por el SBC-NG">
+        <Text size="sm">Asterisk no se conecta directo a los operadores: <b>las llamadas entrantes y salientes pasan por el SBC-NG</b>. Las <b>entrantes</b> llegan desde el SBC (contexto <Code>from-trunk</Code>) y las <b>salientes</b> se envían al SBC, que aplica seguridad, normaliza y <b>elige el operador</b>. Acá definís el ruteo; el enlace con el carrier se configura en <b>SBC-NG → Operadores</b>.</Text>
+        <Group mt="sm"><Button size="xs" variant="light" color="grape" leftSection={<IconRouteAltLeft size={14} />} loading={gen} onClick={generar}>Generar rutas sugeridas (por el SBC)</Button><Text size="xs" c="dimmed">Crea la salida estándar (marcá 0 + número) y una entrada por defecto. Podés editarlas o borrarlas.</Text></Group>
+      </Alert>
       <Tabs defaultValue="entrantes" variant="pills" radius="md" keepMounted={false}>
         <Tabs.List mb="lg">
           <Tabs.Tab value="entrantes" leftSection={<IconArrowDownLeft size={16} />}>Entrantes</Tabs.Tab>
@@ -22,7 +47,7 @@ export default function Rutas() {
 
         <Tabs.Panel value="entrantes">
           <DidOverview />
-          <CrudPanel title="Rutas entrantes (DID)" subtitle="Número que recibís del operador → destino interno" color="indigo" icon={<IconArrowDownLeft size={18} />}
+          <CrudPanel key={"in-" + rk} title="Rutas entrantes (DID)" subtitle="Número que recibís del operador → destino interno" color="indigo" icon={<IconArrowDownLeft size={18} />}
             idKey="id" fetchUrl="/backend/api/routes/inbound" createUrl="/backend/api/routes/inbound" deleteUrl={(r) => '/backend/api/routes/inbound/' + r.id}
             columns={[
               { key: 'did', label: 'DID / Número', mono: true, icon: <IconPhoneIncoming size={13} /> },
@@ -39,12 +64,12 @@ export default function Rutas() {
         </Tabs.Panel>
 
         <Tabs.Panel value="salientes">
-          <CrudPanel title="Rutas salientes" subtitle="Patrón de marcado → salida por el SBC. El operador y el formato del carrier se eligen en SBC → Operadores." color="teal" icon={<IconArrowUpRight size={18} />}
+          <CrudPanel key={"out-" + rk} title="Rutas salientes" subtitle="Patrón de marcado → salida por el SBC. El operador y el formato del carrier se eligen en SBC → Operadores." color="teal" icon={<IconArrowUpRight size={18} />}
             idKey="id" fetchUrl="/backend/api/routes/outbound" createUrl="/backend/api/routes/outbound" deleteUrl={(r) => '/backend/api/routes/outbound/' + r.id}
             columns={[
               { key: 'name', label: 'Nombre', icon: <IconTag size={13} /> },
               { key: 'pattern', label: 'Patrón', icon: <IconAsterisk size={13} />, render: (r) => <Badge variant="light" color="pbx" ff="monospace">_{r.pattern}</Badge> },
-              { key: 'trunk', label: 'Salida', mono: true, icon: <IconDeviceLandlinePhone size={13} /> },
+              { key: 'trunk', label: 'Salida', icon: <IconRouteAltLeft size={13} />, render: (r) => <Badge variant="light" color="grape" leftSection={<IconShieldLock size={10} />}>{(!r.trunk || r.trunk === 'to-sbc') ? 'SBC-NG' : r.trunk}</Badge> },
               { key: 'strip', label: 'Quita', icon: <IconBackspace size={13} /> },
               { key: 'prepend', label: 'Antepone', icon: <IconPlus size={13} /> },
               { key: 'callerid', label: 'CallerID', icon: <IconId size={13} /> },

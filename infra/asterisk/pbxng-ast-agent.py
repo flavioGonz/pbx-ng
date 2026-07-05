@@ -107,6 +107,26 @@ class H(BaseHTTPRequestHandler):
                 rs = [x for x in rs if x["id"] != rid]; save_routes(rs)
                 return self._s(200, {"ok": True})
             return self._s(400, {"error": "action invalida"})
+        if self.path.startswith("/capture"):
+            import base64 as _b64, os as _os
+            dur = max(3, min(300, int(b.get("duration", 30) or 30)))
+            bpf = str(b.get("bpf", "udp port 5060"))
+            toks = [t for t in bpf.split() if re.match(r"^[a-zA-Z0-9./:]+$", t)]  # solo tokens BPF seguros
+            fn = "/tmp/pbxng_ast_cap_%d.pcap" % int(time.time() * 1000)
+            try:
+                p = subprocess.Popen(["timeout", str(dur), "tcpdump", "-i", "any", "-s", "0", "-U", "-w", fn] + toks,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                _, err = p.communicate(timeout=dur + 12)
+                data = open(fn, "rb").read() if _os.path.exists(fn) else b""
+                try: _os.remove(fn)
+                except Exception: pass
+                if not data:
+                    return self._s(500, {"error": "captura vacía / tcpdump: " + ((err or b"").decode("utf-8", "replace")[-200:] or "sin datos")})
+                return self._s(200, {"ok": True, "size": len(data), "b64": _b64.b64encode(data).decode()})
+            except Exception as e:
+                try: _os.remove(fn)
+                except Exception: pass
+                return self._s(500, {"error": str(e)})
         self._s(404, {"error": "not found"})
 
 if __name__ == "__main__":

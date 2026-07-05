@@ -127,7 +127,53 @@ cd pbx-ng/docker
 ./install.sh
 ```
 
-El instalador es **interactivo**: te pregunta la topología, qué servicios levantar (núcleo / SBC / media / IA / proxy), el dominio y genera los secretos automáticamente en `.env`. Al terminar deja el stack corriendo y te muestra las URLs.
+El instalador es **interactivo**: te pregunta la topología, qué **módulos** levantar, el dominio y genera los secretos automáticamente en `.env`. Al terminar deja el stack corriendo y te muestra las URLs.
+
+**Modelo de empaquetado (importante): módulo = perfil de compose = contenedor.** Un contenedor existe **solo si su módulo está activo**. El estado activo vive en `docker/.env` → `COMPOSE_PROFILES`. Módulos:
+
+| Módulo | Perfil | Contenedor(es) | Función |
+|---|---|---|---|
+| core | `core` | postgres, redis, asterisk, api, dashboard | Núcleo (siempre) |
+| sbc | `sbc` | kamailio, rtpengine, wsbridge | SBC / troncales WebRTC |
+| turn | `turn` | coturn | TURN/STUN para WebRTC |
+| ai | `ai` | voz | IVR con IA (TTS/STT) |
+| intercom | `intercom` | go2rtc | Video RTSP (intercom/cámaras) |
+| proxy | `proxy` | npm | Reverse proxy TLS/WSS (opcional) |
+
+Las **grabaciones** son función del `core` (volumen compartido `recordings`), no un contenedor aparte. Detalle completo en [`docs/PACKAGING.md`](docs/PACKAGING.md).
+
+### Instalación por rol (1 VM o 2 VMs)
+
+El instalador es **multi-rol**. En una sola máquina o repartido en dos VMs (núcleo en la LAN, borde SBC en la DMZ):
+
+```bash
+# SOHO / demo — todo en una VM
+./install.sh --role=all
+
+# 2 VMs — primero el CORE (LAN); genera edge-join.env con los secretos compartidos
+./install.sh --role=core --public-ip=<IP_WAN> --domain=pbx.cliente.com --edge-ip=<IP_LAN_EDGE>
+
+# copiar el join al edge:  scp docker/edge-join.env root@<IP_EDGE>:/opt/pbx-ng/docker/
+# luego, en el EDGE (DMZ):
+./install.sh --role=edge --join=edge-join.env --public-ip=<IP_WAN>
+```
+
+`core` genera y comparte credenciales; `edge` las consume vía `edge-join.env`, valida la conectividad al core (Postgres/AMI/ARI) y levanta solo `sbc,turn`. Arquitectura, firewall y pasos completos en [`docs/TOPOLOGY.md`](docs/TOPOLOGY.md).
+
+### Actualización por imagen (sin `docker cp`)
+
+Los despliegues comerciales usan **imágenes versionadas**: `docker/release.sh` construye y publica (o empaqueta para air-gapped) y `docker/deploy.sh` actualiza por `pull`/`load` + migraciones. Proceso, versionado (SemVer) y rollback en [`RELEASE.md`](RELEASE.md).
+
+**Activar/desactivar módulos** (crea/destruye sus contenedores):
+
+```bash
+pbxng-ctl status                 # perfiles activos + contenedores
+pbxng-ctl enable  intercom       # agrega el perfil y CREA go2rtc
+pbxng-ctl disable intercom       # DESTRUYE go2rtc y saca el perfil
+pbxng-ctl reconcile              # sincroniza contenedores <-> COMPOSE_PROFILES
+```
+
+Desde el **panel** (Módulos), el toggle escribe `pbxng_settings.mod_<id>` y un reconciliador (systemd timer, cada 20 s) llama a `pbxng-ctl` para que el contenedor exista solo si el módulo está activo. El instalador deja `pbxng-ctl` y el reconciliador instalados.
 
 ### Opción B — Docker, todo en un contenedor (demo/pruebas)
 

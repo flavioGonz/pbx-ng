@@ -1,14 +1,18 @@
-# PBX-NG · stack Docker completo. Perfiles (profiles) para instalar separado o junto:
-#   core  -> postgres, redis, asterisk, api, dashboard
-#   sbc   -> kamailio, rtpengine
-#   media -> coturn
-#   ai    -> voz (TTS/STT)
-#   proxy -> nginx-proxy-manager
-# Uso:  docker compose --profile core --profile sbc up -d --build   (o usar install.sh)
+# PBX-NG · stack Docker. Perfiles (profiles) = MODULOS. Un contenedor existe solo si
+# su perfil esta activo. Se controla con COMPOSE_PROFILES en .env (recomendado) o con
+# --profile en la linea de comandos.
+#   core      -> postgres, redis, asterisk, api, dashboard   (siempre)
+#   sbc       -> kamailio, rtpengine, wsbridge               (SBC / troncales WebRTC)
+#   turn      -> coturn                                       (TURN/STUN para WebRTC)
+#   ai        -> voz (TTS/STT, IVR con IA)
+#   intercom  -> go2rtc (RTSP -> WebRTC/MSE, video de intercom/camaras)
+#   proxy     -> nginx-proxy-manager                          (TLS/WSS, opcional)
+# Uso:  export COMPOSE_PROFILES=core,sbc,turn,intercom ; docker compose up -d
+#       (o: pbxng-ctl up   ·   o el instalador)
 #
 # NOTA: asterisk/kamailio/coturn usan network_mode: host (SIP/RTP necesitan la red
-# real). Para que alcancen a Postgres, éste publica 5432 en el host; por eso
-# DB_HOST para esos servicios es la IP del host (o 127.0.0.1 en single-node).
+# real). Para que alcancen a Postgres, este publica 5432 en el host; por eso DB_HOST
+# para esos servicios es la IP del host (o 127.0.0.1 en single-node).
 name: pbxng
 
 networks:
@@ -22,6 +26,8 @@ volumes:
   npm_letsencrypt:
   asterisk_sounds:
   voz_models:
+  go2rtc_config:
+  recordings:          # grabaciones: compartido asterisk (escribe) <-> api (lee)
 
 services:
   postgres:
@@ -34,8 +40,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./config/initdb:/docker-entrypoint-initdb.d:ro   # esquema realtime + app (primer arranque)
-    ports: ["5432:5432"]                                  # host-net asterisk/kamailio alcanzan la DB
+      - ./config/initdb:/docker-entrypoint-initdb.d:ro
+    ports: ["5432:5432"]
     networks: [pbxng]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
@@ -58,7 +64,7 @@ services:
     image: pbxng/asterisk:22
     profiles: ["core"]
     restart: unless-stopped
-    network_mode: host                 # SIP/RTP necesitan red del host
+    network_mode: host
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -75,6 +81,7 @@ services:
       DOMAIN: ${DOMAIN:-pbx.local}
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
+      - recordings:/var/spool/asterisk/monitor      # grabaciones MixMonitor
 
   api:
     build: ../control-plane
@@ -104,7 +111,6 @@ services:
       TURN_USER: ${TURN_USER:-pbxng}
       TURN_PASS: ${TURN_PASS:-}
       DEFAULT_COMPANY: ${DEFAULT_COMPANY:-Mi Empresa}
-      # --- topologia de nodos (parametriza IPs mostradas/usadas; sin lab viejo) ---
       SBC_HOST: ${SBC_HOST:-}
       NPM_HOST: ${NPM_HOST:-}
       TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
@@ -113,6 +119,9 @@ services:
       AST_AGENT: ${AST_AGENT:-}
       TURN_AGENT: ${TURN_AGENT:-}
       VM_AGENT: ${VM_AGENT:-}
+      GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}    # gestion interna de go2rtc (modulo intercom)
+    volumes:
+      - recordings:/recordings:ro                        # grabaciones (lectura directa)
     ports: ["3000:3000"]
     networks: [pbxng]
 
@@ -160,12 +169,30 @@ services:
         echo "rtpengine: bind $$LAN advertise $$PUB"
         exec rtpengine --foreground --interface "$$LAN!$$PUB" --listen-ng 127.0.0.1:2223 --port-min 30000 --port-max 40000
 
+  wsbridge:
+    build:
+      context: images/wsbridge
+      dockerfile: Dockerfile
+    image: pbxng/wsbridge
+    profiles: ["sbc"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pbxng}
+      DB_USER: ${DB_USER:-pbxng}
+      DB_PASS: ${DB_PASS:?}
+      ASTERISK_HOST: ${ASTERISK_HOST:-192.168.99.10}
+      KAM_HOST: ${KAM_HOST:-127.0.0.1}
+      KAM_PORT: ${KAM_PORT:-5060}
+
   coturn:
     build:
       context: .
       dockerfile: images/coturn/Dockerfile
     image: pbxng/coturn
-    profiles: ["media"]
+    profiles: ["turn"]
     restart: unless-stopped
     network_mode: host
     environment:
@@ -185,6 +212,18 @@ services:
     restart: unless-stopped
     volumes: [voz_models:/opt/voz/models]
     ports: ["8080:8080"]
+    networks: [pbxng]
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    profiles: ["intercom"]
+    restart: unless-stopped
+    volumes:
+      - go2rtc_config:/config
+    ports:
+      - "1984:1984"        # API/HTTP (MSE/WebRTC signaling); el proxy publica /go2rtc/
+      - "8555:8555/tcp"    # WebRTC (opcional)
+      - "8555:8555/udp"    # WebRTC (opcional)
     networks: [pbxng]
 
   npm:

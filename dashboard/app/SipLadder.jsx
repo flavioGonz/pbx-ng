@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Stack, Group, Text, Badge, Card, Button, TextInput, Switch, ScrollArea, ActionIcon, Tooltip, Code, SegmentedControl, Box, Table, Drawer, Divider, Anchor } from '@mantine/core';
 import { IconInfoCircle, IconRefresh, IconPlayerPlay, IconPlayerPause, IconX, IconPhoneCall, IconPhoneOff, IconPhonePlus, IconCircleCheck, IconCircleX, IconArrowsExchange, IconClock, IconBell, IconUserCheck, IconHeartbeat, IconCheck, IconArrowRight, IconDownload, IconTrash, IconSearch, IconWaveSine } from '@tabler/icons-react';
 import { toast } from './notify';
+import PcapCapture from './PcapCapture';
+import RecordingPlayer from './RecordingPlayer';
 
 const ipOf = (hp) => (hp || '').split(':')[0];
 const userOf = (u) => { if (!u) return '?'; const m = String(u).match(/sips?:([^@>;\s]+)/i); if (m) return m[1]; const m2 = String(u).match(/<?([^@>;\s]+)/); return m2 ? m2[1] : String(u).slice(0, 14); };
@@ -66,6 +68,7 @@ export default function SipLadder() {
   const [drawer, setDrawer] = useState(null);
   const [raw, setRaw] = useState(null);
   const [grouped, setGrouped] = useState(false);
+  const [rec, setRec] = useState(null);
   const liveRef = useRef(live); liveRef.current = live;
   const vpRef = useRef(null);
 
@@ -98,6 +101,16 @@ export default function SipLadder() {
     const inv = ms.find((m) => m.method) || ms[0];
     return { callid: drawer, ms, from: userOf(inv.from_uri), to: userOf(inv.to_uri), status: dlgStatus(ms) };
   }, [drawer, msgs]);
+
+  useEffect(() => {
+    setRec(null);
+    if (!dialog || !hasAudio(dialog.ms)) return;
+    let dead = false;
+    const ts = dialog.ms[0] ? Math.round(dialog.ms[0].t) : 0;
+    fetch('/backend/api/recordings/match?from=' + encodeURIComponent(dialog.from) + '&to=' + encodeURIComponent(dialog.to) + '&ts=' + ts)
+      .then((r) => r.json()).then((d) => { if (!dead && d && d.id) setRec(d); }).catch(() => {});
+    return () => { dead = true; };
+  }, [drawer]);
 
   const showRaw = async (id) => { setRaw({ id, text: 'Cargando...' }); try { const d = await fetch('/backend/api/sip/raw/' + id).then((r) => r.json()); setRaw({ id, text: d.raw || '(sin contenido)' }); } catch (_) { setRaw({ id, text: '(error)' }); } };
   const toggle = async (v) => { setOn(v); try { await fetch('/backend/api/sip/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: v }) }); toast(v ? 'Captura activada' : 'Captura pausada', 'ok'); } catch (_) {} };
@@ -137,7 +150,8 @@ export default function SipLadder() {
           <TextInput size="xs" leftSection={<IconSearch size={14} />} placeholder="Filtrar..." value={q} onChange={(e) => setQ(e.target.value)} w={190} />
           <Switch checked={grouped} onChange={(e) => setGrouped(e.currentTarget.checked)} label="Agrupar" size="xs" color="grape" /><Switch checked={follow} onChange={(e) => setFollow(e.currentTarget.checked)} label="Auto" size="xs" />
           <Badge variant="light" color="gray">{filtered.length}</Badge>
-          <Tooltip label="Exportar captura (.txt)"><Button size="xs" variant="default" leftSection={<IconDownload size={14} />} onClick={exportTxt}>Exportar</Button></Tooltip>
+          <PcapCapture />
+          <Tooltip label="Exportar la vista SIP como texto (.txt)"><Button size="xs" variant="default" leftSection={<IconDownload size={14} />} onClick={exportTxt}>TXT</Button></Tooltip>
           <Tooltip label="Limpiar captura"><ActionIcon variant="light" color="red" onClick={clear}><IconTrash size={16} /></ActionIcon></Tooltip>
         </Group>
       </Group>
@@ -196,6 +210,13 @@ export default function SipLadder() {
               </svg>
             </ScrollArea.Autosize>
           </Card>
+
+          {rec && rec.id && (
+            <Card withBorder radius="md" padding="xs">
+              <Group gap={6} mb={6}><IconWaveSine size={14} color="var(--mantine-color-teal-6)" /><Text fw={700} size="sm">Grabación de la llamada</Text></Group>
+              <RecordingPlayer src={'/backend/api/recordings/' + rec.id + '/audio'} recId={rec.id} label={(rec.src || '') + ' → ' + (rec.dst || '') + (rec.duration ? ' · ' + rec.duration + 's' : '')} />
+            </Card>
+          )}
 
           <Box>
             <Text fw={700} size="sm" mb={6}>Mensajes (cada paso explicado)</Text>

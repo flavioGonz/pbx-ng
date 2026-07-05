@@ -1,8 +1,11 @@
 /* TrunkEditor.jsx - editor de troncal SIP en wizard por pasos (compartido) */
 'use client';
 import { useEffect, useState } from 'react';
-import { Modal, Stepper, Group, Button, Stack, Text, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, FileButton, Box } from '@mantine/core';
-import { IconDeviceLandlinePhone, IconTag, IconUser, IconWorld, IconHash, IconLock, IconKey, IconPlugConnected, IconWaveSine, IconBroadcast, IconRouteAltLeft, IconPhoto, IconCloud, IconServer2, IconCheck } from '@tabler/icons-react';
+import { Modal, Stepper, Group, Button, Stack, Text, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, FileButton, Box, CopyButton, ActionIcon, Tooltip } from '@mantine/core';
+import { IconDeviceLandlinePhone, IconTag, IconUser, IconWorld, IconHash, IconLock, IconKey, IconPlugConnected, IconWaveSine, IconBroadcast, IconRouteAltLeft, IconPhoto, IconCloud, IconServer2, IconCheck, IconCopy } from '@tabler/icons-react';
+const CopyField = ({ label, value }) => (
+  <TextInput label={label} value={value} readOnly styles={{ input: { fontFamily: 'monospace' } }} rightSection={<CopyButton value={value}>{({ copied, copy }) => <Tooltip label={copied ? 'Copiado' : 'Copiar'}><ActionIcon variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copy}>{copied ? <IconCheck size={16} /> : <IconCopy size={16} />}</ActionIcon></Tooltip>}</CopyButton>} />
+);
 import { toast } from './notify';
 
 const CODECS = ['ulaw', 'alaw', 'g722', 'g729', 'opus', 'gsm'];
@@ -20,19 +23,21 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
   const [active, setActive] = useState(0);
   const [saving, setSaving] = useState(false);
   const [gwOpts, setGwOpts] = useState([]);
+  const [wr, setWr] = useState(null); // resultado troncal WebRTC (enlace + credenciales)
+  const [wmode, setWmode] = useState('server'); // webrtc: 'server' (expone) | 'client' (conecta)
   const editing = !!initialName;
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
   useEffect(() => {
     if (!opened) return;
-    setActive(0);
+    setActive(0); setWr(null); setWmode('server');
     fetch('/backend/api/sbc/routes').then((r) => r.json()).then((d) => Array.isArray(d) && setGwOpts(d.map((r) => ({ value: String(r.id), label: (r.note || r.dest) + ' (via ' + (r.gw || r.dev) + ')' })))).catch(() => {});
     if (initialName) {
       (async () => {
         let adv = {}, kind = defaultKind || 'asterisk';
-        try { const d = await fetch('/backend/api/trunks/' + encodeURIComponent(initialName) + '/detail').then((r) => r.json()); adv = d.adv || {}; } catch (_) {}
+        let det = {}; try { det = await fetch('/backend/api/trunks/' + encodeURIComponent(initialName) + '/detail').then((r) => r.json()); adv = det.adv || {}; } catch (_) {}
         try { const list = await fetch('/backend/api/trunks').then((r) => r.json()); const me = Array.isArray(list) && list.find((t) => t.name === initialName); if (me && me.kind) kind = me.kind; } catch (_) {}
-        setF({ ...trunkBlank, ...adv, name: initialName, kind, password: '', provider_port: String(adv.provider_port || '5060') });
+        if (kind === 'webrtc' || kind === 'webrtc-client') { setWmode(kind === 'webrtc-client' ? 'client' : 'server'); setF({ ...trunkBlank, name: initialName, kind: 'webrtc', username: det.username || '', remote_url: det.remote_url || '', callerid: (det.adv && det.adv.note) || '', password: '' }); } else { setF({ ...trunkBlank, ...adv, name: initialName, kind, password: '', provider_port: String(adv.provider_port || '5060') }); }
       })();
     } else { setF({ ...trunkBlank, kind: defaultKind || 'asterisk' }); }
   }, [opened, initialName, defaultKind]);
@@ -50,6 +55,32 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
   }
 
   async function save() {
+    if (f.kind === 'webrtc') {
+      if (wmode === 'client') {
+        if (!f.name || !f.remote_url || !f.username || (!editing && !f.password)) { toast('Nombre, URL WSS remota, usuario y contraseña son obligatorios', 'bad'); return; }
+        setSaving(true);
+        const body = { name: f.name, kind: 'webrtc-client', remote_url: f.remote_url, username: f.username, note: f.callerid || '' };
+        if (f.password) body.password = f.password;
+        const url = editing ? '/backend/api/trunks/' + encodeURIComponent(f.name) : '/backend/api/trunks';
+        const r = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
+        setSaving(false);
+        if (r.error) { toast('Error: ' + r.error, 'bad'); return; }
+        toast(editing ? 'Troncal WebRTC (cliente) actualizada' : 'Troncal WebRTC (cliente) creada — el bridge la conectará', 'ok'); if (onSaved) onSaved(); onClose();
+        return;
+      }
+      if (!f.name || (!editing && !f.password)) { toast('Nombre y contraseña son obligatorios', 'bad'); return; }
+      setSaving(true);
+      const body = { name: f.name, kind: 'webrtc', username: f.username || f.name, note: f.callerid || '' };
+      if (f.password) body.password = f.password;
+      const url = editing ? '/backend/api/trunks/' + encodeURIComponent(f.name) : '/backend/api/trunks';
+      const r = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
+      setSaving(false);
+      if (r.error) { toast('Error: ' + r.error, 'bad'); return; }
+      if (editing) { toast('Troncal WebRTC actualizada', 'ok'); if (onSaved) onSaved(); onClose(); return; }
+      setWr({ link: r.link || ('wss://' + (typeof window !== 'undefined' ? window.location.host : '') + '/ws'), username: r.username || f.username || f.name, password: f.password });
+      toast('Troncal WebRTC creada', 'ok'); if (onSaved) onSaved();
+      return;
+    }
     if (!f.name || !f.provider_host) { toast('Nombre y host del proveedor son obligatorios', 'bad'); setActive(f.name ? 1 : 0); return; }
     setSaving(true);
     const url = editing ? '/backend/api/trunks/' + encodeURIComponent(f.name) : '/backend/api/trunks';
@@ -74,14 +105,53 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
   return (
     <Modal opened={opened} onClose={onClose} centered radius="lg" size={760}
       title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color="teal"><IconDeviceLandlinePhone size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>{editing ? 'Configurar troncal' : 'Nueva troncal'}</Text><Text size="xs" c="dimmed">Enlace con tu operador SIP</Text></div></Group>}>
+      <div style={{ marginBottom: 14 }}>
+        <Text size="sm" fw={500} mb={4}>Tipo de troncal</Text>
+        <SegmentedControl fullWidth value={f.kind} onChange={(v) => set('kind', v)} disabled={editing} data={[{ value: 'asterisk', label: 'SIP · Asterisk' }, { value: 'kamailio', label: 'SIP · SBC-NG' }, { value: 'webrtc', label: 'WebRTC (WSS)' }]} />
+      </div>
+      {f.kind === 'webrtc' ? (
+        <Stack gap="md">
+          <SegmentedControl fullWidth value={wmode} onChange={setWmode} disabled={editing} color="grape"
+            data={[{ value: 'server', label: 'Exponer (servidor WSS)' }, { value: 'client', label: 'Conectar (cliente WSS)' }]} />
+          {wmode === 'client' ? (
+            <>
+              <Text size="sm" c="dimmed">PBX-NG se <b>conecta</b> a una troncal WebRTC remota (ej. el enlace WSS que genera la UCM u otra PBX-NG). Lo maneja el servicio <b>Bridge WebRTC</b> (módulo <i>wsbridge</i>, debe estar activo).</Text>
+              <Group grow>
+                <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="webrtc-out-ies" value={f.name} onChange={(e) => set('name', e.target.value)} disabled={editing} required />
+                <TextInput label="Usuario (remoto)" leftSection={<IconUser size={15} />} value={f.username} onChange={(e) => set('username', e.target.value)} required />
+              </Group>
+              <TextInput label="URL WSS remota" leftSection={<IconWorld size={15} />} placeholder="wss://peer.dominio/ws" value={f.remote_url || ''} onChange={(e) => set('remote_url', e.target.value)} required description="El enlace WSS que te dio el otro extremo (UCM, PBX-NG, etc.)" />
+              <PasswordInput label="Contraseña (remoto)" leftSection={<IconLock size={15} />} value={f.password} onChange={(e) => set('password', e.target.value)} required={!editing} placeholder={editing ? '(sin cambios)' : ''} />
+            </>
+          ) : (!wr ? (
+            <>
+              <Text size="sm" c="dimmed">Troncal <b>WebRTC estándar</b> (SIP sobre WSS + DTLS-SRTP). El extremo remoto (otra PBX-NG, Grandstream, navegador o gateway) se conecta a tu enlace WSS y se registra con estas credenciales; el SBC/rtpengine normaliza el audio hacia Asterisk.</Text>
+              <Group grow>
+                <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="webrtc-ies" value={f.name} onChange={(e) => set('name', e.target.value)} disabled={editing} required />
+                <TextInput label="Usuario" leftSection={<IconUser size={15} />} placeholder="(por defecto = nombre)" value={f.username} onChange={(e) => set('username', e.target.value)} />
+              </Group>
+              <PasswordInput label="Contraseña" leftSection={<IconLock size={15} />} value={f.password} onChange={(e) => set('password', e.target.value)} required={!editing} placeholder={editing ? '(sin cambios)' : ''} description="La usa el extremo remoto para registrarse por WSS" />
+              <TextInput label="Nota / Caller ID (opcional)" leftSection={<IconUser size={15} />} value={f.callerid} onChange={(e) => set('callerid', e.target.value)} />
+            </>
+          ) : (
+            <Box>
+              <Group gap="xs" mb="xs"><ThemeIcon variant="light" color="teal"><IconCheck size={16} /></ThemeIcon><Text fw={700}>Troncal WebRTC lista — pegá esto en el otro extremo</Text></Group>
+              <Stack gap="sm">
+                <CopyField label="Enlace WSS (servidor SIP)" value={wr.link} />
+                <Group grow>
+                  <CopyField label="Usuario" value={wr.username} />
+                  <CopyField label="Contraseña" value={wr.password} />
+                </Group>
+              </Stack>
+              <Text size="xs" c="dimmed" mt="sm">Estándar SIP-over-WSS (RFC 7118) + DTLS-SRTP. Compatible con Grandstream, navegadores y otra PBX-NG. El estado pasa a «conectada» cuando el remoto se registra.</Text>
+            </Box>
+          ))}
+        </Stack>
+      ) : (
       <Stepper active={active} onStepClick={setActive} size="sm" iconSize={30} mb="lg">
         <Stepper.Step label="General" description="Nombre y logo" icon={<IconTag size={15} />}>
           <Stack gap="md" mt="md">
-            <div>
-              <Text size="sm" fw={500} mb={4}>¿Dónde vive la troncal?</Text>
-              <SegmentedControl fullWidth value={f.kind} onChange={(v) => set('kind', v)} disabled={editing} data={[{ value: 'asterisk', label: 'Asterisk (directo)' }, { value: 'kamailio', label: 'SBC-NG (borde)' }]} />
-              <Text size="xs" c="dimmed" mt={6}>{f.kind === 'kamailio' ? 'El registro y la seguridad de la troncal viven en el SBC (Kamailio).' : 'La troncal se registra directo en Asterisk.'}</Text>
-            </div>
+            <Text size="xs" c="dimmed">{f.kind === 'kamailio' ? 'El registro y la seguridad de la troncal viven en el SBC (Kamailio).' : 'La troncal se registra directo en Asterisk.'}</Text>
             <Group grow>
               <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="proveedor-1" value={f.name} onChange={(e) => set('name', e.target.value)} required disabled={editing} description={editing ? 'No se puede cambiar' : 'Identificador único'} />
               <TextInput label="Caller ID saliente" leftSection={<IconUser size={15} />} placeholder='"Empresa" <099...>' value={f.callerid} onChange={(e) => set('callerid', e.target.value)} description="Lo que verá el destino" />
@@ -163,12 +233,24 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
           </Stack>
         </Stepper.Step>
       </Stepper>
+      )}
 
       <Group justify="space-between" mt="md">
-        <Button variant="default" onClick={prev} disabled={active === 0}>Atrás</Button>
-        {active < STEPS - 1
-          ? <Button onClick={next} color="teal">Siguiente</Button>
-          : <Button onClick={save} loading={saving} color="teal" leftSection={<IconCheck size={16} />}>{editing ? 'Guardar cambios' : 'Crear troncal'}</Button>}
+        {f.kind === 'webrtc' ? (
+          <>
+            <span />
+            {wr
+              ? <Button onClick={onClose} color="teal" leftSection={<IconCheck size={16} />}>Listo</Button>
+              : <Button onClick={save} loading={saving} color="teal" leftSection={<IconWaveSine size={16} />}>{editing ? 'Guardar' : 'Crear troncal WebRTC'}</Button>}
+          </>
+        ) : (
+          <>
+            <Button variant="default" onClick={prev} disabled={active === 0}>Atrás</Button>
+            {active < STEPS - 1
+              ? <Button onClick={next} color="teal">Siguiente</Button>
+              : <Button onClick={save} loading={saving} color="teal" leftSection={<IconCheck size={16} />}>{editing ? 'Guardar cambios' : 'Crear troncal'}</Button>}
+          </>
+        )}
       </Group>
     </Modal>
   );

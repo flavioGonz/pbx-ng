@@ -2,13 +2,15 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Stack, Card, Group, Text, Switch, ThemeIcon, Badge, Alert } from '@mantine/core';
-import { IconShieldLock, IconArrowsLeftRight, IconWaveSine, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconInfoCircle } from '@tabler/icons-react';
+import { IconShieldLock, IconArrowsLeftRight, IconWaveSine, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconInfoCircle, IconHeadset } from '@tabler/icons-react';
 import { toast } from './notify';
 
 const MODS = [
+  { id: 'callcenter', label: 'Call Center (Agentes y Supervisores)', desc: 'Habilita los paneles de Agente y Supervisor y sus roles en el login: softphone WebRTC integrado, colas, CDR propio, cambio de clave, y escucha/susurro/irrupción para supervisores.', icon: IconHeadset },
   { id: 'sbc', label: 'SBC-NG (Kamailio)', desc: 'Borde SIP: seguridad perimetral, dispatcher y rtpengine. Apaga/enciende el servicio kamailio en el CT107.', infra: true, icon: IconShieldLock },
   { id: 'turn', label: 'TURN / STUN (Turn-NG)', desc: 'Relay de medios WebRTC para clientes detrás de NAT. Apaga/enciende el servidor TURN en el CT106.', infra: true, icon: IconArrowsLeftRight },
   { id: 'voz', label: 'Voz IA (TTS / STT)', desc: 'Síntesis y reconocimiento de voz del IVR conversacional (CT108).', infra: true, icon: IconWaveSine },
+  { id: 'wsbridge', label: 'Bridge WebRTC (cliente WSS)', desc: 'Permite CONECTAR la PBX a troncales WebRTC remotas (Grandstream y otras) como cliente WSS. Corre en el edge junto al SBC. Necesario para troncales WebRTC salientes.', infra: true, icon: IconWorldShare },
   { id: 'ai', label: 'Agentes IA & Voz', desc: 'Recepcionista IA y pipeline conversacional. Oculta la sección IA & Voz.', icon: IconRobot },
   { id: 'clicktocall', label: 'Click-to-Call', desc: 'Llamadas web públicas por enlace o QR, sin registro.', icon: IconWorldShare },
   { id: 'push', label: 'Notificaciones Push', desc: 'Push RFC 8599 a la PWA y móviles.', icon: IconBell },

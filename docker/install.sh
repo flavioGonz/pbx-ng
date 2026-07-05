@@ -1,170 +1,194 @@
 #!/usr/bin/env bash
-# ============================================================
-#  PBX-NG · Instalador interactivo
-#  Pregunta la TOPOLOGIA de despliegue y levanta el stack.
-# ============================================================
+# ============================================================================
+#  PBX-NG · Instalador multi-rol
+#  Roles:
+#    all   · Todo en esta maquina (SOHO / demo)                       [default]
+#    core  · Nucleo (Asterisk + API + Dashboard + Postgres + Redis)   -> zona LAN
+#    edge  · Borde SBC (Kamailio + rtpengine + wsbridge + TURN)       -> zona DMZ
+#
+#  Modelo: MODULO = PERFIL de compose = CONTENEDOR (COMPOSE_PROFILES en .env).
+#  Dos VMs: instalar 'core' primero (genera edge-join.env con los secretos
+#  compartidos), copiar ese archivo al edge e instalar 'edge --join=...'.
+#
+#  Uso interactivo:   ./install.sh
+#  No interactivo:    ./install.sh --role=core  --public-ip=1.2.3.4 --domain=pbx.x.com --edge-ip=10.0.0.20 --yes
+#                     ./install.sh --role=edge  --join=edge-join.env --public-ip=1.2.3.4 --yes
+#  Flags: --role= --profiles=a,b --core-ip= --edge-ip= --public-ip= --domain=
+#         --join=FILE --tenant=single|multi --release --yes
+# ============================================================================
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")"; HERE="$(pwd)"
 
-c(){ printf "\033[1;36m%s\033[0m\n" "$*"; }        # cyan
-g(){ printf "\033[1;32m%s\033[0m\n" "$*"; }        # green
-y(){ printf "\033[1;33m%s\033[0m\n" "$*"; }        # yellow
-r(){ printf "\033[1;31m%s\033[0m\n" "$*"; }        # red
+c(){ printf "\033[1;36m%s\033[0m\n" "$*"; }
+g(){ printf "\033[1;32m%s\033[0m\n" "$*"; }
+y(){ printf "\033[1;33m%s\033[0m\n" "$*"; }
+r(){ printf "\033[1;31m%s\033[0m\n" "$*"; }
 ask(){ local p="$1" d="${2:-}" a; read -rp "$(printf '\033[1m%s\033[0m %s: ' "$p" "${d:+[$d]}")" a; echo "${a:-$d}"; }
 yn(){ local a; read -rp "$(printf '\033[1m%s\033[0m (s/n) [%s]: ' "$1" "${2:-s}")" a; a="${a:-${2:-s}}"; [[ "$a" =~ ^[sSyY] ]]; }
+gen(){ openssl rand -hex "$1" 2>/dev/null || echo "x$RANDOM$RANDOM$RANDOM"; }
+lanip(){ hostname -I 2>/dev/null | awk '{print $1}'; }
+put(){ local k="$1" v="$2"; grep -q "^$k=" .env && sed -i "s|^$k=.*|$k=$v|" .env || echo "$k=$v" >> .env; }
+has(){ grep -q "^$1=..*" .env 2>/dev/null; }               # clave con valor no vacio
+getv(){ grep "^$1=" .env | head -1 | cut -d= -f2-; }
+tcpok(){ timeout 3 bash -c "echo > /dev/tcp/$1/$2" 2>/dev/null && echo ok || echo fail; }
 
-clear
+# ---------------- flags ----------------
+ROLE=""; PROFILES=""; CORE_IP=""; EDGE_IP=""; PUBLIC_IP_F=""; DOMAIN_F=""; JOIN=""; TENANT_F=""; RELEASE=0; YES=0
+for a in "$@"; do case "$a" in
+  --role=*) ROLE="${a#*=}";; --profiles=*) PROFILES="${a#*=}";;
+  --core-ip=*) CORE_IP="${a#*=}";; --edge-ip=*) EDGE_IP="${a#*=}";;
+  --public-ip=*) PUBLIC_IP_F="${a#*=}";; --domain=*) DOMAIN_F="${a#*=}";;
+  --join=*) JOIN="${a#*=}";; --tenant=*) TENANT_F="${a#*=}";;
+  --release) RELEASE=1;; --yes|-y) YES=1;;
+  -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+  *) r "arg desconocido: $a"; exit 1;;
+esac; done
+
+clear 2>/dev/null || true
 c "================================================================"
-c "   PBX-NG · Instalador"
-c "   UCaaS: Asterisk 22 + WebRTC + SBC Kamailio + IVR IA"
-c "================================================================"
-echo
+c "   PBX-NG · Instalador multi-rol (all | core | edge)"
+c "================================================================"; echo
 
-# ---------------- 0) Modo de la aplicacion ----------------
-c "Modo de la aplicacion"
-echo "   1) PBX simple (single-tenant)  · una sola empresa   (RECOMENDADO)"
-echo "   2) Multi-tenant (SaaS)         · varias empresas aisladas"
-TMODE_SEL=$(ask "Elegi" "1")
-[[ "$TMODE_SEL" == "2" ]] && TENANT_MODE="multi" || TENANT_MODE="single"
-g "  Modo: $TENANT_MODE"
-echo
-
-# ---------------- 1) Topologia ----------------
-c "1) Topologia de despliegue"
-echo "   1) Docker · un contenedor por servicio   (RECOMENDADO, produccion)"
-echo "   2) Docker · todo en un solo contenedor    (experimental, demos)"
-echo "   3) Bare-metal / LXC nativo (sin Docker)    (guia manual)"
-TOPO=$(ask "Elegi" "1")
-echo
-
-case "$TOPO" in
-  3)
-    y "Instalacion bare-metal / LXC (sin Docker)"
-    echo "Cada componente se instala nativo sobre Debian/Ubuntu (idealmente 1 por host/CT):"
-    echo "  - PostgreSQL 16 + Redis"
-    echo "  - Asterisk 22 (chan_pjsip + res_config_pgsql, realtime)"
-    echo "  - Kamailio 5.6 + rtpengine (SBC)"
-    echo "  - Coturn (TURN/STUN)"
-    echo "  - Control Plane (Node) + Dashboard (Next.js) + Voz IA (Python)"
-    echo "  - Nginx Proxy Manager (TLS/WSS)"
-    echo
-    y "Segui la guia por componente en la carpeta docs/ del repo."
-    exit 0
-    ;;
-  2)
-    c "Modo monolitico (todo en un contenedor) — experimental"
-    command -v docker >/dev/null || { r "Falta Docker: https://docs.docker.com/engine/install/"; exit 1; }
-    [[ -f Dockerfile.allinone ]] || { r "Falta docker/Dockerfile.allinone"; exit 1; }
-    DOMAIN=$(ask "Dominio publico" "pbx.tu-dominio.com")
-    y "Construyendo imagen all-in-one (puede tardar)…"
-    docker build -f Dockerfile.allinone -t pbxng/allinone:latest ..
-    docker run -d --name pbxng --restart unless-stopped \
-      -p 3000:3000 -p 3001:3001 -p 5060:5060/udp -p 5060:5060/tcp -p 8088:8088 \
-      -p 10000-10200:10000-10200/udp -e DOMAIN="$DOMAIN" -e TENANT_MODE="$TENANT_MODE" pbxng/allinone:latest
-    g "Listo. Dashboard: http://localhost:3001 · API: http://localhost:3000"
-    y "Nota: modo demo. Para produccion usa 'un contenedor por servicio'."
-    exit 0
-    ;;
-  1) : ;;
-  *) r "Opcion invalida"; exit 1 ;;
-esac
-
-# ---------------- Verificar Docker ----------------
 command -v docker >/dev/null || { r "Falta Docker: https://docs.docker.com/engine/install/"; exit 1; }
 docker compose version >/dev/null 2>&1 || { r "Falta el plugin 'docker compose'."; exit 1; }
 
-# ---------------- 2) Servicios (perfiles) ----------------
-c "2) Que servicios levantar (un contenedor por cada uno)"
-echo "   1) Todo el stack (nucleo + SBC + media + IA + proxy)"
-echo "   2) Elegir servicios"
-echo "   3) Solo nucleo (DB + Redis + Asterisk + API + Dashboard)"
-MODE=$(ask "Elegi" "1")
-PROFILES=()
-case "$MODE" in
-  1) PROFILES=(core sbc media ai) ;;
-  3) PROFILES=(core) ;;
-  2)
-     yn "Nucleo (DB/Redis/Asterisk/API/Dashboard)" && PROFILES+=(core)
-     yn "SBC (Kamailio + rtpengine)"               && PROFILES+=(sbc)
-     yn "Media (Coturn TURN/STUN)"                 && PROFILES+=(media)
-     yn "Voz IA (TTS/STT)"                         && PROFILES+=(ai)
-     ;;
-  *) r "Opcion invalida"; exit 1 ;;
-esac
-[[ ${#PROFILES[@]} -gt 0 ]] || { r "No elegiste ningun servicio."; exit 1; }
-echo
+# ---------------- rol ----------------
+if [[ -z "$ROLE" ]]; then
+  if [[ "$YES" == 1 ]]; then ROLE=all; else
+    c "Rol de esta VM/host"
+    echo "   1) all   · Todo en esta maquina (SOHO / demo)         (RECOMENDADO chico)"
+    echo "   2) core  · Nucleo (Asterisk+API+Dashboard+DB) — LAN"
+    echo "   3) edge  · Borde SBC (Kamailio+rtpengine+wsbridge+TURN) — DMZ"
+    case "$(ask 'Elegi' '1')" in 1) ROLE=all;; 2) ROLE=core;; 3) ROLE=edge;; *) r "Opcion invalida"; exit 1;; esac
+  fi
+fi
+LAN="$(lanip)"; LAN="${LAN:-127.0.0.1}"
+CF="docker-compose.yml"; UP=(up -d --build)
+[[ "$RELEASE" == 1 ]] && { CF="docker-compose.release.yml"; UP=(up -d); }
+g "  Rol: $ROLE   ·   IP LAN detectada: $LAN"; echo
 
-# ---------------- 2b) Reverse proxy / TLS ----------------
-c "2b) Reverse proxy (TLS/WSS)"
-echo "   1) Desplegar Nginx Proxy Manager (contenedor 'npm' en este stack)"
-echo "   2) Ya tengo un reverse proxy (NO desplegar NPM, solo apunto el mio)"
-echo "   3) Ninguno por ahora"
-RPROXY=$(ask "Elegi" "1")
-PROXY_URL=""
-case "$RPROXY" in
-  1) [[ " ${PROFILES[*]} " == *" proxy "* ]] || PROFILES+=(proxy) ;;
-  2) PROXY_URL=$(ask "URL/host de tu proxy existente (informativo)" "") ;;
-  3) : ;;
-  *) r "Opcion invalida"; exit 1 ;;
-esac
-echo
+ensure_env(){ [[ -f .env ]] || { cp -n .env.example .env 2>/dev/null || : > .env; }; }
+gen_shared_secrets(){  # solo si faltan (re-run idempotente)
+  has DB_PASS    || put DB_PASS "$(gen 12)"
+  has JWT_SECRET || put JWT_SECRET "$(gen 24)"
+  has ARI_PASS   || put ARI_PASS "$(gen 8)"
+  has AMI_PASS   || put AMI_PASS "$(gen 8)"
+  has TURN_PASS  || put TURN_PASS "$(gen 8)"
+  has DB_NAME    || put DB_NAME pbxng
+  has DB_USER    || put DB_USER pbxng
+  has ARI_USER   || put ARI_USER pbxng
+  has AMI_USER   || put AMI_USER pbxng-ami
+}
+install_ctl(){
+  [[ -f "$HERE/pbxng-ctl" ]] && { install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl 2>/dev/null || sudo install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl; sed -i "s|^DIR=.*|DIR=\"\${PBXNG_DIR:-$HERE}\"|" /usr/local/bin/pbxng-ctl 2>/dev/null || true; }
+  if [[ -f "$HERE/pbxng-reconciler.sh" ]] && command -v systemctl >/dev/null; then
+    install -m 0755 "$HERE/pbxng-reconciler.sh" /usr/local/bin/pbxng-reconciler.sh 2>/dev/null || sudo install -m 0755 "$HERE/pbxng-reconciler.sh" /usr/local/bin/pbxng-reconciler.sh
+    sed "s|/opt/pbx-ng/docker|$HERE|g" "$HERE/pbxng-reconciler.service" > /etc/systemd/system/pbxng-reconciler.service 2>/dev/null || true
+    cp "$HERE/pbxng-reconciler.timer" /etc/systemd/system/pbxng-reconciler.timer 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null && systemctl enable --now pbxng-reconciler.timer 2>/dev/null && g "  reconciliador activo (cada 20s)." || y "  (timer systemd no activado; el panel togglea via pbxng-ctl igual)"
+  fi
+}
+deploy(){
+  install_ctl
+  c "Desplegando [$ROLE]  modulos: $CPROFILES  (compose: $CF)"
+  COMPOSE_PROFILES="$CPROFILES" docker compose -f "$CF" "${UP[@]}"
+  echo; c "Estado"; COMPOSE_PROFILES="$CPROFILES" docker compose -f "$CF" ps
+}
 
-# ---------------- 3) Configuracion (.env) ----------------
-if [[ ! -f .env ]]; then
-  c "3) Configuracion inicial (se guarda en .env, no se versiona)"
-  DOMAIN=$(ask "Dominio publico" "pbx.tu-dominio.com")
-  PUBLIC_IP=$(ask "IP publica (TURN/RTP, opcional)" "")
-  COMPANY=$(ask "Nombre de la empresa (empresa por defecto)" "Mi Empresa")
-  DB_PASS=$(openssl rand -hex 12 2>/dev/null || echo "pbxng_$RANDOM$RANDOM")
-  JWT_SECRET=$(openssl rand -hex 24 2>/dev/null || echo "jwt_$RANDOM$RANDOM$RANDOM")
-  cp -n .env.example .env 2>/dev/null || cp .env.example .env
-  sed -i "s|^DB_PASS=.*|DB_PASS=$DB_PASS|; s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|; s|^DOMAIN=.*|DOMAIN=$DOMAIN|; s|^PUBLIC_IP=.*|PUBLIC_IP=$PUBLIC_IP|" .env
-  grep -q "^TENANT_MODE=" .env && sed -i "s|^TENANT_MODE=.*|TENANT_MODE=$TENANT_MODE|" .env || echo "TENANT_MODE=$TENANT_MODE" >> .env
-  HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}'); HOST_IP="${HOST_IP:-127.0.0.1}"
-  # En host unico todos los servicios comparten HOST_IP; si hay proxy propio, NPM_HOST queda vacio (usas el tuyo)
-  if [[ "${RPROXY:-1}" == "1" ]]; then NPM_HOST_V="$HOST_IP"; else NPM_HOST_V=""; fi
-  for kv in "DB_HOST=$HOST_IP" "ASTERISK_HOST=$HOST_IP" "SBC_HOST=$HOST_IP" "TURN_HOST=$HOST_IP" \
-            "VOZ_HOST=$HOST_IP" "MEDIA_HOST=$HOST_IP" "NPM_HOST=$NPM_HOST_V" "DEFAULT_COMPANY=$COMPANY" \
-            "ARI_USER=pbxng" "AMI_USER=pbxng-ami" \
-            "ARI_PASS=$(openssl rand -hex 8)" "AMI_PASS=$(openssl rand -hex 8)" "TURN_PASS=$(openssl rand -hex 8)"; do
-    k="${kv%%=*}"; grep -q "^$k=" .env && sed -i "s|^$k=.*|$kv|" .env || echo "$kv" >> .env
+case "$ROLE" in
+# ==========================================================================
+all)
+  TENANT_MODE="${TENANT_F:-single}"
+  c "Modulos (perfiles). core siempre; el resto opcional."
+  PROFS=(core)
+  if [[ -n "$PROFILES" ]]; then IFS=',' read -ra PROFS <<< "core,$PROFILES"; PROFS=($(printf '%s\n' "${PROFS[@]}" | awk '!s[$0]++'));
+  elif [[ "$YES" == 1 ]]; then PROFS=(core sbc turn ai intercom); else
+    echo "   1) Todo (core+sbc+turn+ai+intercom)   2) Elegir   3) Solo core"
+    case "$(ask 'Elegi' '1')" in
+      1) PROFS=(core sbc turn ai intercom);;
+      3) PROFS=(core);;
+      2) yn "sbc (SBC/WebRTC)"  && PROFS+=(sbc); yn "turn (Coturn)" && PROFS+=(turn); yn "ai (Voz IA)" && PROFS+=(ai); yn "intercom (go2rtc)" && PROFS+=(intercom);;
+      *) r "Opcion invalida"; exit 1;;
+    esac
+  fi
+  if [[ "$YES" != 1 ]]; then yn "Desplegar Nginx Proxy Manager (proxy)?" n && PROFS+=(proxy); fi
+  CPROFILES="$(IFS=,; echo "${PROFS[*]}")"
+  DOMAIN="${DOMAIN_F:-$( [[ "$YES" == 1 ]] && echo pbx.local || ask 'Dominio publico' 'pbx.tu-dominio.com')}"
+  PUBLIC_IP="${PUBLIC_IP_F:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP publica (TURN/RTP, opcional)' '')}"
+  ensure_env; gen_shared_secrets
+  put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"; put TENANT_MODE "$TENANT_MODE"
+  put DB_HOST "$LAN"; put ASTERISK_HOST "$LAN"; put SBC_HOST "$LAN"
+  put TURN_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
+  put COMPOSE_PROFILES "$CPROFILES"
+  deploy
+;;
+# ==========================================================================
+core)
+  TENANT_MODE="${TENANT_F:-single}"
+  DOMAIN="${DOMAIN_F:-$( [[ "$YES" == 1 ]] && echo pbx.local || ask 'Dominio publico' 'pbx.tu-dominio.com')}"
+  PUBLIC_IP="${PUBLIC_IP_F:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP publica (WAN)' '')}"
+  EDGE_IP="${EDGE_IP:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP del EDGE/SBC en la LAN (vacio si aun no existe)' '')}"
+  PROFS=(core)
+  if [[ -n "$PROFILES" ]]; then IFS=',' read -ra PROFS <<< "core,$PROFILES"; PROFS=($(printf '%s\n' "${PROFS[@]}" | awk '!s[$0]++'));
+  elif [[ "$YES" != 1 ]]; then yn "Incluir 'ai' (Voz IA/IVR)?" n && PROFS+=(ai); yn "Incluir 'intercom' (video go2rtc)?" n && PROFS+=(intercom); fi
+  CPROFILES="$(IFS=,; echo "${PROFS[*]}")"
+  SB="${EDGE_IP:-$LAN}"
+  ensure_env; gen_shared_secrets
+  put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"; put TENANT_MODE "$TENANT_MODE"
+  put DB_HOST 127.0.0.1; put ASTERISK_HOST 127.0.0.1; put VOZ_HOST 127.0.0.1
+  put SBC_HOST "$SB"; put TURN_HOST "$SB"; put MEDIA_HOST "$SB"
+  put COMPOSE_PROFILES "$CPROFILES"
+  # join file para el edge (secretos compartidos + IP del core)
+  JF="$HERE/edge-join.env"
+  { echo "# PBX-NG edge-join — generado $(date -Is). Copialo al EDGE y corre:"
+    echo "#   ./install.sh --role=edge --join=edge-join.env"
+    echo "CORE_IP=$LAN"; echo "DB_HOST=$LAN"; echo "ASTERISK_HOST=$LAN"
+    echo "DB_NAME=$(getv DB_NAME)"; echo "DB_USER=$(getv DB_USER)"; echo "DB_PASS=$(getv DB_PASS)"
+    echo "AMI_USER=$(getv AMI_USER)"; echo "AMI_PASS=$(getv AMI_PASS)"
+    echo "ARI_USER=$(getv ARI_USER)"; echo "ARI_PASS=$(getv ARI_PASS)"
+    echo "JWT_SECRET=$(getv JWT_SECRET)"; echo "PUBLIC_IP=$PUBLIC_IP"; echo "DOMAIN=$DOMAIN"
+  } > "$JF"; chmod 600 "$JF"
+  deploy
+  echo; g "================================================================"
+  g "  CORE listo.  Dashboard :3001 · API :3000"
+  y "  Para el EDGE (SBC/TURN) copia el archivo de secretos:"
+  echo "     scp $JF root@<IP-edge>:/opt/pbx-ng/docker/"
+  echo "     # en el edge:  ./install.sh --role=edge --join=edge-join.env --public-ip=$PUBLIC_IP"
+  r  "  Seguridad: restringi el acceso a Postgres (5432) SOLO desde la IP del edge."
+  g "================================================================"
+;;
+# ==========================================================================
+edge)
+  if [[ -n "$JOIN" && -f "$JOIN" ]]; then set -a; . "$JOIN"; set +a; g "  join cargado: $JOIN"; fi
+  CORE_IP="${CORE_IP:-}"; [[ -z "$CORE_IP" && "$YES" != 1 ]] && CORE_IP="$(ask 'IP del CORE (LAN)' '')"
+  [[ -z "$CORE_IP" ]] && { r "Falta CORE_IP (usa --join=edge-join.env o --core-ip=)"; exit 1; }
+  DB_HOST="${DB_HOST:-$CORE_IP}"; ASTERISK_HOST="${ASTERISK_HOST:-$CORE_IP}"
+  PUBLIC_IP="${PUBLIC_IP_F:-${PUBLIC_IP:-}}"
+  [[ -z "${DB_PASS:-}" ]] && { r "Falta DB_PASS (viene del edge-join.env del core)"; exit 1; }
+  PROFS=(sbc turn); [[ -n "$PROFILES" ]] && IFS=',' read -ra PROFS <<< "$PROFILES"
+  CPROFILES="$(IFS=,; echo "${PROFS[*]}")"
+  c "Validando conectividad al core ($CORE_IP)…"
+  ok=1
+  for pp in "Postgres 5432" "Asterisk-AMI 5038" "Asterisk-ARI 8088"; do
+    nm="${pp% *}"; pt="${pp#* }"
+    if [[ "$(tcpok "$CORE_IP" "$pt")" == ok ]]; then g "  OK  $nm ($CORE_IP:$pt)"; else y "  ... $nm ($CORE_IP:$pt) no responde — revisa firewall/servicio"; ok=0; fi
   done
-  g "  .env creado (secretos generados automaticamente)."
-else
-  y "3) Usando .env existente (borralo para reconfigurar)."
-fi
-echo
-
-# ---------------- 4) Desplegar ----------------
-ARGS=(); for p in "${PROFILES[@]}"; do ARGS+=(--profile "$p"); done
-c "4) Perfiles: ${PROFILES[*]}"
-c "   Construyendo e iniciando contenedores…"
-docker compose "${ARGS[@]}" up -d --build
-
-echo
-c "5) Estado"
-docker compose "${ARGS[@]}" ps
-echo
-# health-check basico
-sleep 4
-for hc in "API|http://localhost:3000/health" "Dashboard|http://localhost:3001"; do
-  n="${hc%%|*}"; u="${hc#*|}"
-  code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$u" 2>/dev/null || echo 000)
-  if [[ "$code" =~ ^(200|401|404)$ ]]; then g "  OK   $n ($code)"; else y "  ...  $n aun iniciando ($code)"; fi
-done
-echo
-g "================================================================"
-g "  PBX-NG desplegado."
-g "  Dashboard : http://localhost:3001"
-g "  API       : http://localhost:3000"
-[[ " ${PROFILES[*]} " == *" proxy "* ]] && g "  Proxy NPM : http://localhost:81  (admin@example.com / changeme)"
-if [[ "${RPROXY:-}" == "2" ]]; then
-  HOST_IP=$(hostname -I 2>/dev/null | awk "{print \$1}"); HOST_IP="${HOST_IP:-<IP-de-este-host>}"
-  y "  Reverse proxy existente ${PROXY_URL:+($PROXY_URL)}: apuntá tu proxy a:"
-  echo "     • Panel web (HTTP)      -> http://$HOST_IP:3001"
-  echo "     • WebSocket softphone   -> http://$HOST_IP:3001  (mismo host; el panel proxya /socket.io y /backend a la API)"
-  echo "     • WSS Asterisk (WebRTC) -> ws://$HOST_IP:8088     (location /ws o /asterisk, upgrade a WebSocket)"
-  echo "     Publicá con TLS: dominio -> :3001 (panel) y el WSS de Asterisk :8088 detrás de tu proxy."
-fi
-g "  Publica el dominio con TLS/WSS desde el proxy inverso."
-g "================================================================"
+  [[ "$ok" == 0 && "$YES" != 1 ]] && { yn "Algunos puertos del core no responden. ¿Continuar igual?" n || { r "Abortado."; exit 1; }; }
+  ensure_env
+  put DB_HOST "$DB_HOST"; put DB_NAME "${DB_NAME:-pbxng}"; put DB_USER "${DB_USER:-pbxng}"; put DB_PASS "$DB_PASS"
+  put ASTERISK_HOST "$ASTERISK_HOST"; put KAM_HOST 127.0.0.1
+  put AMI_USER "${AMI_USER:-pbxng-ami}"; put AMI_PASS "${AMI_PASS:-}"
+  put ARI_USER "${ARI_USER:-pbxng}"; put ARI_PASS "${ARI_PASS:-}"
+  put JWT_SECRET "${JWT_SECRET:-$(gen 24)}"
+  put PUBLIC_IP "$PUBLIC_IP"; put DOMAIN "${DOMAIN:-}"
+  put TRUSTED_NET "${TRUSTED_NET:-}"
+  put COMPOSE_PROFILES "$CPROFILES"
+  deploy
+  echo; g "================================================================"
+  g "  EDGE (SBC/TURN) desplegado. Apunta al core en $CORE_IP."
+  g "  Kamailio SIP :5060 · TURN :3478 · rtpengine (media)"
+  r "  Abri al WAN solo: 5060/5061 (SIP), 3478+relay (TURN), 443 (WSS por proxy)."
+  g "================================================================"
+;;
+*) r "Rol invalido: $ROLE (usa all | core | edge)"; exit 1;;
+esac

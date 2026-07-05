@@ -334,6 +334,58 @@ def sip_capture_loop():
             print('sipcap err', e, flush=True)
         time.sleep(5)
 
+CAP_PRESETS = {'sip': ['udp', 'port', '5060'], 'siprtp': ['udp'], 'all': []}
+def do_capture(cur, cid, preset, dur):
+    dur = max(3, min(300, int(dur or 30)))
+    fn = "/tmp/pbxng_cap_%d.pcap" % cid
+    proc = None
+    try:
+        expr = CAP_PRESETS.get(preset, CAP_PRESETS['sip'])
+        proc = subprocess.Popen(['tcpdump', '-i', 'any', '-s', '0', '-U', '-w', fn] + expr,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < dur:
+            time.sleep(1)
+            try:
+                cur.execute("SELECT status FROM pbxng_captures WHERE id=%s", (cid,))
+                r = cur.fetchone()
+                if r and r[0] == 'stopping':
+                    break
+            except Exception:
+                pass
+        proc.terminate()
+        try: proc.wait(timeout=5)
+        except Exception: proc.kill()
+        data = open(fn, 'rb').read()
+        cur.execute("UPDATE pbxng_captures SET status='done', size=%s, data=%s, finished_at=now() WHERE id=%s",
+                    (len(data), psycopg2.Binary(data), cid))
+    except Exception as e:
+        try: cur.execute("UPDATE pbxng_captures SET status='error', error=%s, finished_at=now() WHERE id=%s", (str(e)[:300], cid))
+        except Exception: pass
+    finally:
+        try:
+            if proc and proc.poll() is None: proc.kill()
+        except Exception: pass
+        try: os.remove(fn)
+        except Exception: pass
+
+def capture_loop():
+    while True:
+        try:
+            conn = psycopg2.connect(**DB); conn.autocommit = True; cur = conn.cursor()
+            cur.execute("CREATE TABLE IF NOT EXISTS pbxng_captures (id serial PRIMARY KEY, node text, preset text, duration int, status text DEFAULT 'pending', filename text, size bigint DEFAULT 0, data bytea, error text, created_at timestamptz DEFAULT now(), started_at timestamptz, finished_at timestamptz)")
+            while True:
+                cur.execute("SELECT id,preset,duration FROM pbxng_captures WHERE node='sbc' AND status='pending' ORDER BY id LIMIT 1")
+                row = cur.fetchone()
+                if not row:
+                    time.sleep(2); continue
+                cid, preset, dur = row
+                cur.execute("UPDATE pbxng_captures SET status='running', started_at=now() WHERE id=%s", (cid,))
+                do_capture(cur, cid, preset, dur)
+        except Exception as e:
+            print('capture_loop err', e, flush=True)
+            time.sleep(5)
+
 def main():
     try:
         c = psycopg2.connect(**DB); cu = c.cursor()
@@ -351,6 +403,7 @@ def main():
     except Exception as e:
         print('alter err', e, flush=True)
     threading.Thread(target=sip_capture_loop, daemon=True).start()
+    threading.Thread(target=capture_loop, daemon=True).start()
     ver = version()
     while True:
         try:
