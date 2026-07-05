@@ -30,6 +30,8 @@ lanip(){ hostname -I 2>/dev/null | awk '{print $1}'; }
 put(){ local k="$1" v="$2"; grep -q "^$k=" .env && sed -i "s|^$k=.*|$k=$v|" .env || echo "$k=$v" >> .env; }
 has(){ grep -q "^$1=..*" .env 2>/dev/null; }               # clave con valor no vacio
 getv(){ grep "^$1=" .env | head -1 | cut -d= -f2-; }
+WEAK="cambia_esta_clave cambia_este_secreto_jwt changeme admin pbxng-turn-changeme pbxng-cli pbxng-turn-cli x test testpass"
+need(){ local v w; v="$(getv "$1")"; [[ -z "$v" ]] && return 0; for w in $WEAK; do [[ "$v" == "$w" ]] && return 0; done; return 1; }
 tcpok(){ timeout 3 bash -c "echo > /dev/tcp/$1/$2" 2>/dev/null && echo ok || echo fail; }
 
 # ---------------- flags ----------------
@@ -67,17 +69,28 @@ CF="docker-compose.yml"; UP=(up -d --build)
 [[ "$RELEASE" == 1 ]] && { CF="docker-compose.release.yml"; UP=(up -d); }
 g "  Rol: $ROLE   ·   IP LAN detectada: $LAN"; echo
 
-ensure_env(){ [[ -f .env ]] || { cp -n .env.example .env 2>/dev/null || : > .env; }; }
-gen_shared_secrets(){  # solo si faltan (re-run idempotente)
-  has DB_PASS    || put DB_PASS "$(gen 12)"
-  has JWT_SECRET || put JWT_SECRET "$(gen 24)"
-  has ARI_PASS   || put ARI_PASS "$(gen 8)"
-  has AMI_PASS   || put AMI_PASS "$(gen 8)"
-  has TURN_PASS  || put TURN_PASS "$(gen 8)"
-  has DB_NAME    || put DB_NAME pbxng
-  has DB_USER    || put DB_USER pbxng
-  has ARI_USER   || put ARI_USER pbxng
-  has AMI_USER   || put AMI_USER pbxng-ami
+ensure_env(){ [[ -f .env ]] || { cp -n .env.example .env 2>/dev/null || : > .env; }; chmod 600 .env 2>/dev/null || true; }
+gen_shared_secrets(){  # genera lo que falte O sea débil (re-run idempotente y seguro)
+  need DB_PASS        && put DB_PASS "$(gen 16)"
+  need JWT_SECRET     && put JWT_SECRET "$(gen 32)"
+  need ARI_PASS       && put ARI_PASS "$(gen 12)"
+  need AMI_PASS       && put AMI_PASS "$(gen 12)"
+  need TURN_PASS      && put TURN_PASS "$(gen 12)"
+  need TURN_CLI_PASS  && put TURN_CLI_PASS "$(gen 10)"
+  need ADMIN_DEFAULT_PASS && put ADMIN_DEFAULT_PASS "$(gen 6)"
+  has DB_NAME  || put DB_NAME pbxng
+  has DB_USER  || put DB_USER pbxng
+  has ARI_USER || put ARI_USER pbxng
+  has AMI_USER || put AMI_USER pbxng-ami
+  has TURN_USER || put TURN_USER pbxng
+}
+preflight_secrets(){
+  local k miss=0
+  for k in DB_PASS JWT_SECRET AMI_PASS ARI_PASS; do
+    if need "$k"; then r "  ✗ Secreto ausente o débil: $k"; miss=1; fi
+  done
+  [[ "$miss" == 1 ]] && { r "Abortado: hay secretos sin generar. Usá el instalador, no edites .env a mano."; exit 1; }
+  g "  ✓ Secretos por-deployment verificados"
 }
 install_ctl(){
   [[ -f "$HERE/pbxng-ctl" ]] && { install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl 2>/dev/null || sudo install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl; sed -i "s|^DIR=.*|DIR=\"\${PBXNG_DIR:-$HERE}\"|" /usr/local/bin/pbxng-ctl 2>/dev/null || true; }
@@ -89,10 +102,15 @@ install_ctl(){
   fi
 }
 deploy(){
+  preflight_secrets
   install_ctl
   c "Desplegando [$ROLE]  modulos: $CPROFILES  (compose: $CF)"
   COMPOSE_PROFILES="$CPROFILES" docker compose -f "$CF" "${UP[@]}"
   echo; c "Estado"; COMPOSE_PROFILES="$CPROFILES" docker compose -f "$CF" ps
+  if [[ " $CPROFILES " == *" core "* ]]; then
+    echo; g "  Usuario admin inicial:  admin  /  $(getv ADMIN_DEFAULT_PASS)"
+    y "  (se te pedirá cambiarla en el primer ingreso)"
+  fi
 }
 
 case "$ROLE" in
@@ -146,7 +164,9 @@ core)
     echo "DB_NAME=$(getv DB_NAME)"; echo "DB_USER=$(getv DB_USER)"; echo "DB_PASS=$(getv DB_PASS)"
     echo "AMI_USER=$(getv AMI_USER)"; echo "AMI_PASS=$(getv AMI_PASS)"
     echo "ARI_USER=$(getv ARI_USER)"; echo "ARI_PASS=$(getv ARI_PASS)"
-    echo "JWT_SECRET=$(getv JWT_SECRET)"; echo "PUBLIC_IP=$PUBLIC_IP"; echo "DOMAIN=$DOMAIN"
+    echo "JWT_SECRET=$(getv JWT_SECRET)"
+    echo "TURN_USER=$(getv TURN_USER)"; echo "TURN_PASS=$(getv TURN_PASS)"
+    echo "PUBLIC_IP=$PUBLIC_IP"; echo "DOMAIN=$DOMAIN"
   } > "$JF"; chmod 600 "$JF"
   deploy
   echo; g "================================================================"
@@ -180,6 +200,8 @@ edge)
   put AMI_USER "${AMI_USER:-pbxng-ami}"; put AMI_PASS "${AMI_PASS:-}"
   put ARI_USER "${ARI_USER:-pbxng}"; put ARI_PASS "${ARI_PASS:-}"
   put JWT_SECRET "${JWT_SECRET:-$(gen 24)}"
+  put TURN_USER "${TURN_USER:-pbxng}"; put TURN_PASS "${TURN_PASS:-$(gen 12)}"
+  need TURN_CLI_PASS && put TURN_CLI_PASS "$(gen 10)"
   put PUBLIC_IP "$PUBLIC_IP"; put DOMAIN "${DOMAIN:-}"
   put TRUSTED_NET "${TRUSTED_NET:-}"
   put COMPOSE_PROFILES "$CPROFILES"

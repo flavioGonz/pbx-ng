@@ -94,30 +94,26 @@ Con el sistema de release (ver `RELEASE.md`): en cada VM, `docker/deploy.sh` hac
 Kamailio (edge) con *dispatcher* puede balancear hacia **varios Asterisk core**.
 Objetivo: 1 edge (o par HA con VIP) + N cores. El edge sigue siendo la única cara pública.
 
-## Apéndice · Provisionar las 2 VMs en Proxmox
+## Apéndice · Provisionar las 2 VMs en Proxmox (automatizado)
 
-Dos LXC (Debian/Ubuntu) con Docker. Idea de red: **dos bridges** — uno LAN (interno) y
-uno DMZ/WAN. El `core` va solo en el bridge LAN; el `edge` es **doble NIC** (DMZ + LAN).
+El orquestador **`deploy/pbxng-proxmox.sh`** crea y aprovisiona las dos LXC de una,
+corriendo **en un nodo Proxmox** (usa `pct`/`pvesh`/`pveam`). Elegí la forma **6) Dos VMs**:
 
 ```bash
-# --- en el nodo Proxmox ---
-# CORE (solo LAN)
-pct create 210 <template> --hostname pbxng-core \
-  --net0 name=eth0,bridge=vmbr-lan,ip=10.0.0.10/24,gw=10.0.0.1 \
-  --cores 4 --memory 4096 --rootfs local-lvm:20 --features nesting=1 --unprivileged 1 --onboot 1
-# EDGE (DMZ + LAN)
-pct create 211 <template> --hostname pbxng-edge \
-  --net0 name=eth0,bridge=vmbr-dmz,ip=<IP_WAN>/24,gw=<GW_WAN> \
-  --net1 name=eth1,bridge=vmbr-lan,ip=10.0.0.20/24 \
-  --cores 2 --memory 2048 --rootfs local-lvm:12 --features nesting=1 --unprivileged 1 --onboot 1
-pct start 210; pct start 211
+# --- en el nodo Proxmox, como root ---
+git clone https://github.com/flavioGonz/pbx-ng.git
+bash pbx-ng/deploy/pbxng-proxmox.sh
+#   Forma de despliegue -> 6) Dos VMs (núcleo LAN + borde SBC DMZ)
+#   ¿DMZ con NIC separada? -> s  (te pide el bridge WAN + IP/gw del borde)
 ```
 
-En cada CT: instalar Docker + `docker compose`, `git clone` del repo en `/opt/pbx-ng`, y
-correr el instalador por rol (sección "Instalación — 2 VMs"). El `edge-join.env` se copia
-del core al edge con `pct push`/`scp`.
+Qué hace la forma 6:
+- Crea **`pbxng-core`** (perfiles `core intercom`; DB, Redis, Asterisk, API, Dashboard) en el bridge LAN.
+- Crea **`pbxng-edge`** (perfiles `sbc turn proxy`; Kamailio + rtpengine + TURN + NPM). Si activás DMZ, le agrega una **segunda NIC** (`eth1`) hacia el bridge WAN/DMZ, dejando `eth0` en la LAN para hablar con el núcleo.
+- Genera los **secretos una sola vez** y escribe el `.env` de cada CT con las IPs cruzadas (el borde apunta `DB_HOST`/`ASTERISK_HOST` al núcleo; el núcleo apunta `SBC_HOST`/`TURN_HOST`/`MEDIA_HOST` al borde).
+- Instala Docker, clona el repo, levanta los perfiles de cada rol y deja `pbxng-ctl` + el reconciliador.
+- Al final imprime la **nota de firewall** (qué abrir al WAN y qué restringir del núcleo al borde).
 
-> El orquestador `deploy/pbxng-proxmox.sh` automatiza el descubrimiento del cluster y la
-> creación de CTs. La automatización end-to-end de esta topología de 2 VMs (core+edge con
-> doble NIC y el join) usando ese orquestador es el siguiente paso planificado; hoy los CTs
-> se crean con los comandos de arriba y el alta se completa con `install.sh --role=…`.
+> Alternativa manual (sin Proxmox / otra virtualización): creá dos VMs vos mismo y usá el
+> instalador por rol (sección "Instalación — 2 VMs") con `install.sh --role=core|edge` y el
+> `edge-join.env`. El orquestador de arriba es el camino recomendado en Proxmox.

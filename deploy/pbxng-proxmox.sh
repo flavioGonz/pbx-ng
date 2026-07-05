@@ -85,7 +85,8 @@ echo "   2) Standalone    · 2 CTs: app+telefonía (DB+Asterisk+App) / SBC apart
 echo "   3) Híbrido       · 3 CTs: núcleo / borde / voz"
 echo "   4) Separado      · 1 contenedor por componente                       (aislamiento máx.)"
 echo "   5) Personalizado · vos agrupás los servicios en los contenedores que quieras"
-SHAPE=$(ask "Elegí" "2")
+echo "   6) Dos VMs      · núcleo (LAN) + borde SBC (DMZ, doble NIC opcional)     (RECOMENDADO comercial)"
+SHAPE=$(ask "Elegí" "6")
 echo
 
 # define los ROLES (nombre → perfiles docker-compose) segun la forma
@@ -122,6 +123,9 @@ case "$SHAPE" in
        ROLE_DESC[$rname]="Grupo $gid"
      done
      [[ ${#ROLES[@]} -gt 0 ]] || die "No definiste ningún grupo." ;;
+  6) ROLES=(core edge)
+     ROLE_PROFILES[core]="core intercom"; ROLE_DESC[core]="Núcleo (LAN): DB, Redis, Asterisk, API, Dashboard, Intercom"
+     ROLE_PROFILES[edge]="sbc turn proxy"; ROLE_DESC[edge]="Borde (DMZ): SBC Kamailio + rtpengine + TURN + Proxy" ;;
   *) die "Opción inválida" ;;
 esac
 
@@ -171,6 +175,15 @@ GW=""; STATIC_BASE=""
 if [[ "$NET_MODE" == "static" ]]; then
   GW=$(ask "Gateway" "192.168.1.1")
   STATIC_BASE=$(ask "IP base (se asigna secuencial /24, ej 192.168.1.50)" "192.168.1.50")
+fi
+# 2 VMs: NIC extra del borde hacia WAN/DMZ (opcional)
+DMZ_BRIDGE=""; EDGE_WAN_IP=""; EDGE_WAN_GW=""
+if [[ "$SHAPE" == "6" ]]; then
+  if yn "¿El borde va en una DMZ con NIC separada hacia WAN?" "n"; then
+    DMZ_BRIDGE=$(ask "Bridge DMZ/WAN del borde" "vmbr1")
+    EDGE_WAN_IP=$(ask "IP WAN del borde (CIDR, ej 203.0.113.10/24; vacío = dhcp)" "")
+    [[ -n "$EDGE_WAN_IP" ]] && EDGE_WAN_GW=$(ask "Gateway WAN" "")
+  fi
 fi
 # detectar plantilla Debian ya descargada en 'local'; si no hay, ofrecer descargarla
 DETECTED_TPL=$(pveam list local 2>/dev/null | awk '/debian-12-standard/{print $1; exit}')
@@ -262,13 +275,18 @@ create_ct(){
   local host="${PREFIX}-${role}"
   local net="name=eth0,bridge=${BRIDGE}"
   if [[ "$NET_MODE" == "static" ]]; then net+=",ip=${ROLE_IP[$role]}/24,gw=${GW}"; else net+=",ip=dhcp"; fi
+  local extranet=""
+  if [[ "$role" == "edge" && -n "$DMZ_BRIDGE" ]]; then
+    extranet="--net1 name=eth1,bridge=$DMZ_BRIDGE,ip=${EDGE_WAN_IP:-dhcp}"
+    [[ -n "$EDGE_WAN_GW" ]] && extranet="$extranet,gw=$EDGE_WAN_GW"
+  fi
 
   c "→ Creando CT $ctid ($host) en $node…"
   pct create "$ctid" "$TEMPLATE" \
     --hostname "$host" \
     --cores "${ROLE_CORES[$role]}" --memory "${ROLE_RAM[$role]}" --swap 512 \
     --rootfs "${STORAGE}:${ROLE_DISK[$role]}" \
-    --net0 "$net" \
+    --net0 "$net" $extranet \
     --features nesting=1,keyctl=1 \
     --unprivileged 1 --onboot 1 --start 1 >/dev/null
   # esperar arranque + IP
@@ -316,7 +334,7 @@ provision_ct(){
   turn_ip="$(ip_for_profile turn)"; [[ -n "$turn_ip" ]] || turn_ip="$sbc_ip"
   voz_ip="$(ip_for_profile ai)"
   npm_ip="$(ip_for_profile proxy)"
-  media_ip="${voz_ip:-$core_ip}"
+  media_ip="${sbc_ip:-${voz_ip:-$core_ip}}"
   # escribir .env (inyecta la IP del núcleo para servicios que viven en otro CT)
   pct exec "$ctid" -- bash -lc "
     set -e
@@ -409,6 +427,12 @@ g "  API       : http://$CORE_IP:3000"
 PROXY_ROLE=""; for role in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$role]} " == *" proxy "* ]] && PROXY_ROLE="$role"; done
 [[ -n "$PROXY_ROLE" ]] && g "  Proxy NPM : http://${ROLE_IP[$PROXY_ROLE]}:81  (admin@example.com / changeme)"
 g "  Modo app  : $TENANT_MODE   Plan guardado en $PLAN_FILE"
+if [[ "$SHAPE" == "6" ]]; then
+  echo "  ---------------------------------------------------------------"
+  y "  Topología 2 VMs:  núcleo=${ROLE_IP[core]:-?} (LAN)   ·   borde=${ROLE_IP[edge]:-?} (SBC/TURN)"
+  y "  Firewall: al WAN exponé SOLO 5060/5061 (SIP), 3478 + rango relay (TURN), 443 (WSS)."
+  r "  Restringí Postgres(5432), AMI(5038) y ARI(8088) del núcleo SOLO desde la IP del borde."
+fi
 y "  Publicá el dominio con TLS/WSS desde el proxy inverso y abrí los"
 y "  puertos SIP/RTP/TURN en tu firewall/NAT."
 g "================================================================"

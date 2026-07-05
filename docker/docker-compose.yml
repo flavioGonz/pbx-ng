@@ -54,7 +54,6 @@ services:
     profiles: ["core"]
     restart: unless-stopped
     volumes: [redis_data:/data]
-    ports: ["6379:6379"]
     networks: [pbxng]
 
   asterisk:
@@ -111,6 +110,7 @@ services:
       TURN_USER: ${TURN_USER:-pbxng}
       TURN_PASS: ${TURN_PASS:-}
       DEFAULT_COMPANY: ${DEFAULT_COMPANY:-Mi Empresa}
+      ADMIN_DEFAULT_PASS: ${ADMIN_DEFAULT_PASS:-}
       SBC_HOST: ${SBC_HOST:-}
       NPM_HOST: ${NPM_HOST:-}
       TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
@@ -199,8 +199,8 @@ services:
       DOMAIN: ${DOMAIN:-pbx.local}
       TURN_REALM: ${TURN_REALM:-${DOMAIN:-pbx.local}}
       TURN_USER: ${TURN_USER:-pbxng}
-      TURN_PASS: ${TURN_PASS:-pbxng-turn-changeme}
-      TURN_CLI_PASS: ${TURN_CLI_PASS:-pbxng-cli}
+      TURN_PASS: ${TURN_PASS:?set TURN_PASS in .env (lo genera install.sh)}
+      TURN_CLI_PASS: ${TURN_CLI_PASS:?set TURN_CLI_PASS in .env}
       PUBLIC_IP: ${PUBLIC_IP:-}
 
   voz:
