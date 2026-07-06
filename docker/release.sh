@@ -26,6 +26,10 @@ THIRD=( postgres:16-alpine redis:7-alpine drachtio/rtpengine:latest \
   alexxit/go2rtc:latest jc21/nginx-proxy-manager:latest )
 
 echo "== PBX-NG release v$VERSION  (registry=$REGISTRY) =="
+# Placeholders SOLO para satisfacer la interpolación del compose durante el BUILD.
+# NO se hornean en las imágenes (son variables de runtime; los valores reales van en .env al desplegar).
+export DB_PASS="${DB_PASS:-build}" ARI_PASS="${ARI_PASS:-build}" AMI_PASS="${AMI_PASS:-build}" \
+       JWT_SECRET="${JWT_SECRET:-build}" TURN_PASS="${TURN_PASS:-build}" TURN_CLI_PASS="${TURN_CLI_PASS:-build}"
 COMPOSE_PROFILES=core,sbc,turn,ai,intercom,proxy docker compose -f docker-compose.yml build
 
 echo "== Tag =="
