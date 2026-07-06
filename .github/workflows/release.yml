@@ -1,26 +1,55 @@
 name: release
+
+# Construye y publica las imágenes versionadas en GHCR.
+# Disparo: al pushear un tag vX.Y.Z, o manual (Actions -> release -> Run workflow).
+# OJO: la imagen de Asterisk compila desde fuente -> el job puede tardar 30-50 min.
+
 on:
   push:
     tags: ['v*']
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión a publicar (sin la v, ej. 1.0.0)'
+        required: true
+        default: '1.0.0'
+
 jobs:
   images:
     runs-on: ubuntu-latest
+    timeout-minutes: 150
     permissions:
       contents: read
       packages: write
     steps:
+      - name: Liberar disco en el runner (builds pesados)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune -af || true
+          df -h /
+
       - uses: actions/checkout@v4
+
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Derivar version
-        run: echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Variables (versión + registry en minúsculas)
+        run: |
+          V="${{ github.event.inputs.version }}"
+          [ -z "$V" ] && V="${GITHUB_REF_NAME#v}"
+          echo "VER=$V" >> "$GITHUB_ENV"
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "REG=ghcr.io/${OWNER}/pbx-ng" >> "$GITHUB_ENV"
+          echo "Publicando v${V} en ghcr.io/${OWNER}/pbx-ng"
+
       - name: Build & push (release.sh)
         working-directory: docker
         env:
-          PBXNG_REGISTRY: ghcr.io/${{ github.repository_owner }}/pbx-ng
-        run: bash release.sh --push --version="${VER:-latest}"
+          PBXNG_REGISTRY: ${{ env.REG }}
+        run: bash release.sh --push --version="${VER}"
