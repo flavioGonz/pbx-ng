@@ -5,12 +5,23 @@
 *{box-sizing:border-box}
 body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
 .page{max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}
-.cover{padding:74px 60px 60px;color:#fff;background:linear-gradient(150deg,#0f1a30,#16233f 60%,var(--accent))}
-.cover .kick{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;opacity:.75}
-.cover h1{font-size:44px;line-height:1.1;margin:12px 0 6px;font-weight:800}
-.cover .sub{font-size:18px;opacity:.85}
-.cover .meta{margin-top:34px;display:flex;gap:34px;flex-wrap:wrap;font-size:13px;opacity:.8}
-.cover .icon{font-size:52px;margin-bottom:14px}
+.cover{position:relative;min-height:940px;padding:0;background:#fff;color:#0f172a;display:flex;flex-direction:column}
+.cover .bar{height:14px;background:var(--accent)}
+.cover .side{position:absolute;left:0;top:14px;bottom:0;width:8px;background:linear-gradient(180deg,var(--accent),#0f1a30)}
+.cover .inner{padding:58px 64px 46px 74px;display:flex;flex-direction:column;flex:1}
+.cover .brandline{display:flex;align-items:center;gap:14px;border-bottom:1px solid #e8edf4;padding-bottom:18px}
+.cover .mark{width:46px;height:46px;border-radius:11px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px}
+.cover .brand{font-size:19px;font-weight:800;letter-spacing:-.2px}
+.cover .brandsub{font-size:12px;color:#94a3b8}
+.cover .mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 0}
+.cover .doctype{font-size:12px;font-weight:800;letter-spacing:2.6px;text-transform:uppercase;color:var(--accent)}
+.cover h1{font-size:52px;line-height:1.05;margin:16px 0 0;font-weight:800;letter-spacing:-1px;color:#0f172a}
+.cover .rule{width:96px;height:5px;background:var(--accent);border-radius:3px;margin:26px 0 22px}
+.cover .sub{font-size:19px;color:#475569;max-width:560px;line-height:1.5}
+.cover .metatable{border-top:1px solid #e8edf4;padding-top:22px;display:flex;gap:60px;flex-wrap:wrap}
+.cover .metatable div span{display:block;font-size:10.5px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:5px}
+.cover .metatable div b{font-size:14.5px;font-weight:600;color:#334155}
+.cover .foot{margin-top:26px;font-size:11px;color:#94a3b8}
 .toc{padding:34px 60px;border-bottom:1px solid #e8edf4;background:#f8fafc}
 .toc h2{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:#94a3b8;margin:0 0 14px}
 .toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
@@ -37,8 +48,10 @@ hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
 figure.shot{margin:26px 0;text-align:center}
 figure.shot img{max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 22px rgba(15,23,42,.09)}
 figure.shot figcaption{font-size:12.5px;color:#94a3b8;margin-top:9px}
+figure.shot .fn{display:block;font:11.5px ui-monospace,Consolas,monospace;color:#cbd5e1;margin-top:3px}
+figure.shot.ph .fn{color:var(--accent);font-weight:700;margin-top:6px}
 figure.shot.ph{border:2px dashed #cbd5e1;border-radius:12px;background:#f8fafc;padding:38px 20px}
-figure.shot.ph::before{content:'🖼  Imagen pendiente';display:block;font-size:13px;font-weight:700;color:#94a3b8;letter-spacing:.4px}
+figure.shot.ph::before{content:'Imagen pendiente';display:block;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8}
 figure.shot.ph figcaption{margin-top:8px;color:#64748b;font-size:13.5px}
 footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px solid #eef1f7}
 .top{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;border:0;border-radius:11px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(15,23,42,.2)}
@@ -57,72 +70,111 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <body>
 <div class="page">
   <header class="cover">
-    <div class="icon">📱</div>
-    <div class="kick">PBX-NG · Plataforma de comunicaciones unificadas</div>
-    <h1>Manual de Usuario</h1>
-    <div class="sub">Softphone y panel de agente</div>
-    <div class="meta">
-      <div><b>Dirigido a</b><br>Usuario final</div>
-      <div><b>Versión</b><br>1.1.0</div>
-      <div><b>Actualizado</b><br>13/07/2026</div>
+    <div class="bar"></div><div class="side"></div>
+    <div class="inner">
+      <div class="brandline">
+        <div class="mark">📱</div>
+        <div>
+          <div class="brand">PBX-NG</div>
+          <div class="brandsub">Plataforma de comunicaciones unificadas</div>
+        </div>
+      </div>
+      <div class="mid">
+        <div class="doctype">Documentación oficial</div>
+        <h1>Manual de Usuario</h1>
+        <div class="rule"></div>
+        <div class="sub">Softphone y panel de agente</div>
+      </div>
+      <div class="metatable">
+        <div><span>Dirigido a</span><b>Usuario final</b></div>
+        <div><span>Versión del producto</span><b>1.1.0</b></div>
+        <div><span>Actualizado</span><b>13/07/2026</b></div>
+        <div><span>Documento</span><b>USUARIO</b></div>
+      </div>
+      <div class="foot">© 2026 PBX-NG · Este documento puede actualizarse sin previo aviso.</div>
     </div>
   </header>
-  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-qu-recibiste">1. ¿Qué recibiste?</a><a class="l2" href="#2-eleg-tu-tel-fono">2. Elegí tu teléfono</a><a class="l2" href="#3-configurar-la-app-de-escritorio">3. Configurar la app de escritorio</a><a class="l2" href="#4-llamar">4. Llamar</a><a class="l2" href="#5-recibir-una-llamada">5. Recibir una llamada</a><a class="l2" href="#6-durante-la-llamada">6. Durante la llamada</a><a class="l2" href="#7-la-ventana-flotante-app-de-escritorio">7. La ventana flotante (app de escritorio)</a><a class="l2" href="#8-tu-buz-n-de-voz">8. Tu buzón de voz</a><a class="l2" href="#9-si-trabaj-s-con-colas-agentes">9. Si trabajás con colas (agentes)</a><a class="l2" href="#10-problemas-frecuentes">10. Problemas frecuentes</a><a class="l2" href="#11-c-digos-tiles">11. Códigos útiles</a></nav>
+  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-qu-recibiste">1. ¿Qué recibiste?</a><a class="l2" href="#2-eleg-tu-tel-fono">2. Elegí tu teléfono</a><a class="l2" href="#3-configurar-la-app-de-escritorio">3. Configurar la app de escritorio</a><a class="l2" href="#4-iniciar-sesi-n">4. Iniciar sesión</a><a class="l3" href="#4-1-con-el-enlace-o-el-qr-lo-normal">4.1 Con el enlace o el QR (lo normal)</a><a class="l3" href="#4-2-a-mano-modo-webrtc">4.2 A mano: modo WebRTC</a><a class="l3" href="#4-3-a-mano-modo-sip-nativo">4.3 A mano: modo SIP nativo</a><a class="l3" href="#4-4-qu-pasa-despu-s-de-conectar">4.4 Qué pasa después de conectar</a><a class="l3" href="#4-5-entrar-tambi-n-a-la-plataforma">4.5 Entrar también a la plataforma</a><a class="l2" href="#5-llamar">5. Llamar</a><a class="l2" href="#6-recibir-una-llamada">6. Recibir una llamada</a><a class="l2" href="#7-durante-la-llamada">7. Durante la llamada</a><a class="l2" href="#8-la-ventana-flotante-app-de-escritorio">8. La ventana flotante (app de escritorio)</a><a class="l2" href="#9-tu-buz-n-de-voz">9. Tu buzón de voz</a><a class="l2" href="#10-si-trabaj-s-con-colas-agentes">10. Si trabajás con colas (agentes)</a><a class="l2" href="#11-problemas-frecuentes">11. Problemas frecuentes</a><a class="l2" href="#12-c-digos-tiles">12. Códigos útiles</a></nav>
   <main><blockquote><p><strong>Para quién es este manual</strong></p><p>Para vos, que vas a usar el teléfono todos los días. No hace falta saber nada de tecnología:</p><p>si sabés usar una app del celular, sabés usar esto.</p></blockquote>
 <hr />
 <h2 id="1-qu-recibiste">1. ¿Qué recibiste?</h2>
 <p>Tu administrador te mandó un <strong>correo con un código QR</strong> y un enlace. Con eso configurás tu teléfono en un paso: no tenés que anotar contraseñas ni configurar nada a mano.</p>
 <blockquote><p>El acceso <strong>vence en 24 horas</strong>. Si se te venció, pedile uno nuevo al administrador.</p></blockquote>
-<figure class="shot"><img src="img/usr-01-email.png" alt="El correo con el código QR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>El correo con el código QR</figcaption></figure>
+<figure class="shot"><img src="img/usr-01-email.png" alt="El correo con el código QR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>El correo con el código QR<span class="fn">usr-01-email.png</span></figcaption></figure>
 <hr />
 <h2 id="2-eleg-tu-tel-fono">2. Elegí tu teléfono</h2>
 <p>Podés usar el que más te sirva. Los tres funcionan igual y podés tener varios a la vez.</p>
 <div class="tw"><table><thead><tr><th></th><th>Cuándo conviene</th></tr></thead><tbody><tr><td><strong>En el navegador</strong></td><td>No instalás nada. Entrás a la web y ya tenés teléfono.</td></tr><tr><td><strong>En el celular</strong></td><td>Abrís el enlace del correo y lo agregás a la pantalla de inicio.</td></tr><tr><td><strong>App de escritorio (Windows)</strong></td><td>Si pasás el día llamando: ventana flotante, atajos, timbre aunque esté minimizada.</td></tr></tbody></table></div>
-<figure class="shot"><img src="img/usr-02-clientes.png" alt="Las tres formas de usar el teléfono" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Las tres formas de usar el teléfono</figcaption></figure>
+<figure class="shot"><img src="img/usr-02-clientes.png" alt="Las tres formas de usar el teléfono" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Las tres formas de usar el teléfono<span class="fn">usr-02-clientes.png</span></figcaption></figure>
 <hr />
 <h2 id="3-configurar-la-app-de-escritorio">3. Configurar la app de escritorio</h2>
 <ol><li>Instalá <strong>PBX-NG Softphone</strong> (te lo pasa el administrador).</li><li>Al abrirla vas a ver la pantalla de acceso. Tocá el <strong>botón de QR</strong>, a la derecha del título.</li><li>Elegí <strong>"Pegar código"</strong> y pegá el enlace que te llegó por correo.</li><li>Listo: el teléfono se configura solo y queda en línea.</li></ol>
-<figure class="shot"><img src="img/usr-03-login.png" alt="Pantalla de acceso con el botón de QR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de acceso con el botón de QR</figcaption></figure>
+<figure class="shot"><img src="img/usr-03-login.png" alt="Pantalla de acceso con el botón de QR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de acceso con el botón de QR<span class="fn">usr-03-login.png</span></figcaption></figure>
 <p>Cuando el punto de tu nombre está <strong>verde</strong>, estás en línea y podés llamar y recibir llamadas.</p>
 <hr />
-<h2 id="4-llamar">4. Llamar</h2>
-<p>Marcá el número en el teclado y tocá el botón verde. También podés <strong>escribir el nombre</strong> de un compañero: aparece solo mientras tipeás.</p>
-<figure class="shot"><img src="img/usr-04-marcador.png" alt="Marcador y búsqueda de contactos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Marcador y búsqueda de contactos</figcaption></figure>
+<h2 id="4-iniciar-sesi-n">4. Iniciar sesión</h2>
+<p>Hay <strong>dos formas</strong> de que tu teléfono se conecte a la central, y el administrador ya eligió cuál te corresponde. La app te la deja configurada sola cuando usás el QR o el enlace; esta sección es para que entiendas qué estás viendo, y para el caso en que tengas que cargarlo a mano.</p>
+<h3 id="4-1-con-el-enlace-o-el-qr-lo-normal">4.1 Con el enlace o el QR (lo normal)</h3>
+<ol><li>Abrí la app y tocá el <strong>botón de QR</strong>, a la derecha del título <em>"Conectar a tu central"</em>.</li><li>Si tenés cámara, escaneá el código del correo. Si no (una PC de escritorio, por ejemplo), la app</li></ol>
+<p>   te ofrece directamente <strong>"Pegar código"</strong>: pegá el enlace del correo.</p>
+<ol><li>La app detecta sola si tu interno es <strong>WebRTC</strong> o <strong>SIP</strong>, se configura y queda en línea.</li></ol>
+<figure class="shot"><img src="img/usr-03-login.png" alt="Pantalla de acceso con el botón de QR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de acceso con el botón de QR<span class="fn">usr-03-login.png</span></figcaption></figure>
+<h3 id="4-2-a-mano-modo-webrtc">4.2 A mano: modo WebRTC</h3>
+<p>Es el modo habitual: el teléfono habla con la central <strong>por Internet</strong>, cifrado, sin necesidad de puertos especiales en tu red. Funciona bien desde casa, desde el celular y detrás de casi cualquier router.</p>
+<div class="tw"><table><thead><tr><th>Campo</th><th>Qué poner</th><th>Ejemplo</th></tr></thead><tbody><tr><td><strong>Servidor WebSocket (WSS)</strong></td><td>La dirección que te dio el administrador</td><td><code>wss://pbx.tu-empresa.com/ws</code></td></tr><tr><td><strong>Dominio SIP</strong></td><td>Suele ser el mismo dominio, sin el <code>wss://</code></td><td><code>pbx.tu-empresa.com</code></td></tr><tr><td><strong>Interno / usuario</strong></td><td>Tu número</td><td><code>2001</code></td></tr><tr><td><strong>Contraseña</strong></td><td>La de tu interno</td><td>—</td></tr></tbody></table></div>
+<figure class="shot"><img src="img/usr-11-login-webrtc.png" alt="Acceso en modo WebRTC" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Acceso en modo WebRTC<span class="fn">usr-11-login-webrtc.png</span></figcaption></figure>
+<h3 id="4-3-a-mano-modo-sip-nativo">4.3 A mano: modo SIP nativo</h3>
+<p>Es el modo clásico, el que usan los teléfonos de escritorio. Se usa cuando la central <strong>no expone WebRTC</strong>, o cuando estás dentro de la red de la empresa.</p>
+<div class="tw"><table><thead><tr><th>Campo</th><th>Qué poner</th><th>Ejemplo</th></tr></thead><tbody><tr><td><strong>Servidor SIP</strong></td><td>Host o IP de la central</td><td><code>192.168.1.10</code></td></tr><tr><td><strong>Puerto</strong></td><td>5060 para UDP/TCP, 5061 para TLS</td><td><code>5060</code></td></tr><tr><td><strong>Dominio SIP</strong></td><td>El dominio de la central</td><td><code>pbx.tu-empresa.com</code></td></tr><tr><td><strong>Interno y contraseña</strong></td><td>Los tuyos</td><td><code>2001</code></td></tr></tbody></table></div>
+<figure class="shot"><img src="img/usr-12-login-sip.png" alt="Acceso en modo SIP nativo" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Acceso en modo SIP nativo<span class="fn">usr-12-login-sip.png</span></figcaption></figure>
+<blockquote><p><strong>¿Cuál te toca?</strong> No adivines: si el administrador te mandó el enlace, la app lo resuelve sola.</p><p>Un interno WebRTC <strong>no</strong> funciona bien en modo SIP nativo (el audio no levanta, porque la central</p><p>le exige cifrado), y un interno SIP clásico no tiene WebSocket al que conectarse.</p></blockquote>
+<h3 id="4-4-qu-pasa-despu-s-de-conectar">4.4 Qué pasa después de conectar</h3>
+<p>La app hace una verificación en varios pasos y te la muestra: alcanza el servidor, negocia el cifrado, se registra. Si algo falla, <strong>te dice el motivo real</strong> (por ejemplo <em>"Registro rechazado (401) — revisá interno/contraseña"</em>), no un error genérico.</p>
+<p>Cuando el punto de tu nombre está <strong>verde</strong>, estás en línea.</p>
+<figure class="shot"><img src="img/usr-13-verificacion.png" alt="Verificación de la conexión" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Verificación de la conexión<span class="fn">usr-13-verificacion.png</span></figcaption></figure>
+<h3 id="4-5-entrar-tambi-n-a-la-plataforma">4.5 Entrar también a la plataforma</h3>
+<p>Además del teléfono, tu acceso te conecta con el <strong>sistema de la empresa</strong>: así ves la ficha del cliente que te llama, el directorio y el intercom. Si el administrador te dio ese permiso, ya viene incluido en el enlace y no tenés que hacer nada.</p>
+<p>Si alguna vez te desconectás, en <strong>Ajustes → Sistema</strong> podés volver a entrar con tu usuario y contraseña del panel.</p>
+<figure class="shot"><img src="img/usr-14-sistema.png" alt="Sesión del sistema en el softphone" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Sesión del sistema en el softphone<span class="fn">usr-14-sistema.png</span></figcaption></figure>
 <hr />
-<h2 id="5-recibir-una-llamada">5. Recibir una llamada</h2>
+<h2 id="5-llamar">5. Llamar</h2>
+<p>Marcá el número en el teclado y tocá el botón verde. También podés <strong>escribir el nombre</strong> de un compañero: aparece solo mientras tipeás.</p>
+<figure class="shot"><img src="img/usr-04-marcador.png" alt="Marcador y búsqueda de contactos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Marcador y búsqueda de contactos<span class="fn">usr-04-marcador.png</span></figcaption></figure>
+<hr />
+<h2 id="6-recibir-una-llamada">6. Recibir una llamada</h2>
 <p>Cuando te llaman, la app suena y aparece quién es. Si el número está en el sistema de clientes, vas a ver <strong>su ficha</strong> antes de atender: sabés con quién hablás desde el "hola".</p>
 <p>Atendés con el botón verde, rechazás con el rojo.</p>
-<figure class="shot"><img src="img/usr-05-entrante.png" alt="Llamada entrante con la ficha del cliente" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Llamada entrante con la ficha del cliente</figcaption></figure>
+<figure class="shot"><img src="img/usr-05-entrante.png" alt="Llamada entrante con la ficha del cliente" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Llamada entrante con la ficha del cliente<span class="fn">usr-05-entrante.png</span></figcaption></figure>
 <hr />
-<h2 id="6-durante-la-llamada">6. Durante la llamada</h2>
+<h2 id="7-durante-la-llamada">7. Durante la llamada</h2>
 <div class="tw"><table><thead><tr><th>Botón</th><th>Qué hace</th></tr></thead><tbody><tr><td><strong>Silenciar</strong></td><td>El otro deja de escucharte. Vos lo seguís escuchando.</td></tr><tr><td><strong>Teclado</strong></td><td>Para marcar opciones ("marque 1 para…").</td></tr><tr><td><strong>Retener</strong></td><td>La persona queda en espera con música.</td></tr><tr><td><strong>Transferir</strong></td><td>Le pasás la llamada a otro interno.</td></tr><tr><td><strong>Video</strong></td><td>Encendés la cámara.</td></tr><tr><td><strong>Invitar</strong></td><td>Sumás a otra persona a la conversación.</td></tr><tr><td><strong>Grabar</strong></td><td>Empieza a grabar la llamada.</td></tr></tbody></table></div>
-<figure class="shot"><img src="img/usr-06-en-llamada.png" alt="Pantalla de llamada en curso" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de llamada en curso</figcaption></figure>
+<figure class="shot"><img src="img/usr-06-en-llamada.png" alt="Pantalla de llamada en curso" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de llamada en curso<span class="fn">usr-06-en-llamada.png</span></figcaption></figure>
 <blockquote><p>Abajo de la llamada vas a ver una etiqueta que dice <strong>VÍA TURN</strong> o <strong>DIRECTO</strong>. Es informativa: te</p><p>dice por dónde viaja el audio. Si tenés problemas de sonido, ese dato le sirve al administrador.</p></blockquote>
 <hr />
-<h2 id="7-la-ventana-flotante-app-de-escritorio">7. La ventana flotante (app de escritorio)</h2>
+<h2 id="8-la-ventana-flotante-app-de-escritorio">8. La ventana flotante (app de escritorio)</h2>
 <p>Tocá el botón <strong>mini</strong> en la barra superior y el teléfono se convierte en una ventanita chica que queda <strong>siempre visible</strong>, aunque estés en otra aplicación. Desde ahí atendés, silenciás, cortás y controlás el volumen.</p>
-<figure class="shot"><img src="img/usr-07-mini.png" alt="La ventana flotante" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>La ventana flotante</figcaption></figure>
+<figure class="shot"><img src="img/usr-07-mini.png" alt="La ventana flotante" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>La ventana flotante<span class="fn">usr-07-mini.png</span></figcaption></figure>
 <hr />
-<h2 id="8-tu-buz-n-de-voz">8. Tu buzón de voz</h2>
+<h2 id="9-tu-buz-n-de-voz">9. Tu buzón de voz</h2>
 <p>Si no atendés, la persona puede dejarte un mensaje.</p>
 <ul><li><strong>Desde el teléfono</strong>: marcá <code>*97</code>. La primera vez, el PIN es tu número de interno.</li><li><strong>Desde la app</strong>: en la sección <strong>Voz</strong> los escuchás, los leés transcritos y los borrás.</li><li><strong>Por correo</strong>: si el administrador lo activó, cada mensaje te llega al mail con el audio adjunto</li></ul>
 <p>  y <strong>la transcripción escrita</strong>. Te enterás de qué se trata sin escuchar nada.</p>
-<figure class="shot"><img src="img/usr-08-buzon.png" alt="Buzón de voz en la app" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Buzón de voz en la app</figcaption></figure>
+<figure class="shot"><img src="img/usr-08-buzon.png" alt="Buzón de voz en la app" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Buzón de voz en la app<span class="fn">usr-08-buzon.png</span></figcaption></figure>
 <hr />
-<h2 id="9-si-trabaj-s-con-colas-agentes">9. Si trabajás con colas (agentes)</h2>
+<h2 id="10-si-trabaj-s-con-colas-agentes">10. Si trabajás con colas (agentes)</h2>
 <p>Tu panel muestra las llamadas en espera, tus estadísticas del día y tu historial.</p>
 <ul><li><strong>Pausa</strong>: si tenés que ausentarte, ponete en pausa y la cola deja de mandarte llamadas.</li></ul>
 <p>  <strong>Volvé a activarte al regresar</strong> — es el olvido más común.</p>
 <ul><li><strong>Descanso entre llamadas</strong>: después de cortar tenés unos segundos para tipificar antes de que</li></ul>
 <p>  entre la siguiente.</p>
 <ul><li><strong>Historial</strong>: cada llamada con su grabación y su transcripción.</li></ul>
-<figure class="shot"><img src="img/usr-09-agente.png" alt="Panel del agente" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel del agente</figcaption></figure>
+<figure class="shot"><img src="img/usr-09-agente.png" alt="Panel del agente" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel del agente<span class="fn">usr-09-agente.png</span></figcaption></figure>
 <hr />
-<h2 id="10-problemas-frecuentes">10. Problemas frecuentes</h2>
+<h2 id="11-problemas-frecuentes">11. Problemas frecuentes</h2>
 <div class="tw"><table><thead><tr><th>Qué te pasa</th><th>Qué hacer</th></tr></thead><tbody><tr><td>Dice <strong>"sin conectar"</strong></td><td>Fijate que tengas internet. La app muestra el motivo real del fallo abajo del estado.</td></tr><tr><td><strong>No te escuchan</strong></td><td>Revisá el micrófono en Ajustes → Dispositivos, y que el navegador tenga permiso.</td></tr><tr><td><strong>No escuchás</strong></td><td>Revisá el altavoz en Ajustes → Dispositivos y el volumen de la llamada.</td></tr><tr><td><strong>Se corta el audio</strong></td><td>Suele ser la red. Pasale al administrador la etiqueta <em>VÍA TURN / DIRECTO</em> y la sección Diagnóstico.</td></tr><tr><td><strong>Se venció el acceso</strong></td><td>Pedile al administrador un enlace nuevo.</td></tr></tbody></table></div>
-<figure class="shot"><img src="img/usr-10-dispositivos.png" alt="Ajustes de dispositivos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Ajustes de dispositivos</figcaption></figure>
+<figure class="shot"><img src="img/usr-10-dispositivos.png" alt="Ajustes de dispositivos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Ajustes de dispositivos<span class="fn">usr-10-dispositivos.png</span></figcaption></figure>
 <hr />
-<h2 id="11-c-digos-tiles">11. Códigos útiles</h2>
+<h2 id="12-c-digos-tiles">12. Códigos útiles</h2>
 <div class="tw"><table><thead><tr><th>Código</th><th>Para qué</th></tr></thead><tbody><tr><td><code>*97</code></td><td>Escuchar tu buzón de voz</td></tr><tr><td><code>*98</code></td><td>Entrar al buzón de otro interno</td></tr></tbody></table></div></main>
   <footer>PBX-NG · Manual de Usuario · versión 1.1.0 · 13/07/2026</footer>
 </div>

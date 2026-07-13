@@ -494,18 +494,45 @@ app.get('/api/enroll/:token', async (req, res) => {
     if (!e) return res.status(404).json({ error: 'token invalido' });
     if (e.expires_at && new Date(e.expires_at) < new Date()) return res.status(410).json({ error: 'token expirado' });
     await pool.query('UPDATE pbxng_enroll SET used_at=COALESCE(used_at, now()) WHERE token=$1', [req.params.token]);
-    // Config completa de aprovisionamiento: el mismo link/QR sirve para la PWA y para el
-    // softphone de escritorio (que consume prov_url = pbxng://prov#<b64url>).
+    // Config completa de aprovisionamiento. El MISMO link/QR sirve para la PWA, el softphone de
+    // escritorio y el celular; y el transporte se deduce del ENDPOINT REAL (no se asume WebRTC):
+    // un interno con transport-ws/wss es WebRTC; uno con udp/tcp/tls es SIP nativo. Mezclarlos
+    // autentica pero deja la llamada sin audio (el endpoint WebRTC exige DTLS-SRTP).
     const gS = async (k) => { const { rows: r2 } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return r2[0] ? r2[0].value : ''; };
     const dom = (await gS('domain')) || NODES.domain || process.env.DOMAIN || '';
     const wssU = (await gS('wss')) || (dom ? ('wss://' + dom + '/ws') : '');
-    const { rows: un } = await pool.query('SELECT name FROM pbxng_users WHERE ext=$1 LIMIT 1', [e.ext]);
+    const { rows: epr } = await pool.query("SELECT transport, media_encryption, COALESCE(webrtc,'no') AS webrtc FROM ps_endpoints WHERE id=$1", [String(e.ext)]);
+    const ep = epr[0] || {};
+    const tr = String(ep.transport || '');
+    const isWeb = ep.webrtc === 'yes' || /ws/i.test(tr);
+    const sipTransport = /tls/i.test(tr) ? 'tls' : /tcp/i.test(tr) ? 'tcp' : 'udp';
+    const sipPort = sipTransport === 'tls' ? '5061' : '5060';
+    const sipHost = (await gS('sip_host')) || NODES.sbc || NODES.asterisk || dom;
+    const { rows: un } = await pool.query('SELECT id, username, name, role FROM pbxng_users WHERE ext=$1 LIMIT 1', [String(e.ext)]);
+    const u = un[0] || null;
     const pubIp = process.env.PUBLIC_IP || process.env.DOMAIN || dom || '';
     const tU = process.env.TURN_USER || 'pbxng', tP = process.env.TURN_PASS || '';
     const withTurn = !!(pubIp && tP);
-    const prov = { transport: 'webrtc', name: (un[0] && un[0].name) || String(e.ext), domain: dom, ext: String(e.ext), pass: e.password, wss: wssU,
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+    const host = req.headers['x-forwarded-host'] || req.get('host') || '';
+    const apiBase = (await gS('public_base')) || (dom ? 'https://' + dom : (host ? proto + '://' + host : ''));
+    const prov = {
+      transport: isWeb ? 'webrtc' : 'sip',
+      name: (u && u.name) || String(e.ext),
+      domain: dom, ext: String(e.ext), pass: e.password,
+      // WebRTC
+      wss: isWeb ? wssU : '',
       stun: process.env.STUN_URL || 'stun:stun.l.google.com:19302',
-      turn: withTurn ? ('turn:' + pubIp + ':3478') : '', turnUser: withTurn ? tU : '', turnPass: withTurn ? tP : '' };
+      turn: (isWeb && withTurn) ? ('turn:' + pubIp + ':3478') : '',
+      turnUser: (isWeb && withTurn) ? tU : '', turnPass: (isWeb && withTurn) ? tP : '',
+      // SIP nativo
+      sipServer: isWeb ? '' : sipHost, sipPort: isWeb ? '' : sipPort,
+      sipTransport: isWeb ? '' : sipTransport,
+      sipSrtp: (!isWeb && String(ep.media_encryption || '') === 'sdes') ? 'sdes' : 'none',
+      // sesion en la plataforma: directorio, clientes (CRM) e intercom sin volver a loguearse
+      apiBase,
+      apiToken: u ? jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext: String(e.ext) }, SECRET, { expiresIn: '30d' }) : '',
+    };
     const b64u = Buffer.from(JSON.stringify(prov), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     res.json({ ext: e.ext, password: e.password, server: dom, prov, prov_url: 'pbxng://prov#' + b64u });
   } catch (e) { res.status(500).json({ error: e.message }); }

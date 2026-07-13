@@ -29,7 +29,25 @@ En **Internos → Nuevo**. Lo mínimo es el número y el nombre. Cada interno na
 
 ![Alta de un interno](img/cfg-02-nuevo-interno.png)
 
-### 2.2 Entregarle el teléfono al usuario
+### 2.2 ¿Interno WebRTC o SIP?
+
+Al crear el interno elegís **cómo se va a conectar el teléfono**. Es la decisión más importante del
+alta, y determina qué recibe el usuario en su enlace de acceso.
+
+| | **WebRTC** | **SIP clásico** |
+|---|---|---|
+| Para qué | Softphone en el navegador, celular o app de escritorio | Teléfonos de escritorio (Yealink, Grandstream), ATAs, bocinas IP |
+| Cómo viaja | Cifrado (DTLS-SRTP) sobre WebSocket, por el puerto 443 | SIP sobre UDP/TCP/TLS |
+| Detrás de NAT | Anda sin abrir puertos en la casa del usuario (usa TURN) | Requiere una red preparada |
+| Cuándo elegirlo | **Por defecto**, para personas | Para **hardware** |
+
+> **No los mezcles.** Un interno WebRTC registrado en modo SIP autentica, pero **el audio no
+> levanta**: el endpoint exige cifrado. Es una confusión frecuente y difícil de diagnosticar.
+> El enlace de acceso que genera el sistema ya viene con el modo correcto según el interno.
+
+![Elegir el tipo de interno](img/cfg-15-tipo-interno.png)
+
+### 2.3 Entregarle el teléfono al usuario
 
 No le dictes contraseñas por teléfono. Usá el botón **Enviar acceso por correo**: la persona recibe
 un mail con un **código QR** y un enlace. Lo escanea con el celular y su teléfono queda configurado

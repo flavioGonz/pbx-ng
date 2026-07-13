@@ -44,7 +44,78 @@ Cuando el punto de tu nombre está **verde**, estás en línea y podés llamar y
 
 ---
 
-## 4. Llamar
+## 4. Iniciar sesión
+
+Hay **dos formas** de que tu teléfono se conecte a la central, y el administrador ya eligió cuál te
+corresponde. La app te la deja configurada sola cuando usás el QR o el enlace; esta sección es para
+que entiendas qué estás viendo, y para el caso en que tengas que cargarlo a mano.
+
+### 4.1 Con el enlace o el QR (lo normal)
+
+1. Abrí la app y tocá el **botón de QR**, a la derecha del título *"Conectar a tu central"*.
+2. Si tenés cámara, escaneá el código del correo. Si no (una PC de escritorio, por ejemplo), la app
+   te ofrece directamente **"Pegar código"**: pegá el enlace del correo.
+3. La app detecta sola si tu interno es **WebRTC** o **SIP**, se configura y queda en línea.
+
+![Pantalla de acceso con el botón de QR](img/usr-03-login.png)
+
+### 4.2 A mano: modo WebRTC
+
+Es el modo habitual: el teléfono habla con la central **por Internet**, cifrado, sin necesidad de
+puertos especiales en tu red. Funciona bien desde casa, desde el celular y detrás de casi cualquier
+router.
+
+| Campo | Qué poner | Ejemplo |
+|---|---|---|
+| **Servidor WebSocket (WSS)** | La dirección que te dio el administrador | `wss://pbx.tu-empresa.com/ws` |
+| **Dominio SIP** | Suele ser el mismo dominio, sin el `wss://` | `pbx.tu-empresa.com` |
+| **Interno / usuario** | Tu número | `2001` |
+| **Contraseña** | La de tu interno | — |
+
+![Acceso en modo WebRTC](img/usr-11-login-webrtc.png)
+
+### 4.3 A mano: modo SIP nativo
+
+Es el modo clásico, el que usan los teléfonos de escritorio. Se usa cuando la central **no expone
+WebRTC**, o cuando estás dentro de la red de la empresa.
+
+| Campo | Qué poner | Ejemplo |
+|---|---|---|
+| **Servidor SIP** | Host o IP de la central | `192.168.1.10` |
+| **Puerto** | 5060 para UDP/TCP, 5061 para TLS | `5060` |
+| **Dominio SIP** | El dominio de la central | `pbx.tu-empresa.com` |
+| **Interno y contraseña** | Los tuyos | `2001` |
+
+![Acceso en modo SIP nativo](img/usr-12-login-sip.png)
+
+> **¿Cuál te toca?** No adivines: si el administrador te mandó el enlace, la app lo resuelve sola.
+> Un interno WebRTC **no** funciona bien en modo SIP nativo (el audio no levanta, porque la central
+> le exige cifrado), y un interno SIP clásico no tiene WebSocket al que conectarse.
+
+### 4.4 Qué pasa después de conectar
+
+La app hace una verificación en varios pasos y te la muestra: alcanza el servidor, negocia el
+cifrado, se registra. Si algo falla, **te dice el motivo real** (por ejemplo *"Registro rechazado
+(401) — revisá interno/contraseña"*), no un error genérico.
+
+Cuando el punto de tu nombre está **verde**, estás en línea.
+
+![Verificación de la conexión](img/usr-13-verificacion.png)
+
+### 4.5 Entrar también a la plataforma
+
+Además del teléfono, tu acceso te conecta con el **sistema de la empresa**: así ves la ficha del
+cliente que te llama, el directorio y el intercom. Si el administrador te dio ese permiso, ya viene
+incluido en el enlace y no tenés que hacer nada.
+
+Si alguna vez te desconectás, en **Ajustes → Sistema** podés volver a entrar con tu usuario y
+contraseña del panel.
+
+![Sesión del sistema en el softphone](img/usr-14-sistema.png)
+
+---
+
+## 5. Llamar
 
 Marcá el número en el teclado y tocá el botón verde. También podés **escribir el nombre** de un
 compañero: aparece solo mientras tipeás.
@@ -53,7 +124,7 @@ compañero: aparece solo mientras tipeás.
 
 ---
 
-## 5. Recibir una llamada
+## 6. Recibir una llamada
 
 Cuando te llaman, la app suena y aparece quién es. Si el número está en el sistema de clientes, vas
 a ver **su ficha** antes de atender: sabés con quién hablás desde el "hola".
@@ -64,7 +135,7 @@ Atendés con el botón verde, rechazás con el rojo.
 
 ---
 
-## 6. Durante la llamada
+## 7. Durante la llamada
 
 | Botón | Qué hace |
 |---|---|
@@ -83,7 +154,7 @@ Atendés con el botón verde, rechazás con el rojo.
 
 ---
 
-## 7. La ventana flotante (app de escritorio)
+## 8. La ventana flotante (app de escritorio)
 
 Tocá el botón **mini** en la barra superior y el teléfono se convierte en una ventanita chica que
 queda **siempre visible**, aunque estés en otra aplicación. Desde ahí atendés, silenciás, cortás y
@@ -93,7 +164,7 @@ controlás el volumen.
 
 ---
 
-## 8. Tu buzón de voz
+## 9. Tu buzón de voz
 
 Si no atendés, la persona puede dejarte un mensaje.
 
@@ -106,7 +177,7 @@ Si no atendés, la persona puede dejarte un mensaje.
 
 ---
 
-## 9. Si trabajás con colas (agentes)
+## 10. Si trabajás con colas (agentes)
 
 Tu panel muestra las llamadas en espera, tus estadísticas del día y tu historial.
 
@@ -120,7 +191,7 @@ Tu panel muestra las llamadas en espera, tus estadísticas del día y tu histori
 
 ---
 
-## 10. Problemas frecuentes
+## 11. Problemas frecuentes
 
 | Qué te pasa | Qué hacer |
 |---|---|
@@ -134,7 +205,7 @@ Tu panel muestra las llamadas en espera, tus estadísticas del día y tu histori
 
 ---
 
-## 11. Códigos útiles
+## 12. Códigos útiles
 
 | Código | Para qué |
 |---|---|

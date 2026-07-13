@@ -37,9 +37,10 @@ def md(text):
         m = re.match(r'!\[([^\]]*)\]\(([^)]+)\)\s*$', ln)
         if m:
             alt, src = m.group(1), m.group(2)
+            fname = src.split('/')[-1]
             out.append(f'<figure class="shot"><img src="{src}" alt="{inline(alt)}" '
                        f'onerror="this.parentNode.classList.add(\'ph\');this.remove();" />'
-                       f'<figcaption>{inline(alt)}</figcaption></figure>')
+                       f'<figcaption>{inline(alt)}<span class="fn">{fname}</span></figcaption></figure>')
             i += 1; continue
 
         # bloque de código
@@ -112,12 +113,23 @@ CSS = """
 *{box-sizing:border-box}
 body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
 .page{max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}
-.cover{padding:74px 60px 60px;color:#fff;background:linear-gradient(150deg,#0f1a30,#16233f 60%,var(--accent))}
-.cover .kick{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;opacity:.75}
-.cover h1{font-size:44px;line-height:1.1;margin:12px 0 6px;font-weight:800}
-.cover .sub{font-size:18px;opacity:.85}
-.cover .meta{margin-top:34px;display:flex;gap:34px;flex-wrap:wrap;font-size:13px;opacity:.8}
-.cover .icon{font-size:52px;margin-bottom:14px}
+.cover{position:relative;min-height:940px;padding:0;background:#fff;color:#0f172a;display:flex;flex-direction:column}
+.cover .bar{height:14px;background:var(--accent)}
+.cover .side{position:absolute;left:0;top:14px;bottom:0;width:8px;background:linear-gradient(180deg,var(--accent),#0f1a30)}
+.cover .inner{padding:58px 64px 46px 74px;display:flex;flex-direction:column;flex:1}
+.cover .brandline{display:flex;align-items:center;gap:14px;border-bottom:1px solid #e8edf4;padding-bottom:18px}
+.cover .mark{width:46px;height:46px;border-radius:11px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px}
+.cover .brand{font-size:19px;font-weight:800;letter-spacing:-.2px}
+.cover .brandsub{font-size:12px;color:#94a3b8}
+.cover .mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 0}
+.cover .doctype{font-size:12px;font-weight:800;letter-spacing:2.6px;text-transform:uppercase;color:var(--accent)}
+.cover h1{font-size:52px;line-height:1.05;margin:16px 0 0;font-weight:800;letter-spacing:-1px;color:#0f172a}
+.cover .rule{width:96px;height:5px;background:var(--accent);border-radius:3px;margin:26px 0 22px}
+.cover .sub{font-size:19px;color:#475569;max-width:560px;line-height:1.5}
+.cover .metatable{border-top:1px solid #e8edf4;padding-top:22px;display:flex;gap:60px;flex-wrap:wrap}
+.cover .metatable div span{display:block;font-size:10.5px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:5px}
+.cover .metatable div b{font-size:14.5px;font-weight:600;color:#334155}
+.cover .foot{margin-top:26px;font-size:11px;color:#94a3b8}
 .toc{padding:34px 60px;border-bottom:1px solid #e8edf4;background:#f8fafc}
 .toc h2{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:#94a3b8;margin:0 0 14px}
 .toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
@@ -144,8 +156,10 @@ hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
 figure.shot{margin:26px 0;text-align:center}
 figure.shot img{max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 22px rgba(15,23,42,.09)}
 figure.shot figcaption{font-size:12.5px;color:#94a3b8;margin-top:9px}
+figure.shot .fn{display:block;font:11.5px ui-monospace,Consolas,monospace;color:#cbd5e1;margin-top:3px}
+figure.shot.ph .fn{color:var(--accent);font-weight:700;margin-top:6px}
 figure.shot.ph{border:2px dashed #cbd5e1;border-radius:12px;background:#f8fafc;padding:38px 20px}
-figure.shot.ph::before{content:'🖼  Imagen pendiente';display:block;font-size:13px;font-weight:700;color:#94a3b8;letter-spacing:.4px}
+figure.shot.ph::before{content:'Imagen pendiente';display:block;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8}
 figure.shot.ph figcaption{margin-top:8px;color:#64748b;font-size:13.5px}
 footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px solid #eef1f7}
 .top{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;border:0;border-radius:11px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(15,23,42,.2)}
@@ -179,14 +193,28 @@ def build(manual, meta):
 <body>
 <div class="page">
   <header class="cover">
-    <div class="icon">{manual['icon']}</div>
-    <div class="kick">{meta['product']} · {meta['tagline']}</div>
-    <h1>{manual['title']}</h1>
-    <div class="sub">{manual['subtitle']}</div>
-    <div class="meta">
-      <div><b>Dirigido a</b><br>{manual['audience']}</div>
-      <div><b>Versión</b><br>{ver or '—'}</div>
-      <div><b>Actualizado</b><br>{today}</div>
+    <div class="bar"></div><div class="side"></div>
+    <div class="inner">
+      <div class="brandline">
+        <div class="mark">{manual['icon']}</div>
+        <div>
+          <div class="brand">{meta['product']}</div>
+          <div class="brandsub">{meta['tagline']}</div>
+        </div>
+      </div>
+      <div class="mid">
+        <div class="doctype">Documentación oficial</div>
+        <h1>{manual['title']}</h1>
+        <div class="rule"></div>
+        <div class="sub">{manual['subtitle']}</div>
+      </div>
+      <div class="metatable">
+        <div><span>Dirigido a</span><b>{manual['audience']}</b></div>
+        <div><span>Versión del producto</span><b>{ver or '—'}</b></div>
+        <div><span>Actualizado</span><b>{today}</b></div>
+        <div><span>Documento</span><b>{manual['id'].upper()}</b></div>
+      </div>
+      <div class="foot">© {datetime.date.today().year} {meta['product']} · Este documento puede actualizarse sin previo aviso.</div>
     </div>
   </header>
   <nav class="toc"><h2>Contenido</h2>{links}</nav>
