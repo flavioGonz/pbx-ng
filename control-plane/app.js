@@ -1212,6 +1212,14 @@ app.post('/api/enroll/email', async (req, res) => {
   if (!ext || !to) return res.status(400).json({ error: 'ext y destinatario requeridos' });
   const c = await pool.connect();
   try {
+    // Validar ANTES de crear nada: si el correo no se puede mandar, no dejamos un token
+    // huerfano (valido 24 h) que nadie recibio.
+    const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenant_id]);
+    const cfg = rows[0];
+    if (!cfg || !cfg.enabled || !cfg.host) return res.status(400).json({ error: 'Configurá y activá el email de la empresa en Configuración → Email' });
+    const base = await (async () => { const { rows: r2 } = await pool.query("SELECT value FROM pbxng_settings WHERE key='domain'"); return (r2[0] && r2[0].value) || NODES.domain || process.env.DOMAIN || ''; })();
+    if (!base) return res.status(400).json({ error: 'Falta el dominio público de la central: sin él, el link de acceso saldría roto.' });
+
     await c.query('BEGIN');
     const ex = await c.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
     let password;
@@ -1220,10 +1228,7 @@ app.post('/api/enroll/email', async (req, res) => {
     const token = crypto.randomBytes(18).toString('hex');
     await c.query("INSERT INTO pbxng_enroll (token,ext,password,expires_at) VALUES ($1,$2,$3, now() + interval '24 hours')", [token, String(ext), password]);
     await c.query('COMMIT');
-    const url = (NODES.domain ? 'https://' + NODES.domain : '') + '/enroll?token=' + token;
-    const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenant_id]);
-    const cfg = rows[0];
-    if (!cfg || !cfg.enabled || !cfg.host) return res.status(400).json({ error: 'Configurá y activá el email de la empresa en Configuración' });
+    const url = 'https://' + base + '/enroll?token=' + token;
     const png = await QRCode.toBuffer(url, { width: 320, margin: 1 });
     const tx = nodemailer.createTransport({ host: cfg.host, port: cfg.port || 587, secure: !!cfg.secure, auth: cfg.username ? { user: cfg.username, pass: cfg.password } : undefined });
     const html = '<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#1f2733">' +
@@ -1232,6 +1237,7 @@ app.post('/api/enroll/email', async (req, res) => {
       '<p style="text-align:center"><img src="cid:qr" width="240" height="240" alt="QR" /></p>' +
       '<p>O abrí este enlace en el navegador del celular:</p>' +
       '<p><a href="' + url + '">' + url + '</a></p>' +
+      '<p>También podés pegar ese mismo enlace en el <b>softphone de escritorio</b> (botón QR de la pantalla de acceso) y se configura solo.</p>' +
       '<p style="color:#8a93a3;font-size:12px">El acceso vence en 24 horas. Luego, agregá la app a tu pantalla de inicio.</p></div>';
     await tx.sendMail({ from: cfg.from_addr || cfg.username, to, subject: 'Tu acceso al softphone PBX-NG (interno ' + ext + ')', html, attachments: [{ filename: 'acceso-qr.png', content: png, cid: 'qr' }] });
     res.json({ ok: true });
