@@ -99,7 +99,7 @@ Los usuarios se crean en **Usuarios**, y ahí se les asigna el rol y su **intern
 
 Todo esto vive en **Configuración**, y son los cimientos.
 
-### 4.1 Módulos
+### 3.1 Módulos
 
 Un módulo activo **es** un contenedor corriendo; uno inactivo **no existe**. Acá prendés y apagás
 el SBC, el TURN, el motor de voz (IA) y el intercom. El cambio crea o destruye el contenedor de
@@ -107,7 +107,7 @@ verdad: no es una casilla decorativa.
 
 ![Módulos activos](img/cfg-16-modulos.png)
 
-### 4.2 Proxy / TLS
+### 3.2 Proxy / TLS
 
 El reverse proxy (Nginx Proxy Manager) termina el TLS y publica el panel y el **WebSocket** de los
 softphones. Acá cargás la URL de administración del NPM, el **dominio público** y las credenciales,
@@ -119,7 +119,7 @@ y el panel te vigila el vencimiento del certificado.
 
 ![Proxy y certificado TLS](img/cfg-17-proxy.png)
 
-### 4.3 Componentes
+### 3.3 Componentes
 
 Es el mapa de la instalación: en qué IP está el Asterisk, el SBC, el TURN, el motor de voz y el
 anclaje de medios. El panel usa esto para consultarlos y para dibujar la topología. Si moviste una
@@ -127,12 +127,12 @@ pieza de servidor, se actualiza acá.
 
 ![Componentes y sus IPs](img/cfg-18-componentes.png)
 
-### 4.4 Branding
+### 3.4 Branding
 
 Nombre, subtítulo y logo. Aparece en el panel, en el login, en los correos de alerta y en los
 manuales.
 
-### 4.5 Audios e Integraciones
+### 3.5 Audios e Integraciones
 
 **Audios**: los mensajes del sistema. Se pueden subir archivos, pero lo normal es **escribir el
 texto y que lo sintetice la central** con su propia voz.
