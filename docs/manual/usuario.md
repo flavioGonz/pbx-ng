@@ -27,7 +27,7 @@ Podés usar el que más te sirva. Los tres funcionan igual y podés tener varios
 | **En el celular** | Abrís el enlace del correo y lo agregás a la pantalla de inicio. |
 | **App de escritorio (Windows)** | Si pasás el día llamando: ventana flotante, atajos, timbre aunque esté minimizada. |
 
-![Las tres formas de usar el teléfono](img/usr-02-clientes.png)
+![Las tres formas de usar el teléfono](img/usr-02-clientes.svg)
 
 ---
 
@@ -38,7 +38,7 @@ Podés usar el que más te sirva. Los tres funcionan igual y podés tener varios
 3. Elegí **"Pegar código"** y pegá el enlace que te llegó por correo.
 4. Listo: el teléfono se configura solo y queda en línea.
 
-![Pantalla de acceso con el botón de QR](img/usr-03-login.png)
+![Pegar el código de acceso en la app](img/usr-15-pegar-codigo.png)
 
 Cuando el punto de tu nombre está **verde**, estás en línea y podés llamar y recibir llamadas.
 
