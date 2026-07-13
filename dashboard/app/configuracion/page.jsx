@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Card, Title, Text, Stack, SimpleGrid, Group, Badge, Tabs, Button, Skeleton, Select, TextInput, PasswordInput, NumberInput, Switch, ThemeIcon, Divider, Table, ActionIcon, FileButton, Tooltip, Code, Alert } from '@mantine/core';
-import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle, IconShieldLock } from '@tabler/icons-react';
+import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle, IconShieldLock, IconBell } from '@tabler/icons-react';
 import { toast } from '../notify';
 import ModulesPanel from '../ModulesPanel';
 import BrandingPanel from '../BrandingPanel';
 import ProxyPanel from '../ProxyPanel';
+import AlertsPanel from '../AlertsPanel';
 const STMAP = { ok: ['teal', 'Activo'], pending: ['yellow', 'Pendiente'], optional: ['gray', 'Opcional'], down: ['red', 'Caído'], off: ['gray', 'Inactivo'] };
 
 export default function Configuracion() {
@@ -54,6 +55,7 @@ export default function Configuracion() {
           <Tabs.Tab value="proxy" leftSection={<IconShieldLock size={16} />}>Proxy / TLS</Tabs.Tab>
           <Tabs.Tab value="componentes" leftSection={<IconServer2 size={16} />}>Componentes</Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={16} />}>Email por empresa</Tabs.Tab>
+          <Tabs.Tab value="alertas" leftSection={<IconBell size={16} />}>Alertas</Tabs.Tab>
           <Tabs.Tab value="audios" leftSection={<IconMicrophone2 size={16} />}>Audios</Tabs.Tab>
           <Tabs.Tab value="integraciones" leftSection={<IconPlugConnected size={16} />}>Integraciones</Tabs.Tab>
         </Tabs.List>
@@ -143,6 +145,7 @@ export default function Configuracion() {
           </Card>
         </Tabs.Panel>
 
+        <Tabs.Panel value="alertas"><AlertsPanel /></Tabs.Panel>
         <Tabs.Panel value="audios">
           <Card withBorder radius="lg" padding="lg" shadow="sm">
             <Group justify="space-between" mb="md">

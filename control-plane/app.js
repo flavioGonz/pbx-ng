@@ -16,6 +16,7 @@ const webpush = require('web-push');
 const pushProviders = require('./push-providers');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const alerts = require('./alerts');
 const QRCode = require('qrcode');
 const SECRET = process.env.JWT_SECRET || '__SET_JWT_SECRET__';
 
@@ -330,13 +331,22 @@ app.get('/api/sbc/rtpengine/effective', async (req, res) => {
   res.json(d);
 });
 
+function clientIp(req) {
+  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xf || (req.socket && req.socket.remoteAddress) || '';
+}
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
+  const ip = clientIp(req), ua = String(req.headers['user-agent'] || '').slice(0, 120);
   try {
     const { rows } = await pool.query('SELECT id,username,name,role,ext,password_hash,must_change FROM pbxng_users WHERE username=$1', [username]);
     const u = rows[0];
-    if (!u || !bcrypt.compareSync(password || '', u.password_hash)) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    if (!u || !bcrypt.compareSync(password || '', u.password_hash)) {
+      alerts.onLogin({ ok: false, username, ip, ua }).catch(() => {});   // no bloquea la respuesta
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
     const token = jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext: u.ext || null }, SECRET, { expiresIn: '12h' });
+    alerts.onLogin({ ok: true, username: u.username, role: u.role, ip, ua }).catch(() => {});
     res.json({ token, user: { username: u.username, name: u.name, role: u.role, ext: u.ext || null }, must_change: !!u.must_change });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1066,6 +1076,52 @@ app.post('/api/vm/email/send', async (req, res) => {
       [String(mailbox), String(id), msg.folder || 'INBOX', msg.origtime || 0, box.email]);
     res.json({ ok: true, to: box.email });
   } catch (e) { res.status(500).json({ error: smtpHint(e) }); }
+});
+
+// ---------------------------------------------------------------------------
+//  Alertas por correo (motor en alerts.js)
+// ---------------------------------------------------------------------------
+alerts.init(pool, {
+  geoLookup,
+  trunkHealth: async () => {
+    const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config,adv_config FROM pbxng_trunks ORDER BY id");
+    return rows.length ? await trunkStatuses(rows) : {};
+  },
+  getQueues,
+  state,
+});
+
+app.get('/api/alerts/rules', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM pbxng_alert_rules ORDER BY event');
+    const { rows: s } = await pool.query("SELECT value FROM pbxng_settings WHERE key='alert_to'");
+    res.json({ rules: rows, default_to: (s[0] && s[0].value) || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/alerts/rules', async (req, res) => {
+  const b = req.body || {};
+  try {
+    if (b.default_to !== undefined) await pool.query("INSERT INTO pbxng_settings(key,value) VALUES('alert_to',$1) ON CONFLICT(key) DO UPDATE SET value=$1", [b.default_to || '']);
+    if (b.event) {
+      await pool.query(`UPDATE pbxng_alert_rules SET enabled=$2, recipients=$3, params=$4, throttle_min=$5, updated_at=now() WHERE event=$1`,
+        [b.event, !!b.enabled, b.recipients || null, JSON.stringify(b.params || {}), Number(b.throttle_min || 15)]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/alerts/history', async (req, res) => {
+  try { const { rows } = await pool.query('SELECT id,event,severity,title,to_addr,sent,err,created_at FROM pbxng_alerts ORDER BY created_at DESC LIMIT 50'); res.json(rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Disparar una alerta de prueba (usa la regla real: si esta apagada o sin destinatario, avisa)
+app.post('/api/alerts/test', async (req, res) => {
+  const ev = (req.body && req.body.event) || 'security.ban';
+  try {
+    const ok = await alerts.raise(ev, { severity: 'info', title: 'Alerta de prueba · ' + ev, force: true,
+      lines: [['Evento', ev], ['Origen', 'Prueba manual desde el panel'], ['Fecha', new Date().toLocaleString('es-UY')]],
+      foot: 'Si recibís este correo, las alertas están funcionando. (La regla no necesita estar activa para esta prueba.)', key: 'test' + Date.now() });
+    res.json(ok ? { ok: true } : { error: 'No se envió: falta destinatario (arriba) o el SMTP de la empresa no está configurado/activo.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/branding', async (req, res) => { try { const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; }; res.json({ name: (await g('brand_name')) || 'PBX-NG', subtitle: (await g('brand_subtitle')) || 'Comunicaciones', tagline: (await g('brand_tagline')) || '', logo: (await g('brand_logo')) || '' , callcenter: (await g('mod_callcenter')) !== '0' }); } catch (e) { res.json({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' }); } });
