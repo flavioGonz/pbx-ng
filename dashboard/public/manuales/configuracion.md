@@ -35,6 +35,8 @@ vas a tener que volver atrás.
 
 ## 2. Primer ingreso al panel
 
+» Navegador → https://tu-dominio
+
 ### 2.1 Dónde se entra
 
 El panel vive en el dominio que configuraste durante la instalación:
@@ -97,9 +99,13 @@ Los usuarios se crean en **Usuarios**, y ahí se les asigna el rol y su **intern
 
 ## 3. Configuración inicial del sistema
 
+» Menú lateral → Sistema → Configuración
+
 Todo esto vive en **Configuración**, y son los cimientos.
 
 ### 3.1 Módulos
+
+» Configuración → Módulos
 
 Un módulo activo **es** un contenedor corriendo; uno inactivo **no existe**. Acá prendés y apagás
 el SBC, el TURN, el motor de voz (IA) y el intercom. El cambio crea o destruye el contenedor de
@@ -108,6 +114,8 @@ verdad: no es una casilla decorativa.
 ![Módulos activos](img/cfg-16-modulos.png)
 
 ### 3.2 Proxy / TLS
+
+» Configuración → Proxy / TLS  ·  y el proxy en sí: http://IP-DEL-PROXY:81
 
 Acá hay una distinción que confunde a todo el mundo la primera vez:
 
@@ -176,6 +184,8 @@ certificado.
 
 ### 3.3 Componentes
 
+» Configuración → Componentes
+
 Es el mapa de la instalación: en qué IP está el Asterisk, el SBC, el TURN, el motor de voz y el
 anclaje de medios. El panel usa esto para consultarlos y para dibujar la topología. Si moviste una
 pieza de servidor, se actualiza acá.
@@ -184,10 +194,14 @@ pieza de servidor, se actualiza acá.
 
 ### 3.4 Branding
 
+» Configuración → Branding
+
 Nombre, subtítulo y logo. Aparece en el panel, en el login, en los correos de alerta y en los
 manuales.
 
 ### 3.5 Audios e Integraciones
+
+» Configuración → Audios  /  Configuración → Integraciones
 
 **Audios**: los mensajes del sistema. Se pueden subir archivos, pero lo normal es **escribir el
 texto y que lo sintetice la central** con su propia voz.
@@ -197,6 +211,8 @@ texto y que lo sintetice la central** con su propia voz.
 ---
 
 ## 4. SBC-NG · el borde de la central
+
+» Menú lateral → Telefonía → SBC-NG
 
 Esta es la sección más importante del sistema, y la que menos se entiende. Vale la pena leerla
 entera **antes** de conectar la primera troncal.
@@ -227,6 +243,8 @@ El SBC hace cinco cosas que Asterisk no debería hacer solo:
 
 ### 4.2 Monitoreo
 
+» SBC-NG → Monitoreo
+
 La pantalla de entrada del SBC. Muestra en vivo:
 
 | Indicador | Qué te dice |
@@ -241,6 +259,8 @@ La pantalla de entrada del SBC. Muestra en vivo:
 ![SBC · Monitoreo](img/cfg-20-sbc-monitoreo.png)
 
 ### 4.3 Seguridad
+
+» SBC-NG → Seguridad
 
 Tres mecanismos, y conviene entender la diferencia porque se complementan:
 
@@ -259,6 +279,8 @@ conocidos (`friendly-scanner`, `sipvicious`), usuarios que se prueban a mansalva
 ![SBC · Seguridad e IPs bloqueadas](img/cfg-21-sbc-seguridad.png)
 
 ### 4.4 Ruteo → Operadores (LCR)
+
+» SBC-NG → Ruteo → Operadores
 
 Acá se define **por dónde sale cada llamada**.
 
@@ -282,6 +304,8 @@ podés tener el operador barato primero y el confiable de respaldo.
 
 ### 4.5 Ruteo → Manipulación SIP
 
+» SBC-NG → Ruteo → Manipulación SIP
+
 **El problema:** cada operador quiere las cabeceras SIP a su manera. Uno exige el número de origen
 en `P-Asserted-Identity`; otro lo lee de `From`; otro rechaza la llamada si no ve un `Diversion`.
 Cuando el operador dice *"me llegan las llamadas sin identificar"*, casi siempre se arregla acá.
@@ -300,6 +324,8 @@ Cuando el operador dice *"me llegan las llamadas sin identificar"*, casi siempre
 
 ### 4.6 Ruteo → Dispatcher
 
+» SBC-NG → Ruteo → Dispatcher
+
 El **dispatcher** es lo que el SBC usa para saber **hacia qué Asterisk mandar las llamadas que
 entran**. Podés tener más de uno, con **prioridad**: el de mayor prioridad recibe todo, y si deja
 de responder, el SBC pasa al siguiente. Es alta disponibilidad del núcleo.
@@ -314,6 +340,8 @@ El SBC mide la latencia de cada destino con OPTIONS automáticamente.
 
 ### 4.7 Ruteo → Remotos
 
+» SBC-NG → Ruteo → Remotos
+
 La lista de **internos que están registrados a través del SBC** en este momento: el teleworker con
 el softphone en casa, el vendedor con el celular. Muestra desde qué IP se registró cada uno. Es la
 foto de quién está afuera y conectado.
@@ -322,6 +350,8 @@ foto de quién está afuera y conectado.
 
 ### 4.8 Red y Media → Red
 
+» SBC-NG → Red y Media → Red
+
 El SBC puede tener **varias salidas a Internet** (multi-WAN). Acá ves las interfaces, la **tabla de
 ruteo del kernel en vivo**, y podés agregar **rutas estáticas** — por ejemplo: "el tráfico hacia la
 red del operador sale por la WAN 2".
@@ -329,6 +359,8 @@ red del operador sale por la WAN 2".
 ![SBC · Red y multi-WAN](img/cfg-26-sbc-red.png)
 
 ### 4.9 Red y Media → rtpengine
+
+» SBC-NG → Red y Media → rtpengine
 
 **rtpengine es por donde pasa el audio.** El SBC ancla los medios: la llamada entra por él y sale
 por él, y así el Asterisk nunca queda expuesto ni tiene que pelear con el NAT.
@@ -341,6 +373,8 @@ por defecto): si no, la llamada conecta pero nadie escucha nada.
 
 ### 4.10 Red y Media → SIP debug
 
+» SBC-NG → Red y Media → SIP debug
+
 La herramienta de diagnóstico. Muestra el **diálogo SIP como una escalera** (quién le dijo qué a
 quién, en orden), permite **capturar el tráfico** en un archivo `.pcap` para abrirlo con Wireshark,
 y reproducir el audio de la captura.
@@ -350,6 +384,8 @@ Cuando el operador dice "el problema es de ustedes", acá está la prueba de qu�
 ![SBC · Diálogo SIP y captura](img/cfg-28-sbc-sipdebug.png)
 
 ### 4.11 TURN
+
+» SBC-NG → TURN
 
 El TURN (coturn) es lo que hace que un softphone **detrás de cualquier NAT** tenga audio. Acá se
 configuran el *realm*, los puertos, el rango de relay y las credenciales.
@@ -362,6 +398,8 @@ verde no es decorativo: significa que funciona de verdad.
 
 ### 4.12 Sistema → Módulos y Configuración
 
+» SBC-NG → Sistema → Módulos  /  SBC-NG → Sistema → Configuración
+
 **Módulos**: qué módulos de Kamailio están cargados.
 **Configuración**: el archivo de configuración del SBC, para verlo o editarlo cuando hace falta algo
 que la interfaz no cubre. Es la puerta de escape; usala con cuidado.
@@ -369,6 +407,8 @@ que la interfaz no cubre. Es la puerta de escape; usala con cuidado.
 ---
 
 ## 5. Asterisk · el núcleo
+
+» Menú lateral → Telefonía → Asterisk
 
 La consola de Asterisk (**Asterisk** en el menú) es la ventana al motor de llamadas:
 
@@ -390,6 +430,8 @@ los IVR y las rutas. Es para **ver** y para **diagnosticar**.
 ---
 
 ## 6. Troncales
+
+» Menú lateral → Telefonía → SBC-NG → Troncales
 
 La **troncal** es la línea que te conecta con el mundo.
 
@@ -418,6 +460,8 @@ recibir llamadas — y sin alerta te enterás cuando un cliente se queja, horas 
 
 ## 7. Rutas salientes · qué se marca y por dónde sale
 
+» Menú lateral → Telefonía → Rutas → Salientes
+
 En **Rutas → Salientes**. Cada regla es un patrón de marcación y qué hacer con él.
 
 | Campo | Qué hace | Ejemplo |
@@ -441,6 +485,8 @@ cual. Si el operador exige formato internacional, ponés `strip=1` y `prepend=59
 
 ## 8. Rutas entrantes · qué pasa cuando te llaman
 
+» Menú lateral → Telefonía → Rutas → Entrantes
+
 En **Rutas → Entrantes**. Una ruta entrante toma el número al que llamaron (**DID**) y lo manda a
 un destino.
 
@@ -462,6 +508,8 @@ directo) va a la **cola de Ventas**.
 ---
 
 ## 9. Internos
+
+» Menú lateral → Telefonía → Internos
 
 ### 8.1 Crear un interno
 
@@ -496,6 +544,8 @@ solo al arrancar.
 
 ## 10. Correo saliente
 
+» Menú lateral → Sistema → Configuración → Email por empresa
+
 **Sin esto no funciona el envío del QR, ni el buzón por correo, ni las alertas.** Es de las
 primeras cosas que conviene dejar andando.
 
@@ -525,6 +575,8 @@ rechazada, no conecta, remitente inválido).
 ---
 
 ## 11. Entrega del teléfono: QR y enlace de acceso
+
+» Menú lateral → Telefonía → Internos → (elegir el interno) → Enviar acceso por correo
 
 Este es el proceso que reemplaza al "te paso la contraseña por WhatsApp".
 
@@ -568,6 +620,8 @@ configure nada:
 ---
 
 ## 12. Aplicaciones
+
+» Menú lateral → Telefonía → Aplicaciones
 
 ### 11.1 Colas
 
@@ -616,6 +670,8 @@ función (`*97`, `*98`, etc.).
 
 ## 13. Alertas
 
+» Menú lateral → Sistema → Configuración → Alertas
+
 En **Configuración → Alertas**. Cargá el destinatario y encendé lo que quieras. Cada alerta tiene un
 botón de **prueba** que manda el correo sin necesidad de activarla.
 
@@ -639,6 +695,8 @@ botón de **prueba** que manda el correo sin necesidad de activarla.
 
 ## 14. Grabaciones
 
+» Menú lateral → Telefonía → Grabaciones
+
 Se graba por interno, por cola o todo. Se escuchan desde **Grabaciones**, con reproductor y
 **transcripción por IA** a pedido.
 
@@ -650,6 +708,8 @@ Se graba por interno, por cola o todo. Se escuchan desde **Grabaciones**, con re
 
 ## 15. Seguridad
 
+» Menú lateral → Sistema → Seguridad
+
 Además del SBC, el núcleo tiene **Fail2ban** sobre los registros SIP: quien intenta adivinar
 contraseñas queda bloqueado. La sección **Seguridad** muestra las IPs bloqueadas con su país y
 permite desbloquear o bloquear a mano.
@@ -659,6 +719,8 @@ permite desbloquear o bloquear a mano.
 ---
 
 ## 16. Usuarios y roles
+
+» Menú lateral → Sistema → Usuarios
 
 En **Usuarios**. Cada persona puede tener un **interno asociado** — y eso es lo que habilita que su
 softphone vea clientes e intercom.

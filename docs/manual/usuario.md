@@ -46,6 +46,8 @@ Cuando el punto de tu nombre está **verde**, estás en línea y podés llamar y
 
 ## 4. Iniciar sesión
 
+» Softphone → botón QR (arriba a la derecha del título)
+
 Hay **dos formas** de que tu teléfono se conecte a la central, y el administrador ya eligió cuál te
 corresponde. La app te la deja configurada sola cuando usás el QR o el enlace; esta sección es para
 que entiendas qué estás viendo, y para el caso en que tengas que cargarlo a mano.
@@ -166,6 +168,8 @@ controlás el volumen.
 
 ## 9. Tu buzón de voz
 
+» Softphone → Voz  ·  o marcá *97 desde tu teléfono
+
 Si no atendés, la persona puede dejarte un mensaje.
 
 - **Desde el teléfono**: marcá `*97`. La primera vez, el PIN es tu número de interno.
@@ -178,6 +182,8 @@ Si no atendés, la persona puede dejarte un mensaje.
 ---
 
 ## 10. Si trabajás con colas (agentes)
+
+» Navegador → https://tu-dominio (entrás con tu usuario)
 
 Tu panel muestra las llamadas en espera, tus estadísticas del día y tu historial.
 
@@ -192,6 +198,8 @@ Tu panel muestra las llamadas en espera, tus estadísticas del día y tu histori
 ---
 
 ## 11. Problemas frecuentes
+
+» Softphone → Ajustes → Dispositivos  /  Ajustes → Diagnóstico
 
 | Qué te pasa | Qué hacer |
 |---|---|

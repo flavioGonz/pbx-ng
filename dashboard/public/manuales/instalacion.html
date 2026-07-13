@@ -45,6 +45,10 @@ tr:last-child td{border-bottom:none}
 ul,ol{margin:12px 0;padding-left:24px}
 li{margin:6px 0}
 hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
+.nav{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:14px 0 18px;padding:11px 15px;background:var(--soft);border:1px solid var(--accent);border-left-width:4px;border-radius:9px;font-size:14px;color:#334155}
+.nav .navk{font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--accent);padding-right:4px}
+.nav b{font-weight:700;color:#0f172a}
+.nav .sep{color:#94a3b8;font-weight:400}
 figure.shot{margin:26px 0;text-align:center}
 figure.shot img{max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 22px rgba(15,23,42,.09)}
 figure.shot figcaption{font-size:12.5px;color:#94a3b8;margin-top:9px}
@@ -166,6 +170,7 @@ cd pbx-ng/docker
 <figure class="shot"><img src="img/inst-04-login.png" alt="Pantalla de login del panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de login del panel<span class="fn">inst-04-login.png</span></figcaption></figure>
 <hr />
 <h2 id="5-firewall-y-nat">5. Firewall y NAT</h2>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Verificación: scripts/check-turn.py  ·  Panel</b> <span class="sep">›</span> <b>SBC-NG</b> <span class="sep">›</span> <b>TURN</b></div>
 <p><strong>Esta sección decide si la central funciona o no.</strong> La señalización suele pasar sola; el audio es lo primero que se rompe.</p>
 <h3 id="5-1-lo-que-se-publica-a-internet">5.1 Lo que se publica a Internet</h3>
 <div class="tw"><table><thead><tr><th>Puerto</th><th>Protocolo</th><th>Para qué</th></tr></thead><tbody><tr><td><code>443</code> (y <code>80</code> para el certificado)</td><td>TCP</td><td>Panel, softphone web y <strong>WSS</strong></td></tr><tr><td><code>5060</code> / <code>5061</code></td><td>UDP+TCP / TCP</td><td>SIP: troncales y teléfonos físicos</td></tr><tr><td><code>30000-40000</code></td><td>UDP</td><td>Audio de las troncales (rtpengine)</td></tr><tr><td><code>3478</code></td><td><strong>UDP y TCP</strong></td><td>STUN/TURN — <strong>los dos</strong>, muchas redes bloquean UDP saliente</td></tr><tr><td><code>49152-65535</code></td><td>UDP</td><td><strong>Rango relay del TURN</strong></td></tr><tr><td><code>5349</code></td><td>TCP</td><td>TURN sobre TLS (recomendado para redes corporativas)</td></tr></tbody></table></div>
@@ -179,6 +184,7 @@ cd pbx-ng/docker
 <figure class="shot"><img src="img/inst-05-turn.png" alt="Diagnóstico ICE/TURN en vivo desde el panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Diagnóstico ICE/TURN en vivo desde el panel<span class="fn">inst-05-turn.png</span></figcaption></figure>
 <hr />
 <h2 id="6-activar-y-desactivar-m-dulos">6. Activar y desactivar módulos</h2>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Panel</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Configuración</b> <span class="sep">›</span> <b>Módulos  ·  o pbxng-ctl en la terminal</b></div>
 <p>Un módulo activo es un contenedor que existe; uno inactivo <strong>no existe</strong>. Se maneja desde el panel (<strong>Configuración → Módulos</strong>) o por línea de comandos:</p>
 <pre><code>pbxng-ctl status              # qué módulos están activos
 pbxng-ctl enable  intercom    # crea el contenedor
@@ -193,6 +199,7 @@ export PBXNG_VERSION=X.Y.Z
 <p><code>deploy.sh</code> baja las imágenes, corre las <strong>migraciones de base de datos</strong> y levanta todo. Para volver atrás, desplegá la versión anterior. El detalle está en <code>RELEASE.md</code>.</p>
 <hr />
 <h2 id="8-si-algo-no-funciona">8. Si algo no funciona</h2>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Panel</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Monitoreo  ·  Panel</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>SBC-NG</b> <span class="sep">›</span> <b>SIP debug</b></div>
 <div class="tw"><table><thead><tr><th>Síntoma</th><th>Dónde mirar</th></tr></thead><tbody><tr><td>El teléfono registra pero <strong>no hay audio</strong></td><td>Firewall: rango de relay del TURN y <code>30000-40000/UDP</code>. Corré <code>check-turn.py</code>.</td></tr><tr><td>El softphone web no conecta</td><td>El proxy debe permitir <strong>WebSocket</strong> en <code>/ws</code> (y con HTTP/2 <strong>desactivado</strong>).</td></tr><tr><td>El panel no carga datos</td><td>Contenedor <code>api</code>: <code>docker compose logs api</code>.</td></tr><tr><td>No entran llamadas</td><td>Estado de la troncal en <strong>Monitoreo</strong>. Activá la alerta de <em>troncal caída</em>.</td></tr></tbody></table></div>
 <figure class="shot"><img src="img/inst-07-monitor.png" alt="Panel de monitoreo con el estado de los componentes" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel de monitoreo con el estado de los componentes<span class="fn">inst-07-monitor.png</span></figcaption></figure></main>
   <footer>PBX-NG · Manual de Instalación · versión 1.1.0 · 13/07/2026</footer>

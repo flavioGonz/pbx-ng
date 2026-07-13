@@ -52,6 +52,13 @@ def md(text):
             out.append('<pre><code>' + '\n'.join(buf) + '</code></pre>')
             continue
 
+        # ruta de navegación (cómo llegar): línea que empieza con »
+        if ln.startswith('» '):
+            crumbs = [c.strip() for c in ln[2:].split('→')]
+            html_c = ' <span class="sep">›</span> '.join('<b>%s</b>' % inline(c) for c in crumbs)
+            out.append(f'<div class="nav"><span class="navk">Cómo llegar</span>{html_c}</div>')
+            i += 1; continue
+
         # cita / nota
         if ln.startswith('> '):
             buf = []
@@ -153,6 +160,10 @@ tr:last-child td{border-bottom:none}
 ul,ol{margin:12px 0;padding-left:24px}
 li{margin:6px 0}
 hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
+.nav{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:14px 0 18px;padding:11px 15px;background:var(--soft);border:1px solid var(--accent);border-left-width:4px;border-radius:9px;font-size:14px;color:#334155}
+.nav .navk{font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--accent);padding-right:4px}
+.nav b{font-weight:700;color:#0f172a}
+.nav .sep{color:#94a3b8;font-weight:400}
 figure.shot{margin:26px 0;text-align:center}
 figure.shot img{max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 22px rgba(15,23,42,.09)}
 figure.shot figcaption{font-size:12.5px;color:#94a3b8;margin-top:9px}

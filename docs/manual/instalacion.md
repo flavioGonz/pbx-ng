@@ -173,6 +173,8 @@ Al terminar, el instalador imprime la contraseña inicial del usuario `admin`. E
 
 ## 5. Firewall y NAT
 
+» Verificación: scripts/check-turn.py  ·  Panel → SBC-NG → TURN
+
 **Esta sección decide si la central funciona o no.** La señalización suele pasar sola; el audio es
 lo primero que se rompe.
 
@@ -214,6 +216,8 @@ Si no, revisá `docs/FIREWALL.md`, que tiene el detalle completo y la trampa del
 
 ## 6. Activar y desactivar módulos
 
+» Panel → Sistema → Configuración → Módulos  ·  o pbxng-ctl en la terminal
+
 Un módulo activo es un contenedor que existe; uno inactivo **no existe**. Se maneja desde el panel
 (**Configuración → Módulos**) o por línea de comandos:
 
@@ -243,6 +247,8 @@ volver atrás, desplegá la versión anterior. El detalle está en `RELEASE.md`.
 ---
 
 ## 8. Si algo no funciona
+
+» Panel → Telefonía → Monitoreo  ·  Panel → Telefonía → SBC-NG → SIP debug
 
 | Síntoma | Dónde mirar |
 |---|---|
