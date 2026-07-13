@@ -17,6 +17,7 @@ const pushProviders = require('./push-providers');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const alerts = require('./alerts');
+const emails = require('./emails');
 const QRCode = require('qrcode');
 const SECRET = process.env.JWT_SECRET || '__SET_JWT_SECRET__';
 
@@ -952,41 +953,21 @@ async function vmTranscript(wav) {
   const sd = await sr.json();
   return (sd.text || '').trim() || null;
 }
-function vmHtml({ brand, box, msg, transcript, when, dur, hasAudio }) {
-  const esc = (t) => String(t || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
-  return `<div style="font-family:-apple-system,Segoe UI,Inter,sans-serif;max-width:560px;margin:0 auto;color:#0b1220">
-    <div style="background:linear-gradient(160deg,#16233f,#0f1a30);color:#fff;padding:18px 22px;border-radius:14px 14px 0 0">
-      <div style="font-size:12px;letter-spacing:.6px;opacity:.7;text-transform:uppercase">${esc(brand)}</div>
-      <div style="font-size:19px;font-weight:700;margin-top:2px">Nuevo mensaje de voz</div>
-    </div>
-    <div style="border:1px solid #e3e8f0;border-top:none;border-radius:0 0 14px 14px;padding:20px 22px;background:#fff">
-      <table style="width:100%;font-size:14px;border-collapse:collapse">
-        <tr><td style="color:#667089;padding:4px 0">De</td><td style="text-align:right;font-weight:600">${esc(msg.callerid || 'desconocido')}</td></tr>
-        <tr><td style="color:#667089;padding:4px 0">Para</td><td style="text-align:right;font-weight:600">Interno ${esc(box.mailbox)}${box.fullname ? ' · ' + esc(box.fullname) : ''}</td></tr>
-        <tr><td style="color:#667089;padding:4px 0">Fecha</td><td style="text-align:right">${esc(when)}</td></tr>
-        <tr><td style="color:#667089;padding:4px 0">Duración</td><td style="text-align:right">${dur}s</td></tr>
-      </table>
-      ${transcript ? `<div style="margin-top:16px;padding:14px 16px;background:#f3f6fc;border-left:3px solid #2f80ff;border-radius:8px">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:#667089;text-transform:uppercase;margin-bottom:6px">Transcripción automática</div>
-        <div style="font-size:14px;line-height:1.5">${esc(transcript)}</div>
-        <div style="font-size:11px;color:#9aa4bd;margin-top:8px">Generada por IA; puede contener errores.</div>
-      </div>` : ''}
-      ${hasAudio ? '<div style="margin-top:16px;font-size:13px;color:#667089">El audio del mensaje va adjunto a este correo.</div>' : ''}
-      <div style="margin-top:18px;font-size:12px;color:#9aa4bd">También podés escucharlo marcando <b>*97</b> desde tu interno.</div>
-    </div>
-  </div>`;
-}
 async function vmSendOne(smtp, brand, box, msg) {
   const wav = await vmAudio(box.mailbox, msg.folder, msg.id);
   let transcript = null;
   if (box.email_transcribe) { try { transcript = await vmTranscript(wav); } catch (e) { console.warn('[vm-mail] stt', e.message); } }
   const when = new Date((msg.origtime || 0) * 1000).toLocaleString('es-UY', { timeZone: process.env.TZ || 'America/Montevideo' });
   const tx = nodemailer.createTransport({ host: smtp.host, port: smtp.port || 587, secure: !!smtp.secure, auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined });
+  const { rows: dm } = await pool.query("SELECT value FROM pbxng_settings WHERE key='domain'");
+  const dom = (dm[0] && dm[0].value) || process.env.DOMAIN || '';
   await tx.sendMail({
     from: smtp.from_addr || smtp.username,
     to: box.email,
     subject: `Mensaje de voz de ${msg.callerid || 'desconocido'} · interno ${box.mailbox}`,
-    html: vmHtml({ brand, box, msg, transcript, when, dur: msg.duration || 0, hasAudio: !!box.email_attach }),
+    html: emails.voicemailEmail({ brand, mailbox: box.mailbox, fullname: box.fullname, from: msg.callerid,
+      when, duration: msg.duration || 0, transcript, hasAudio: !!box.email_attach,
+      panelUrl: dom ? 'https://' + dom + '/voz' : '' }),
     text: `Nuevo mensaje de voz para el interno ${box.mailbox}\nDe: ${msg.callerid || 'desconocido'}\nFecha: ${when}\nDuración: ${msg.duration || 0}s\n` + (transcript ? `\nTranscripción:\n${transcript}\n` : ''),
     attachments: box.email_attach ? [{ filename: `mensaje-${box.mailbox}-${msg.id}.wav`, content: wav }] : [],
   });
@@ -1238,7 +1219,10 @@ app.post('/api/email/test', async (req, res) => {
     const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenant_id]);
     const cfg = rows[0]; if (!cfg || !cfg.host) return res.status(400).json({ error: 'sin configuración SMTP' });
     const tx = nodemailer.createTransport({ host: cfg.host, port: cfg.port || 587, secure: !!cfg.secure, auth: cfg.username ? { user: cfg.username, pass: cfg.password } : undefined });
-    await tx.sendMail({ from: cfg.from_addr || cfg.username, to, subject: 'Prueba de email · PBX-NG', text: 'Configuración SMTP funcionando correctamente.' });
+    const { rows: bn } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
+    const bname = (bn[0] && bn[0].value) || 'PBX-NG';
+    await tx.sendMail({ from: cfg.from_addr || cfg.username, to, subject: 'Prueba de correo · ' + bname,
+      html: emails.testEmail({ brand: bname }), text: 'La configuración SMTP funciona correctamente.' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: smtpHint(e) }); }
 });
@@ -1287,14 +1271,8 @@ app.post('/api/enroll/email', async (req, res) => {
     const url = 'https://' + base + '/enroll?token=' + token;
     const png = await QRCode.toBuffer(url, { width: 320, margin: 1 });
     const tx = nodemailer.createTransport({ host: cfg.host, port: cfg.port || 587, secure: !!cfg.secure, auth: cfg.username ? { user: cfg.username, pass: cfg.password } : undefined });
-    const html = '<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#1f2733">' +
-      '<h2 style="color:#1d4ed8">Tu acceso al softphone</h2>' +
-      '<p>Interno <b>' + ext + '</b>. Escaneá este código QR desde el celular para configurar tu teléfono automáticamente:</p>' +
-      '<p style="text-align:center"><img src="cid:qr" width="240" height="240" alt="QR" /></p>' +
-      '<p>O abrí este enlace en el navegador del celular:</p>' +
-      '<p><a href="' + url + '">' + url + '</a></p>' +
-      '<p>También podés pegar ese mismo enlace en el <b>softphone de escritorio</b> (botón QR de la pantalla de acceso) y se configura solo.</p>' +
-      '<p style="color:#8a93a3;font-size:12px">El acceso vence en 24 horas. Luego, agregá la app a tu pantalla de inicio.</p></div>';
+    const { rows: bn } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
+    const html = emails.enrollEmail({ brand: (bn[0] && bn[0].value) || 'PBX-NG', ext, url });
     await tx.sendMail({ from: cfg.from_addr || cfg.username, to, subject: 'Tu acceso al softphone PBX-NG (interno ' + ext + ')', html, attachments: [{ filename: 'acceso-qr.png', content: png, cid: 'qr' }] });
     res.json({ ok: true });
   } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: smtpHint(e) }); } finally { c.release(); }

@@ -11,6 +11,7 @@
  * ==========================================================================*/
 'use strict';
 const nodemailer = require('nodemailer');
+const emails = require('./emails');
 
 let pool, deps = {};
 const nowMin = () => Math.floor(Date.now() / 60000);
@@ -48,24 +49,13 @@ async function brand() {
   const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
   return (rows[0] && rows[0].value) || 'PBX-NG';
 }
-
-const COLOR = { info: '#2f80ff', warn: '#f59e0b', crit: '#ef4444' };
-const LABEL = { info: 'Informativo', warn: 'Atención', crit: 'Crítico' };
-function html({ brandName, severity, title, lines, foot }) {
-  const esc = (t) => String(t == null ? '' : t).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
-  const c = COLOR[severity] || COLOR.info;
-  const rows = (lines || []).map(([k, v]) => `<tr><td style="color:#667089;padding:5px 0;font-size:13px">${esc(k)}</td><td style="text-align:right;font-weight:600;font-size:13px">${esc(v)}</td></tr>`).join('');
-  return `<div style="font-family:-apple-system,Segoe UI,Inter,sans-serif;max-width:560px;margin:0 auto;color:#0b1220">
-    <div style="background:${c};color:#fff;padding:16px 22px;border-radius:14px 14px 0 0">
-      <div style="font-size:11px;letter-spacing:.8px;opacity:.85;text-transform:uppercase">${esc(brandName)} · ${esc(LABEL[severity] || '')}</div>
-      <div style="font-size:18px;font-weight:700;margin-top:3px">${esc(title)}</div>
-    </div>
-    <div style="border:1px solid #e3e8f0;border-top:none;border-radius:0 0 14px 14px;padding:18px 22px;background:#fff">
-      <table style="width:100%;border-collapse:collapse">${rows}</table>
-      ${foot ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #eef1f7;font-size:12px;color:#667089">${foot}</div>` : ''}
-    </div>
-  </div>`;
+async function panelUrl(path = '') {
+  const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='domain'");
+  const d = (rows[0] && rows[0].value) || process.env.DOMAIN || '';
+  return d ? 'https://' + d + path : '';
 }
+
+const LABEL = { info: 'Informativo', warn: 'Atención', crit: 'Crítico' };
 
 /** Dispara una alerta (respeta enabled + throttle). key = identidad para el throttle. */
 async function raise(event, { severity = 'warn', title, lines = [], foot = '', key = '', force = false } = {}) {
@@ -86,10 +76,17 @@ async function raise(event, { severity = 'warn', title, lines = [], foot = '', k
     const brandName = await brand();
     const tx = nodemailer.createTransport({ host: cfg.host, port: cfg.port || 587, secure: !!cfg.secure, auth: cfg.username ? { user: cfg.username, pass: cfg.password } : undefined });
     const subject = `[${brandName}] ${severity === 'crit' ? '🔴 ' : severity === 'warn' ? '🟠 ' : ''}${title}`;
+    const link = await panelUrl(event === 'security.ban' || event === 'security.attack' ? '/seguridad' : event.startsWith('fraud') ? '/historial' : event === 'digest.daily' ? '/' : '/monitor');
+    const isDigest = event === 'digest.daily';
+    const kpis = isDigest ? lines.filter(([k]) => !/^Top interno/.test(k)).slice(0, 6).map(([k, v]) => ({ label: k, value: v })) : [];
+    const rest = isDigest ? lines.filter(([k]) => /^Top interno/.test(k)) : lines;
+    const htmlBody = isDigest
+      ? emails.digestEmail({ brand: brandName, title, kpis, rows: rest, panelUrl: link })
+      : emails.alertEmail({ brand: brandName, event, severity, title, lines, foot, panelUrl: link });
     await tx.sendMail({
       from: cfg.from_addr || cfg.username, to, subject,
-      html: html({ brandName, severity, title, lines, foot }),
-      text: title + '\n\n' + lines.map(([k, v]) => k + ': ' + v).join('\n') + (foot ? '\n\n' + foot.replace(/<[^>]+>/g, '') : ''),
+      html: htmlBody,
+      text: title + '\n\n' + lines.map(([k, v]) => k + ': ' + v).join('\n') + (foot ? '\n\n' + String(foot).replace(/<[^>]+>/g, '') : ''),
     });
     if (th > 0) await setState(tk, { at: nowMin() });
     await pool.query('INSERT INTO pbxng_alerts (event,severity,title,detail,to_addr,sent) VALUES ($1,$2,$3,$4,$5,true)',
