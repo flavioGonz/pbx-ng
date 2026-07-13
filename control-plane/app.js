@@ -86,8 +86,7 @@ const NODES = {
   domain:   process.env.DOMAIN || process.env.PUBLIC_IP || '',
   public_ip: process.env.PUBLIC_IP || process.env.DOMAIN || '',
 };
-// VM_AGENT se define aca (arriba de su primer uso en los fetch de grabaciones/vm)
-const VM_AGENT = process.env.VM_AGENT || ('http://' + NODES.asterisk + ':8089');
+// (VM_AGENT retirado: los buzones se leen del volumen compartido /voicemail, sin agente HTTP)
 const pool = new Pool(CFG.db);
 const app = express();
 const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
@@ -823,20 +822,83 @@ app.post('/api/geo/report', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ---------------------------------------------------------------------------
+//  Buzon de voz: se lee DIRECTO del volumen compartido con Asterisk (/voicemail).
+//  Antes esto dependia de un agente HTTP (:8089) que dejo de correr cuando pasamos
+//  a "grabaciones por volumen compartido" -> el buzon visual quedo mudo. Sin agente,
+//  sin token, sin red de por medio.
+// ---------------------------------------------------------------------------
+const VM_DIR = process.env.VM_DIR || '/voicemail';
+const VM_CTX = process.env.VM_CONTEXT || 'default';
+const _fsp = require('fs').promises;
+const _path = require('path');
+const vmSafe = (x) => String(x || '').replace(/[^A-Za-z0-9_-]/g, '');
+const vmFolder = (f) => (['INBOX', 'Old', 'Urgent', 'Work', 'Family', 'Friends'].includes(f) ? f : 'INBOX');
+const vmBase = (ext, folder) => _path.join(VM_DIR, VM_CTX, vmSafe(ext), vmFolder(folder));
+async function vmMeta(file) {
+  const d = {};
+  try {
+    const txt = await _fsp.readFile(file, 'utf8');
+    for (const line of txt.split('\n')) { const i = line.indexOf('='); if (i > 0) d[line.slice(0, i).trim()] = line.slice(i + 1).trim(); }
+  } catch (_) {}
+  return d;
+}
+async function vmList(ext) {
+  const out = [];
+  for (const folder of ['INBOX', 'Old']) {
+    const base = vmBase(ext, folder);
+    let files = [];
+    try { files = await _fsp.readdir(base); } catch (_) { continue; }
+    for (const f of files) {
+      if (!f.endsWith('.txt')) continue;
+      const id = f.slice(0, -4);
+      const m = await vmMeta(_path.join(base, f));
+      out.push({ id, folder, callerid: m.callerid || '', origtime: Number(m.origtime || 0), duration: Number(m.duration || 0), new: folder === 'INBOX' });
+    }
+  }
+  out.sort((a, b) => b.origtime - a.origtime);
+  return out;
+}
+async function vmAudio(ext, folder, id) {
+  const base = vmBase(ext, folder);
+  for (const e of ['.wav', '.WAV', '.gsm']) {
+    try { return await _fsp.readFile(_path.join(base, vmSafe(id) + e)); } catch (_) {}
+  }
+  throw new Error('audio no disponible');
+}
+async function vmDelete(ext, folder, id) {
+  const base = vmBase(ext, folder);
+  for (const f of await _fsp.readdir(base).catch(() => [])) {
+    if (f.startsWith(vmSafe(id) + '.')) { try { await _fsp.unlink(_path.join(base, f)); } catch (_) {} }
+  }
+}
+async function vmMarkRead(ext, id) {   // INBOX -> Old (como hace *97 al guardar)
+  const from = vmBase(ext, 'INBOX'), to = vmBase(ext, 'Old');
+  await _fsp.mkdir(to, { recursive: true }).catch(() => {});
+  const used = (await _fsp.readdir(to).catch(() => [])).filter((f) => f.endsWith('.txt')).map((f) => f.slice(3, -4));
+  let n = 0; while (used.includes(String(n).padStart(4, '0'))) n++;
+  const nid = 'msg' + String(n).padStart(4, '0');
+  for (const f of await _fsp.readdir(from).catch(() => [])) {
+    if (!f.startsWith(vmSafe(id) + '.')) continue;
+    const ext2 = f.slice(f.indexOf('.'));
+    try { await _fsp.rename(_path.join(from, f), _path.join(to, nid + ext2)); } catch (_) {}
+  }
+  return nid;
+}
 app.get('/api/vm', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(req.query.ext || ''), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); res.json(await r.json()); }
+  try { res.json(await vmList(req.query.ext || '')); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/vm/audio', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(req.query.ext || '') + '&folder=' + encodeURIComponent(req.query.folder || 'INBOX') + '&id=' + encodeURIComponent(req.query.id || ''), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); if (!r.ok) return res.status(404).end(); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try { const buf = await vmAudio(req.query.ext, req.query.folder, req.query.id); res.set('Content-Type', 'audio/wav').send(buf); }
+  catch (e) { res.status(404).end(); }
 });
 app.post('/api/vm/del', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PBXNG-Token': AGENT_TOKEN }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
+  try { const { ext, folder, id } = req.body || {}; await vmDelete(ext, folder, id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/vm/read', async (req, res) => {
-  try { const r = await fetch(VM_AGENT + '/vm/read', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PBXNG-Token': AGENT_TOKEN }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
+  try { const { ext, id } = req.body || {}; const nid = await vmMarkRead(ext, id); res.json({ ok: true, id: nid }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Transcripcion de un mensaje de voz (Whisper): baja el WAV del agente VM, lo pasa a PCM
@@ -845,9 +907,8 @@ app.post('/api/vm/transcribe', async (req, res) => {
   try {
     const { ext, folder, id } = req.body || {};
     if (!ext || id == null || id === '') return res.status(400).json({ error: 'faltan ext/id' });
-    const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(ext) + '&folder=' + encodeURIComponent(folder || 'INBOX') + '&id=' + encodeURIComponent(id), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
-    if (!r.ok) return res.status(404).json({ error: 'audio no disponible' });
-    const wav = Buffer.from(await r.arrayBuffer());
+    let wav;
+    try { wav = await vmAudio(ext, folder, id); } catch (_) { return res.status(404).json({ error: 'audio no disponible' }); }
     const pc = wavToPcm(wav);
     if (!pc) return res.status(422).json({ error: 'formato WAV no soportado (se requiere PCM 16-bit)' });
     const base = await vozBase();
@@ -871,11 +932,6 @@ async function smtpFor(tenantId = 1) {
   const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenantId]);
   const c = rows[0];
   return (c && c.enabled && c.host) ? c : null;
-}
-async function vmAudio(ext, folder, id) {
-  const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(ext) + '&folder=' + encodeURIComponent(folder || 'INBOX') + '&id=' + encodeURIComponent(id), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
-  if (!r.ok) throw new Error('audio no disponible (' + r.status + ')');
-  return Buffer.from(await r.arrayBuffer());
 }
 async function vmTranscript(wav) {
   const pc = wavToPcm(wav);
@@ -941,7 +997,7 @@ async function vmMailTick() {
     const brand = (br[0] && br[0].value) || 'PBX-NG';
     for (const box of boxes) {
       let list = [];
-      try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(box.mailbox), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); list = await r.json(); } catch (e) { continue; }
+      try { list = await vmList(box.mailbox); } catch (e) { continue; }
       for (const msg of (Array.isArray(list) ? list : []).filter((m) => m.folder === 'INBOX')) {
         const { rowCount } = await pool.query('SELECT 1 FROM pbxng_vm_sent WHERE mailbox=$1 AND mid=$2', [box.mailbox, msg.id]);
         if (rowCount) continue;
@@ -950,9 +1006,7 @@ async function vmMailTick() {
           await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (mailbox,mid) DO NOTHING',
             [box.mailbox, msg.id, msg.folder, msg.origtime || 0, box.email]);
           console.log('[vm-mail] enviado', box.mailbox, msg.id, '->', box.email);
-          if (box.email_delete) {
-            try { await fetch(VM_AGENT + '/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PBXNG-Token': AGENT_TOKEN }, body: JSON.stringify({ ext: box.mailbox, folder: msg.folder, id: msg.id }) }); } catch (_) {}
-          }
+          if (box.email_delete) { try { await vmDelete(box.mailbox, msg.folder, msg.id); } catch (_) {} }
         } catch (e) {
           console.error('[vm-mail] fallo', box.mailbox, msg.id, e.message);
           await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok,err) VALUES ($1,$2,$3,$4,$5,false,$6) ON CONFLICT (mailbox,mid) DO UPDATE SET ok=false, err=$6',
@@ -1004,7 +1058,7 @@ app.post('/api/vm/email/send', async (req, res) => {
     const box = rows[0];
     if (!box || !box.email) return res.status(400).json({ error: 'el buzón no tiene email configurado' });
     let list = [];
-    try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(mailbox), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); list = await r.json(); } catch (_) {}
+    try { list = await vmList(mailbox); } catch (_) {}
     const msg = (Array.isArray(list) ? list : []).find((m) => String(m.id) === String(id)) || { id, folder: folder || 'INBOX', callerid: '', origtime: Math.floor(Date.now() / 1000), duration: 0 };
     const { rows: br } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
     await vmSendOne(smtp, (br[0] && br[0].value) || 'PBX-NG', box, msg);

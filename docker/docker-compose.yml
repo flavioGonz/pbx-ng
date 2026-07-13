@@ -28,6 +28,7 @@ volumes:
   voz_models:
   go2rtc_config:
   recordings:          # grabaciones: compartido asterisk (escribe) <-> api (lee)
+  voicemail:           # buzones de voz: asterisk (escribe) <-> api (lee/borra) — sin agente HTTP
 
 services:
   postgres:
@@ -81,6 +82,7 @@ services:
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
       - recordings:/var/spool/asterisk/monitor      # grabaciones MixMonitor
+      - voicemail:/var/spool/asterisk/voicemail    # buzones de voz (compartido con la api)
 
   api:
     build: ../control-plane
@@ -122,6 +124,7 @@ services:
       GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}    # gestion interna de go2rtc (modulo intercom)
     volumes:
       - recordings:/recordings:ro                        # grabaciones (lectura directa)
+      - voicemail:/voicemail                            # buzones de voz (listar/escuchar/borrar)
     ports: ["3000:3000"]
     networks: [pbxng]
 
