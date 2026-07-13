@@ -47,6 +47,17 @@ export default function AlertsPanel() {
   useEffect(() => { load(); }, []);
 
   const upd = (ev, patch) => setRules(rs => rs.map(r => r.event === ev ? { ...r, ...patch } : r));
+
+  // el interruptor guarda solo: un toggle que no persiste parece roto
+  async function toggle(r, on) {
+    upd(r.event, { enabled: on });
+    setBusy(r.event);
+    const res = await fetch('/backend/api/alerts/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...r, enabled: on }) }).then(x => x.json()).catch(() => ({ error: 1 }));
+    setBusy('');
+    if (res.error) { upd(r.event, { enabled: !on }); toast('No se pudo guardar', 'bad'); return; }
+    toast((META[r.event]?.title || r.event) + (on ? ': activada' : ': desactivada'), on ? 'ok' : 'info');
+  }
   const updParam = (ev, k, v) => setRules(rs => rs.map(r => r.event === ev ? { ...r, params: { ...(r.params || {}), [k]: v } } : r));
 
   async function saveTo() {
@@ -78,7 +89,7 @@ export default function AlertsPanel() {
             <ThemeIcon size={40} radius="md" variant="light" color="orange"><IconBellRinging size={22} /></ThemeIcon>
             <div>
               <Text fw={800} lh={1.1}>Alertas por correo</Text>
-              <Text size="xs" c="dimmed">Usa el SMTP de la empresa. Cada alerta tiene un anti-repetición: no te inunda cuando algo falla en cadena.</Text>
+              <Text size="xs" c="dimmed">Usa el SMTP de la empresa. El interruptor guarda al instante; el botón de abajo es para umbrales y destinatarios propios.</Text>
             </div>
           </Group>
           <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={load}>Refrescar</Button>
@@ -109,7 +120,7 @@ export default function AlertsPanel() {
               </Group>
               <Group gap="xs" wrap="nowrap">
                 <Tooltip label="Enviar una alerta de prueba"><ActionIcon variant="light" loading={busy === r.event + ':test'} onClick={() => test(r.event)}><IconSend size={16} /></ActionIcon></Tooltip>
-                <Switch size="md" color="teal" checked={!!r.enabled} onChange={e => upd(r.event, { enabled: e.currentTarget.checked })} />
+                <Switch size="md" color="teal" checked={!!r.enabled} disabled={busy === r.event} onChange={e => toggle(r, e.currentTarget.checked)} />
                 <ActionIcon variant="subtle" onClick={() => setOpen(o => ({ ...o, [r.event]: !isOpen }))}><IconChevronDown size={16} style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: '.15s' }} /></ActionIcon>
               </Group>
             </Group>
@@ -138,7 +149,7 @@ export default function AlertsPanel() {
                   onChange={e => updParam(r.event, 'only_new_ip', e.currentTarget.checked)} />
               )}
               <Group justify="flex-end" mt="sm">
-                <Button size="xs" leftSection={<IconDeviceFloppy size={14} />} loading={busy === r.event} onClick={() => save(r)}>Guardar</Button>
+                <Button size="xs" leftSection={<IconDeviceFloppy size={14} />} loading={busy === r.event} onClick={() => save(r)}>Guardar umbrales</Button>
               </Group>
             </Collapse>
           </Card>
