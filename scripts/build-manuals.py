@@ -99,7 +99,14 @@ def md(text):
             slug = re.sub(r'[^a-z0-9]+', '-', txt.lower()).strip('-')
             if lvl in (2, 3):
                 toc.append((lvl, txt, slug))
-            out.append(f'<h{lvl} id="{slug}">{inline(txt)}</h{lvl}>')
+            if lvl == 2:
+                m2 = re.match(r'^(\d+)\.\s*(.+)$', txt)
+                num = ('Capítulo ' + m2.group(1)) if m2 else ''
+                title = m2.group(2) if m2 else txt
+                out.append(f'<div class="chapter"><span class="num">{num}</span>'
+                           f'<h2 id="{slug}">{inline(title)}</h2></div>')
+            else:
+                out.append(f'<h{lvl} id="{slug}">{inline(txt)}</h{lvl}>')
             i += 1; continue
 
         if ln.strip() == '---':
@@ -108,9 +115,14 @@ def md(text):
             i += 1; continue
 
         # párrafo
-        buf = []
-        while i < len(lines) and lines[i].strip() and not re.match(r'^(#{1,4} |> |\||```|!\[|\s*[-*] |\s*\d+\. |---)', lines[i]):
+        buf, start = [], i
+        while i < len(lines) and lines[i].strip() and not re.match(r'^(#{1,4} |> |\||```|!\[|» |\s*[-*] |\s*\d+\. |---)', lines[i]):
             buf.append(lines[i]); i += 1
+        if i == start:      # ninguna regla matcheó Y el párrafo no consumió nada:
+            i += 1          # sin esto el compilador entra en bucle infinito y se cuelga en silencio
+            if lines[start].strip():
+                out.append('<p>' + inline(lines[start]) + '</p>')
+            continue
         out.append('<p>' + inline(' '.join(buf)) + '</p>')
 
     return '\n'.join(out), toc
@@ -119,7 +131,7 @@ def md(text):
 CSS = """
 *{box-sizing:border-box}
 body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
-.page{max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}
+.page{max-width:900px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}   /* ~A4 a 96dpi: 794px de contenido + márgenes */
 .cover{position:relative;min-height:940px;padding:0;background:#fff;color:#0f172a;display:flex;flex-direction:column}
 .cover .bar{height:14px;background:var(--accent)}
 .cover .side{position:absolute;left:0;top:14px;bottom:0;width:8px;background:linear-gradient(180deg,var(--accent),#0f1a30)}
@@ -142,10 +154,14 @@ body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Seg
 .toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
 .toc a:hover{color:var(--accent);border-left-color:var(--accent)}
 .toc a.l3{padding-left:30px;font-size:13.5px;color:#64748b}
-main{padding:44px 60px 70px}
+main{padding:44px 64px 70px}
 h1{font-size:30px;margin:0 0 22px}
-h2{font-size:23px;margin:44px 0 14px;padding-bottom:9px;border-bottom:2px solid #eef1f7;scroll-margin-top:20px}
-h3{font-size:17.5px;margin:28px 0 10px;color:#1e293b;scroll-margin-top:20px}
+h2{font-size:24px;margin:0 0 6px;padding:0;color:#0f172a;letter-spacing:-.3px;scroll-margin-top:20px}
+.chapter{margin:52px 0 20px;padding-top:22px;border-top:3px solid var(--accent)}
+.chapter:first-of-type{margin-top:0;border-top:none;padding-top:0}
+.chapter .num{display:inline-block;font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:7px}
+h3{font-size:17px;margin:30px 0 10px;color:#1e293b;padding-left:12px;border-left:3px solid #e2e8f0;scroll-margin-top:20px}
+h4{font-size:14.5px;margin:20px 0 8px;color:#475569;font-weight:700}
 p{margin:12px 0}
 code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font:13.5px/1.5 ui-monospace,Consolas,monospace;color:#be123c}
 pre{background:#0f1a30;color:#e2e8f0;padding:16px 18px;border-radius:11px;overflow:auto;margin:16px 0}
@@ -181,7 +197,10 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
   .cover{padding:60px 40px;page-break-after:always}
   .toc{page-break-after:always}
   main{padding:0 10px}
-  h2{page-break-after:avoid}
+  .chapter{page-break-before:always;page-break-after:avoid;border-top:3px solid var(--accent)}
+  .chapter:first-of-type{page-break-before:avoid}
+  h2,h3{page-break-after:avoid}
+  @page{size:A4;margin:16mm 14mm}
   figure.shot,table,pre,blockquote{page-break-inside:avoid}
   a{color:inherit;text-decoration:none}
 }

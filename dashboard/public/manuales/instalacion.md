@@ -167,6 +167,11 @@ El borde valida que llegue al núcleo (base de datos, AMI, ARI) **antes** de des
 Al terminar, el instalador imprime la contraseña inicial del usuario `admin`. Entrá al panel
 (`https://tu-dominio`) y **cambiala en el primer ingreso** — el sistema te lo va a exigir.
 
+Adentro del panel, en **Sistema → Manuales**, están estos tres manuales: se pueden leer en pantalla,
+descargar en PDF (con la versión del producto impresa en la portada) o bajar en Markdown. Van con la
+central, así que sirven también donde no hay Internet — y es lo que le entregás al cliente junto con
+el appliance.
+
 ![Pantalla de login del panel](img/inst-04-login.png)
 
 ---

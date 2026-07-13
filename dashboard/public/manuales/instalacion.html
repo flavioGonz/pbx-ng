@@ -4,7 +4,7 @@
 <style>:root{--accent:#2563eb;--soft:#2563eb14}
 *{box-sizing:border-box}
 body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
-.page{max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}
+.page{max-width:900px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}   /* ~A4 a 96dpi: 794px de contenido + márgenes */
 .cover{position:relative;min-height:940px;padding:0;background:#fff;color:#0f172a;display:flex;flex-direction:column}
 .cover .bar{height:14px;background:var(--accent)}
 .cover .side{position:absolute;left:0;top:14px;bottom:0;width:8px;background:linear-gradient(180deg,var(--accent),#0f1a30)}
@@ -27,10 +27,14 @@ body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Seg
 .toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
 .toc a:hover{color:var(--accent);border-left-color:var(--accent)}
 .toc a.l3{padding-left:30px;font-size:13.5px;color:#64748b}
-main{padding:44px 60px 70px}
+main{padding:44px 64px 70px}
 h1{font-size:30px;margin:0 0 22px}
-h2{font-size:23px;margin:44px 0 14px;padding-bottom:9px;border-bottom:2px solid #eef1f7;scroll-margin-top:20px}
-h3{font-size:17.5px;margin:28px 0 10px;color:#1e293b;scroll-margin-top:20px}
+h2{font-size:24px;margin:0 0 6px;padding:0;color:#0f172a;letter-spacing:-.3px;scroll-margin-top:20px}
+.chapter{margin:52px 0 20px;padding-top:22px;border-top:3px solid var(--accent)}
+.chapter:first-of-type{margin-top:0;border-top:none;padding-top:0}
+.chapter .num{display:inline-block;font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:7px}
+h3{font-size:17px;margin:30px 0 10px;color:#1e293b;padding-left:12px;border-left:3px solid #e2e8f0;scroll-margin-top:20px}
+h4{font-size:14.5px;margin:20px 0 8px;color:#475569;font-weight:700}
 p{margin:12px 0}
 code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font:13.5px/1.5 ui-monospace,Consolas,monospace;color:#be123c}
 pre{background:#0f1a30;color:#e2e8f0;padding:16px 18px;border-radius:11px;overflow:auto;margin:16px 0}
@@ -66,7 +70,10 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
   .cover{padding:60px 40px;page-break-after:always}
   .toc{page-break-after:always}
   main{padding:0 10px}
-  h2{page-break-after:avoid}
+  .chapter{page-break-before:always;page-break-after:avoid;border-top:3px solid var(--accent)}
+  .chapter:first-of-type{page-break-before:avoid}
+  h2,h3{page-break-after:avoid}
+  @page{size:A4;margin:16mm 14mm}
   figure.shot,table,pre,blockquote{page-break-inside:avoid}
   a{color:inherit;text-decoration:none}
 }
@@ -101,7 +108,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
   <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-antes-de-empezar">1. Antes de empezar</a><a class="l3" href="#1-1-qu-vas-a-instalar">1.1 Qué vas a instalar</a><a class="l3" href="#1-2-requisitos">1.2 Requisitos</a><a class="l2" href="#2-d-nde-instalarlo-tipos-de-host">2. Dónde instalarlo: tipos de host</a><a class="l3" href="#2-1-comparaci-n">2.1 Comparación</a><a class="l3" href="#2-2-recursos-m-nimos">2.2 Recursos mínimos</a><a class="l3" href="#2-3-proxmox-vm-o-contenedor-lxc">2.3 Proxmox: VM o contenedor LXC</a><a class="l3" href="#2-4-instalaci-n-asistida-en-proxmox">2.4 Instalación asistida en Proxmox</a><a class="l3" href="#2-5-cosas-que-arruinan-el-audio-en-cualquier-host">2.5 Cosas que arruinan el audio (en cualquier host)</a><a class="l2" href="#3-elegir-la-topolog-a">3. Elegir la topología</a><a class="l3" href="#3-1-una-sola-m-quina-recomendado-para-empezar">3.1 Una sola máquina (recomendado para empezar)</a><a class="l3" href="#3-2-dos-m-quinas-n-cleo-borde">3.2 Dos máquinas: núcleo + borde</a><a class="l2" href="#4-instalaci-n">4. Instalación</a><a class="l3" href="#4-1-descargar-e-instalar">4.1 Descargar e instalar</a><a class="l3" href="#4-2-instalaci-n-en-dos-m-quinas">4.2 Instalación en dos máquinas</a><a class="l3" href="#4-3-primer-acceso">4.3 Primer acceso</a><a class="l2" href="#5-firewall-y-nat">5. Firewall y NAT</a><a class="l3" href="#5-1-lo-que-se-publica-a-internet">5.1 Lo que se publica a Internet</a><a class="l3" href="#5-2-lo-que-nunca-se-publica">5.2 Lo que nunca se publica</a><a class="l3" href="#5-3-verificarlo-de-verdad">5.3 Verificarlo de verdad</a><a class="l2" href="#6-activar-y-desactivar-m-dulos">6. Activar y desactivar módulos</a><a class="l2" href="#7-actualizar-la-central">7. Actualizar la central</a><a class="l2" href="#8-si-algo-no-funciona">8. Si algo no funciona</a></nav>
   <main><blockquote><p><strong>Para quién es este manual</strong></p><p>Para la persona que instala PBX-NG por primera vez en un servidor: técnico, integrador o</p><p>administrador de sistemas. No hace falta saber de Asterisk; sí manejarse con una terminal Linux.</p></blockquote>
 <hr />
-<h2 id="1-antes-de-empezar">1. Antes de empezar</h2>
+<div class="chapter"><span class="num">Capítulo 1</span><h2 id="1-antes-de-empezar">Antes de empezar</h2></div>
 <h3 id="1-1-qu-vas-a-instalar">1.1 Qué vas a instalar</h3>
 <p>PBX-NG es una central telefónica que se despliega como <strong>appliance</strong>: un conjunto de módulos independientes que se activan según lo que necesite el cliente. Cada módulo es un contenedor.</p>
 <div class="tw"><table><thead><tr><th>Módulo</th><th>Qué aporta</th><th>¿Es obligatorio?</th></tr></thead><tbody><tr><td><code>core</code></td><td>Asterisk, base de datos, API y panel de administración</td><td><strong>Sí</strong></td></tr><tr><td><code>sbc</code></td><td>Borde SIP: seguridad, troncales, anclaje de medios</td><td>Solo si hay troncales SIP</td></tr><tr><td><code>turn</code></td><td>Traversía de NAT para los teléfonos WebRTC</td><td><strong>Sí</strong> si hay softphones fuera de la red</td></tr><tr><td><code>ai</code></td><td>Motor de voz: TTS (anuncios) y STT (transcripciones)</td><td>Opcional</td></tr><tr><td><code>intercom</code></td><td>Video de porteros y cámaras (RTSP → navegador)</td><td>Opcional</td></tr><tr><td><code>proxy</code></td><td>Reverse proxy con certificados TLS</td><td>Solo si no tenés uno propio</td></tr></tbody></table></div>
@@ -112,7 +119,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <p>  causa número uno de instalaciones "que registran pero no tienen audio".</p>
 <figure class="shot"><img src="img/inst-01-arquitectura.svg" alt="Diagrama de la arquitectura y sus módulos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Diagrama de la arquitectura y sus módulos<span class="fn">inst-01-arquitectura.svg</span></figcaption></figure>
 <hr />
-<h2 id="2-d-nde-instalarlo-tipos-de-host">2. Dónde instalarlo: tipos de host</h2>
+<div class="chapter"><span class="num">Capítulo 2</span><h2 id="2-d-nde-instalarlo-tipos-de-host">Dónde instalarlo: tipos de host</h2></div>
 <p>PBX-NG corre sobre Docker, así que técnicamente anda en cualquier Linux. Pero <strong>la telefonía en tiempo real no perdona la sobreventa de recursos</strong>: si el hipervisor le roba CPU a la máquina un milisegundo de más, eso se escucha como audio entrecortado. Esta sección es para elegir bien.</p>
 <h3 id="2-1-comparaci-n">2.1 Comparación</h3>
 <div class="tw"><table><thead><tr><th>Tipo de host</th><th>Cuándo conviene</th><th>Qué tener en cuenta</th></tr></thead><tbody><tr><td><strong>Servidor físico (bare metal)</strong></td><td>Centrales grandes, muchas llamadas simultáneas, grabación masiva</td><td>El mejor rendimiento de audio. Sin capas de virtualización que agreguen <em>jitter</em></td></tr><tr><td><strong>Máquina virtual (Proxmox / KVM)</strong></td><td><strong>La opción recomendada</strong> para la mayoría</td><td>Reservá la CPU (sin sobreventa). Tipo de CPU <code>host</code> para que se aproveche AES-NI en el cifrado</td></tr><tr><td><strong>Contenedor LXC (Proxmox)</strong></td><td>Cuando querés densidad y ya tenés Proxmox</td><td>Requiere habilitar <strong>anidamiento</strong> para que Docker funcione adentro. Ver 2.3</td></tr><tr><td><strong>VMware ESXi</strong></td><td>Infraestructura corporativa ya montada en VMware</td><td>Adaptador <strong>VMXNET3</strong>, reserva de CPU y sincronización horaria con VMware Tools</td></tr><tr><td><strong>Hyper-V</strong></td><td>Entornos Windows Server</td><td>Deshabilitá <em>Dynamic Memory</em> para la VM de la central</td></tr><tr><td><strong>VPS en la nube</strong></td><td>Central sin sede física, teletrabajo</td><td>Verificá que el proveedor <strong>no bloquee UDP</strong> y configurá <code>PUBLIC_IP</code> si la IP pública no está en la interfaz</td></tr></tbody></table></div>
@@ -142,14 +149,14 @@ chmod +x pbxng-proxmox.sh &amp;&amp; ./pbxng-proxmox.sh</code></pre>
 <ol><li><strong>Firewall incompleto.</strong> Ver la sección de firewall: es la causa número uno de "registra pero no</li></ol>
 <p>   hay audio".</p>
 <hr />
-<h2 id="3-elegir-la-topolog-a">3. Elegir la topología</h2>
+<div class="chapter"><span class="num">Capítulo 3</span><h2 id="3-elegir-la-topolog-a">Elegir la topología</h2></div>
 <h3 id="3-1-una-sola-m-quina-recomendado-para-empezar">3.1 Una sola máquina (recomendado para empezar)</h3>
 <p>Todo corre en un servidor. Es lo indicado para una central única, una oficina, o una prueba.</p>
 <h3 id="3-2-dos-m-quinas-n-cleo-borde">3.2 Dos máquinas: núcleo + borde</h3>
 <p>El <strong>núcleo</strong> (Asterisk, base de datos, panel) queda en la LAN, y el <strong>borde</strong> (SBC, TURN) en la DMZ, expuesto a Internet. Es la topología que se usa cuando la seguridad perimetral importa: si alguien vulnera el borde, no llega a la base de datos ni a las grabaciones.</p>
 <figure class="shot"><img src="img/inst-02-topologias.svg" alt="Topologías: una VM vs dos VMs" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Topologías: una VM vs dos VMs<span class="fn">inst-02-topologias.svg</span></figcaption></figure>
 <hr />
-<h2 id="4-instalaci-n">4. Instalación</h2>
+<div class="chapter"><span class="num">Capítulo 4</span><h2 id="4-instalaci-n">Instalación</h2></div>
 <h3 id="4-1-descargar-e-instalar">4.1 Descargar e instalar</h3>
 <pre><code>git clone https://github.com/flavioGonz/pbx-ng.git
 cd pbx-ng/docker
@@ -167,9 +174,10 @@ cd pbx-ng/docker
 <figure class="shot"><img src="img/inst-03-instalador.png" alt="Salida del instalador al terminar" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Salida del instalador al terminar<span class="fn">inst-03-instalador.png</span></figcaption></figure>
 <h3 id="4-3-primer-acceso">4.3 Primer acceso</h3>
 <p>Al terminar, el instalador imprime la contraseña inicial del usuario <code>admin</code>. Entrá al panel (<code>https://tu-dominio</code>) y <strong>cambiala en el primer ingreso</strong> — el sistema te lo va a exigir.</p>
+<p>Adentro del panel, en <strong>Sistema → Manuales</strong>, están estos tres manuales: se pueden leer en pantalla, descargar en PDF (con la versión del producto impresa en la portada) o bajar en Markdown. Van con la central, así que sirven también donde no hay Internet — y es lo que le entregás al cliente junto con el appliance.</p>
 <figure class="shot"><img src="img/inst-04-login.png" alt="Pantalla de login del panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de login del panel<span class="fn">inst-04-login.png</span></figcaption></figure>
 <hr />
-<h2 id="5-firewall-y-nat">5. Firewall y NAT</h2>
+<div class="chapter"><span class="num">Capítulo 5</span><h2 id="5-firewall-y-nat">Firewall y NAT</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Verificación: scripts/check-turn.py  ·  Panel</b> <span class="sep">›</span> <b>SBC-NG</b> <span class="sep">›</span> <b>TURN</b></div>
 <p><strong>Esta sección decide si la central funciona o no.</strong> La señalización suele pasar sola; el audio es lo primero que se rompe.</p>
 <h3 id="5-1-lo-que-se-publica-a-internet">5.1 Lo que se publica a Internet</h3>
@@ -183,7 +191,7 @@ cd pbx-ng/docker
 <p>Si la salida dice <strong><code>ALLOCATE 200 · relay = …</code></strong>, el TURN está alcanzable <strong>y</strong> autenticado. Si no, revisá <code>docs/FIREWALL.md</code>, que tiene el detalle completo y la trampa del <em>NAT hairpin</em>.</p>
 <figure class="shot"><img src="img/inst-05-turn.png" alt="Diagnóstico ICE/TURN en vivo desde el panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Diagnóstico ICE/TURN en vivo desde el panel<span class="fn">inst-05-turn.png</span></figcaption></figure>
 <hr />
-<h2 id="6-activar-y-desactivar-m-dulos">6. Activar y desactivar módulos</h2>
+<div class="chapter"><span class="num">Capítulo 6</span><h2 id="6-activar-y-desactivar-m-dulos">Activar y desactivar módulos</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Panel</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Configuración</b> <span class="sep">›</span> <b>Módulos  ·  o pbxng-ctl en la terminal</b></div>
 <p>Un módulo activo es un contenedor que existe; uno inactivo <strong>no existe</strong>. Se maneja desde el panel (<strong>Configuración → Módulos</strong>) o por línea de comandos:</p>
 <pre><code>pbxng-ctl status              # qué módulos están activos
@@ -191,14 +199,14 @@ pbxng-ctl enable  intercom    # crea el contenedor
 pbxng-ctl disable intercom    # lo destruye</code></pre>
 <figure class="shot"><img src="img/inst-06-modulos.png" alt="Panel de módulos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel de módulos<span class="fn">inst-06-modulos.png</span></figcaption></figure>
 <hr />
-<h2 id="7-actualizar-la-central">7. Actualizar la central</h2>
+<div class="chapter"><span class="num">Capítulo 7</span><h2 id="7-actualizar-la-central">Actualizar la central</h2></div>
 <p>Las actualizaciones se hacen por <strong>imagen versionada</strong>, no parchando archivos:</p>
 <pre><code>cd docker
 export PBXNG_VERSION=X.Y.Z
 ./deploy.sh                    # o ./deploy.sh --images=pbxng-X.Y.Z-images.tar.gz (sin internet)</code></pre>
 <p><code>deploy.sh</code> baja las imágenes, corre las <strong>migraciones de base de datos</strong> y levanta todo. Para volver atrás, desplegá la versión anterior. El detalle está en <code>RELEASE.md</code>.</p>
 <hr />
-<h2 id="8-si-algo-no-funciona">8. Si algo no funciona</h2>
+<div class="chapter"><span class="num">Capítulo 8</span><h2 id="8-si-algo-no-funciona">Si algo no funciona</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Panel</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Monitoreo  ·  Panel</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>SBC-NG</b> <span class="sep">›</span> <b>SIP debug</b></div>
 <div class="tw"><table><thead><tr><th>Síntoma</th><th>Dónde mirar</th></tr></thead><tbody><tr><td>El teléfono registra pero <strong>no hay audio</strong></td><td>Firewall: rango de relay del TURN y <code>30000-40000/UDP</code>. Corré <code>check-turn.py</code>.</td></tr><tr><td>El softphone web no conecta</td><td>El proxy debe permitir <strong>WebSocket</strong> en <code>/ws</code> (y con HTTP/2 <strong>desactivado</strong>).</td></tr><tr><td>El panel no carga datos</td><td>Contenedor <code>api</code>: <code>docker compose logs api</code>.</td></tr><tr><td>No entran llamadas</td><td>Estado de la troncal en <strong>Monitoreo</strong>. Activá la alerta de <em>troncal caída</em>.</td></tr></tbody></table></div>
 <figure class="shot"><img src="img/inst-07-monitor.png" alt="Panel de monitoreo con el estado de los componentes" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel de monitoreo con el estado de los componentes<span class="fn">inst-07-monitor.png</span></figcaption></figure></main>

@@ -4,7 +4,7 @@
 <style>:root{--accent:#7c3aed;--soft:#7c3aed14}
 *{box-sizing:border-box}
 body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
-.page{max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}
+.page{max-width:900px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}   /* ~A4 a 96dpi: 794px de contenido + márgenes */
 .cover{position:relative;min-height:940px;padding:0;background:#fff;color:#0f172a;display:flex;flex-direction:column}
 .cover .bar{height:14px;background:var(--accent)}
 .cover .side{position:absolute;left:0;top:14px;bottom:0;width:8px;background:linear-gradient(180deg,var(--accent),#0f1a30)}
@@ -27,10 +27,14 @@ body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Seg
 .toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
 .toc a:hover{color:var(--accent);border-left-color:var(--accent)}
 .toc a.l3{padding-left:30px;font-size:13.5px;color:#64748b}
-main{padding:44px 60px 70px}
+main{padding:44px 64px 70px}
 h1{font-size:30px;margin:0 0 22px}
-h2{font-size:23px;margin:44px 0 14px;padding-bottom:9px;border-bottom:2px solid #eef1f7;scroll-margin-top:20px}
-h3{font-size:17.5px;margin:28px 0 10px;color:#1e293b;scroll-margin-top:20px}
+h2{font-size:24px;margin:0 0 6px;padding:0;color:#0f172a;letter-spacing:-.3px;scroll-margin-top:20px}
+.chapter{margin:52px 0 20px;padding-top:22px;border-top:3px solid var(--accent)}
+.chapter:first-of-type{margin-top:0;border-top:none;padding-top:0}
+.chapter .num{display:inline-block;font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:7px}
+h3{font-size:17px;margin:30px 0 10px;color:#1e293b;padding-left:12px;border-left:3px solid #e2e8f0;scroll-margin-top:20px}
+h4{font-size:14.5px;margin:20px 0 8px;color:#475569;font-weight:700}
 p{margin:12px 0}
 code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font:13.5px/1.5 ui-monospace,Consolas,monospace;color:#be123c}
 pre{background:#0f1a30;color:#e2e8f0;padding:16px 18px;border-radius:11px;overflow:auto;margin:16px 0}
@@ -66,7 +70,10 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
   .cover{padding:60px 40px;page-break-after:always}
   .toc{page-break-after:always}
   main{padding:0 10px}
-  h2{page-break-after:avoid}
+  .chapter{page-break-before:always;page-break-after:avoid;border-top:3px solid var(--accent)}
+  .chapter:first-of-type{page-break-before:avoid}
+  h2,h3{page-break-after:avoid}
+  @page{size:A4;margin:16mm 14mm}
   figure.shot,table,pre,blockquote{page-break-inside:avoid}
   a{color:inherit;text-decoration:none}
 }
@@ -98,15 +105,15 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
       <div class="foot">© 2026 PBX-NG · Este documento puede actualizarse sin previo aviso.</div>
     </div>
   </header>
-  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-orden-de-puesta-en-marcha">1. Orden de puesta en marcha</a><a class="l2" href="#2-primer-ingreso-al-panel">2. Primer ingreso al panel</a><a class="l3" href="#2-1-d-nde-se-entra">2.1 Dónde se entra</a><a class="l3" href="#2-2-credenciales-por-defecto">2.2 Credenciales por defecto</a><a class="l3" href="#2-3-otras-credenciales-que-genera-el-instalador">2.3 Otras credenciales que genera el instalador</a><a class="l3" href="#2-4-roles-qui-n-ve-qu">2.4 Roles: quién ve qué</a><a class="l2" href="#3-configuraci-n-inicial-del-sistema">3. Configuración inicial del sistema</a><a class="l3" href="#3-1-m-dulos">3.1 Módulos</a><a class="l3" href="#3-2-proxy-tls">3.2 Proxy / TLS</a><a class="l3" href="#3-3-componentes">3.3 Componentes</a><a class="l3" href="#3-4-branding">3.4 Branding</a><a class="l3" href="#3-5-audios-e-integraciones">3.5 Audios e Integraciones</a><a class="l2" href="#4-sbc-ng-el-borde-de-la-central">4. SBC-NG · el borde de la central</a><a class="l3" href="#4-1-qu-es-el-sbc-y-por-qu-existe">4.1 ¿Qué es el SBC y por qué existe?</a><a class="l3" href="#4-2-monitoreo">4.2 Monitoreo</a><a class="l3" href="#4-3-seguridad">4.3 Seguridad</a><a class="l3" href="#4-4-ruteo-operadores-lcr">4.4 Ruteo → Operadores (LCR)</a><a class="l3" href="#4-5-ruteo-manipulaci-n-sip">4.5 Ruteo → Manipulación SIP</a><a class="l3" href="#4-6-ruteo-dispatcher">4.6 Ruteo → Dispatcher</a><a class="l3" href="#4-7-ruteo-remotos">4.7 Ruteo → Remotos</a><a class="l3" href="#4-8-red-y-media-red">4.8 Red y Media → Red</a><a class="l3" href="#4-9-red-y-media-rtpengine">4.9 Red y Media → rtpengine</a><a class="l3" href="#4-10-red-y-media-sip-debug">4.10 Red y Media → SIP debug</a><a class="l3" href="#4-11-turn">4.11 TURN</a><a class="l3" href="#4-12-sistema-m-dulos-y-configuraci-n">4.12 Sistema → Módulos y Configuración</a><a class="l2" href="#5-asterisk-el-n-cleo">5. Asterisk · el núcleo</a><a class="l2" href="#6-troncales">6. Troncales</a><a class="l3" href="#5-1-troncal-sip-con-un-operador">5.1 Troncal SIP con un operador</a><a class="l3" href="#5-2-troncal-webrtc-unir-dos-centrales">5.2 Troncal WebRTC (unir dos centrales)</a><a class="l3" href="#5-3-activ-la-alerta">5.3 Activá la alerta</a><a class="l2" href="#7-rutas-salientes-qu-se-marca-y-por-d-nde-sale">7. Rutas salientes · qué se marca y por dónde sale</a><a class="l2" href="#8-rutas-entrantes-qu-pasa-cuando-te-llaman">8. Rutas entrantes · qué pasa cuando te llaman</a><a class="l2" href="#9-internos">9. Internos</a><a class="l3" href="#8-1-crear-un-interno">8.1 Crear un interno</a><a class="l3" href="#8-2-webrtc-o-sip">8.2 ¿WebRTC o SIP?</a><a class="l3" href="#8-3-tel-fonos-f-sicos">8.3 Teléfonos físicos</a><a class="l2" href="#10-correo-saliente">10. Correo saliente</a><a class="l2" href="#11-entrega-del-tel-fono-qr-y-enlace-de-acceso">11. Entrega del teléfono: QR y enlace de acceso</a><a class="l3" href="#10-1-c-mo-se-manda">10.1 Cómo se manda</a><a class="l3" href="#10-2-qu-recibe-la-persona">10.2 Qué recibe la persona</a><a class="l3" href="#10-3-qu-lleva-adentro-el-enlace">10.3 Qué lleva adentro el enlace</a><a class="l3" href="#10-4-reglas-del-enlace">10.4 Reglas del enlace</a><a class="l2" href="#12-aplicaciones">12. Aplicaciones</a><a class="l3" href="#11-1-colas">11.1 Colas</a><a class="l3" href="#11-2-ivr">11.2 IVR</a><a class="l3" href="#11-3-buzones-de-voz">11.3 Buzones de voz</a><a class="l3" href="#11-4-conferencias-grupos-de-timbrado-paging-y-c-digos">11.4 Conferencias, grupos de timbrado, paging y códigos</a><a class="l2" href="#13-alertas">13. Alertas</a><a class="l2" href="#14-grabaciones">14. Grabaciones</a><a class="l2" href="#15-seguridad">15. Seguridad</a><a class="l2" href="#16-usuarios-y-roles">16. Usuarios y roles</a></nav>
+  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-orden-de-puesta-en-marcha">1. Orden de puesta en marcha</a><a class="l2" href="#2-primer-ingreso-al-panel">2. Primer ingreso al panel</a><a class="l3" href="#2-1-d-nde-se-entra">2.1 Dónde se entra</a><a class="l3" href="#2-2-credenciales-por-defecto">2.2 Credenciales por defecto</a><a class="l3" href="#2-3-otras-credenciales-que-genera-el-instalador">2.3 Otras credenciales que genera el instalador</a><a class="l3" href="#2-4-roles-qui-n-ve-qu">2.4 Roles: quién ve qué</a><a class="l2" href="#3-configuraci-n-inicial-del-sistema">3. Configuración inicial del sistema</a><a class="l3" href="#3-1-m-dulos">3.1 Módulos</a><a class="l3" href="#3-2-proxy-tls">3.2 Proxy / TLS</a><a class="l3" href="#3-3-componentes">3.3 Componentes</a><a class="l3" href="#3-4-branding">3.4 Branding</a><a class="l3" href="#3-5-audios-e-integraciones">3.5 Audios e Integraciones</a><a class="l2" href="#4-sbc-ng-el-borde-de-la-central">4. SBC-NG · el borde de la central</a><a class="l3" href="#4-1-qu-es-el-sbc-y-por-qu-existe">4.1 ¿Qué es el SBC y por qué existe?</a><a class="l3" href="#4-2-monitoreo">4.2 Monitoreo</a><a class="l3" href="#4-3-seguridad">4.3 Seguridad</a><a class="l3" href="#4-4-ruteo-operadores-lcr">4.4 Ruteo → Operadores (LCR)</a><a class="l3" href="#4-5-ruteo-manipulaci-n-sip">4.5 Ruteo → Manipulación SIP</a><a class="l3" href="#4-6-ruteo-dispatcher">4.6 Ruteo → Dispatcher</a><a class="l3" href="#4-7-ruteo-remotos">4.7 Ruteo → Remotos</a><a class="l3" href="#4-8-red-y-media-red">4.8 Red y Media → Red</a><a class="l3" href="#4-9-red-y-media-rtpengine">4.9 Red y Media → rtpengine</a><a class="l3" href="#4-10-red-y-media-sip-debug">4.10 Red y Media → SIP debug</a><a class="l3" href="#4-11-turn">4.11 TURN</a><a class="l3" href="#4-12-sistema-m-dulos-y-configuraci-n">4.12 Sistema → Módulos y Configuración</a><a class="l2" href="#5-asterisk-el-n-cleo">5. Asterisk · el núcleo</a><a class="l2" href="#6-troncales">6. Troncales</a><a class="l3" href="#5-1-troncal-sip-con-un-operador">5.1 Troncal SIP con un operador</a><a class="l3" href="#5-2-troncal-webrtc-unir-dos-centrales">5.2 Troncal WebRTC (unir dos centrales)</a><a class="l3" href="#5-3-activ-la-alerta">5.3 Activá la alerta</a><a class="l2" href="#7-rutas-salientes-qu-se-marca-y-por-d-nde-sale">7. Rutas salientes · qué se marca y por dónde sale</a><a class="l2" href="#8-rutas-entrantes-qu-pasa-cuando-te-llaman">8. Rutas entrantes · qué pasa cuando te llaman</a><a class="l2" href="#9-internos">9. Internos</a><a class="l3" href="#8-1-crear-un-interno">8.1 Crear un interno</a><a class="l3" href="#8-2-webrtc-o-sip">8.2 ¿WebRTC o SIP?</a><a class="l3" href="#8-3-tel-fonos-f-sicos">8.3 Teléfonos físicos</a><a class="l2" href="#10-correo-saliente">10. Correo saliente</a><a class="l2" href="#11-entrega-del-tel-fono-qr-y-enlace-de-acceso">11. Entrega del teléfono: QR y enlace de acceso</a><a class="l3" href="#10-1-c-mo-se-manda">10.1 Cómo se manda</a><a class="l3" href="#10-2-qu-recibe-la-persona">10.2 Qué recibe la persona</a><a class="l3" href="#10-3-qu-lleva-adentro-el-enlace">10.3 Qué lleva adentro el enlace</a><a class="l3" href="#10-4-reglas-del-enlace">10.4 Reglas del enlace</a><a class="l2" href="#12-aplicaciones">12. Aplicaciones</a><a class="l3" href="#11-1-colas">11.1 Colas</a><a class="l3" href="#11-2-ivr">11.2 IVR</a><a class="l3" href="#11-3-buzones-de-voz">11.3 Buzones de voz</a><a class="l3" href="#11-4-conferencias-grupos-de-timbrado-paging-y-c-digos">11.4 Conferencias, grupos de timbrado, paging y códigos</a><a class="l2" href="#13-alertas">13. Alertas</a><a class="l2" href="#14-grabaciones">14. Grabaciones</a><a class="l2" href="#15-seguridad">15. Seguridad</a><a class="l2" href="#16-usuarios-y-roles">16. Usuarios y roles</a><a class="l2" href="#17-clientes-crm">17. Clientes (CRM)</a><a class="l3" href="#17-1-para-qu-existe">17.1 Para qué existe</a><a class="l3" href="#17-2-qu-guarda-cada-ficha">17.2 Qué guarda cada ficha</a><a class="l3" href="#17-3-encuesta-post-llamada">17.3 Encuesta post-llamada</a><a class="l2" href="#18-qu-ve-el-softphone-del-crm-y-qu-no">18. Qué ve el softphone del CRM (y qué no)</a><a class="l3" href="#18-1-el-softphone-solo-ve-el-crm-si-tiene-sesi-n-de-plataforma">18.1 El softphone solo ve el CRM si tiene sesión de plataforma</a><a class="l3" href="#18-2-qu-puede-hacer-cada-rol">18.2 Qué puede hacer cada rol</a><a class="l3" href="#18-3-lo-que-el-softphone-nunca-ve">18.3 Lo que el softphone nunca ve</a><a class="l2" href="#19-intercom-porteros-y-c-maras">19. Intercom · porteros y cámaras</a><a class="l3" href="#19-1-para-qu-existe">19.1 Para qué existe</a><a class="l3" href="#19-2-c-mo-se-arma">19.2 Cómo se arma</a><a class="l3" href="#19-3-c-mo-llega-el-video-al-navegador">19.3 Cómo llega el video al navegador</a><a class="l3" href="#19-4-probar-que-funciona">19.4 Probar que funciona</a><a class="l2" href="#20-historial-de-llamadas">20. Historial de llamadas</a><a class="l2" href="#21-monitoreo-en-vivo-wallboard-y-mapa">21. Monitoreo en vivo, Wallboard y Mapa</a><a class="l3" href="#21-1-llamadas-en-vivo">21.1 Llamadas en vivo</a><a class="l3" href="#21-2-wallboard">21.2 Wallboard</a><a class="l3" href="#21-3-mapa">21.3 Mapa</a><a class="l3" href="#21-4-resumen">21.4 Resumen</a><a class="l2" href="#22-topolog-a">22. Topología</a><a class="l2" href="#23-tel-fonos-f-sicos-aprovisionamiento">23. Teléfonos físicos (aprovisionamiento)</a><a class="l3" href="#23-1-para-qu-existe">23.1 Para qué existe</a><a class="l2" href="#24-ivr-el-men-de-bienvenida">24. IVR · el menú de bienvenida</a><a class="l3" href="#24-1-para-qu-existe">24.1 Para qué existe</a><a class="l3" href="#24-2-c-mo-se-arma">24.2 Cómo se arma</a><a class="l2" href="#25-ia-voz">25. IA & Voz</a><a class="l2" href="#26-click-to-call">26. Click-to-Call</a><a class="l2" href="#27-notificaciones-push">27. Notificaciones push</a><a class="l2" href="#28-dialplan">28. Dialplan</a><a class="l2" href="#29-empresas-multi-tenant">29. Empresas (multi-tenant)</a><a class="l2" href="#30-base-de-datos">30. Base de datos</a><a class="l2" href="#31-manuales">31. Manuales</a><a class="l3" href="#17-1-los-recuadros-imagen-pendiente">17.1 Los recuadros "Imagen pendiente"</a></nav>
   <main><blockquote><p><strong>Para quién es este manual</strong></p><p>Para el administrador de la central: la persona que la pone en marcha, conecta las troncales,</p><p>crea los internos y decide cómo entran y salen las llamadas. Se lee en orden la primera vez, y</p><p>después se usa como referencia por sección.</p></blockquote>
 <hr />
-<h2 id="1-orden-de-puesta-en-marcha">1. Orden de puesta en marcha</h2>
+<div class="chapter"><span class="num">Capítulo 1</span><h2 id="1-orden-de-puesta-en-marcha">Orden de puesta en marcha</h2></div>
 <p>Este es el recorrido completo. Si lo seguís en este orden, cada paso se apoya en el anterior y no vas a tener que volver atrás.</p>
 <div class="tw"><table><thead><tr><th>#</th><th>Paso</th><th>Dónde</th><th>Por qué va acá</th></tr></thead><tbody><tr><td>0</td><td><strong>Entrar al panel</strong></td><td><code>https://tu-dominio</code> · usuario <code>admin</code></td><td>La contraseña la imprimió el instalador; el sistema te obliga a cambiarla</td></tr><tr><td>1</td><td>Módulos activos</td><td>Configuración → Módulos</td><td>Define qué contenedores existen</td></tr><tr><td>2</td><td>Dominio y certificado</td><td>Configuración → Proxy / TLS</td><td>Sin TLS no hay softphone web</td></tr><tr><td>3</td><td>Componentes (IPs)</td><td>Configuración → Componentes</td><td>El panel necesita saber dónde vive cada pieza</td></tr><tr><td>4</td><td>Marca</td><td>Configuración → Branding</td><td>Aparece en el panel y en los correos</td></tr><tr><td>5</td><td><strong>SBC</strong></td><td>SBC-NG</td><td>El borde: seguridad, operadores, medios</td></tr><tr><td>6</td><td>Troncal</td><td>Troncales</td><td>La línea con el mundo</td></tr><tr><td>7</td><td>Rutas salientes</td><td>Rutas → Salientes</td><td>Qué se marca y por dónde sale</td></tr><tr><td>8</td><td>Rutas entrantes</td><td>Rutas → Entrantes</td><td>Qué pasa cuando te llaman</td></tr><tr><td>9</td><td>Internos</td><td>Internos</td><td>Las personas</td></tr><tr><td>10</td><td>Correo</td><td>Configuración → Email</td><td>Sin esto no hay QR, ni buzón por mail, ni alertas</td></tr><tr><td>11</td><td>Entrega de teléfonos</td><td>Internos → Enviar acceso</td><td>El QR y el enlace</td></tr><tr><td>12</td><td>Aplicaciones</td><td>Aplicaciones</td><td>Colas, IVR, buzones, conferencias</td></tr><tr><td>13</td><td>Alertas</td><td>Configuración → Alertas</td><td>Que la central te avise a vos</td></tr></tbody></table></div>
 <figure class="shot"><img src="img/cfg-01-panel.png" alt="Vista general del panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Vista general del panel<span class="fn">cfg-01-panel.png</span></figcaption></figure>
 <hr />
-<h2 id="2-primer-ingreso-al-panel">2. Primer ingreso al panel</h2>
+<div class="chapter"><span class="num">Capítulo 2</span><h2 id="2-primer-ingreso-al-panel">Primer ingreso al panel</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Navegador</b> <span class="sep">›</span> <b>https://tu-dominio</b></div>
 <h3 id="2-1-d-nde-se-entra">2.1 Dónde se entra</h3>
 <p>El panel vive en el dominio que configuraste durante la instalación:</p>
@@ -127,7 +134,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <p>Los usuarios se crean en <strong>Usuarios</strong>, y ahí se les asigna el rol y su <strong>interno</strong>.</p>
 <figure class="shot"><img src="img/cfg-14-usuarios.png" alt="Usuarios y roles" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Usuarios y roles<span class="fn">cfg-14-usuarios.png</span></figcaption></figure>
 <hr />
-<h2 id="3-configuraci-n-inicial-del-sistema">3. Configuración inicial del sistema</h2>
+<div class="chapter"><span class="num">Capítulo 3</span><h2 id="3-configuraci-n-inicial-del-sistema">Configuración inicial del sistema</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Configuración</b></div>
 <p>Todo esto vive en <strong>Configuración</strong>, y son los cimientos.</p>
 <h3 id="3-1-m-dulos">3.1 Módulos</h3>
@@ -174,7 +181,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <p><strong>Audios</strong>: los mensajes del sistema. Se pueden subir archivos, pero lo normal es <strong>escribir el texto y que lo sintetice la central</strong> con su propia voz.</p>
 <p><strong>Integraciones</strong>: notificaciones a Telegram/WhatsApp y otros ganchos externos.</p>
 <hr />
-<h2 id="4-sbc-ng-el-borde-de-la-central">4. SBC-NG · el borde de la central</h2>
+<div class="chapter"><span class="num">Capítulo 4</span><h2 id="4-sbc-ng-el-borde-de-la-central">SBC-NG · el borde de la central</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>SBC-NG</b></div>
 <p>Esta es la sección más importante del sistema, y la que menos se entiende. Vale la pena leerla entera <strong>antes</strong> de conectar la primera troncal.</p>
 <h3 id="4-1-qu-es-el-sbc-y-por-qu-existe">4.1 ¿Qué es el SBC y por qué existe?</h3>
@@ -224,7 +231,14 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <figure class="shot"><img src="img/cfg-24-sbc-dispatcher.png" alt="SBC · Dispatcher" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>SBC · Dispatcher<span class="fn">cfg-24-sbc-dispatcher.png</span></figcaption></figure>
 <h3 id="4-7-ruteo-remotos">4.7 Ruteo → Remotos</h3>
 <div class="nav"><span class="navk">Cómo llegar</span><b>SBC-NG</b> <span class="sep">›</span> <b>Ruteo</b> <span class="sep">›</span> <b>Remotos</b></div>
-<p>La lista de <strong>internos que están registrados a través del SBC</strong> en este momento: el teleworker con el softphone en casa, el vendedor con el celular. Muestra desde qué IP se registró cada uno. Es la foto de quién está afuera y conectado.</p>
+<p><strong>Qué es.</strong> La lista, en vivo, de los internos que <strong>no están en la oficina</strong>: el que trabaja desde su casa, el vendedor con el softphone en el celular, la sucursal chica sin central propia. Todos esos no se registran directo contra el Asterisk — se registran <strong>a través del SBC</strong>, que es el único que da la cara a Internet.</p>
+<p><strong>Por qué existe esta pantalla.</strong> Porque un interno remoto es el punto más frágil de la central, y el que más preguntas genera:</p>
+<ul><li><em>"¿Está conectado o no?"</em> Acá lo ves, con la hora del último registro.</li><li><em>"¿Desde dónde se conecta?"</em> Muestra la <strong>IP de origen</strong>. Si el teleworker de Montevideo aparece</li></ul>
+<p>  conectándose desde otro país, tenés un problema de seguridad — y esta es la pantalla donde se ve.</p>
+<ul><li><em>"¿Por qué no le entran las llamadas?"</em> Si el interno no figura acá, no está registrado: no es un</li></ul>
+<p>  problema de rutas ni del operador, es que el teléfono no llegó a la central.</p>
+<p><strong>Ejemplo de uso real.</strong> Un vendedor dice que "el teléfono no le suena". Antes de revisar colas, rutas y troncales, mirás Remotos: si su interno no está en la lista, el diagnóstico terminó ahí — su softphone no está registrado (se quedó sin internet, cerró la app, o se le venció el acceso). Si <strong>sí</strong> está en la lista, entonces el problema es aguas abajo y seguís buscando.</p>
+<blockquote><p><strong>La diferencia con "Internos" del menú principal:</strong> aquella pantalla lista <strong>todos</strong> los internos</p><p>que existen (la configuración). Esta lista solo los que están <strong>registrados desde afuera, ahora</strong></p><p>(la realidad). Una es el padrón; la otra, quién vino a votar.</p></blockquote>
 <figure class="shot"><img src="img/cfg-25-sbc-remotos.png" alt="SBC · Extensiones remotas" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>SBC · Extensiones remotas<span class="fn">cfg-25-sbc-remotos.png</span></figcaption></figure>
 <h3 id="4-8-red-y-media-red">4.8 Red y Media → Red</h3>
 <div class="nav"><span class="navk">Cómo llegar</span><b>SBC-NG</b> <span class="sep">›</span> <b>Red y Media</b> <span class="sep">›</span> <b>Red</b></div>
@@ -249,14 +263,14 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <div class="nav"><span class="navk">Cómo llegar</span><b>SBC-NG</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Módulos  /  SBC-NG</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Configuración</b></div>
 <p><strong>Módulos</strong>: qué módulos de Kamailio están cargados. <strong>Configuración</strong>: el archivo de configuración del SBC, para verlo o editarlo cuando hace falta algo que la interfaz no cubre. Es la puerta de escape; usala con cuidado.</p>
 <hr />
-<h2 id="5-asterisk-el-n-cleo">5. Asterisk · el núcleo</h2>
+<div class="chapter"><span class="num">Capítulo 5</span><h2 id="5-asterisk-el-n-cleo">Asterisk · el núcleo</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Asterisk</b></div>
 <p>La consola de Asterisk (<strong>Asterisk</strong> en el menú) es la ventana al motor de llamadas:</p>
 <div class="tw"><table><thead><tr><th>Pestaña</th><th>Qué muestra</th></tr></thead><tbody><tr><td><strong>Núcleo</strong></td><td>Versión, uptime, llamadas activas, canales</td></tr><tr><td><strong>Internos</strong></td><td>Estado real de cada endpoint (registrado, en llamada, no alcanzable)</td></tr><tr><td><strong>Troncal SBC</strong></td><td>El enlace entre el núcleo y el borde</td></tr><tr><td><strong>Red</strong></td><td>Interfaces y conectividad</td></tr><tr><td><strong>Dialplan</strong></td><td>El plan de marcación generado, tal cual lo ve Asterisk</td></tr><tr><td><strong>Rutas</strong></td><td>Las rutas resueltas</td></tr><tr><td><strong>Seguridad</strong></td><td>Fail2ban sobre los registros SIP</td></tr></tbody></table></div>
 <p>Casi nunca vas a tener que tocar nada acá: el panel genera el dialplan solo a partir de las colas, los IVR y las rutas. Es para <strong>ver</strong> y para <strong>diagnosticar</strong>.</p>
 <figure class="shot"><img src="img/cfg-30-asterisk.png" alt="Consola de Asterisk" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Consola de Asterisk<span class="fn">cfg-30-asterisk.png</span></figcaption></figure>
 <hr />
-<h2 id="6-troncales">6. Troncales</h2>
+<div class="chapter"><span class="num">Capítulo 6</span><h2 id="6-troncales">Troncales</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>SBC-NG</b> <span class="sep">›</span> <b>Troncales</b></div>
 <p>La <strong>troncal</strong> es la línea que te conecta con el mundo.</p>
 <h3 id="5-1-troncal-sip-con-un-operador">5.1 Troncal SIP con un operador</h3>
@@ -269,7 +283,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <h3 id="5-3-activ-la-alerta">5.3 Activá la alerta</h3>
 <p><strong>Encendé la alerta de "troncal caída"</strong> (Configuración → Alertas). Si la troncal se corta, dejás de recibir llamadas — y sin alerta te enterás cuando un cliente se queja, horas después.</p>
 <hr />
-<h2 id="7-rutas-salientes-qu-se-marca-y-por-d-nde-sale">7. Rutas salientes · qué se marca y por dónde sale</h2>
+<div class="chapter"><span class="num">Capítulo 7</span><h2 id="7-rutas-salientes-qu-se-marca-y-por-d-nde-sale">Rutas salientes · qué se marca y por dónde sale</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Rutas</b> <span class="sep">›</span> <b>Salientes</b></div>
 <p>En <strong>Rutas → Salientes</strong>. Cada regla es un patrón de marcación y qué hacer con él.</p>
 <div class="tw"><table><thead><tr><th>Campo</th><th>Qué hace</th><th>Ejemplo</th></tr></thead><tbody><tr><td><strong>Patrón</strong></td><td>Qué números matchea</td><td><code>_0X.</code> (todo lo que empieza con 0)</td></tr><tr><td><strong>Strip</strong></td><td>Dígitos a quitar del principio</td><td><code>1</code> (saca el 0)</td></tr><tr><td><strong>Prepend</strong></td><td>Qué agregar adelante</td><td><code>598</code></td></tr><tr><td><strong>Caller ID</strong></td><td>Con qué número te ven</td><td><code>+59824001234</code></td></tr><tr><td><strong>Troncal</strong></td><td>Por dónde sale</td><td>La troncal o el SBC</td></tr></tbody></table></div>
@@ -277,7 +291,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <blockquote><p>Las reglas se evalúan <strong>de arriba hacia abajo</strong>. Poné las más específicas primero (emergencias,</p><p>internacional) y las genéricas al final.</p></blockquote>
 <figure class="shot"><img src="img/cfg-32-rutas-salientes.png" alt="Rutas salientes" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Rutas salientes<span class="fn">cfg-32-rutas-salientes.png</span></figcaption></figure>
 <hr />
-<h2 id="8-rutas-entrantes-qu-pasa-cuando-te-llaman">8. Rutas entrantes · qué pasa cuando te llaman</h2>
+<div class="chapter"><span class="num">Capítulo 8</span><h2 id="8-rutas-entrantes-qu-pasa-cuando-te-llaman">Rutas entrantes · qué pasa cuando te llaman</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Rutas</b> <span class="sep">›</span> <b>Entrantes</b></div>
 <p>En <strong>Rutas → Entrantes</strong>. Una ruta entrante toma el número al que llamaron (<strong>DID</strong>) y lo manda a un destino.</p>
 <div class="tw"><table><thead><tr><th>Campo</th><th>Qué es</th></tr></thead><tbody><tr><td><strong>DID</strong></td><td>El número que te asignó el operador</td></tr><tr><td><strong>Nombre</strong></td><td>Para identificarla en la lista</td></tr><tr><td><strong>Destino</strong></td><td>Interno, cola, IVR, buzón o conferencia</td></tr></tbody></table></div>
@@ -285,7 +299,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <blockquote><p>Si una llamada entrante "no llega a ningún lado", el 90% de las veces es que **falta la ruta</p><p>entrante** para ese DID, o que el operador te está mandando el número en otro formato del que</p><p>cargaste (con o sin el código de país). Miralo en <strong>SBC → SIP debug</strong>.</p></blockquote>
 <figure class="shot"><img src="img/cfg-05-rutas.png" alt="Rutas entrantes" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Rutas entrantes<span class="fn">cfg-05-rutas.png</span></figcaption></figure>
 <hr />
-<h2 id="9-internos">9. Internos</h2>
+<div class="chapter"><span class="num">Capítulo 9</span><h2 id="9-internos">Internos</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Internos</b></div>
 <h3 id="8-1-crear-un-interno">8.1 Crear un interno</h3>
 <p>En <strong>Internos → Nuevo</strong>. Lo mínimo es el número y el nombre. Cada interno nace con su contraseña SIP generada y su <strong>buzón de voz activado</strong> (PIN inicial = su número).</p>
@@ -298,7 +312,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <h3 id="8-3-tel-fonos-f-sicos">8.3 Teléfonos físicos</h3>
 <p>En <strong>Teléfonos</strong> se aprovisionan por MAC (Yealink, Grandstream): el teléfono baja su configuración solo al arrancar.</p>
 <hr />
-<h2 id="10-correo-saliente">10. Correo saliente</h2>
+<div class="chapter"><span class="num">Capítulo 10</span><h2 id="10-correo-saliente">Correo saliente</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Configuración</b> <span class="sep">›</span> <b>Email por empresa</b></div>
 <p><strong>Sin esto no funciona el envío del QR, ni el buzón por correo, ni las alertas.</strong> Es de las primeras cosas que conviene dejar andando.</p>
 <p>En <strong>Configuración → Email</strong>:</p>
@@ -309,7 +323,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <blockquote><p>Alternativa más robusta para una cuenta <code>no-reply</code>: usar el <strong>SMTP relay</strong> de Google autorizando</p><p>la IP pública de la central. No hay contraseña que rotar ni que se venza.</p></blockquote>
 <figure class="shot"><img src="img/cfg-10-email.png" alt="Configuración de correo" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Configuración de correo<span class="fn">cfg-10-email.png</span></figcaption></figure>
 <hr />
-<h2 id="11-entrega-del-tel-fono-qr-y-enlace-de-acceso">11. Entrega del teléfono: QR y enlace de acceso</h2>
+<div class="chapter"><span class="num">Capítulo 11</span><h2 id="11-entrega-del-tel-fono-qr-y-enlace-de-acceso">Entrega del teléfono: QR y enlace de acceso</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Internos</b> <span class="sep">›</span> <b>(elegir el interno)</b> <span class="sep">›</span> <b>Enviar acceso por correo</b></div>
 <p>Este es el proceso que reemplaza al "te paso la contraseña por WhatsApp".</p>
 <h3 id="10-1-c-mo-se-manda">10.1 Cómo se manda</h3>
@@ -330,7 +344,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <blockquote><p><strong>Para que el usuario vea clientes e intercom</strong>, el interno tiene que tener un <strong>usuario asociado</strong></p><p>en <strong>Usuarios</strong> (con su rol). Si no lo tiene, el enlace configura el teléfono igual, pero sin</p><p>sesión en la plataforma.</p></blockquote>
 <figure class="shot"><img src="img/cfg-33-enviar-acceso.png" alt="Enviar acceso desde el panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Enviar acceso desde el panel<span class="fn">cfg-33-enviar-acceso.png</span></figcaption></figure>
 <hr />
-<h2 id="12-aplicaciones">12. Aplicaciones</h2>
+<div class="chapter"><span class="num">Capítulo 12</span><h2 id="12-aplicaciones">Aplicaciones</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Aplicaciones</b></div>
 <h3 id="11-1-colas">11.1 Colas</h3>
 <p>En <strong>Aplicaciones → Colas → Nueva cola</strong>. Tres pestañas.</p>
@@ -349,28 +363,179 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <h3 id="11-4-conferencias-grupos-de-timbrado-paging-y-c-digos">11.4 Conferencias, grupos de timbrado, paging y códigos</h3>
 <p>Salas de conferencia con PIN, grupos que suenan a la vez, voceo por parlantes, y los códigos de función (<code><em>97</code>, <code></em>98</code>, etc.).</p>
 <hr />
-<h2 id="13-alertas">13. Alertas</h2>
+<div class="chapter"><span class="num">Capítulo 13</span><h2 id="13-alertas">Alertas</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Configuración</b> <span class="sep">›</span> <b>Alertas</b></div>
 <p>En <strong>Configuración → Alertas</strong>. Cargá el destinatario y encendé lo que quieras. Cada alerta tiene un botón de <strong>prueba</strong> que manda el correo sin necesidad de activarla.</p>
 <div class="tw"><table><thead><tr><th>Alerta</th><th>Cuándo llega</th></tr></thead><tbody><tr><td><strong>Estamos bajo ataque</strong></td><td>Ráfaga de registros fallidos. Llega <strong>una</strong> alerta agrupada, no una por IP</td></tr><tr><td>IP bloqueada</td><td>El firewall bloqueó una IP (con país e ISP)</td></tr><tr><td>Inicio de sesión al panel</td><td>Por defecto, <strong>solo desde una IP nueva</strong></td></tr><tr><td>Intentos fallidos al panel</td><td>Posible fuerza bruta</td></tr><tr><td><strong>Troncal caída / recuperada</strong></td><td>Se cortó (o volvió) la línea</td></tr><tr><td>Servicio caído</td><td>Base de datos o Asterisk sin conexión</td></tr><tr><td>Cola sin agentes</td><td>En horario laboral no hay quien atienda</td></tr><tr><td>Llamada muy larga</td><td>Primer síntoma de fraude telefónico</td></tr><tr><td>Salientes fuera de horario</td><td>El patrón clásico: ráfaga de madrugada</td></tr><tr><td>Llamada internacional</td><td>Destinos que no deberían marcarse</td></tr><tr><td>Resumen diario</td><td>Un correo a la mañana con lo de ayer</td></tr></tbody></table></div>
 <figure class="shot"><img src="img/cfg-11-alertas.png" alt="Panel de alertas" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel de alertas<span class="fn">cfg-11-alertas.png</span></figcaption></figure>
 <hr />
-<h2 id="14-grabaciones">14. Grabaciones</h2>
+<div class="chapter"><span class="num">Capítulo 14</span><h2 id="14-grabaciones">Grabaciones</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Grabaciones</b></div>
 <p>Se graba por interno, por cola o todo. Se escuchan desde <strong>Grabaciones</strong>, con reproductor y <strong>transcripción por IA</strong> a pedido.</p>
 <blockquote><p>El disco crece rápido: alrededor de <strong>0,5 MB por minuto</strong> grabado. Hacé la cuenta antes.</p></blockquote>
 <figure class="shot"><img src="img/cfg-12-grabaciones.png" alt="Grabaciones" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Grabaciones<span class="fn">cfg-12-grabaciones.png</span></figcaption></figure>
 <hr />
-<h2 id="15-seguridad">15. Seguridad</h2>
+<div class="chapter"><span class="num">Capítulo 15</span><h2 id="15-seguridad">Seguridad</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Seguridad</b></div>
 <p>Además del SBC, el núcleo tiene <strong>Fail2ban</strong> sobre los registros SIP: quien intenta adivinar contraseñas queda bloqueado. La sección <strong>Seguridad</strong> muestra las IPs bloqueadas con su país y permite desbloquear o bloquear a mano.</p>
 <figure class="shot"><img src="img/cfg-13-seguridad.png" alt="Seguridad" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Seguridad<span class="fn">cfg-13-seguridad.png</span></figcaption></figure>
 <hr />
-<h2 id="16-usuarios-y-roles">16. Usuarios y roles</h2>
+<div class="chapter"><span class="num">Capítulo 16</span><h2 id="16-usuarios-y-roles">Usuarios y roles</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Usuarios</b></div>
 <p>En <strong>Usuarios</strong>. Cada persona puede tener un <strong>interno asociado</strong> — y eso es lo que habilita que su softphone vea clientes e intercom.</p>
 <div class="tw"><table><thead><tr><th>Rol</th><th>Qué puede hacer</th></tr></thead><tbody><tr><td><strong>Administrador</strong></td><td>Todo</td></tr><tr><td><strong>Supervisor</strong></td><td>Monitorear colas y agentes, escuchar/susurrar/irrumpir, gestionar clientes</td></tr><tr><td><strong>Agente</strong></td><td>Su softphone, su historial y su buzón</td></tr></tbody></table></div>
-<figure class="shot"><img src="img/cfg-14-usuarios.png" alt="Usuarios y roles" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Usuarios y roles<span class="fn">cfg-14-usuarios.png</span></figcaption></figure></main>
+<figure class="shot"><img src="img/cfg-14-usuarios.png" alt="Usuarios y roles" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Usuarios y roles<span class="fn">cfg-14-usuarios.png</span></figcaption></figure>
+<hr />
+<hr />
+<div class="chapter"><span class="num">Capítulo 17</span><h2 id="17-clientes-crm">Clientes (CRM)</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Operación</b> <span class="sep">›</span> <b>Clientes</b></div>
+<h3 id="17-1-para-qu-existe">17.1 Para qué existe</h3>
+<p>La central sabe <strong>quién llama</strong> (un número). El CRM le enseña <strong>quién es</strong> (una persona, una empresa, un domicilio). Con eso, cuando entra una llamada, el agente ve la ficha <strong>antes de atender</strong> — sabe con quién habla desde el "hola".</p>
+<p>Es el mismo concepto que el identificador de llamadas del teléfono de tu casa, pero con la libreta de la empresa adentro.</p>
+<p><strong>Ejemplo real (un edificio con portería):</strong> llama el <code>099123456</code>. El sistema lo reconoce como <em>María Fernández, apartamento 302</em>, y le muestra al portero sus <strong>personas autorizadas</strong> (quién puede entrar en su nombre) y sus <strong>espacios</strong> (garaje 12, baulera 7). El portero no busca nada: la información le llega sola.</p>
+<h3 id="17-2-qu-guarda-cada-ficha">17.2 Qué guarda cada ficha</h3>
+<div class="tw"><table><thead><tr><th>Nivel</th><th>Qué es</th><th>Ejemplo</th></tr></thead><tbody><tr><td><strong>Cliente</strong></td><td>La ficha principal</td><td><em>María Fernández</em> · doc · dirección · notas</td></tr><tr><td><strong>Teléfonos</strong></td><td>Todos los números por los que puede llamar</td><td><code>099123456</code>, <code>24001234</code></td></tr><tr><td><strong>Personas autorizadas</strong></td><td>Quién puede actuar en su nombre, con vencimiento</td><td><em>Juan Pérez (hijo), hasta 31/12</em></td></tr><tr><td><strong>Espacios</strong></td><td>Lugares asociados</td><td><em>Garaje 12</em>, <em>Baulera 7</em></td></tr><tr><td><strong>Dispositivos</strong></td><td>Porteros y cámaras del cliente</td><td><em>Portero principal</em> (ver Intercom)</td></tr></tbody></table></div>
+<p>El reconocimiento se hace por el <strong>teléfono</strong>: cualquier número cargado en la ficha identifica al cliente cuando llama.</p>
+<figure class="shot"><img src="img/cfg-37-clientes.png" alt="Libreta de clientes" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Libreta de clientes<span class="fn">cfg-37-clientes.png</span></figcaption></figure>
+<h3 id="17-3-encuesta-post-llamada">17.3 Encuesta post-llamada</h3>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Clientes</b> <span class="sep">›</span> <b>Encuesta post-llamada</b></div>
+<p>Se definen los campos que el agente completa <strong>al cortar</strong> (texto, opciones, obligatorio o no). Sirve para tipificar: <em>motivo del llamado</em>, <em>resuelto sí/no</em>, <em>derivado a</em>. Los campos que definís acá son los que le aparecen al agente en su panel cuando termina la llamada.</p>
+<figure class="shot"><img src="img/cfg-38-encuesta.png" alt="Editor de la encuesta post-llamada" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Editor de la encuesta post-llamada<span class="fn">cfg-38-encuesta.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 18</span><h2 id="18-qu-ve-el-softphone-del-crm-y-qu-no">Qué ve el softphone del CRM (y qué no)</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Se aplica al softphone de escritorio, a la PWA y al panel del agente</b></div>
+<p>Esta es una pregunta que conviene tener contestada <strong>antes</strong> de entregar teléfonos, porque define qué información sale de la central hacia la computadora de cada persona.</p>
+<h3 id="18-1-el-softphone-solo-ve-el-crm-si-tiene-sesi-n-de-plataforma">18.1 El softphone solo ve el CRM si tiene sesión de plataforma</h3>
+<p>El teléfono y la plataforma son <strong>dos accesos distintos</strong>:</p>
+<ul><li><strong>Registro SIP</strong> (interno + contraseña): le permite llamar y recibir llamadas. Nada más.</li><li><strong>Sesión de plataforma</strong> (usuario del panel): le permite ver directorio, clientes e intercom.</li></ul>
+<p>El enlace de acceso que mandás por correo trae <strong>las dos cosas</strong> — pero la segunda <strong>solo si el interno tiene un usuario asociado</strong> en <em>Usuarios</em>. Si no lo tiene, el teléfono funciona igual, pero el softphone no muestra clientes ni intercom.</p>
+<blockquote><p><strong>Consecuencia práctica:</strong> si querés que un agente vea la ficha del cliente que lo llama, no</p><p>alcanza con crearle el interno. Hay que crearle <strong>también el usuario</strong> y asignarle ese interno.</p></blockquote>
+<h3 id="18-2-qu-puede-hacer-cada-rol">18.2 Qué puede hacer cada rol</h3>
+<div class="tw"><table><thead><tr><th>Acción</th><th>Agente</th><th>Supervisor</th><th>Administrador</th></tr></thead><tbody><tr><td>Ver el directorio de internos</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>Ver la ficha del cliente que lo llama</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>Ver toda la libreta de clientes</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td><strong>Crear, editar o borrar clientes</strong></td><td>❌</td><td>✅</td><td>✅</td></tr><tr><td><strong>Editar personas autorizadas y espacios</strong></td><td>❌</td><td>✅</td><td>✅</td></tr><tr><td><strong>Definir la encuesta post-llamada</strong></td><td>❌</td><td>✅</td><td>✅</td></tr><tr><td>Responder la encuesta al cortar</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>Ver las cámaras del intercom</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>Escuchar / susurrar / irrumpir en llamadas ajenas</td><td>❌</td><td>✅</td><td>✅</td></tr></tbody></table></div>
+<p>El agente <strong>lee</strong> el CRM porque lo necesita para atender; <strong>no lo modifica</strong>. Si un agente intenta editar la libreta desde su softphone, la central le responde que no está autorizado.</p>
+<h3 id="18-3-lo-que-el-softphone-nunca-ve">18.3 Lo que el softphone nunca ve</h3>
+<p>Las grabaciones de llamadas ajenas, la configuración de la central, las troncales, la seguridad y los datos de otros internos. El softphone es un teléfono con contexto, no una consola de administración.</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 19</span><h2 id="19-intercom-porteros-y-c-maras">Intercom · porteros y cámaras</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Intercom</b></div>
+<h3 id="19-1-para-qu-existe">19.1 Para qué existe</h3>
+<p>Un <strong>portero</strong> que llama al interno de recepción es una llamada como cualquier otra: se escucha, pero no se ve. El módulo de Intercom agrega <strong>el video</strong>: cuando el portero del cliente llama, el que atiende ve la cámara asociada, en vivo, dentro del mismo panel.</p>
+<p><strong>Ejemplo:</strong> llama el portero del edificio. En la pantalla del portero (la persona) aparece la ficha del cliente <strong>y la imagen de la cámara de entrada</strong>, sin que tenga que abrir otra aplicación ni recordar la IP de nada.</p>
+<h3 id="19-2-c-mo-se-arma">19.2 Cómo se arma</h3>
+<p>Los dispositivos se asocian a un <strong>cliente</strong> del CRM (por eso este capítulo va después del anterior).</p>
+<div class="tw"><table><thead><tr><th>Campo</th><th>Qué es</th><th>Ejemplo</th></tr></thead><tbody><tr><td><strong>Cliente</strong></td><td>A quién pertenece el dispositivo</td><td><em>Edificio Rambla</em></td></tr><tr><td><strong>Etiqueta</strong></td><td>Cómo se lo llama</td><td><em>Portero principal</em></td></tr><tr><td><strong>Tipo</strong></td><td>Portero o cámara</td><td>—</td></tr><tr><td><strong>URL RTSP</strong></td><td>El flujo de video del dispositivo</td><td><code>rtsp://usuario:clave@192.168.1.50:554/Streaming/Channels/101</code></td></tr></tbody></table></div>
+<p>La URL RTSP la da el fabricante del portero o la cámara. Es la misma que usarías en un grabador de video (NVR).</p>
+<figure class="shot"><img src="img/cfg-39-intercom.png" alt="Intercom: dispositivos por cliente" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Intercom: dispositivos por cliente<span class="fn">cfg-39-intercom.png</span></figcaption></figure>
+<h3 id="19-3-c-mo-llega-el-video-al-navegador">19.3 Cómo llega el video al navegador</h3>
+<p>Un navegador <strong>no puede reproducir RTSP</strong>. Entre medio hay un traductor (go2rtc) que convierte el flujo de la cámara a algo que el navegador entiende (WebRTC), en tiempo real y sin plugins.</p>
+<p>Eso significa dos cosas prácticas:</p>
+<ul><li>El módulo <strong>intercom</strong> tiene que estar activo (Configuración → Módulos).</li><li>La central tiene que <strong>alcanzar la cámara por la red</strong>. Si la cámara está en la LAN del cliente y</li></ul>
+<p>  la central en otra red, no hay magia: hay que darle camino (VPN o publicación).</p>
+<blockquote><p><strong>Las credenciales de la cámara viajan dentro de la URL RTSP.</strong> Usá un usuario de solo lectura</p><p>creado para esto, no el administrador de la cámara.</p></blockquote>
+<h3 id="19-4-probar-que-funciona">19.4 Probar que funciona</h3>
+<p>Al guardar el dispositivo, el panel intenta levantar el flujo. Si la cámara no responde, lo vas a ver ahí mismo — no esperes a la primera llamada real para enterarte.</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 20</span><h2 id="20-historial-de-llamadas">Historial de llamadas</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Historial</b></div>
+<p>Todas las llamadas de la central (el <strong>CDR</strong>): quién llamó, a quién, cuándo, cuánto duró y cómo terminó (atendida, no contestada, ocupado). Se actualiza solo.</p>
+<p>Es la fuente de verdad para las tres preguntas típicas: <em>"¿me llamaron?"</em>, <em>"¿cuánto habló con el cliente?"</em> y <em>"¿por qué esa llamada no entró?"</em>.</p>
+<div class="tw"><table><thead><tr><th>Estado</th><th>Qué significa</th></tr></thead><tbody><tr><td><code>ANSWERED</code></td><td>Alguien atendió</td></tr><tr><td><code>NO ANSWER</code></td><td>Sonó y nadie atendió</td></tr><tr><td><code>BUSY</code></td><td>El destino estaba ocupado</td></tr><tr><td><code>FAILED</code> / <code>CONGESTION</code></td><td>No se pudo completar (problema de ruta u operador)</td></tr></tbody></table></div>
+<blockquote><p>Si ves muchas <code>FAILED</code> hacia el mismo destino, el problema no es el usuario: es la ruta saliente o</p><p>el operador. Miralo en <strong>SBC → SIP debug</strong>.</p></blockquote>
+<figure class="shot"><img src="img/cfg-40-historial.png" alt="Historial de llamadas (CDR)" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Historial de llamadas (CDR)<span class="fn">cfg-40-historial.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 21</span><h2 id="21-monitoreo-en-vivo-wallboard-y-mapa">Monitoreo en vivo, Wallboard y Mapa</h2></div>
+<h3 id="21-1-llamadas-en-vivo">21.1 Llamadas en vivo</h3>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Operación</b> <span class="sep">›</span> <b>Llamadas en vivo</b></div>
+<p>Las llamadas que están ocurriendo <strong>ahora</strong>: quién habla con quién, hace cuánto. Desde acá el supervisor puede <strong>escuchar</strong> (sin que lo sepan), <strong>susurrar</strong> (solo lo escucha el agente) o <strong>irrumpir</strong> (los tres hablan). Es la herramienta de un jefe de call center, y es la razón principal por la que existe el rol de supervisor.</p>
+<figure class="shot"><img src="img/cfg-41-monitor.png" alt="Llamadas en vivo" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Llamadas en vivo<span class="fn">cfg-41-monitor.png</span></figcaption></figure>
+<h3 id="21-2-wallboard">21.2 Wallboard</h3>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Operación</b> <span class="sep">›</span> <b>Wallboard</b></div>
+<p>La pantalla grande del call center: llamadas en espera, agentes conectados, tiempos. Está pensada para dejarla en un televisor, no para mirarla de cerca.</p>
+<figure class="shot"><img src="img/cfg-42-wallboard.png" alt="Wallboard" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Wallboard<span class="fn">cfg-42-wallboard.png</span></figcaption></figure>
+<h3 id="21-3-mapa">21.3 Mapa</h3>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Operación</b> <span class="sep">›</span> <b>Mapa</b></div>
+<p>Ubica geográficamente las llamadas (cuando hay dato de posición, típicamente de Click-to-Call). Sirve para ver de dónde te llaman.</p>
+<h3 id="21-4-resumen">21.4 Resumen</h3>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Operación</b> <span class="sep">›</span> <b>Resumen</b></div>
+<p>La portada del panel: salud de los componentes, llamadas de hoy, lo que está pasando. Es la primera pantalla que ves al entrar.</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 22</span><h2 id="22-topolog-a">Topología</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Topología</b></div>
+<p>El dibujo en vivo de tu instalación: qué componentes hay, en qué IP vive cada uno, cómo se conectan y <strong>cuáles están sanos</strong>. Un componente en rojo es un problema antes de que alguien lo reporte.</p>
+<p>Es la pantalla que conviene abrir primero cuando algo "no anda" y no sabés por dónde empezar.</p>
+<figure class="shot"><img src="img/cfg-43-topologia.png" alt="Topología de la instalación" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Topología de la instalación<span class="fn">cfg-43-topologia.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 23</span><h2 id="23-tel-fonos-f-sicos-aprovisionamiento">Teléfonos físicos (aprovisionamiento)</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Teléfonos</b></div>
+<h3 id="23-1-para-qu-existe">23.1 Para qué existe</h3>
+<p>Configurar un teléfono de escritorio a mano —entrar a su web, cargar servidor, usuario, contraseña— lleva diez minutos por aparato y se presta a errores. El <strong>aprovisionamiento</strong> lo hace solo: cargás la <strong>dirección MAC</strong> (viene en una etiqueta abajo del teléfono) y le asignás un interno. Cuando el teléfono arranca, pide su configuración a la central y se configura solo.</p>
+<p>Sirve para Yealink y Grandstream, que son los que respetan este mecanismo.</p>
+<p><strong>Ejemplo:</strong> llegan 20 teléfonos nuevos. Cargás las 20 MAC con su interno, los enchufás, y en dos minutos están todos registrados. Sin tocar ninguno.</p>
+<figure class="shot"><img src="img/cfg-44-telefonos.png" alt="Aprovisionamiento por MAC" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Aprovisionamiento por MAC<span class="fn">cfg-44-telefonos.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 24</span><h2 id="24-ivr-el-men-de-bienvenida">IVR · el menú de bienvenida</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>IVR</b></div>
+<h3 id="24-1-para-qu-existe">24.1 Para qué existe</h3>
+<p><em>"Marque 1 para ventas, 2 para soporte."</em> El IVR atiende, saluda y reparte la llamada según lo que marque la persona.</p>
+<h3 id="24-2-c-mo-se-arma">24.2 Cómo se arma</h3>
+<p>Se diseña visualmente: un audio de bienvenida y, por cada dígito, un destino (interno, cola, otro IVR, buzón). <strong>El audio se escribe como texto</strong> y lo sintetiza la central con su propia voz — no hay que grabar nada ni subir archivos.</p>
+<div class="tw"><table><thead><tr><th>Dígito</th><th>Destino típico</th></tr></thead><tbody><tr><td>1</td><td>Cola de Ventas</td></tr><tr><td>2</td><td>Cola de Soporte</td></tr><tr><td>0</td><td>Recepción (un interno)</td></tr><tr><td>(nada)</td><td>Después de N segundos, repite o va a recepción</td></tr></tbody></table></div>
+<blockquote><p>Dejá <strong>siempre</strong> una salida para el que no marca nada (una persona mayor, alguien desde un teléfono</p><p>viejo). Un IVR sin salida es una llamada perdida.</p></blockquote>
+<figure class="shot"><img src="img/cfg-34-ivr.png" alt="Diseñador de IVR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Diseñador de IVR<span class="fn">cfg-34-ivr.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 25</span><h2 id="25-ia-voz">IA &amp; Voz</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>IA &amp; Voz</b></div>
+<p>El motor de voz de la central (módulo <code>ai</code>). Hace dos cosas:</p>
+<p><strong>Sintetizar voz (TTS).</strong> Convierte texto en audio con voz natural. Es lo que usan los anuncios de las colas y el IVR: escribís, escuchás, guardás. Acá elegís <strong>la voz</strong> de la central y la probás.</p>
+<p><strong>Transcribir (STT).</strong> Convierte audio en texto. Es lo que transcribe los mensajes de voz y las grabaciones.</p>
+<blockquote><p>Es un módulo <strong>opcional</strong>: si no lo activás, las colas y el IVR siguen funcionando, pero tenés que</p><p>subir los audios a mano y no hay transcripciones.</p></blockquote>
+<figure class="shot"><img src="img/cfg-45-ia-voz.png" alt="Motor de voz: voces y pruebas" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Motor de voz: voces y pruebas<span class="fn">cfg-45-ia-voz.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 26</span><h2 id="26-click-to-call">Click-to-Call</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Click-to-Call</b></div>
+<p>Un enlace o un código QR que ponés en tu web o en un cartel, y que <strong>llama a tu central desde el navegador del cliente</strong>, sin que instale nada y sin gastarle crédito.</p>
+<p><strong>Ejemplo:</strong> un QR en la vidriera. El cliente lo escanea, toca "llamar", y suena el teléfono de ventas. Del otro lado ves de dónde salió la llamada.</p>
+<figure class="shot"><img src="img/cfg-46-click-to-call.png" alt="Click-to-Call: enlaces y QR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Click-to-Call: enlaces y QR<span class="fn">cfg-46-click-to-call.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 27</span><h2 id="27-notificaciones-push">Notificaciones push</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Notificaciones</b></div>
+<p>Sirve para que <strong>suene el celular con la app cerrada</strong>. Sin esto, la app tiene que estar abierta para recibir llamadas — que es exactamente lo que nadie hace.</p>
+<p>Se configuran los proveedores (Web Push, y FCM/APNs para las apps nativas). Es configuración técnica: se hace una vez, con las credenciales que da Google o Apple.</p>
+<figure class="shot"><img src="img/cfg-47-push.png" alt="Notificaciones push" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Notificaciones push<span class="fn">cfg-47-push.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 28</span><h2 id="28-dialplan">Dialplan</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Dialplan</b></div>
+<p>El <strong>plan de marcación</strong>: las reglas que dicen qué pasa con cada número que se marca. La central lo genera solo a partir de lo que configurás (colas, IVR, rutas), y acá lo ves tal cual lo ejecuta Asterisk.</p>
+<p><strong>No es una pantalla para configurar, es para entender.</strong> Cuando una llamada hace algo raro, este es el lugar donde se ve <em>exactamente</em> qué reglas se aplicaron y en qué orden.</p>
+<blockquote><p>Tocar el dialplan a mano solo tiene sentido para casos que la interfaz no cubre. Si lo hacés, tené</p><p>presente que lo que generan las colas y las rutas <strong>se regenera</strong> al guardarlas.</p></blockquote>
+<figure class="shot"><img src="img/cfg-48-dialplan.png" alt="Dialplan generado" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Dialplan generado<span class="fn">cfg-48-dialplan.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 29</span><h2 id="29-empresas-multi-tenant">Empresas (multi-tenant)</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Empresas</b></div>
+<p>Solo tiene sentido si instalaste la central en <strong>modo multi-tenant</strong>: varias empresas conviviendo en la misma central, cada una con sus internos, sus troncales y su marca, sin verse entre sí.</p>
+<p>En modo <strong>PBX simple</strong> (el habitual, una sola empresa) esta sección existe pero no la vas a usar: hay una única empresa por defecto.</p>
+<figure class="shot"><img src="img/cfg-49-empresas.png" alt="Empresas" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Empresas<span class="fn">cfg-49-empresas.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 30</span><h2 id="30-base-de-datos">Base de datos</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Base de datos</b></div>
+<p>PostgreSQL guarda <strong>todo</strong>: la configuración de la central (los internos, las colas y las rutas no viven en archivos, viven acá), el historial de llamadas, las grabaciones indexadas y el CRM.</p>
+<p>Esta pantalla muestra el estado y permite consultar. Es una herramienta de diagnóstico, no de configuración diaria.</p>
+<blockquote><p><strong>El respaldo de esta base es el respaldo de la central.</strong> Si tenés que elegir una sola cosa para</p><p>respaldar, es esta. Un <code>pg_dump</code> periódico te devuelve la central completa; sin él, no tenés nada.</p></blockquote>
+<figure class="shot"><img src="img/cfg-50-basedatos.png" alt="Base de datos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Base de datos<span class="fn">cfg-50-basedatos.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 31</span><h2 id="31-manuales">Manuales</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Manuales</b></div>
+<p>Los tres manuales viajan <strong>adentro de la central</strong>: no hay que buscarlos en un drive ni pedirlos por correo, y siguen estando cuando la instalación no tiene salida a Internet. La sección los muestra como tres tarjetas — instalación, configuración y usuario — con a quién va dirigido cada uno.</p>
+<p>La sección la ven <strong>todos los roles</strong>, no solo el administrador: si un agente entra a la plataforma, tiene su manual a mano sin que se lo mandes.</p>
+<div class="tw"><table><thead><tr><th>Botón</th><th>Qué hace</th></tr></thead><tbody><tr><td><strong>Abrir manual</strong></td><td>Lo abre en una pestaña nueva, con índice navegable y la barra <em>Cómo llegar</em> en cada capítulo</td></tr><tr><td><strong>PDF</strong></td><td>Abre el manual y lanza el diálogo de impresión del navegador: elegí <strong>Guardar como PDF</strong></td></tr><tr><td><strong>Markdown</strong></td><td>Baja el archivo <code>.md</code> original — el mismo que está en el repositorio</td></tr></tbody></table></div>
+<p>El manual está maquetado para imprimirse en A4: portada, índice en su propia hoja, y ni las tablas ni las imágenes se parten entre páginas.</p>
+<blockquote><p><strong>Si el PDF te sale en blanco y negro y sin portada</strong>, no es el manual: es el navegador. En el</p><p>diálogo de impresión, entrá en <em>Más opciones</em> y activá <strong>"Gráficos de fondo"</strong>. Sin eso, Chrome y</p><p>Edge descartan todos los fondos de color — y la portada es fondo de color.</p></blockquote>
+<p>La portada del PDF lleva la <strong>versión del producto</strong> y la <strong>fecha de compilación</strong>. Sirve: cuando le mandás el manual a un cliente, queda dicho a qué versión corresponde lo que está leyendo.</p>
+<h3 id="17-1-los-recuadros-imagen-pendiente">17.1 Los recuadros "Imagen pendiente"</h3>
+<p>Donde todavía falta una captura, el manual muestra un recuadro punteado que dice <strong>Imagen pendiente</strong> con la descripción de lo que va ahí y el <strong>nombre exacto del archivo</strong> (por ejemplo <code>cfg-17-proxy.png</code>). No es una falla: es la lista de tareas, a la vista.</p>
+<p>Para completar una: guardá la captura con ese nombre en <code>docs/manual/img/</code> del repositorio, corré <code>python3 scripts/build-manuals.py</code> desde la raíz y volvé a desplegar el panel.</p>
+<blockquote><p>Los manuales se compilan y se empaquetan <strong>junto con el panel</strong>. Editar el Markdown no cambia nada</p><p>de lo que ves en pantalla hasta que recompiles y despliegues. Y una vez desplegado, hacé</p><p><strong>Ctrl+F5</strong>: el navegador cachea las imágenes y vas a jurar que no se actualizó nada.</p></blockquote>
+<figure class="shot"><img src="img/cfg-36-manuales.png" alt="Sección Manuales del panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Sección Manuales del panel<span class="fn">cfg-36-manuales.png</span></figcaption></figure></main>
   <footer>PBX-NG · Manual de Configuración · versión 1.1.0 · 13/07/2026</footer>
 </div>
 <button class="top" onclick="window.print()">Descargar PDF</button>

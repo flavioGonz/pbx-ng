@@ -2827,6 +2827,15 @@ app.post('/api/intercom/config', async (req,res)=>{ const u=(req.body&&req.body.
 app.post('/api/intercom/sync', async (req,res)=>{ try{ await syncGo2rtc(); res.json({ok:true}); }catch(e){ res.status(500).json({error:e.message}); } });
 function crmNormNum(s){ return String(s||'').replace(/[^0-9]/g,''); }
 
+// Escribir en el CRM (clientes, personas autorizadas, espacios, dispositivos) queda reservado a
+// admin y supervisor. Los agentes LEEN la ficha del cliente que los llama —para eso existe el
+// screen-pop— pero no deben poder editar ni borrar la libreta desde su softphone.
+function crmWrite(req, res, next) {
+  if (!['admin', 'supervisor'].includes(req.user && req.user.role)) {
+    return res.status(403).json({ error: 'solo un administrador o supervisor puede modificar el CRM' });
+  }
+  next();
+}
 app.get('/api/clients', async (req,res)=>{ try{
   const { rows } = await pool.query(`SELECT c.*,
     (SELECT count(*)::int FROM pbxng_client_persons p WHERE p.client_id=c.id) AS persons,
@@ -2862,14 +2871,14 @@ app.get('/api/clients/:id', async (req,res)=>{ try{
   res.json(c);
 }catch(e){res.status(500).json({error:e.message});} });
 
-app.post('/api/clients', async (req,res)=>{ const b=req.body||{}; try{
+app.post('/api/clients', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const phones = Array.isArray(b.phones)? b.phones : (b.phones? String(b.phones).split(',').map(x=>x.trim()).filter(Boolean):[]);
   const { rows } = await pool.query('INSERT INTO pbxng_clients (name,doc,address,notes,phones) VALUES ($1,$2,$3,$4,$5) RETURNING *',
     [b.name, b.doc||null, b.address||null, b.notes||null, phones]);
   res.status(201).json(rows[0]);
 }catch(e){res.status(500).json({error:e.message});} });
 
-app.put('/api/clients/:id', async (req,res)=>{ const b=req.body||{}; try{
+app.put('/api/clients/:id', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const phones = Array.isArray(b.phones)? b.phones : (b.phones!==undefined && b.phones!==null ? String(b.phones).split(',').map(x=>x.trim()).filter(Boolean): null);
   const { rows } = await pool.query(`UPDATE pbxng_clients SET name=COALESCE($2,name), doc=$3, address=$4, notes=$5,
     phones=COALESCE($6,phones), updated_at=now() WHERE id=$1 RETURNING *`,
@@ -2877,26 +2886,26 @@ app.put('/api/clients/:id', async (req,res)=>{ const b=req.body||{}; try{
   res.json(rows[0]||{});
 }catch(e){res.status(500).json({error:e.message});} });
 
-app.delete('/api/clients/:id', async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_clients WHERE id=$1',[req.params.id]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+app.delete('/api/clients/:id', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_clients WHERE id=$1',[req.params.id]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
 
-app.post('/api/clients/:id/persons', async (req,res)=>{ const b=req.body||{}; try{
+app.post('/api/clients/:id/persons', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const { rows } = await pool.query('INSERT INTO pbxng_client_persons (client_id,name,doc,relation,valid_until,notes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
     [req.params.id,b.name,b.doc||null,b.relation||null,b.valid_until||null,b.notes||null]); res.status(201).json(rows[0]);
 }catch(e){res.status(500).json({error:e.message});} });
-app.delete('/api/persons/:pid', async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_persons WHERE id=$1',[req.params.pid]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+app.delete('/api/persons/:pid', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_persons WHERE id=$1',[req.params.pid]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
 
-app.post('/api/clients/:id/spaces', async (req,res)=>{ const b=req.body||{}; try{
+app.post('/api/clients/:id/spaces', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const { rows } = await pool.query('INSERT INTO pbxng_client_spaces (client_id,name,kind,notes) VALUES ($1,$2,$3,$4) RETURNING *',
     [req.params.id,b.name,b.kind||null,b.notes||null]); res.status(201).json(rows[0]);
 }catch(e){res.status(500).json({error:e.message});} });
-app.delete('/api/spaces/:sid', async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_spaces WHERE id=$1',[req.params.sid]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+app.delete('/api/spaces/:sid', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_spaces WHERE id=$1',[req.params.sid]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
 
-app.post('/api/clients/:id/devices', async (req,res)=>{ const b=req.body||{}; try{
+app.post('/api/clients/:id/devices', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const src = b.go2rtc_src || ('cli'+req.params.id+'_'+Date.now().toString(36));
   const { rows } = await pool.query('INSERT INTO pbxng_client_devices (client_id,label,type,rtsp_url,go2rtc_src,enabled) VALUES ($1,$2,$3,$4,$5,COALESCE($6,true)) RETURNING *',
     [req.params.id,b.label,b.type||'camera',b.rtsp_url||null,src,b.enabled]); res.status(201).json(rows[0]);
 }catch(e){res.status(500).json({error:e.message});} });
-app.delete('/api/devices/:did', async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_devices WHERE id=$1',[req.params.did]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+app.delete('/api/devices/:did', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_devices WHERE id=$1',[req.params.did]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
 
 app.get('/api/intercom/clients', async (req,res)=>{ try{
   const { rows } = await pool.query(`SELECT DISTINCT c.id, c.name FROM pbxng_clients c JOIN pbxng_client_devices d ON d.client_id=c.id WHERE d.enabled ORDER BY c.name`); res.json(rows);
@@ -2908,7 +2917,7 @@ app.get('/api/intercom/streams', async (req,res)=>{ try{
 }catch(e){res.status(500).json({error:e.message});} });
 
 app.get('/api/survey/fields', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_survey_fields WHERE active ORDER BY ord, id'); res.json(rows); }catch(e){res.status(500).json({error:e.message});} });
-app.put('/api/survey/fields', async (req,res)=>{ const arr=Array.isArray(req.body)?req.body:((req.body&&req.body.fields)||[]); try{
+app.put('/api/survey/fields', crmWrite, async (req,res)=>{ const arr=Array.isArray(req.body)?req.body:((req.body&&req.body.fields)||[]); try{
   await pool.query('UPDATE pbxng_survey_fields SET active=false');
   for(let i=0;i<arr.length;i++){ const f=arr[i];
     if(f.id){ await pool.query('UPDATE pbxng_survey_fields SET ord=$2,label=$3,ftype=$4,options=$5,required=$6,active=true WHERE id=$1',[f.id,i,f.label,f.ftype||'text',JSON.stringify(f.options||[]),!!f.required]); }

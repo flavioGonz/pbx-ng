@@ -342,9 +342,28 @@ El SBC mide la latencia de cada destino con OPTIONS automáticamente.
 
 » SBC-NG → Ruteo → Remotos
 
-La lista de **internos que están registrados a través del SBC** en este momento: el teleworker con
-el softphone en casa, el vendedor con el celular. Muestra desde qué IP se registró cada uno. Es la
-foto de quién está afuera y conectado.
+**Qué es.** La lista, en vivo, de los internos que **no están en la oficina**: el que trabaja desde
+su casa, el vendedor con el softphone en el celular, la sucursal chica sin central propia. Todos
+esos no se registran directo contra el Asterisk — se registran **a través del SBC**, que es el único
+que da la cara a Internet.
+
+**Por qué existe esta pantalla.** Porque un interno remoto es el punto más frágil de la central, y
+el que más preguntas genera:
+
+- *"¿Está conectado o no?"* Acá lo ves, con la hora del último registro.
+- *"¿Desde dónde se conecta?"* Muestra la **IP de origen**. Si el teleworker de Montevideo aparece
+  conectándose desde otro país, tenés un problema de seguridad — y esta es la pantalla donde se ve.
+- *"¿Por qué no le entran las llamadas?"* Si el interno no figura acá, no está registrado: no es un
+  problema de rutas ni del operador, es que el teléfono no llegó a la central.
+
+**Ejemplo de uso real.** Un vendedor dice que "el teléfono no le suena". Antes de revisar colas,
+rutas y troncales, mirás Remotos: si su interno no está en la lista, el diagnóstico terminó ahí —
+su softphone no está registrado (se quedó sin internet, cerró la app, o se le venció el acceso). Si
+**sí** está en la lista, entonces el problema es aguas abajo y seguís buscando.
+
+> **La diferencia con "Internos" del menú principal:** aquella pantalla lista **todos** los internos
+> que existen (la configuración). Esta lista solo los que están **registrados desde afuera, ahora**
+> (la realidad). Una es el padrón; la otra, quién vino a votar.
 
 ![SBC · Extensiones remotas](img/cfg-25-sbc-remotos.png)
 
@@ -732,3 +751,411 @@ softphone vea clientes e intercom.
 | **Agente** | Su softphone, su historial y su buzón |
 
 ![Usuarios y roles](img/cfg-14-usuarios.png)
+
+---
+
+---
+
+## 17. Clientes (CRM)
+
+» Menú lateral → Operación → Clientes
+
+### 17.1 Para qué existe
+
+La central sabe **quién llama** (un número). El CRM le enseña **quién es** (una persona, una
+empresa, un domicilio). Con eso, cuando entra una llamada, el agente ve la ficha **antes de
+atender** — sabe con quién habla desde el "hola".
+
+Es el mismo concepto que el identificador de llamadas del teléfono de tu casa, pero con la libreta
+de la empresa adentro.
+
+**Ejemplo real (un edificio con portería):** llama el `099123456`. El sistema lo reconoce como
+*María Fernández, apartamento 302*, y le muestra al portero sus **personas autorizadas** (quién
+puede entrar en su nombre) y sus **espacios** (garaje 12, baulera 7). El portero no busca nada:
+la información le llega sola.
+
+### 17.2 Qué guarda cada ficha
+
+| Nivel | Qué es | Ejemplo |
+|---|---|---|
+| **Cliente** | La ficha principal | *María Fernández* · doc · dirección · notas |
+| **Teléfonos** | Todos los números por los que puede llamar | `099123456`, `24001234` |
+| **Personas autorizadas** | Quién puede actuar en su nombre, con vencimiento | *Juan Pérez (hijo), hasta 31/12* |
+| **Espacios** | Lugares asociados | *Garaje 12*, *Baulera 7* |
+| **Dispositivos** | Porteros y cámaras del cliente | *Portero principal* (ver Intercom) |
+
+El reconocimiento se hace por el **teléfono**: cualquier número cargado en la ficha identifica al
+cliente cuando llama.
+
+![Libreta de clientes](img/cfg-37-clientes.png)
+
+### 17.3 Encuesta post-llamada
+
+» Clientes → Encuesta post-llamada
+
+Se definen los campos que el agente completa **al cortar** (texto, opciones, obligatorio o no). Sirve
+para tipificar: *motivo del llamado*, *resuelto sí/no*, *derivado a*. Los campos que definís acá son
+los que le aparecen al agente en su panel cuando termina la llamada.
+
+![Editor de la encuesta post-llamada](img/cfg-38-encuesta.png)
+
+---
+
+## 18. Qué ve el softphone del CRM (y qué no)
+
+» Se aplica al softphone de escritorio, a la PWA y al panel del agente
+
+Esta es una pregunta que conviene tener contestada **antes** de entregar teléfonos, porque define
+qué información sale de la central hacia la computadora de cada persona.
+
+### 18.1 El softphone solo ve el CRM si tiene sesión de plataforma
+
+El teléfono y la plataforma son **dos accesos distintos**:
+
+- **Registro SIP** (interno + contraseña): le permite llamar y recibir llamadas. Nada más.
+- **Sesión de plataforma** (usuario del panel): le permite ver directorio, clientes e intercom.
+
+El enlace de acceso que mandás por correo trae **las dos cosas** — pero la segunda **solo si el
+interno tiene un usuario asociado** en *Usuarios*. Si no lo tiene, el teléfono funciona igual, pero
+el softphone no muestra clientes ni intercom.
+
+> **Consecuencia práctica:** si querés que un agente vea la ficha del cliente que lo llama, no
+> alcanza con crearle el interno. Hay que crearle **también el usuario** y asignarle ese interno.
+
+### 18.2 Qué puede hacer cada rol
+
+| Acción | Agente | Supervisor | Administrador |
+|---|---|---|---|
+| Ver el directorio de internos | ✅ | ✅ | ✅ |
+| Ver la ficha del cliente que lo llama | ✅ | ✅ | ✅ |
+| Ver toda la libreta de clientes | ✅ | ✅ | ✅ |
+| **Crear, editar o borrar clientes** | ❌ | ✅ | ✅ |
+| **Editar personas autorizadas y espacios** | ❌ | ✅ | ✅ |
+| **Definir la encuesta post-llamada** | ❌ | ✅ | ✅ |
+| Responder la encuesta al cortar | ✅ | ✅ | ✅ |
+| Ver las cámaras del intercom | ✅ | ✅ | ✅ |
+| Escuchar / susurrar / irrumpir en llamadas ajenas | ❌ | ✅ | ✅ |
+
+El agente **lee** el CRM porque lo necesita para atender; **no lo modifica**. Si un agente intenta
+editar la libreta desde su softphone, la central le responde que no está autorizado.
+
+### 18.3 Lo que el softphone nunca ve
+
+Las grabaciones de llamadas ajenas, la configuración de la central, las troncales, la seguridad y
+los datos de otros internos. El softphone es un teléfono con contexto, no una consola de
+administración.
+
+---
+
+## 19. Intercom · porteros y cámaras
+
+» Menú lateral → Telefonía → Intercom
+
+### 19.1 Para qué existe
+
+Un **portero** que llama al interno de recepción es una llamada como cualquier otra: se escucha,
+pero no se ve. El módulo de Intercom agrega **el video**: cuando el portero del cliente llama, el
+que atiende ve la cámara asociada, en vivo, dentro del mismo panel.
+
+**Ejemplo:** llama el portero del edificio. En la pantalla del portero (la persona) aparece la ficha
+del cliente **y la imagen de la cámara de entrada**, sin que tenga que abrir otra aplicación ni
+recordar la IP de nada.
+
+### 19.2 Cómo se arma
+
+Los dispositivos se asocian a un **cliente** del CRM (por eso este capítulo va después del anterior).
+
+| Campo | Qué es | Ejemplo |
+|---|---|---|
+| **Cliente** | A quién pertenece el dispositivo | *Edificio Rambla* |
+| **Etiqueta** | Cómo se lo llama | *Portero principal* |
+| **Tipo** | Portero o cámara | — |
+| **URL RTSP** | El flujo de video del dispositivo | `rtsp://usuario:clave@192.168.1.50:554/Streaming/Channels/101` |
+
+La URL RTSP la da el fabricante del portero o la cámara. Es la misma que usarías en un grabador de
+video (NVR).
+
+![Intercom: dispositivos por cliente](img/cfg-39-intercom.png)
+
+### 19.3 Cómo llega el video al navegador
+
+Un navegador **no puede reproducir RTSP**. Entre medio hay un traductor (go2rtc) que convierte el
+flujo de la cámara a algo que el navegador entiende (WebRTC), en tiempo real y sin plugins.
+
+Eso significa dos cosas prácticas:
+
+- El módulo **intercom** tiene que estar activo (Configuración → Módulos).
+- La central tiene que **alcanzar la cámara por la red**. Si la cámara está en la LAN del cliente y
+  la central en otra red, no hay magia: hay que darle camino (VPN o publicación).
+
+> **Las credenciales de la cámara viajan dentro de la URL RTSP.** Usá un usuario de solo lectura
+> creado para esto, no el administrador de la cámara.
+
+### 19.4 Probar que funciona
+
+Al guardar el dispositivo, el panel intenta levantar el flujo. Si la cámara no responde, lo vas a
+ver ahí mismo — no esperes a la primera llamada real para enterarte.
+
+---
+
+## 20. Historial de llamadas
+
+» Menú lateral → Telefonía → Historial
+
+Todas las llamadas de la central (el **CDR**): quién llamó, a quién, cuándo, cuánto duró y cómo
+terminó (atendida, no contestada, ocupado). Se actualiza solo.
+
+Es la fuente de verdad para las tres preguntas típicas: *"¿me llamaron?"*, *"¿cuánto habló con el
+cliente?"* y *"¿por qué esa llamada no entró?"*.
+
+| Estado | Qué significa |
+|---|---|
+| `ANSWERED` | Alguien atendió |
+| `NO ANSWER` | Sonó y nadie atendió |
+| `BUSY` | El destino estaba ocupado |
+| `FAILED` / `CONGESTION` | No se pudo completar (problema de ruta u operador) |
+
+> Si ves muchas `FAILED` hacia el mismo destino, el problema no es el usuario: es la ruta saliente o
+> el operador. Miralo en **SBC → SIP debug**.
+
+![Historial de llamadas (CDR)](img/cfg-40-historial.png)
+
+---
+
+## 21. Monitoreo en vivo, Wallboard y Mapa
+
+### 21.1 Llamadas en vivo
+
+» Menú lateral → Operación → Llamadas en vivo
+
+Las llamadas que están ocurriendo **ahora**: quién habla con quién, hace cuánto. Desde acá el
+supervisor puede **escuchar** (sin que lo sepan), **susurrar** (solo lo escucha el agente) o
+**irrumpir** (los tres hablan). Es la herramienta de un jefe de call center, y es la razón principal
+por la que existe el rol de supervisor.
+
+![Llamadas en vivo](img/cfg-41-monitor.png)
+
+### 21.2 Wallboard
+
+» Menú lateral → Operación → Wallboard
+
+La pantalla grande del call center: llamadas en espera, agentes conectados, tiempos. Está pensada
+para dejarla en un televisor, no para mirarla de cerca.
+
+![Wallboard](img/cfg-42-wallboard.png)
+
+### 21.3 Mapa
+
+» Menú lateral → Operación → Mapa
+
+Ubica geográficamente las llamadas (cuando hay dato de posición, típicamente de Click-to-Call). Sirve
+para ver de dónde te llaman.
+
+### 21.4 Resumen
+
+» Menú lateral → Operación → Resumen
+
+La portada del panel: salud de los componentes, llamadas de hoy, lo que está pasando. Es la primera
+pantalla que ves al entrar.
+
+---
+
+## 22. Topología
+
+» Menú lateral → Telefonía → Topología
+
+El dibujo en vivo de tu instalación: qué componentes hay, en qué IP vive cada uno, cómo se conectan
+y **cuáles están sanos**. Un componente en rojo es un problema antes de que alguien lo reporte.
+
+Es la pantalla que conviene abrir primero cuando algo "no anda" y no sabés por dónde empezar.
+
+![Topología de la instalación](img/cfg-43-topologia.png)
+
+---
+
+## 23. Teléfonos físicos (aprovisionamiento)
+
+» Menú lateral → Telefonía → Teléfonos
+
+### 23.1 Para qué existe
+
+Configurar un teléfono de escritorio a mano —entrar a su web, cargar servidor, usuario, contraseña—
+lleva diez minutos por aparato y se presta a errores. El **aprovisionamiento** lo hace solo: cargás
+la **dirección MAC** (viene en una etiqueta abajo del teléfono) y le asignás un interno. Cuando el
+teléfono arranca, pide su configuración a la central y se configura solo.
+
+Sirve para Yealink y Grandstream, que son los que respetan este mecanismo.
+
+**Ejemplo:** llegan 20 teléfonos nuevos. Cargás las 20 MAC con su interno, los enchufás, y en dos
+minutos están todos registrados. Sin tocar ninguno.
+
+![Aprovisionamiento por MAC](img/cfg-44-telefonos.png)
+
+---
+
+## 24. IVR · el menú de bienvenida
+
+» Menú lateral → Telefonía → IVR
+
+### 24.1 Para qué existe
+
+*"Marque 1 para ventas, 2 para soporte."* El IVR atiende, saluda y reparte la llamada según lo que
+marque la persona.
+
+### 24.2 Cómo se arma
+
+Se diseña visualmente: un audio de bienvenida y, por cada dígito, un destino (interno, cola, otro
+IVR, buzón). **El audio se escribe como texto** y lo sintetiza la central con su propia voz — no hay
+que grabar nada ni subir archivos.
+
+| Dígito | Destino típico |
+|---|---|
+| 1 | Cola de Ventas |
+| 2 | Cola de Soporte |
+| 0 | Recepción (un interno) |
+| (nada) | Después de N segundos, repite o va a recepción |
+
+> Dejá **siempre** una salida para el que no marca nada (una persona mayor, alguien desde un teléfono
+> viejo). Un IVR sin salida es una llamada perdida.
+
+![Diseñador de IVR](img/cfg-34-ivr.png)
+
+---
+
+## 25. IA & Voz
+
+» Menú lateral → Telefonía → IA & Voz
+
+El motor de voz de la central (módulo `ai`). Hace dos cosas:
+
+**Sintetizar voz (TTS).** Convierte texto en audio con voz natural. Es lo que usan los anuncios de
+las colas y el IVR: escribís, escuchás, guardás. Acá elegís **la voz** de la central y la probás.
+
+**Transcribir (STT).** Convierte audio en texto. Es lo que transcribe los mensajes de voz y las
+grabaciones.
+
+> Es un módulo **opcional**: si no lo activás, las colas y el IVR siguen funcionando, pero tenés que
+> subir los audios a mano y no hay transcripciones.
+
+![Motor de voz: voces y pruebas](img/cfg-45-ia-voz.png)
+
+---
+
+## 26. Click-to-Call
+
+» Menú lateral → Telefonía → Click-to-Call
+
+Un enlace o un código QR que ponés en tu web o en un cartel, y que **llama a tu central desde el
+navegador del cliente**, sin que instale nada y sin gastarle crédito.
+
+**Ejemplo:** un QR en la vidriera. El cliente lo escanea, toca "llamar", y suena el teléfono de
+ventas. Del otro lado ves de dónde salió la llamada.
+
+![Click-to-Call: enlaces y QR](img/cfg-46-click-to-call.png)
+
+---
+
+## 27. Notificaciones push
+
+» Menú lateral → Sistema → Notificaciones
+
+Sirve para que **suene el celular con la app cerrada**. Sin esto, la app tiene que estar abierta para
+recibir llamadas — que es exactamente lo que nadie hace.
+
+Se configuran los proveedores (Web Push, y FCM/APNs para las apps nativas). Es configuración técnica:
+se hace una vez, con las credenciales que da Google o Apple.
+
+![Notificaciones push](img/cfg-47-push.png)
+
+---
+
+## 28. Dialplan
+
+» Menú lateral → Sistema → Dialplan
+
+El **plan de marcación**: las reglas que dicen qué pasa con cada número que se marca. La central lo
+genera solo a partir de lo que configurás (colas, IVR, rutas), y acá lo ves tal cual lo ejecuta
+Asterisk.
+
+**No es una pantalla para configurar, es para entender.** Cuando una llamada hace algo raro, este es
+el lugar donde se ve *exactamente* qué reglas se aplicaron y en qué orden.
+
+> Tocar el dialplan a mano solo tiene sentido para casos que la interfaz no cubre. Si lo hacés, tené
+> presente que lo que generan las colas y las rutas **se regenera** al guardarlas.
+
+![Dialplan generado](img/cfg-48-dialplan.png)
+
+---
+
+## 29. Empresas (multi-tenant)
+
+» Menú lateral → Sistema → Empresas
+
+Solo tiene sentido si instalaste la central en **modo multi-tenant**: varias empresas conviviendo en
+la misma central, cada una con sus internos, sus troncales y su marca, sin verse entre sí.
+
+En modo **PBX simple** (el habitual, una sola empresa) esta sección existe pero no la vas a usar: hay
+una única empresa por defecto.
+
+![Empresas](img/cfg-49-empresas.png)
+
+---
+
+## 30. Base de datos
+
+» Menú lateral → Sistema → Base de datos
+
+PostgreSQL guarda **todo**: la configuración de la central (los internos, las colas y las rutas no
+viven en archivos, viven acá), el historial de llamadas, las grabaciones indexadas y el CRM.
+
+Esta pantalla muestra el estado y permite consultar. Es una herramienta de diagnóstico, no de
+configuración diaria.
+
+> **El respaldo de esta base es el respaldo de la central.** Si tenés que elegir una sola cosa para
+> respaldar, es esta. Un `pg_dump` periódico te devuelve la central completa; sin él, no tenés nada.
+
+![Base de datos](img/cfg-50-basedatos.png)
+
+---
+
+## 31. Manuales
+
+» Menú lateral → Sistema → Manuales
+
+Los tres manuales viajan **adentro de la central**: no hay que buscarlos en un drive ni pedirlos por
+correo, y siguen estando cuando la instalación no tiene salida a Internet. La sección los muestra
+como tres tarjetas — instalación, configuración y usuario — con a quién va dirigido cada uno.
+
+La sección la ven **todos los roles**, no solo el administrador: si un agente entra a la plataforma,
+tiene su manual a mano sin que se lo mandes.
+
+| Botón | Qué hace |
+|---|---|
+| **Abrir manual** | Lo abre en una pestaña nueva, con índice navegable y la barra *Cómo llegar* en cada capítulo |
+| **PDF** | Abre el manual y lanza el diálogo de impresión del navegador: elegí **Guardar como PDF** |
+| **Markdown** | Baja el archivo `.md` original — el mismo que está en el repositorio |
+
+El manual está maquetado para imprimirse en A4: portada, índice en su propia hoja, y ni las tablas ni
+las imágenes se parten entre páginas.
+
+> **Si el PDF te sale en blanco y negro y sin portada**, no es el manual: es el navegador. En el
+> diálogo de impresión, entrá en *Más opciones* y activá **"Gráficos de fondo"**. Sin eso, Chrome y
+> Edge descartan todos los fondos de color — y la portada es fondo de color.
+
+La portada del PDF lleva la **versión del producto** y la **fecha de compilación**. Sirve: cuando le
+mandás el manual a un cliente, queda dicho a qué versión corresponde lo que está leyendo.
+
+### 17.1 Los recuadros "Imagen pendiente"
+
+Donde todavía falta una captura, el manual muestra un recuadro punteado que dice **Imagen pendiente**
+con la descripción de lo que va ahí y el **nombre exacto del archivo** (por ejemplo
+`cfg-17-proxy.png`). No es una falla: es la lista de tareas, a la vista.
+
+Para completar una: guardá la captura con ese nombre en `docs/manual/img/` del repositorio, corré
+`python3 scripts/build-manuals.py` desde la raíz y volvé a desplegar el panel.
+
+> Los manuales se compilan y se empaquetan **junto con el panel**. Editar el Markdown no cambia nada
+> de lo que ves en pantalla hasta que recompiles y despliegues. Y una vez desplegado, hacé
+> **Ctrl+F5**: el navegador cachea las imágenes y vas a jurar que no se actualizó nada.
+
+![Sección Manuales del panel](img/cfg-36-manuales.png)

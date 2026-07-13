@@ -113,6 +113,9 @@ incluido en el enlace y no tenés que hacer nada.
 Si alguna vez te desconectás, en **Ajustes → Sistema** podés volver a entrar con tu usuario y
 contraseña del panel.
 
+Y ya que entrás: **este manual está adentro de la plataforma**, en **Sistema → Manuales**. Lo podés
+leer en pantalla o descargarlo en PDF, sin pedírselo a nadie.
+
 ![Sesión del sistema en el softphone](img/usr-14-sistema.png)
 
 ---
