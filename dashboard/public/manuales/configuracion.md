@@ -7,7 +7,60 @@
 
 ---
 
-## 1. Orden de puesta en marcha
+## 1. Qué es PBX-NG
+
+### 1.1 No es una central: es el director de orquesta
+
+PBX-NG **no reemplaza** a las piezas clásicas de la telefonía IP: las **coordina**. Debajo del capó
+corren tres motores libres, cada uno excelente en lo suyo y ninguno pensado para conversar con el
+otro. PBX-NG es la capa que los hace trabajar juntos, y la única cara que ves.
+
+| Motor | Qué resuelve | Qué NO hace |
+|---|---|---|
+| **Asterisk 22** | Las llamadas: dialplan, colas, IVR, buzón, grabación, conferencias | No sabe defenderse de Internet ni hablar con navegadores |
+| **Kamailio** (el SBC) | El borde: seguridad SIP, enrutamiento por operador, ocultamiento de topología | No procesa llamadas ni maneja audio |
+| **rtpengine** | El audio: ancla los medios, resuelve NAT, cifra y traduce | No entiende de señalización |
+| **coturn** | STUN y TURN: que un teléfono detrás de cualquier NAT tenga audio | No es una central |
+| **go2rtc** | Traduce el video RTSP de porteros y cámaras a WebRTC | Solo video |
+| **PostgreSQL** | La memoria: configuración, llamadas, grabaciones, CRM | — |
+
+Y por encima de todos, el **control-plane** de PBX-NG: el panel que ves, la API, las alertas, el CRM
+y los correos. Es quien traduce "creá una cola de ventas" en las decenas de líneas de configuración
+que cada motor necesita.
+
+### 1.2 Cómo se hablan entre sí
+
+El recorrido de **una llamada que entra desde la calle** cuenta la historia mejor que cualquier
+diagrama:
+
+1. El operador manda la llamada a tu IP pública. **La recibe el SBC (Kamailio)**, no Asterisk.
+2. El SBC decide si es legítima (¿viene del operador o de un robot?), le esconde la topología
+   interna, y la manda al Asterisk que corresponde (*dispatcher*).
+3. **El audio no lo toca Asterisk**: queda anclado en **rtpengine**, en el borde. Por eso el núcleo
+   nunca queda expuesto.
+4. **Asterisk** hace lo suyo: mira el dialplan, decide si va a un interno, una cola o un IVR, graba
+   si corresponde, deja el mensaje en el buzón si nadie atiende.
+5. Si el que atiende es un **softphone WebRTC**, el navegador negocia el audio con **coturn**, que le
+   da un camino aunque esté detrás del NAT de su casa.
+6. Todo lo que pasó queda en **PostgreSQL**: el registro de la llamada, la grabación, la encuesta.
+7. Y el **control-plane** lo muestra en el panel, y te manda un correo si algo salió mal.
+
+![Cómo se comunican los componentes](img/inst-01-arquitectura.svg)
+
+### 1.3 Qué implica esto para vos
+
+- **Cada motor se puede prender y apagar** (Configuración → Módulos). Sin SBC, la central sigue
+  andando en una LAN; sin TURN, los softphones remotos se quedan sin audio; sin el motor de IA, hay
+  que subir los audios a mano.
+- **Cada motor tiene su panel de diagnóstico** en PBX-NG. Cuando algo falla, la pregunta correcta es
+  *"¿qué motor falló?"*, y este manual te lleva a la pantalla de ese motor.
+- **No hay que configurar Asterisk ni Kamailio a mano.** El panel genera su configuración. Si editás
+  archivos por debajo, el panel los va a sobrescribir la próxima vez que guardes algo.
+
+
+---
+
+## 2. Orden de puesta en marcha
 
 Este es el recorrido completo. Si lo seguís en este orden, cada paso se apoya en el anterior y no
 vas a tener que volver atrás.
@@ -29,42 +82,75 @@ vas a tener que volver atrás.
 | 12 | Aplicaciones | Aplicaciones | Colas, IVR, buzones, conferencias |
 | 13 | Alertas | Configuración → Alertas | Que la central te avise a vos |
 
-![Vista general del panel](img/cfg-01-panel.png)
 
 ---
 
-## 2. Primer ingreso al panel
+## 3. Primer ingreso al panel
 
 » Navegador → https://tu-dominio
 
-### 2.1 Dónde se entra
+### 3.1 La dirección de la aplicación
 
-El panel vive en el dominio que configuraste durante la instalación:
+Al terminar la instalación, el instalador imprime **las URLs** y la contraseña inicial. Guardalas: son
+la puerta de entrada.
+
+El panel vive en el servidor donde instalaste PBX-NG, en el **puerto 3001**:
+
+```
+http://IP-DEL-SERVIDOR:3001
+```
+
+Esa dirección **solo sirve para el primer arranque y desde la red interna**. En cuanto publiques el
+dominio (siguiente punto), el acceso definitivo pasa a ser:
 
 ```
 https://pbx.tu-empresa.com
 ```
 
-Si todavía no publicaste el dominio, también responde en la IP del servidor, en el puerto **3001**
-(`http://IP-DEL-SERVIDOR:3001`). Es el único momento en que conviene entrar así: después, siempre
-por HTTPS.
+Y esa es la que le vas a dar a todo el mundo — la que va en los correos de acceso, la que usan los
+softphones y la que hay que respaldar en tu documentación del cliente.
 
 ![Pantalla de login del panel](img/inst-04-login.png)
 
-### 2.2 Credenciales por defecto
+### 3.2 El dominio con certificado SSL no es opcional
+
+> **Esta es la advertencia más importante de todo el despliegue.**
+>
+> **Sin un dominio con certificado SSL válido, los internos WebRTC no funcionan.** Ninguno. Ni el
+> softphone del navegador, ni el del celular, ni el de escritorio en modo WebRTC.
+>
+> No es un capricho nuestro: los navegadores **prohíben** el acceso al micrófono y el WebSocket
+> seguro (`wss://`) fuera de un origen seguro (HTTPS con certificado válido). Un certificado
+> autofirmado tampoco alcanza.
+
+**Qué pasa si instalás sin dominio:** la central funciona, pero **solo con teléfonos SIP** — los de
+escritorio, los ATA, las bocinas IP y el softphone en modo SIP nativo dentro de la red. Perdés todo
+lo que hace atractiva a la central: el softphone web, el celular, el teletrabajo, el QR de acceso, el
+click-to-call.
+
+| Con dominio + SSL | Sin dominio |
+|---|---|
+| Internos WebRTC (navegador, celular, escritorio) | ❌ |
+| Teletrabajo sin VPN | ❌ |
+| Acceso por QR / enlace | ❌ (el enlace apunta a la nada) |
+| Click-to-Call | ❌ |
+| Teléfonos SIP en la LAN | ✅ |
+| Troncales SIP | ✅ |
+
+**Por eso, en un despliegue nuevo, el orden correcto es**: dominio → certificado → resto. No dejes el
+dominio "para después": vas a tener que rehacer la configuración de los teléfonos.
+
+### 3.3 Credenciales por defecto
 
 | Usuario | Contraseña |
 |---|---|
 | `admin` | **La que imprimió el instalador al terminar** |
 
 La contraseña del `admin` **no es fija ni conocida**: el instalador genera una aleatoria en cada
-instalación y la muestra en pantalla al final, junto con las URLs. Si la perdiste, se puede
-regenerar desde el servidor.
+instalación. **En el primer ingreso el sistema te obliga a cambiarla** y no te deja avanzar hasta que
+lo hagas. Una central con la contraseña de fábrica es una central comprometida.
 
-> **En el primer ingreso el sistema te obliga a cambiarla.** No es una sugerencia: no te deja
-> avanzar hasta que la cambiás. Una central con la contraseña de fábrica es una central comprometida.
-
-### 2.3 Otras credenciales que genera el instalador
+### 3.4 Otras credenciales que genera el instalador
 
 Todas se generan solas, son distintas en cada instalación, y viven en `docker/.env` con permisos
 restringidos. **Nunca las edites a mano**: el instalador aborta si detecta un secreto débil.
@@ -81,29 +167,30 @@ restringidos. **Nunca las edites a mano**: el instalador aborta si detecta un se
 > ejemplo (`pbxng-turn-changeme`). Se cambia en **SBC → TURN**, y hay que actualizarla también en el
 > `.env` para que la central se la entregue a los teléfonos.
 
-### 2.4 Roles: quién ve qué
+### 3.5 Hay tres paneles, no uno
 
-El panel no es uno solo: cada rol entra a un lugar distinto.
+La misma dirección sirve a las tres personas, pero **cada rol entra a un panel distinto**. No es una
+cuestión de permisos sobre la misma pantalla: son tres aplicaciones con propósitos diferentes.
 
-| Rol | Al entrar ve | Para quién es |
+| Panel | Quién entra | Para qué sirve |
 |---|---|---|
-| **Administrador** | El panel completo | Vos |
-| **Supervisor** | Monitoreo de colas y agentes, escucha/susurro/irrupción, clientes | Jefe de call center |
-| **Agente** | Su softphone, su historial, su buzón | La persona que atiende |
+| **Administración** | Administrador | Configurar la central: internos, troncales, rutas, colas, seguridad. Es este manual. |
+| **Supervisor** | Jefe de call center | Ver las colas en vivo, monitorear agentes, escuchar/susurrar/irrumpir, gestionar clientes |
+| **Agente** | Quien atiende llamadas | Su softphone, la ficha del cliente que llama, su historial y su buzón |
 
-Los usuarios se crean en **Usuarios**, y ahí se les asigna el rol y su **interno**.
+El ruteo es automático: la persona entra con su usuario y **cae en el panel que le corresponde**. Un
+agente no ve —ni puede ver— la configuración de la central.
 
-![Usuarios y roles](img/cfg-14-usuarios.png)
+Los paneles de agente y supervisor están explicados en el **Capítulo 32**; el del usuario final, en
+el *Manual de Usuario*.
 
----
-
-## 3. Configuración inicial del sistema
+## 4. Configuración inicial del sistema
 
 » Menú lateral → Sistema → Configuración
 
 Todo esto vive en **Configuración**, y son los cimientos.
 
-### 3.1 Módulos
+### 4.1 Módulos
 
 » Configuración → Módulos
 
@@ -113,7 +200,7 @@ verdad: no es una casilla decorativa.
 
 ![Módulos activos](img/cfg-16-modulos.png)
 
-### 3.2 Proxy / TLS
+### 4.2 Proxy / TLS
 
 » Configuración → Proxy / TLS  ·  y el proxy en sí: http://IP-DEL-PROXY:81
 
@@ -171,6 +258,55 @@ vale la pena tenerlo a la vista.
 
 ![Proxy y certificado TLS en el panel](img/cfg-17-proxy.png)
 
+#### Que se pueda llegar desde adentro y desde afuera (loopback / hairpin)
+
+Un detalle que hace perder horas: **el softphone tiene que registrar tanto desde la calle como desde
+la propia oficina**, y las dos cosas usan el mismo dominio público. Cuando alguien en la LAN abre
+`https://pbx.tu-empresa.com`, ese pedido sale hacia la IP pública... y tiene que "dar la vuelta" para
+volver a entrar. A eso se le llama **NAT loopback** o **hairpin**, y muchos routers no lo hacen de
+fábrica.
+
+Los dos síntomas:
+
+- Desde afuera (4G, casa) todo anda; **desde la oficina el softphone no registra**.
+- El diagnóstico ICE del panel (SBC → TURN) da **error 701** cuando lo probás desde la LAN.
+
+La solución depende del router, pero la idea es siempre la misma: que el tráfico interno hacia la IP
+pública se redirija al servidor, igual que el que viene de Internet. En routers MikroTik, esto se
+resuelve con reglas `dst-nat` que **no filtren por interfaz de entrada** (el error clásico es
+`in-interface=WAN`, que ignora el tráfico de la LAN) más un `masquerade` de vuelta. El detalle
+completo, con las reglas exactas, está en el documento técnico `docs/FIREWALL.md`.
+
+#### Qué puertos abrir, y cómo verificarlos
+
+El proxy publica el panel y el WebSocket, pero la telefonía necesita **más puertos abiertos en el
+router hacia el servidor**. Estos son los mínimos:
+
+| Puerto | Protocolo | Para qué |
+|---|---|---|
+| `443` (y `80` para el certificado) | TCP | Panel, softphone web y `wss://` |
+| `5060` / `5061` | UDP+TCP / TCP | SIP (troncales y teléfonos) |
+| `3478` | **UDP y TCP** | STUN/TURN — los dos |
+| `49152-65535` | UDP | Rango de relay del TURN |
+| `30000-40000` | UDP | Audio de las troncales (rtpengine) |
+
+> **Los dos errores que dejan las llamadas mudas:**
+> 1. Abrir `3478` y **olvidar el rango de relay** (`49152-65535/UDP`). El teléfono obtiene la
+>    dirección de relay pero el audio nunca fluye. Van juntos.
+> 2. Abrir `3478/UDP` y **no `3478/TCP`**. Muchas redes corporativas bloquean el UDP saliente.
+
+**No confíes en que "está abierto" porque lo configuraste.** Verificalo de verdad: el panel tiene el
+**diagnóstico ICE en vivo** (SBC → TURN), que levanta una conexión real y te dice si el TURN
+responde y autentica. Y desde la terminal:
+
+```bash
+scripts/check-turn.py --env docker/.env --tcp
+```
+
+Si la salida dice **`ALLOCATE 200 · relay`**, el puerto está abierto y el TURN funciona de verdad.
+Si no, revisá el router antes de seguir. Un puerto que creés abierto y no lo está es la causa número
+uno de "registra pero no hay audio".
+
 #### Si usás tu propio proxy (nginx, Traefik, Caddy)
 
 No hace falta NPM. Solo asegurate de que tu proxy:
@@ -182,7 +318,7 @@ No hace falta NPM. Solo asegurate de que tu proxy:
 En ese caso, dejá vacío el panel de Proxy/TLS: simplemente no vas a tener el monitoreo del
 certificado.
 
-### 3.3 Componentes
+### 4.3 Componentes
 
 » Configuración → Componentes
 
@@ -192,14 +328,17 @@ pieza de servidor, se actualiza acá.
 
 ![Componentes y sus IPs](img/cfg-18-componentes.png)
 
-### 3.4 Branding
+### 4.4 Branding
 
 » Configuración → Branding
 
-Nombre, subtítulo y logo. Aparece en el panel, en el login, en los correos de alerta y en los
-manuales.
+Nombre, subtítulo y **logo** (se sube una imagen). Aparece en el panel, en la pantalla de login, en
+los correos de alerta y en los manuales. Es lo primero que ve el cliente: si entregás la central con
+el logo de fábrica, parece a medio instalar.
 
-### 3.5 Audios e Integraciones
+![Branding: nombre y logo](img/cfg-51-branding.png)
+
+### 4.5 Audios e Integraciones
 
 » Configuración → Audios  /  Configuración → Integraciones
 
@@ -208,16 +347,18 @@ texto y que lo sintetice la central** con su propia voz.
 
 **Integraciones**: notificaciones a Telegram/WhatsApp y otros ganchos externos.
 
+![Audios del sistema](img/cfg-52-audios.png)
+
 ---
 
-## 4. SBC-NG · el borde de la central
+## 5. SBC-NG · el borde de la central
 
 » Menú lateral → Telefonía → SBC-NG
 
 Esta es la sección más importante del sistema, y la que menos se entiende. Vale la pena leerla
 entera **antes** de conectar la primera troncal.
 
-### 4.1 ¿Qué es el SBC y por qué existe?
+### 5.1 ¿Qué es el SBC y por qué existe?
 
 Un **SBC** (Session Border Controller) es un guardián que se para entre Internet y tu central.
 Asterisk sabe manejar llamadas, pero no está pensado para estar desnudo frente a Internet: en
@@ -241,7 +382,7 @@ El SBC hace cinco cosas que Asterisk no debería hacer solo:
 
 ![SBC-NG · panel principal](img/cfg-19-sbc-inicio.png)
 
-### 4.2 Monitoreo
+### 5.2 Monitoreo
 
 » SBC-NG → Monitoreo
 
@@ -258,7 +399,7 @@ La pantalla de entrada del SBC. Muestra en vivo:
 
 ![SBC · Monitoreo](img/cfg-20-sbc-monitoreo.png)
 
-### 4.3 Seguridad
+### 5.3 Seguridad
 
 » SBC-NG → Seguridad
 
@@ -278,7 +419,7 @@ conocidos (`friendly-scanner`, `sipvicious`), usuarios que se prueban a mansalva
 
 ![SBC · Seguridad e IPs bloqueadas](img/cfg-21-sbc-seguridad.png)
 
-### 4.4 Ruteo → Operadores (LCR)
+### 5.4 Ruteo → Operadores (LCR)
 
 » SBC-NG → Ruteo → Operadores
 
@@ -302,27 +443,75 @@ podés tener el operador barato primero y el confiable de respaldo.
 
 ![SBC · Operadores y reglas LCR](img/cfg-22-sbc-lcr.png)
 
-### 4.5 Ruteo → Manipulación SIP
+### 5.5 Ruteo → Manipulación SIP
 
 » SBC-NG → Ruteo → Manipulación SIP
 
-**El problema:** cada operador quiere las cabeceras SIP a su manera. Uno exige el número de origen
-en `P-Asserted-Identity`; otro lo lee de `From`; otro rechaza la llamada si no ve un `Diversion`.
-Cuando el operador dice *"me llegan las llamadas sin identificar"*, casi siempre se arregla acá.
+**El problema.** Cada operador quiere las cabeceras SIP a su manera. Uno exige el número de origen en
+`P-Asserted-Identity`; otro lo lee de `From`; otro rechaza la llamada si ve un `Remote-Party-ID`.
+Cuando el operador dice *"me llegan las llamadas sin identificar"* o *"rechazadas 403"*, casi siempre
+se arregla acá.
 
-**La solución:** reglas por operador que reescriben lo que sale:
+**El principio.** Por defecto **no hay ninguna manipulación**: el SBC manda el SIP tal cual. Eso es a
+propósito — una regla de más rompe llamadas que funcionaban. Se agrega solo lo que el operador exija.
 
-| Campo | Qué hace |
+#### Las 7 acciones disponibles
+
+| Acción | Qué hace | Cuándo la vas a necesitar |
+|---|---|---|
+| **Quitar header** | Elimina una cabecera de la llamada saliente | El operador rechaza una cabecera que no entiende |
+| **Agregar header** | Inserta una cabecera con un valor fijo | El operador exige una cabecera propietaria |
+| **Modificar (regex)** | Busca un patrón dentro de una cabecera y lo reemplaza | Arreglar un formato de número |
+| **Forzar From-user** | Reemplaza el usuario del `From` por un valor fijo | El operador exige que el `From` sea **tu número de cuenta**, no el del interno |
+| **P-Asserted-Identity** | Agrega `P-Asserted-Identity` con el número de origen | El operador toma de ahí el identificador del llamante |
+| **P-Preferred-Identity** | Igual, pero con `P-Preferred-Identity` | Algunos operadores usan esta y no la anterior |
+| **Diversion** | Agrega la cabecera `Diversion` | Desvíos: el operador necesita saber que la llamada fue redirigida |
+
+#### Las cabeceras que se tocan habitualmente
+
+| Cabecera | Para qué la usa el operador | Nota |
+|---|---|---|
+| `From` | El identificador "público" de quien llama | Muchos operadores exigen que sea tu cuenta SIP |
+| `P-Asserted-Identity` (PAI) | Identidad **verificada** por la red | La más pedida en Uruguay y la región |
+| `P-Preferred-Identity` (PPI) | Identidad **sugerida** por el cliente | El operador decide si la respeta |
+| `Remote-Party-ID` (RPID) | Identidad, cabecera **antigua** | Muchos operadores la **rechazan**: conviene quitarla |
+| `Diversion` | Indica que la llamada viene desviada | Necesaria para desvíos y buzones remotos |
+| `Contact` | Dónde contestar | La reescribe el SBC solo (ocultamiento de topología) |
+| `Allow` | Qué métodos soporta el equipo | Se puede quitar; algunos operadores prefieren no verla |
+| `User-Agent` | Qué software sos | Se quita para no revelar la versión |
+| `Privacy` | Llamada anónima | Va junto con PAI cuando se oculta el número |
+
+#### Variables que podés usar en el valor
+
+| Variable | Qué contiene |
 |---|---|
-| **Acción** | Agregar, reemplazar o borrar una cabecera |
-| **Operador** | A qué proveedor se le aplica (o a todos) |
-| **Header** | Cuál se toca: `P-Asserted-Identity`, `From`, `Diversion`, `Remote-Party-ID`… |
-| **Buscar (regex)** | El patrón a encontrar |
-| **Valor** | Con qué reemplazar. Se pueden usar variables: `$fU` = usuario del From |
+| `$fU` | El **usuario del From**: el número del interno que llama |
+| `$rU` | El usuario del destino (a quién se llama) |
+| `$si` | La IP de origen |
+| texto fijo | Lo que escribas tal cual (por ejemplo, tu número de cuenta) |
+
+**Ejemplo real.** El operador te da la cuenta `59824001234` y exige que **todas** las llamadas salgan
+identificadas con ella, sin importar qué interno llame:
+
+| Acción | Valor |
+|---|---|
+| Forzar From-user | `59824001234` |
+| P-Asserted-Identity | `59824001234` |
+| Quitar header | `Remote-Party-ID` |
+
+#### El botón "Generar reglas compatibles"
+
+Carga una **librería de reglas comunes** de una sola vez. Vienen **desactivadas**, salvo la única que
+es 100% segura (quitar `Remote-Party-ID`). La idea es que no tengas que escribirlas: las activás una
+por una según lo que tu operador pida, y probás.
+
+> **Cómo se prueba una regla:** activás **una sola**, hacés una llamada, y mirás en
+> **SBC → SIP debug** qué salió realmente. Cambiar tres reglas juntas y llamar es la forma más rápida
+> de no entender nada.
 
 ![SBC · Manipulación SIP](img/cfg-23-sbc-manipulacion.png)
 
-### 4.6 Ruteo → Dispatcher
+### 5.6 Ruteo → Dispatcher
 
 » SBC-NG → Ruteo → Dispatcher
 
@@ -338,7 +527,7 @@ El SBC mide la latencia de cada destino con OPTIONS automáticamente.
 
 ![SBC · Dispatcher](img/cfg-24-sbc-dispatcher.png)
 
-### 4.7 Ruteo → Remotos
+### 5.7 Ruteo → Remotos
 
 » SBC-NG → Ruteo → Remotos
 
@@ -367,7 +556,7 @@ su softphone no está registrado (se quedó sin internet, cerró la app, o se le
 
 ![SBC · Extensiones remotas](img/cfg-25-sbc-remotos.png)
 
-### 4.8 Red y Media → Red
+### 5.8 Red y Media → Red
 
 » SBC-NG → Red y Media → Red
 
@@ -377,7 +566,7 @@ red del operador sale por la WAN 2".
 
 ![SBC · Red y multi-WAN](img/cfg-26-sbc-red.png)
 
-### 4.9 Red y Media → rtpengine
+### 5.9 Red y Media → rtpengine
 
 » SBC-NG → Red y Media → rtpengine
 
@@ -390,7 +579,7 @@ por defecto): si no, la llamada conecta pero nadie escucha nada.
 
 ![SBC · rtpengine](img/cfg-27-sbc-rtpengine.png)
 
-### 4.10 Red y Media → SIP debug
+### 5.10 Red y Media → SIP debug
 
 » SBC-NG → Red y Media → SIP debug
 
@@ -402,7 +591,7 @@ Cuando el operador dice "el problema es de ustedes", acá está la prueba de qu�
 
 ![SBC · Diálogo SIP y captura](img/cfg-28-sbc-sipdebug.png)
 
-### 4.11 TURN
+### 5.11 TURN
 
 » SBC-NG → TURN
 
@@ -415,7 +604,7 @@ verde no es decorativo: significa que funciona de verdad.
 
 ![SBC · TURN y diagnóstico ICE](img/cfg-29-sbc-turn.png)
 
-### 4.12 Sistema → Módulos y Configuración
+### 5.12 Sistema → Módulos y Configuración
 
 » SBC-NG → Sistema → Módulos  /  SBC-NG → Sistema → Configuración
 
@@ -425,7 +614,7 @@ que la interfaz no cubre. Es la puerta de escape; usala con cuidado.
 
 ---
 
-## 5. Asterisk · el núcleo
+## 6. Asterisk · el núcleo
 
 » Menú lateral → Telefonía → Asterisk
 
@@ -448,13 +637,13 @@ los IVR y las rutas. Es para **ver** y para **diagnosticar**.
 
 ---
 
-## 6. Troncales
+## 7. Troncales
 
 » Menú lateral → Telefonía → SBC-NG → Troncales
 
 La **troncal** es la línea que te conecta con el mundo.
 
-### 5.1 Troncal SIP con un operador
+### 7.1 Troncal SIP con un operador
 
 En **Troncales → Nueva**: nombre, host y puerto del proveedor, usuario y contraseña, y si hace falta
 **registro** (la mayoría de los operadores lo exigen; los que autentican por IP, no).
@@ -463,21 +652,21 @@ El panel muestra el estado en vivo: **verde** si responde a OPTIONS, **rojo** si
 
 ![Troncales con estado en vivo](img/cfg-04-troncales.png)
 
-### 5.2 Troncal WebRTC (unir dos centrales)
+### 7.2 Troncal WebRTC (unir dos centrales)
 
 Sirve para enlazar dos PBX por Internet sin abrir puertos SIP: una actúa de servidor y la otra se
 registra por WebSocket seguro. Se configura con el **enlace WSS**, usuario y contraseña.
 
 ![Troncal WebRTC](img/cfg-31-troncal-webrtc.png)
 
-### 5.3 Activá la alerta
+### 7.3 Activá la alerta
 
 **Encendé la alerta de "troncal caída"** (Configuración → Alertas). Si la troncal se corta, dejás de
 recibir llamadas — y sin alerta te enterás cuando un cliente se queja, horas después.
 
 ---
 
-## 7. Rutas salientes · qué se marca y por dónde sale
+## 8. Rutas salientes · qué se marca y por dónde sale
 
 » Menú lateral → Telefonía → Rutas → Salientes
 
@@ -502,7 +691,7 @@ cual. Si el operador exige formato internacional, ponés `strip=1` y `prepend=59
 
 ---
 
-## 8. Rutas entrantes · qué pasa cuando te llaman
+## 9. Rutas entrantes · qué pasa cuando te llaman
 
 » Menú lateral → Telefonía → Rutas → Entrantes
 
@@ -526,18 +715,18 @@ directo) va a la **cola de Ventas**.
 
 ---
 
-## 9. Internos
+## 10. Internos
 
 » Menú lateral → Telefonía → Internos
 
-### 8.1 Crear un interno
+### 10.1 Crear un interno
 
 En **Internos → Nuevo**. Lo mínimo es el número y el nombre. Cada interno nace con su contraseña
 SIP generada y su **buzón de voz activado** (PIN inicial = su número).
 
 ![Alta de un interno](img/cfg-02-nuevo-interno.png)
 
-### 8.2 ¿WebRTC o SIP?
+### 10.2 ¿WebRTC o SIP?
 
 Es la decisión más importante del alta y define qué recibe el usuario en su enlace.
 
@@ -554,14 +743,14 @@ Es la decisión más importante del alta y define qué recibe el usuario en su e
 
 ![Tipo de interno](img/cfg-15-tipo-interno.png)
 
-### 8.3 Teléfonos físicos
+### 10.3 Teléfonos físicos
 
 En **Teléfonos** se aprovisionan por MAC (Yealink, Grandstream): el teléfono baja su configuración
 solo al arrancar.
 
 ---
 
-## 10. Correo saliente
+## 11. Correo saliente
 
 » Menú lateral → Sistema → Configuración → Email por empresa
 
@@ -593,25 +782,25 @@ rechazada, no conecta, remitente inválido).
 
 ---
 
-## 11. Entrega del teléfono: QR y enlace de acceso
+## 12. Entrega del teléfono: QR y enlace de acceso
 
 » Menú lateral → Telefonía → Internos → (elegir el interno) → Enviar acceso por correo
 
 Este es el proceso que reemplaza al "te paso la contraseña por WhatsApp".
 
-### 10.1 Cómo se manda
+### 12.1 Cómo se manda
 
 En **Internos**, sobre el interno, botón **Enviar acceso por correo**. Escribís la dirección de la
 persona y listo.
 
-### 10.2 Qué recibe la persona
+### 12.2 Qué recibe la persona
 
 Un correo con **un código QR** y **un enlace**. Con cualquiera de los dos, su teléfono queda
 configurado solo.
 
 ![Correo de acceso con el QR](img/cfg-03-email-acceso.png)
 
-### 10.3 Qué lleva adentro el enlace
+### 12.3 Qué lleva adentro el enlace
 
 Es importante que sepas qué estás mandando, porque explica por qué funciona sin que el usuario
 configure nada:
@@ -623,7 +812,7 @@ configure nada:
 - La **sesión en la plataforma** (si el interno tiene un usuario asociado): así la persona ve el
   directorio, la ficha de los clientes y el intercom sin volver a loguearse.
 
-### 10.4 Reglas del enlace
+### 12.4 Reglas del enlace
 
 - **Vence en 24 horas.** Si expira, se genera uno nuevo.
 - **Sirve para los tres clientes**: navegador, celular (agregar a la pantalla de inicio) y app de
@@ -638,11 +827,11 @@ configure nada:
 
 ---
 
-## 12. Aplicaciones
+## 13. Aplicaciones
 
 » Menú lateral → Telefonía → Aplicaciones
 
-### 11.1 Colas
+### 13.1 Colas
 
 En **Aplicaciones → Colas → Nueva cola**. Tres pestañas.
 
@@ -665,14 +854,14 @@ Escribís el texto, elegís la voz, lo escuchás, y el sistema lo sintetiza y lo
 
 **Avanzado:** qué hacer si no hay agentes, SLA objetivo, pausa automática al que no atiende.
 
-### 11.2 IVR
+### 13.2 IVR
 
 El menú de bienvenida ("marque 1 para ventas"). Se arma visualmente y los audios se generan por
 texto, igual que en las colas.
 
 ![IVR](img/cfg-34-ivr.png)
 
-### 11.3 Buzones de voz
+### 13.3 Buzones de voz
 
 Cada interno ya tiene el suyo (`*97` para escucharlo). En **Aplicaciones → Buzones**, panel
 *"Mensaje de voz al correo"*: cargás la dirección y cada mensaje nuevo llega por mail con **el audio
@@ -680,14 +869,14 @@ adjunto y la transcripción automática**.
 
 ![Buzón de voz al correo](img/cfg-09-buzon-email.png)
 
-### 11.4 Conferencias, grupos de timbrado, paging y códigos
+### 13.4 Conferencias, grupos de timbrado, paging y códigos
 
 Salas de conferencia con PIN, grupos que suenan a la vez, voceo por parlantes, y los códigos de
 función (`*97`, `*98`, etc.).
 
 ---
 
-## 13. Alertas
+## 14. Alertas
 
 » Menú lateral → Sistema → Configuración → Alertas
 
@@ -712,7 +901,7 @@ botón de **prueba** que manda el correo sin necesidad de activarla.
 
 ---
 
-## 14. Grabaciones
+## 15. Grabaciones
 
 » Menú lateral → Telefonía → Grabaciones
 
@@ -725,7 +914,7 @@ Se graba por interno, por cola o todo. Se escuchan desde **Grabaciones**, con re
 
 ---
 
-## 15. Seguridad
+## 16. Seguridad
 
 » Menú lateral → Sistema → Seguridad
 
@@ -737,7 +926,7 @@ permite desbloquear o bloquear a mano.
 
 ---
 
-## 16. Usuarios y roles
+## 17. Usuarios y roles
 
 » Menú lateral → Sistema → Usuarios
 
@@ -756,11 +945,11 @@ softphone vea clientes e intercom.
 
 ---
 
-## 17. Clientes (CRM)
+## 18. Clientes (CRM)
 
 » Menú lateral → Operación → Clientes
 
-### 17.1 Para qué existe
+### 18.1 Para qué existe
 
 La central sabe **quién llama** (un número). El CRM le enseña **quién es** (una persona, una
 empresa, un domicilio). Con eso, cuando entra una llamada, el agente ve la ficha **antes de
@@ -774,7 +963,7 @@ de la empresa adentro.
 puede entrar en su nombre) y sus **espacios** (garaje 12, baulera 7). El portero no busca nada:
 la información le llega sola.
 
-### 17.2 Qué guarda cada ficha
+### 18.2 Qué guarda cada ficha
 
 | Nivel | Qué es | Ejemplo |
 |---|---|---|
@@ -789,7 +978,7 @@ cliente cuando llama.
 
 ![Libreta de clientes](img/cfg-37-clientes.png)
 
-### 17.3 Encuesta post-llamada
+### 18.3 Encuesta post-llamada
 
 » Clientes → Encuesta post-llamada
 
@@ -801,14 +990,14 @@ los que le aparecen al agente en su panel cuando termina la llamada.
 
 ---
 
-## 18. Qué ve el softphone del CRM (y qué no)
+## 19. Qué ve el softphone del CRM (y qué no)
 
 » Se aplica al softphone de escritorio, a la PWA y al panel del agente
 
 Esta es una pregunta que conviene tener contestada **antes** de entregar teléfonos, porque define
 qué información sale de la central hacia la computadora de cada persona.
 
-### 18.1 El softphone solo ve el CRM si tiene sesión de plataforma
+### 19.1 El softphone solo ve el CRM si tiene sesión de plataforma
 
 El teléfono y la plataforma son **dos accesos distintos**:
 
@@ -822,7 +1011,7 @@ el softphone no muestra clientes ni intercom.
 > **Consecuencia práctica:** si querés que un agente vea la ficha del cliente que lo llama, no
 > alcanza con crearle el interno. Hay que crearle **también el usuario** y asignarle ese interno.
 
-### 18.2 Qué puede hacer cada rol
+### 19.2 Qué puede hacer cada rol
 
 | Acción | Agente | Supervisor | Administrador |
 |---|---|---|---|
@@ -839,7 +1028,7 @@ el softphone no muestra clientes ni intercom.
 El agente **lee** el CRM porque lo necesita para atender; **no lo modifica**. Si un agente intenta
 editar la libreta desde su softphone, la central le responde que no está autorizado.
 
-### 18.3 Lo que el softphone nunca ve
+### 19.3 Lo que el softphone nunca ve
 
 Las grabaciones de llamadas ajenas, la configuración de la central, las troncales, la seguridad y
 los datos de otros internos. El softphone es un teléfono con contexto, no una consola de
@@ -847,11 +1036,11 @@ administración.
 
 ---
 
-## 19. Intercom · porteros y cámaras
+## 20. Intercom · porteros y cámaras
 
 » Menú lateral → Telefonía → Intercom
 
-### 19.1 Para qué existe
+### 20.1 Para qué existe
 
 Un **portero** que llama al interno de recepción es una llamada como cualquier otra: se escucha,
 pero no se ve. El módulo de Intercom agrega **el video**: cuando el portero del cliente llama, el
@@ -861,7 +1050,7 @@ que atiende ve la cámara asociada, en vivo, dentro del mismo panel.
 del cliente **y la imagen de la cámara de entrada**, sin que tenga que abrir otra aplicación ni
 recordar la IP de nada.
 
-### 19.2 Cómo se arma
+### 20.2 Cómo se arma
 
 Los dispositivos se asocian a un **cliente** del CRM (por eso este capítulo va después del anterior).
 
@@ -877,7 +1066,7 @@ video (NVR).
 
 ![Intercom: dispositivos por cliente](img/cfg-39-intercom.png)
 
-### 19.3 Cómo llega el video al navegador
+### 20.3 Cómo llega el video al navegador
 
 Un navegador **no puede reproducir RTSP**. Entre medio hay un traductor (go2rtc) que convierte el
 flujo de la cámara a algo que el navegador entiende (WebRTC), en tiempo real y sin plugins.
@@ -891,14 +1080,14 @@ Eso significa dos cosas prácticas:
 > **Las credenciales de la cámara viajan dentro de la URL RTSP.** Usá un usuario de solo lectura
 > creado para esto, no el administrador de la cámara.
 
-### 19.4 Probar que funciona
+### 20.4 Probar que funciona
 
 Al guardar el dispositivo, el panel intenta levantar el flujo. Si la cámara no responde, lo vas a
 ver ahí mismo — no esperes a la primera llamada real para enterarte.
 
 ---
 
-## 20. Historial de llamadas
+## 21. Historial de llamadas
 
 » Menú lateral → Telefonía → Historial
 
@@ -922,9 +1111,9 @@ cliente?"* y *"¿por qué esa llamada no entró?"*.
 
 ---
 
-## 21. Monitoreo en vivo, Wallboard y Mapa
+## 22. Monitoreo en vivo, Wallboard y Mapa
 
-### 21.1 Llamadas en vivo
+### 22.1 Llamadas en vivo
 
 » Menú lateral → Operación → Llamadas en vivo
 
@@ -935,7 +1124,7 @@ por la que existe el rol de supervisor.
 
 ![Llamadas en vivo](img/cfg-41-monitor.png)
 
-### 21.2 Wallboard
+### 22.2 Wallboard
 
 » Menú lateral → Operación → Wallboard
 
@@ -944,14 +1133,14 @@ para dejarla en un televisor, no para mirarla de cerca.
 
 ![Wallboard](img/cfg-42-wallboard.png)
 
-### 21.3 Mapa
+### 22.3 Mapa
 
 » Menú lateral → Operación → Mapa
 
 Ubica geográficamente las llamadas (cuando hay dato de posición, típicamente de Click-to-Call). Sirve
 para ver de dónde te llaman.
 
-### 21.4 Resumen
+### 22.4 Resumen
 
 » Menú lateral → Operación → Resumen
 
@@ -960,7 +1149,7 @@ pantalla que ves al entrar.
 
 ---
 
-## 22. Topología
+## 23. Topología
 
 » Menú lateral → Telefonía → Topología
 
@@ -973,11 +1162,11 @@ Es la pantalla que conviene abrir primero cuando algo "no anda" y no sabés por 
 
 ---
 
-## 23. Teléfonos físicos (aprovisionamiento)
+## 24. Teléfonos físicos (aprovisionamiento)
 
 » Menú lateral → Telefonía → Teléfonos
 
-### 23.1 Para qué existe
+### 24.1 Para qué existe
 
 Configurar un teléfono de escritorio a mano —entrar a su web, cargar servidor, usuario, contraseña—
 lleva diez minutos por aparato y se presta a errores. El **aprovisionamiento** lo hace solo: cargás
@@ -993,16 +1182,16 @@ minutos están todos registrados. Sin tocar ninguno.
 
 ---
 
-## 24. IVR · el menú de bienvenida
+## 25. IVR · el menú de bienvenida
 
 » Menú lateral → Telefonía → IVR
 
-### 24.1 Para qué existe
+### 25.1 Para qué existe
 
 *"Marque 1 para ventas, 2 para soporte."* El IVR atiende, saluda y reparte la llamada según lo que
 marque la persona.
 
-### 24.2 Cómo se arma
+### 25.2 Cómo se arma
 
 Se diseña visualmente: un audio de bienvenida y, por cada dígito, un destino (interno, cola, otro
 IVR, buzón). **El audio se escribe como texto** y lo sintetiza la central con su propia voz — no hay
@@ -1022,7 +1211,7 @@ que grabar nada ni subir archivos.
 
 ---
 
-## 25. IA & Voz
+## 26. IA & Voz
 
 » Menú lateral → Telefonía → IA & Voz
 
@@ -1041,7 +1230,7 @@ grabaciones.
 
 ---
 
-## 26. Click-to-Call
+## 27. Click-to-Call
 
 » Menú lateral → Telefonía → Click-to-Call
 
@@ -1055,7 +1244,7 @@ ventas. Del otro lado ves de dónde salió la llamada.
 
 ---
 
-## 27. Notificaciones push
+## 28. Notificaciones push
 
 » Menú lateral → Sistema → Notificaciones
 
@@ -1069,7 +1258,7 @@ se hace una vez, con las credenciales que da Google o Apple.
 
 ---
 
-## 28. Dialplan
+## 29. Dialplan
 
 » Menú lateral → Sistema → Dialplan
 
@@ -1087,7 +1276,7 @@ el lugar donde se ve *exactamente* qué reglas se aplicaron y en qué orden.
 
 ---
 
-## 29. Empresas (multi-tenant)
+## 30. Empresas (multi-tenant)
 
 » Menú lateral → Sistema → Empresas
 
@@ -1101,7 +1290,7 @@ una única empresa por defecto.
 
 ---
 
-## 30. Base de datos
+## 31. Base de datos
 
 » Menú lateral → Sistema → Base de datos
 
@@ -1118,7 +1307,64 @@ configuración diaria.
 
 ---
 
-## 31. Manuales
+## 32. Los paneles de agente y supervisor
+
+» Navegador → https://tu-dominio (cada rol entra a su panel automáticamente)
+
+Este manual es el del panel de **administración**. Pero la central tiene otros dos paneles, con
+propósitos distintos. Los describimos acá para que sepas qué le estás entregando a cada persona
+cuando le creás el usuario.
+
+### 32.1 Panel de Agente
+
+Es la pantalla de quien atiende llamadas todo el día. Está pensada para eso y nada más: un teléfono
+con contexto, sin distracciones de administración.
+
+Qué tiene:
+
+- **El softphone embebido**: marca, atiende, transfiere, retiene, con o sin video — todo dentro del
+  navegador, sin instalar nada.
+- **La ficha del cliente en llamada**: cuando entra una llamada de un número conocido, aparece **quién
+  es** antes de atender (viene del CRM). Si es un cliente con portero, ve también sus personas
+  autorizadas y sus espacios.
+- **Mis llamadas**: su historial personal, con estado (contestada, saliente, perdida) y duración.
+- **La encuesta de la llamada**: al cortar, completa los campos que definió el administrador (motivo,
+  resuelto, derivado). Puede omitirla si no aplica.
+- **Cambiar contraseña** y **salir**.
+
+Lo que **no** ve: la configuración de la central, las troncales, la seguridad, las llamadas de otros.
+Su mundo es su teléfono y sus clientes.
+
+![Panel del agente](img/cfg-53-panel-agente.png)
+
+### 32.2 Panel de Supervisor
+
+Es la pantalla del jefe de call center. Tiene su propio softphone, pero su verdadera función es
+**vigilar y ayudar**.
+
+Qué tiene:
+
+- **Colas en vivo**: cuántas llamadas esperan, cuántos agentes hay conectados, los tiempos.
+- **Los agentes y su estado**: quién está en llamada, quién libre, quién en pausa.
+- **Escuchar / Susurrar / Irrumpir** sobre cualquier llamada en curso:
+
+| Acción | Qué pasa | Para qué |
+|---|---|---|
+| **Escuchar** | El supervisor oye la llamada; nadie lo sabe | Control de calidad, capacitación |
+| **Susurrar** | El supervisor le habla **solo al agente**; el cliente no lo oye | Ayudar en vivo sin que el cliente se entere |
+| **Irrumpir** | Los tres hablan | Tomar una llamada que se complica |
+
+- **La libreta de clientes** (el CRM completo, con permiso de edición).
+
+![Panel del supervisor](img/cfg-54-panel-supervisor.png)
+
+> **Recordá:** para que una persona entre a estos paneles, hay que crearle el **usuario** con su rol
+> en *Usuarios* y asignarle un **interno**. El rol decide a qué panel cae; el interno es su teléfono.
+
+
+---
+
+## 33. Manuales
 
 » Menú lateral → Sistema → Manuales
 
@@ -1145,7 +1391,7 @@ las imágenes se parten entre páginas.
 La portada del PDF lleva la **versión del producto** y la **fecha de compilación**. Sirve: cuando le
 mandás el manual a un cliente, queda dicho a qué versión corresponde lo que está leyendo.
 
-### 17.1 Los recuadros "Imagen pendiente"
+### 32.1 Los recuadros "Imagen pendiente"
 
 Donde todavía falta una captura, el manual muestra un recuadro punteado que dice **Imagen pendiente**
 con la descripción de lo que va ahí y el **nombre exacto del archivo** (por ejemplo
