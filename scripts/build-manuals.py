@@ -225,6 +225,32 @@ def build(manual, meta):
 <script>if(location.search.indexOf("print=1")>=0){{window.addEventListener("load",function(){{setTimeout(function(){{window.print()}},400)}});}}</script>
 </body></html>"""
 
+MAXW, MAXKB = 1800, 350
+def optimize(src, dst):
+    """Redimensiona y recomprime capturas pesadas: un manual con 50 PNG de 2 MB es
+    inservible (tarda en cargar y el PDF pesa 100 MB). Los SVG pasan intactos."""
+    if not src.lower().endswith(('.png', '.jpg', '.jpeg')):
+        return False
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+    if os.path.getsize(src) <= MAXKB * 1024:
+        return False
+    try:
+        im = Image.open(src)
+        if im.width > MAXW:
+            im = im.resize((MAXW, round(im.height * MAXW / im.width)), Image.LANCZOS)
+        if im.mode == 'RGBA':
+            bg = Image.new('RGB', im.size, (255, 255, 255)); bg.paste(im, mask=im.split()[-1]); im = bg
+        im = im.convert('RGB')
+        im.save(dst, 'PNG', optimize=True)
+        if os.path.getsize(dst) > 600 * 1024:      # sigue pesada: paleta de 256 colores
+            im.convert('P', palette=Image.ADAPTIVE, colors=256).save(dst, 'PNG', optimize=True)
+        return True
+    except Exception:
+        return False
+
 def main():
     meta = json.load(open(os.path.join(SRC, '00-meta.json'), encoding='utf-8'))
     os.makedirs(os.path.join(OUT, 'img'), exist_ok=True)
@@ -234,14 +260,18 @@ def main():
         open(dst, 'w', encoding='utf-8').write(html)
         shutil.copy(os.path.join(SRC, m['id'] + '.md'), os.path.join(OUT, m['id'] + '.md'))
         print('  ✓ %-14s %s' % (m['id'], dst))
-    # imágenes que ya existan
+    # imágenes que ya existan (las capturas grandes se optimizan al copiarlas)
     src_img = os.path.join(SRC, 'img')
-    n = 0
+    n, saved = 0, 0
     if os.path.isdir(src_img):
         for f in os.listdir(src_img):
-            shutil.copy(os.path.join(src_img, f), os.path.join(OUT, 'img', f)); n += 1
+            src_f = os.path.join(src_img, f); dst_f = os.path.join(OUT, 'img', f)
+            before = os.path.getsize(src_f)
+            if not optimize(src_f, dst_f):
+                shutil.copy(src_f, dst_f)
+            saved += before - os.path.getsize(dst_f); n += 1
     json.dump(meta, open(os.path.join(OUT, 'index.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-    print('  ✓ %d imágenes copiadas · índice en %s' % (n, os.path.join(OUT, 'index.json')))
+    print('  ✓ %d imágenes · %.1f MB ahorrados por optimización' % (n, saved / 1048576))
     return 0
 
 if __name__ == '__main__':
