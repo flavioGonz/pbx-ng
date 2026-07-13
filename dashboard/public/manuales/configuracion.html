@@ -128,9 +128,32 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <p>Un módulo activo <strong>es</strong> un contenedor corriendo; uno inactivo <strong>no existe</strong>. Acá prendés y apagás el SBC, el TURN, el motor de voz (IA) y el intercom. El cambio crea o destruye el contenedor de verdad: no es una casilla decorativa.</p>
 <figure class="shot"><img src="img/cfg-16-modulos.png" alt="Módulos activos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Módulos activos<span class="fn">cfg-16-modulos.png</span></figcaption></figure>
 <h3 id="3-2-proxy-tls">3.2 Proxy / TLS</h3>
-<p>El reverse proxy (Nginx Proxy Manager) termina el TLS y publica el panel y el <strong>WebSocket</strong> de los softphones. Acá cargás la URL de administración del NPM, el <strong>dominio público</strong> y las credenciales, y el panel te vigila el vencimiento del certificado.</p>
-<blockquote><p><strong>Un detalle que rompe el softphone web y cuesta encontrar:</strong> en el host del proxy hay que</p><p><strong>desactivar HTTP/2</strong>. Con HTTP/2 activo, el WebSocket (<code>/ws</code>) no se establece y el teléfono</p><p>queda "conectando" para siempre.</p></blockquote>
-<figure class="shot"><img src="img/cfg-17-proxy.png" alt="Proxy y certificado TLS" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Proxy y certificado TLS<span class="fn">cfg-17-proxy.png</span></figcaption></figure>
+<p>Acá hay una distinción que confunde a todo el mundo la primera vez:</p>
+<blockquote><p><strong>PBX-NG no configura el proxy: lo vigila.</strong> La configuración real del reverse proxy se hace</p><p><strong>dentro de Nginx Proxy Manager</strong>, en su propia interfaz. Lo que cargás en el panel de PBX-NG son</p><p>las credenciales para que pueda <em>leer</em> el estado del certificado y la regla del host, y avisarte</p><p>si el certificado está por vencer.</p></blockquote>
+<h4 id="d-nde-se-configura-de-verdad">Dónde se configura de verdad</h4>
+<p>Nginx Proxy Manager tiene su propio panel, en el <strong>puerto 81</strong> del servidor donde corre:</p>
+<pre><code>http://IP-DEL-PROXY:81</code></pre>
+<p>Credenciales de fábrica de NPM (cambialas en el primer ingreso):</p>
+<div class="tw"><table><thead><tr><th>Usuario</th><th>Contraseña</th></tr></thead><tbody><tr><td><code>admin@example.com</code></td><td><code>changeme</code></td></tr></tbody></table></div>
+<h4 id="c-mo-se-publica-pbx-ng-paso-a-paso-en-npm">Cómo se publica PBX-NG (paso a paso, en NPM)</h4>
+<ol><li><strong>Hosts → Proxy Hosts → Add Proxy Host</strong>.</li><li><strong>Domain Names</strong>: tu dominio (<code>pbx.tu-empresa.com</code>).</li><li><strong>Scheme</strong>: <code>http</code> · <strong>Forward Hostname/IP</strong>: la IP del servidor de PBX-NG · <strong>Forward Port</strong>:</li></ol>
+<p>   <code>3001</code> (el panel).</p>
+<ol><li>Activá <strong>Websockets Support</strong>. ← <em>Sin esto, el softphone web no registra nunca.</em></li><li>Activá <strong>Block Common Exploits</strong>.</li><li>Pestaña <strong>SSL</strong> → <em>Request a new SSL Certificate</em> (Let's Encrypt) → activá <strong>Force SSL</strong> y</li></ol>
+<p>   <strong>HTTP/2 Support = APAGADO</strong>.</p>
+<ol><li><strong>Save</strong>.</li></ol>
+<blockquote><p><strong>Los dos errores que dejan el softphone "conectando" para siempre:</strong></p><p>1. <strong>Websockets Support apagado.</strong> El WebSocket (<code>/ws</code>) no se establece y el teléfono no registra.</p><p>2. <strong>HTTP/2 encendido.</strong> Rompe el WebSocket aunque esté habilitado. Tiene que estar <strong>apagado</strong>.</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>Si el panel carga bien pero el teléfono no registra, revisá estas dos casillas antes que nada.</p></blockquote>
+<figure class="shot"><img src="img/cfg-35-npm-host.png" alt="Regla del host en Nginx Proxy Manager" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Regla del host en Nginx Proxy Manager<span class="fn">cfg-35-npm-host.png</span></figcaption></figure>
+<h4 id="qu-hace-el-panel-de-pbx-ng-configuraci-n-proxy-tls">Qué hace el panel de PBX-NG (Configuración → Proxy / TLS)</h4>
+<p>Cargás la URL del NPM (<code>http://IP:81</code>), el dominio público y las credenciales de administración de NPM. Con eso, PBX-NG te muestra:</p>
+<ul><li>El <strong>estado del certificado TLS</strong>: emisor, dominio y <strong>cuántos días le quedan</strong>.</li><li>La <strong>regla del host</strong> de PBX-NG tal como está en el proxy (para verificar que quedó bien).</li></ul>
+<p>Es monitoreo, no configuración. Si el certificado se vence, el softphone deja de funcionar — por eso vale la pena tenerlo a la vista.</p>
+<figure class="shot"><img src="img/cfg-17-proxy.png" alt="Proxy y certificado TLS en el panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Proxy y certificado TLS en el panel<span class="fn">cfg-17-proxy.png</span></figcaption></figure>
+<h4 id="si-us-s-tu-propio-proxy-nginx-traefik-caddy">Si usás tu propio proxy (nginx, Traefik, Caddy)</h4>
+<p>No hace falta NPM. Solo asegurate de que tu proxy:</p>
+<ul><li>Reenvíe el dominio al puerto <strong>3001</strong> (panel) del servidor.</li><li><strong>Soporte WebSocket</strong> en <code>/ws</code> (cabeceras <code>Upgrade</code> y <code>Connection</code>).</li><li>Tenga <strong>HTTP/2 desactivado</strong> en ese host.</li></ul>
+<p>En ese caso, dejá vacío el panel de Proxy/TLS: simplemente no vas a tener el monitoreo del certificado.</p>
 <h3 id="3-3-componentes">3.3 Componentes</h3>
 <p>Es el mapa de la instalación: en qué IP está el Asterisk, el SBC, el TURN, el motor de voz y el anclaje de medios. El panel usa esto para consultarlos y para dibujar la topología. Si moviste una pieza de servidor, se actualiza acá.</p>
 <figure class="shot"><img src="img/cfg-18-componentes.png" alt="Componentes y sus IPs" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Componentes y sus IPs<span class="fn">cfg-18-componentes.png</span></figcaption></figure>
