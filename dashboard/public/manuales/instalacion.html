@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PBX-NG · Manual de Instalación</title>
+<style>:root{--accent:#2563eb;--soft:#2563eb14}
+*{box-sizing:border-box}
+body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}
+.cover{padding:74px 60px 60px;color:#fff;background:linear-gradient(150deg,#0f1a30,#16233f 60%,var(--accent))}
+.cover .kick{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;opacity:.75}
+.cover h1{font-size:44px;line-height:1.1;margin:12px 0 6px;font-weight:800}
+.cover .sub{font-size:18px;opacity:.85}
+.cover .meta{margin-top:34px;display:flex;gap:34px;flex-wrap:wrap;font-size:13px;opacity:.8}
+.cover .icon{font-size:52px;margin-bottom:14px}
+.toc{padding:34px 60px;border-bottom:1px solid #e8edf4;background:#f8fafc}
+.toc h2{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:#94a3b8;margin:0 0 14px}
+.toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
+.toc a:hover{color:var(--accent);border-left-color:var(--accent)}
+.toc a.l3{padding-left:30px;font-size:13.5px;color:#64748b}
+main{padding:44px 60px 70px}
+h1{font-size:30px;margin:0 0 22px}
+h2{font-size:23px;margin:44px 0 14px;padding-bottom:9px;border-bottom:2px solid #eef1f7;scroll-margin-top:20px}
+h3{font-size:17.5px;margin:28px 0 10px;color:#1e293b;scroll-margin-top:20px}
+p{margin:12px 0}
+code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font:13.5px/1.5 ui-monospace,Consolas,monospace;color:#be123c}
+pre{background:#0f1a30;color:#e2e8f0;padding:16px 18px;border-radius:11px;overflow:auto;margin:16px 0}
+pre code{background:none;color:inherit;padding:0;font-size:13.5px}
+blockquote{margin:18px 0;padding:14px 18px;background:var(--soft);border-left:4px solid var(--accent);border-radius:0 10px 10px 0}
+blockquote p{margin:5px 0;font-size:14.5px;color:#334155}
+.tw{overflow-x:auto;margin:18px 0}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th{text-align:left;background:#f8fafc;color:#475569;font-weight:700;font-size:12.5px;letter-spacing:.4px;text-transform:uppercase;padding:11px 13px;border-bottom:2px solid #e8edf4}
+td{padding:11px 13px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+tr:last-child td{border-bottom:none}
+ul,ol{margin:12px 0;padding-left:24px}
+li{margin:6px 0}
+hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
+figure.shot{margin:26px 0;text-align:center}
+figure.shot img{max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 22px rgba(15,23,42,.09)}
+figure.shot figcaption{font-size:12.5px;color:#94a3b8;margin-top:9px}
+figure.shot.ph{border:2px dashed #cbd5e1;border-radius:12px;background:#f8fafc;padding:38px 20px}
+figure.shot.ph::before{content:'🖼  Imagen pendiente';display:block;font-size:13px;font-weight:700;color:#94a3b8;letter-spacing:.4px}
+figure.shot.ph figcaption{margin-top:8px;color:#64748b;font-size:13.5px}
+footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px solid #eef1f7}
+.top{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;border:0;border-radius:11px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(15,23,42,.2)}
+@media print{
+  body{background:#fff}
+  .page{box-shadow:none;max-width:none}
+  .top{display:none}
+  .cover{padding:60px 40px;page-break-after:always}
+  .toc{page-break-after:always}
+  main{padding:0 10px}
+  h2{page-break-after:avoid}
+  figure.shot,table,pre,blockquote{page-break-inside:avoid}
+  a{color:inherit;text-decoration:none}
+}
+</style></head>
+<body>
+<div class="page">
+  <header class="cover">
+    <div class="icon">🚀</div>
+    <div class="kick">PBX-NG · Plataforma de comunicaciones unificadas</div>
+    <h1>Manual de Instalación</h1>
+    <div class="sub">Puesta en marcha del appliance</div>
+    <div class="meta">
+      <div><b>Dirigido a</b><br>Técnico / integrador</div>
+      <div><b>Versión</b><br>1.1.0</div>
+      <div><b>Actualizado</b><br>13/07/2026</div>
+    </div>
+  </header>
+  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-antes-de-empezar">1. Antes de empezar</a><a class="l3" href="#1-1-qu-vas-a-instalar">1.1 Qué vas a instalar</a><a class="l3" href="#1-2-requisitos">1.2 Requisitos</a><a class="l2" href="#2-elegir-la-topolog-a">2. Elegir la topología</a><a class="l3" href="#2-1-una-sola-m-quina-recomendado-para-empezar">2.1 Una sola máquina (recomendado para empezar)</a><a class="l3" href="#2-2-dos-m-quinas-n-cleo-borde">2.2 Dos máquinas: núcleo + borde</a><a class="l2" href="#3-instalaci-n">3. Instalación</a><a class="l3" href="#3-1-descargar-e-instalar">3.1 Descargar e instalar</a><a class="l3" href="#3-2-instalaci-n-en-dos-m-quinas">3.2 Instalación en dos máquinas</a><a class="l3" href="#3-3-primer-acceso">3.3 Primer acceso</a><a class="l2" href="#4-firewall-y-nat">4. Firewall y NAT</a><a class="l3" href="#4-1-lo-que-se-publica-a-internet">4.1 Lo que se publica a Internet</a><a class="l3" href="#4-2-lo-que-nunca-se-publica">4.2 Lo que nunca se publica</a><a class="l3" href="#4-3-verificarlo-de-verdad">4.3 Verificarlo de verdad</a><a class="l2" href="#5-activar-y-desactivar-m-dulos">5. Activar y desactivar módulos</a><a class="l2" href="#6-actualizar-la-central">6. Actualizar la central</a><a class="l2" href="#7-si-algo-no-funciona">7. Si algo no funciona</a></nav>
+  <main><blockquote><p><strong>Para quién es este manual</strong></p><p>Para la persona que instala PBX-NG por primera vez en un servidor: técnico, integrador o</p><p>administrador de sistemas. No hace falta saber de Asterisk; sí manejarse con una terminal Linux.</p></blockquote>
+<hr />
+<h2 id="1-antes-de-empezar">1. Antes de empezar</h2>
+<h3 id="1-1-qu-vas-a-instalar">1.1 Qué vas a instalar</h3>
+<p>PBX-NG es una central telefónica que se despliega como <strong>appliance</strong>: un conjunto de módulos independientes que se activan según lo que necesite el cliente. Cada módulo es un contenedor.</p>
+<div class="tw"><table><thead><tr><th>Módulo</th><th>Qué aporta</th><th>¿Es obligatorio?</th></tr></thead><tbody><tr><td><code>core</code></td><td>Asterisk, base de datos, API y panel de administración</td><td><strong>Sí</strong></td></tr><tr><td><code>sbc</code></td><td>Borde SIP: seguridad, troncales, anclaje de medios</td><td>Solo si hay troncales SIP</td></tr><tr><td><code>turn</code></td><td>Traversía de NAT para los teléfonos WebRTC</td><td><strong>Sí</strong> si hay softphones fuera de la red</td></tr><tr><td><code>ai</code></td><td>Motor de voz: TTS (anuncios) y STT (transcripciones)</td><td>Opcional</td></tr><tr><td><code>intercom</code></td><td>Video de porteros y cámaras (RTSP → navegador)</td><td>Opcional</td></tr><tr><td><code>proxy</code></td><td>Reverse proxy con certificados TLS</td><td>Solo si no tenés uno propio</td></tr></tbody></table></div>
+<h3 id="1-2-requisitos">1.2 Requisitos</h3>
+<ul><li><strong>Servidor</strong>: Debian 12 o Ubuntu 22.04, 2 vCPU y 4 GB de RAM como mínimo (más si vas a</li></ul>
+<p>  transcodificar muchas llamadas simultáneas).</p>
+<ul><li><strong>Docker</strong> y el plugin <code>docker compose</code>.</li><li><strong>Un dominio</strong> apuntando al servidor (por ejemplo <code>pbx.cliente.com</code>) y su certificado TLS.</li><li><strong>Los puertos abiertos</strong> que se detallan en la sección 4. <strong>Este punto no es opcional</strong>: es la</li></ul>
+<p>  causa número uno de instalaciones "que registran pero no tienen audio".</p>
+<figure class="shot"><img src="img/inst-01-arquitectura.png" alt="Diagrama de la arquitectura y sus módulos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Diagrama de la arquitectura y sus módulos</figcaption></figure>
+<hr />
+<h2 id="2-elegir-la-topolog-a">2. Elegir la topología</h2>
+<h3 id="2-1-una-sola-m-quina-recomendado-para-empezar">2.1 Una sola máquina (recomendado para empezar)</h3>
+<p>Todo corre en un servidor. Es lo indicado para una central única, una oficina, o una prueba.</p>
+<h3 id="2-2-dos-m-quinas-n-cleo-borde">2.2 Dos máquinas: núcleo + borde</h3>
+<p>El <strong>núcleo</strong> (Asterisk, base de datos, panel) queda en la LAN, y el <strong>borde</strong> (SBC, TURN) en la DMZ, expuesto a Internet. Es la topología que se usa cuando la seguridad perimetral importa: si alguien vulnera el borde, no llega a la base de datos ni a las grabaciones.</p>
+<figure class="shot"><img src="img/inst-02-topologias.png" alt="Topologías: una VM vs dos VMs" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Topologías: una VM vs dos VMs</figcaption></figure>
+<hr />
+<h2 id="3-instalaci-n">3. Instalación</h2>
+<h3 id="3-1-descargar-e-instalar">3.1 Descargar e instalar</h3>
+<pre><code>git clone https://github.com/flavioGonz/pbx-ng.git
+cd pbx-ng/docker
+./install.sh</code></pre>
+<p>El instalador es <strong>interactivo</strong>: te pregunta el rol de la máquina, qué módulos querés levantar, el dominio y la IP pública. <strong>Genera todos los secretos solo</strong> (contraseñas de base de datos, JWT, ARI, AMI, TURN) y los guarda en <code>docker/.env</code> con permisos restringidos.</p>
+<blockquote><p><strong>Nunca edites <code>.env</code> a mano para poner contraseñas.</strong> El instalador tiene un control previo que</p><p>aborta si detecta un secreto débil o de ejemplo. Está ahí por algo.</p></blockquote>
+<h3 id="3-2-instalaci-n-en-dos-m-quinas">3.2 Instalación en dos máquinas</h3>
+<p>Primero el <strong>núcleo</strong>, que genera el archivo de unión con los secretos compartidos:</p>
+<pre><code>./install.sh --role=core --public-ip=&lt;IP_WAN&gt; --domain=pbx.cliente.com --edge-ip=&lt;IP_LAN_DEL_BORDE&gt;</code></pre>
+<p>Copiá ese archivo al borde e instalá allí:</p>
+<pre><code>scp docker/edge-join.env root@&lt;IP_BORDE&gt;:/opt/pbx-ng/docker/
+# en el borde:
+./install.sh --role=edge --join=edge-join.env --public-ip=&lt;IP_WAN&gt;</code></pre>
+<p>El borde valida que llegue al núcleo (base de datos, AMI, ARI) <strong>antes</strong> de desplegar nada.</p>
+<figure class="shot"><img src="img/inst-03-instalador.png" alt="Salida del instalador al terminar" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Salida del instalador al terminar</figcaption></figure>
+<h3 id="3-3-primer-acceso">3.3 Primer acceso</h3>
+<p>Al terminar, el instalador imprime la contraseña inicial del usuario <code>admin</code>. Entrá al panel (<code>https://tu-dominio</code>) y <strong>cambiala en el primer ingreso</strong> — el sistema te lo va a exigir.</p>
+<figure class="shot"><img src="img/inst-04-login.png" alt="Pantalla de login del panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Pantalla de login del panel</figcaption></figure>
+<hr />
+<h2 id="4-firewall-y-nat">4. Firewall y NAT</h2>
+<p><strong>Esta sección decide si la central funciona o no.</strong> La señalización suele pasar sola; el audio es lo primero que se rompe.</p>
+<h3 id="4-1-lo-que-se-publica-a-internet">4.1 Lo que se publica a Internet</h3>
+<div class="tw"><table><thead><tr><th>Puerto</th><th>Protocolo</th><th>Para qué</th></tr></thead><tbody><tr><td><code>443</code> (y <code>80</code> para el certificado)</td><td>TCP</td><td>Panel, softphone web y <strong>WSS</strong></td></tr><tr><td><code>5060</code> / <code>5061</code></td><td>UDP+TCP / TCP</td><td>SIP: troncales y teléfonos físicos</td></tr><tr><td><code>30000-40000</code></td><td>UDP</td><td>Audio de las troncales (rtpengine)</td></tr><tr><td><code>3478</code></td><td><strong>UDP y TCP</strong></td><td>STUN/TURN — <strong>los dos</strong>, muchas redes bloquean UDP saliente</td></tr><tr><td><code>49152-65535</code></td><td>UDP</td><td><strong>Rango relay del TURN</strong></td></tr><tr><td><code>5349</code></td><td>TCP</td><td>TURN sobre TLS (recomendado para redes corporativas)</td></tr></tbody></table></div>
+<blockquote><p><strong>Los dos errores más comunes:</strong></p><p>1. Abrir <code>3478</code> y olvidar el rango <code>49152-65535/UDP</code>. El teléfono obtiene el candidato de relay,</p><p>   pero el audio nunca fluye. Van juntos, siempre.</p><p>2. Abrir <code>3478/UDP</code> y no <code>3478/TCP</code>. Muchas redes corporativas bloquean UDP saliente.</p></blockquote>
+<h3 id="4-2-lo-que-nunca-se-publica">4.2 Lo que nunca se publica</h3>
+<p><code>5432</code> (base de datos), <code>6379</code> (Redis), <code>3000</code> y <code>3001</code> (API y panel, van detrás del proxy), <code>5038</code> (AMI), <code>8088</code> (ARI), <code>81</code> (admin del proxy).</p>
+<h3 id="4-3-verificarlo-de-verdad">4.3 Verificarlo de verdad</h3>
+<p>Que el servicio esté "activo" no prueba nada. Verificá lo que hace un teléfono real:</p>
+<pre><code>scripts/check-turn.py --env docker/.env --tcp</code></pre>
+<p>Si la salida dice <strong><code>ALLOCATE 200 · relay = …</code></strong>, el TURN está alcanzable <strong>y</strong> autenticado. Si no, revisá <code>docs/FIREWALL.md</code>, que tiene el detalle completo y la trampa del <em>NAT hairpin</em>.</p>
+<figure class="shot"><img src="img/inst-05-turn.png" alt="Diagnóstico ICE/TURN en vivo desde el panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Diagnóstico ICE/TURN en vivo desde el panel</figcaption></figure>
+<hr />
+<h2 id="5-activar-y-desactivar-m-dulos">5. Activar y desactivar módulos</h2>
+<p>Un módulo activo es un contenedor que existe; uno inactivo <strong>no existe</strong>. Se maneja desde el panel (<strong>Configuración → Módulos</strong>) o por línea de comandos:</p>
+<pre><code>pbxng-ctl status              # qué módulos están activos
+pbxng-ctl enable  intercom    # crea el contenedor
+pbxng-ctl disable intercom    # lo destruye</code></pre>
+<figure class="shot"><img src="img/inst-06-modulos.png" alt="Panel de módulos" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel de módulos</figcaption></figure>
+<hr />
+<h2 id="6-actualizar-la-central">6. Actualizar la central</h2>
+<p>Las actualizaciones se hacen por <strong>imagen versionada</strong>, no parchando archivos:</p>
+<pre><code>cd docker
+export PBXNG_VERSION=X.Y.Z
+./deploy.sh                    # o ./deploy.sh --images=pbxng-X.Y.Z-images.tar.gz (sin internet)</code></pre>
+<p><code>deploy.sh</code> baja las imágenes, corre las <strong>migraciones de base de datos</strong> y levanta todo. Para volver atrás, desplegá la versión anterior. El detalle está en <code>RELEASE.md</code>.</p>
+<hr />
+<h2 id="7-si-algo-no-funciona">7. Si algo no funciona</h2>
+<div class="tw"><table><thead><tr><th>Síntoma</th><th>Dónde mirar</th></tr></thead><tbody><tr><td>El teléfono registra pero <strong>no hay audio</strong></td><td>Firewall: rango de relay del TURN y <code>30000-40000/UDP</code>. Corré <code>check-turn.py</code>.</td></tr><tr><td>El softphone web no conecta</td><td>El proxy debe permitir <strong>WebSocket</strong> en <code>/ws</code> (y con HTTP/2 <strong>desactivado</strong>).</td></tr><tr><td>El panel no carga datos</td><td>Contenedor <code>api</code>: <code>docker compose logs api</code>.</td></tr><tr><td>No entran llamadas</td><td>Estado de la troncal en <strong>Monitoreo</strong>. Activá la alerta de <em>troncal caída</em>.</td></tr></tbody></table></div>
+<figure class="shot"><img src="img/inst-07-monitor.png" alt="Panel de monitoreo con el estado de los componentes" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel de monitoreo con el estado de los componentes</figcaption></figure></main>
+  <footer>PBX-NG · Manual de Instalación · versión 1.1.0 · 13/07/2026</footer>
+</div>
+<button class="top" onclick="window.print()">Descargar PDF</button>
+<script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>
+</body></html>

@@ -1,0 +1,9 @@
+{
+  "product": "PBX-NG",
+  "tagline": "Plataforma de comunicaciones unificadas",
+  "manuals": [
+    { "id": "instalacion",  "title": "Manual de Instalación",  "subtitle": "Puesta en marcha del appliance", "audience": "Técnico / integrador", "icon": "🚀", "accent": "#2563eb" },
+    { "id": "configuracion","title": "Manual de Configuración","subtitle": "Administración de la central",   "audience": "Administrador",        "icon": "⚙️", "accent": "#7c3aed" },
+    { "id": "usuario",      "title": "Manual de Usuario",      "subtitle": "Softphone y panel de agente",    "audience": "Usuario final",        "icon": "📱", "accent": "#0d9488" }
+  ]
+}

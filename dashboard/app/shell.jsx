@@ -8,7 +8,7 @@ import {
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute,
   IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2,
-  IconDeviceCctv, IconAddressBook,
+  IconDeviceCctv, IconAddressBook, IconBook,
 } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
@@ -53,6 +53,7 @@ const groups = [
     { href: '/seguridad', label: 'Seguridad', icon: IconShieldCheck },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
     { href: '/configuracion', label: 'Configuración', icon: IconSettings },
+    { href: '/manuales', label: 'Manuales', icon: IconBook },
   ] },
 ];
 

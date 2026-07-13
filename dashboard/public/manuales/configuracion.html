@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PBX-NG · Manual de Configuración</title>
+<style>:root{--accent:#7c3aed;--soft:#7c3aed14}
+*{box-sizing:border-box}
+body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}
+.cover{padding:74px 60px 60px;color:#fff;background:linear-gradient(150deg,#0f1a30,#16233f 60%,var(--accent))}
+.cover .kick{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;opacity:.75}
+.cover h1{font-size:44px;line-height:1.1;margin:12px 0 6px;font-weight:800}
+.cover .sub{font-size:18px;opacity:.85}
+.cover .meta{margin-top:34px;display:flex;gap:34px;flex-wrap:wrap;font-size:13px;opacity:.8}
+.cover .icon{font-size:52px;margin-bottom:14px}
+.toc{padding:34px 60px;border-bottom:1px solid #e8edf4;background:#f8fafc}
+.toc h2{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:#94a3b8;margin:0 0 14px}
+.toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
+.toc a:hover{color:var(--accent);border-left-color:var(--accent)}
+.toc a.l3{padding-left:30px;font-size:13.5px;color:#64748b}
+main{padding:44px 60px 70px}
+h1{font-size:30px;margin:0 0 22px}
+h2{font-size:23px;margin:44px 0 14px;padding-bottom:9px;border-bottom:2px solid #eef1f7;scroll-margin-top:20px}
+h3{font-size:17.5px;margin:28px 0 10px;color:#1e293b;scroll-margin-top:20px}
+p{margin:12px 0}
+code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font:13.5px/1.5 ui-monospace,Consolas,monospace;color:#be123c}
+pre{background:#0f1a30;color:#e2e8f0;padding:16px 18px;border-radius:11px;overflow:auto;margin:16px 0}
+pre code{background:none;color:inherit;padding:0;font-size:13.5px}
+blockquote{margin:18px 0;padding:14px 18px;background:var(--soft);border-left:4px solid var(--accent);border-radius:0 10px 10px 0}
+blockquote p{margin:5px 0;font-size:14.5px;color:#334155}
+.tw{overflow-x:auto;margin:18px 0}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th{text-align:left;background:#f8fafc;color:#475569;font-weight:700;font-size:12.5px;letter-spacing:.4px;text-transform:uppercase;padding:11px 13px;border-bottom:2px solid #e8edf4}
+td{padding:11px 13px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+tr:last-child td{border-bottom:none}
+ul,ol{margin:12px 0;padding-left:24px}
+li{margin:6px 0}
+hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
+figure.shot{margin:26px 0;text-align:center}
+figure.shot img{max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 22px rgba(15,23,42,.09)}
+figure.shot figcaption{font-size:12.5px;color:#94a3b8;margin-top:9px}
+figure.shot.ph{border:2px dashed #cbd5e1;border-radius:12px;background:#f8fafc;padding:38px 20px}
+figure.shot.ph::before{content:'🖼  Imagen pendiente';display:block;font-size:13px;font-weight:700;color:#94a3b8;letter-spacing:.4px}
+figure.shot.ph figcaption{margin-top:8px;color:#64748b;font-size:13.5px}
+footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px solid #eef1f7}
+.top{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;border:0;border-radius:11px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(15,23,42,.2)}
+@media print{
+  body{background:#fff}
+  .page{box-shadow:none;max-width:none}
+  .top{display:none}
+  .cover{padding:60px 40px;page-break-after:always}
+  .toc{page-break-after:always}
+  main{padding:0 10px}
+  h2{page-break-after:avoid}
+  figure.shot,table,pre,blockquote{page-break-inside:avoid}
+  a{color:inherit;text-decoration:none}
+}
+</style></head>
+<body>
+<div class="page">
+  <header class="cover">
+    <div class="icon">⚙️</div>
+    <div class="kick">PBX-NG · Plataforma de comunicaciones unificadas</div>
+    <h1>Manual de Configuración</h1>
+    <div class="sub">Administración de la central</div>
+    <div class="meta">
+      <div><b>Dirigido a</b><br>Administrador</div>
+      <div><b>Versión</b><br>1.1.0</div>
+      <div><b>Actualizado</b><br>13/07/2026</div>
+    </div>
+  </header>
+  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-el-panel-de-administraci-n">1. El panel de administración</a><a class="l2" href="#2-internos-extensiones">2. Internos (extensiones)</a><a class="l3" href="#2-1-crear-un-interno">2.1 Crear un interno</a><a class="l3" href="#2-2-entregarle-el-tel-fono-al-usuario">2.2 Entregarle el teléfono al usuario</a><a class="l2" href="#3-troncales">3. Troncales</a><a class="l3" href="#3-1-dar-de-alta-una-troncal-sip">3.1 Dar de alta una troncal SIP</a><a class="l3" href="#3-2-rutas-entrantes-y-salientes">3.2 Rutas entrantes y salientes</a><a class="l2" href="#4-colas-de-llamadas">4. Colas de llamadas</a><a class="l3" href="#4-1-crear-una-cola">4.1 Crear una cola</a><a class="l3" href="#4-2-agentes">4.2 Agentes</a><a class="l2" href="#5-buz-n-de-voz">5. Buzón de voz</a><a class="l3" href="#5-1-mandar-los-mensajes-al-correo">5.1 Mandar los mensajes al correo</a><a class="l2" href="#6-correo-saliente">6. Correo saliente</a><a class="l2" href="#7-alertas-autom-ticas">7. Alertas automáticas</a><a class="l2" href="#8-grabaci-n-de-llamadas">8. Grabación de llamadas</a><a class="l2" href="#9-seguridad">9. Seguridad</a><a class="l2" href="#10-usuarios-y-roles">10. Usuarios y roles</a></nav>
+  <main><blockquote><p><strong>Para quién es este manual</strong></p><p>Para el administrador de la central: la persona que crea los internos, arma las colas, conecta</p><p>las troncales y decide quién recibe qué. No requiere conocimientos de telefonía previa.</p></blockquote>
+<hr />
+<h2 id="1-el-panel-de-administraci-n">1. El panel de administración</h2>
+<p>Se entra con el usuario <code>admin</code> en <code>https://tu-dominio</code>. El menú lateral agrupa todo en secciones; las que más vas a usar son <strong>Internos</strong>, <strong>Aplicaciones</strong>, <strong>Troncales</strong> y <strong>Configuración</strong>.</p>
+<figure class="shot"><img src="img/cfg-01-panel.png" alt="Vista general del panel" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Vista general del panel</figcaption></figure>
+<hr />
+<h2 id="2-internos-extensiones">2. Internos (extensiones)</h2>
+<p>Un <strong>interno</strong> es una línea telefónica: el 2001 de recepción, el 3005 de un vendedor. Puede ser un teléfono físico, un softphone en la computadora o la app del celular.</p>
+<h3 id="2-1-crear-un-interno">2.1 Crear un interno</h3>
+<p>En <strong>Internos → Nuevo</strong>. Lo mínimo es el número y el nombre. Cada interno nace con:</p>
+<ul><li>Su <strong>contraseña SIP</strong>, generada automáticamente.</li><li>Su <strong>buzón de voz activado</strong>, con PIN inicial igual al número de interno.</li></ul>
+<figure class="shot"><img src="img/cfg-02-nuevo-interno.png" alt="Alta de un interno" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Alta de un interno</figcaption></figure>
+<h3 id="2-2-entregarle-el-tel-fono-al-usuario">2.2 Entregarle el teléfono al usuario</h3>
+<p>No le dictes contraseñas por teléfono. Usá el botón <strong>Enviar acceso por correo</strong>: la persona recibe un mail con un <strong>código QR</strong> y un enlace. Lo escanea con el celular y su teléfono queda configurado solo. El mismo enlace sirve para la app de escritorio.</p>
+<blockquote><p>El acceso <strong>vence en 24 horas</strong>. Si expira, generá uno nuevo.</p></blockquote>
+<figure class="shot"><img src="img/cfg-03-email-acceso.png" alt="Correo de acceso con el QR" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Correo de acceso con el QR</figcaption></figure>
+<hr />
+<h2 id="3-troncales">3. Troncales</h2>
+<p>La <strong>troncal</strong> es la línea que te conecta con el mundo: el proveedor por el que entran y salen las llamadas.</p>
+<h3 id="3-1-dar-de-alta-una-troncal-sip">3.1 Dar de alta una troncal SIP</h3>
+<p>En <strong>Troncales → Nueva</strong>, cargá los datos que te dio el proveedor: host, puerto, usuario y contraseña. Marcá <strong>registrar</strong> si el proveedor lo exige.</p>
+<p>El panel muestra el estado en vivo: <strong>verde</strong> si la troncal responde, <strong>rojo</strong> si no.</p>
+<figure class="shot"><img src="img/cfg-04-troncales.png" alt="Troncales con su estado en vivo" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Troncales con su estado en vivo</figcaption></figure>
+<blockquote><p><strong>Activá la alerta de "troncal caída"</strong> (Configuración → Alertas). Si la troncal se cae, dejás de</p><p>recibir llamadas — y sin alerta te enterás cuando un cliente se queja.</p></blockquote>
+<h3 id="3-2-rutas-entrantes-y-salientes">3.2 Rutas entrantes y salientes</h3>
+<ul><li><strong>Ruta entrante</strong>: qué pasa cuando llaman a un número tuyo (DID). Puede ir a un interno, a un IVR</li></ul>
+<p>  o a una cola.</p>
+<ul><li><strong>Ruta saliente</strong>: por qué troncal sale cada llamada según lo que se marque.</li></ul>
+<figure class="shot"><img src="img/cfg-05-rutas.png" alt="Rutas entrantes" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Rutas entrantes</figcaption></figure>
+<hr />
+<h2 id="4-colas-de-llamadas">4. Colas de llamadas</h2>
+<p>Una <strong>cola</strong> reparte las llamadas entre varios agentes: soporte, ventas, mesa de entrada.</p>
+<h3 id="4-1-crear-una-cola">4.1 Crear una cola</h3>
+<p>En <strong>Aplicaciones → Colas → Nueva cola</strong>. El editor tiene tres pestañas.</p>
+<p><strong>Básico</strong> — lo que define el comportamiento:</p>
+<div class="tw"><table><thead><tr><th>Campo</th><th>Qué significa</th><th>Recomendación</th></tr></thead><tbody><tr><td>Estrategia</td><td>Cómo se elige al agente</td><td><em>Round-robin con memoria</em> reparte parejo</td></tr><tr><td>Timbrado del agente</td><td>Cuánto suena en cada uno</td><td>20-25 segundos</td></tr><tr><td><strong>Descanso del agente</strong></td><td>Tiempo para tipificar antes de la próxima llamada</td><td><strong>Al menos 10 s</strong>; en 0 el agente se quema</td></tr><tr><td>Capacidad máxima</td><td>Cuántas llamadas pueden esperar</td><td>0 = sin límite</td></tr><tr><td>Espera máxima + destino</td><td>Qué hacer si nadie atiende</td><td>Buzón o interno de respaldo</td></tr></tbody></table></div>
+<figure class="shot"><img src="img/cfg-06-cola-basico.png" alt="Editor de colas · pestaña Básico" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Editor de colas · pestaña Básico</figcaption></figure>
+<p><strong>Anuncios</strong> — acá está la diferencia con otras centrales: <strong>no hay que subir archivos de audio</strong>. Escribís el texto, elegís la voz y lo escuchás antes de guardar. El sistema lo sintetiza y lo publica solo.</p>
+<ul><li><em>Bienvenida</em>: se reproduce al entrar a la cola.</li><li><em>Anuncio periódico</em>: se repite mientras la persona espera.</li><li><em>Posición y tiempo de espera</em>: los locuta la central con su propia voz.</li></ul>
+<figure class="shot"><img src="img/cfg-07-cola-anuncios.png" alt="Editor de colas · pestaña Anuncios" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Editor de colas · pestaña Anuncios</figcaption></figure>
+<p><strong>Avanzado</strong> — qué hacer si no hay agentes, SLA objetivo, pausa automática al que no atiende.</p>
+<h3 id="4-2-agentes">4.2 Agentes</h3>
+<p>Se agregan desde la tarjeta de la cola. El punto verde indica que están conectados.</p>
+<figure class="shot"><img src="img/cfg-08-cola-agentes.png" alt="Agentes de una cola" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Agentes de una cola</figcaption></figure>
+<hr />
+<h2 id="5-buz-n-de-voz">5. Buzón de voz</h2>
+<p>Cada interno <strong>ya tiene buzón</strong>. El usuario lo escucha marcando **<code>*97</code>** desde su teléfono (PIN inicial = su número de interno).</p>
+<h3 id="5-1-mandar-los-mensajes-al-correo">5.1 Mandar los mensajes al correo</h3>
+<p>En <strong>Aplicaciones → Buzones</strong>, panel <em>"Mensaje de voz al correo"</em>: cargá la dirección y activá el envío. A partir de ahí, cada mensaje nuevo llega por mail con:</p>
+<ul><li>El <strong>audio adjunto</strong>.</li><li>La <strong>transcripción automática</strong> del mensaje en el cuerpo del correo.</li></ul>
+<p>Podés elegir si además querés que se borre del buzón después de enviarlo (modo "solo correo").</p>
+<figure class="shot"><img src="img/cfg-09-buzon-email.png" alt="Buzón de voz al correo" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Buzón de voz al correo</figcaption></figure>
+<hr />
+<h2 id="6-correo-saliente">6. Correo saliente</h2>
+<p>Sin esto no funcionan ni los avisos de buzón ni las alertas.</p>
+<p>En <strong>Configuración → Email</strong>: host, puerto, usuario y contraseña del SMTP. Guardá y usá el botón <strong>Probar</strong>: si algo está mal, el sistema te dice exactamente qué.</p>
+<blockquote><p><strong>Con Gmail o Google Workspace</strong>: si la cuenta tiene verificación en dos pasos, la contraseña</p><p>normal <strong>no sirve</strong> para SMTP. Hay que generar una <strong>contraseña de aplicación</strong>. Es el error más</p><p>frecuente, y el panel te lo señala con esas palabras.</p></blockquote>
+<figure class="shot"><img src="img/cfg-10-email.png" alt="Configuración de correo" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Configuración de correo</figcaption></figure>
+<hr />
+<h2 id="7-alertas-autom-ticas">7. Alertas automáticas</h2>
+<p>En <strong>Configuración → Alertas</strong>. Cargá el destinatario arriba y encendé lo que quieras recibir. Cada alerta tiene un botón de <strong>prueba</strong> que manda el correo sin necesidad de activarla.</p>
+<div class="tw"><table><thead><tr><th>Alerta</th><th>Cuándo llega</th></tr></thead><tbody><tr><td><strong>Estamos bajo ataque</strong></td><td>Ráfaga de intentos de registro fallidos. Llega <strong>una</strong> alerta agrupada, no una por IP</td></tr><tr><td>IP bloqueada</td><td>El firewall bloqueó una IP (con país e ISP)</td></tr><tr><td>Inicio de sesión al panel</td><td>Alguien entró — por defecto, <strong>solo desde una IP nueva</strong></td></tr><tr><td>Intentos fallidos al panel</td><td>Posible fuerza bruta contra el administrador</td></tr><tr><td><strong>Troncal caída / recuperada</strong></td><td>Se cortó (o volvió) la línea con el proveedor</td></tr><tr><td>Servicio caído</td><td>Base de datos o Asterisk sin conexión</td></tr><tr><td>Cola sin agentes</td><td>En horario laboral no hay nadie para atender</td></tr><tr><td>Llamada muy larga</td><td>Primer síntoma habitual de fraude telefónico</td></tr><tr><td>Salientes fuera de horario</td><td>El patrón clásico: ráfaga de llamadas de madrugada</td></tr><tr><td>Llamada internacional</td><td>Destinos que no deberían marcarse</td></tr><tr><td>Resumen diario</td><td>Un correo a la mañana con lo de ayer</td></tr></tbody></table></div>
+<figure class="shot"><img src="img/cfg-11-alertas.png" alt="Panel de alertas" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Panel de alertas</figcaption></figure>
+<blockquote><p><strong>Por qué el aviso de login viene con "solo IP nueva" activado:</strong> si te avisa de <em>todos</em> los</p><p>ingresos, en una semana lo mandás a la papelera y dejás de leerlo. La señal que importa es</p><p>"alguien entró desde un lugar donde nunca entraste".</p></blockquote>
+<hr />
+<h2 id="8-grabaci-n-de-llamadas">8. Grabación de llamadas</h2>
+<p>Se puede grabar por interno, por cola o todo. Las grabaciones se escuchan desde <strong>Grabaciones</strong>, con reproductor y <strong>transcripción con IA</strong> a pedido.</p>
+<figure class="shot"><img src="img/cfg-12-grabaciones.png" alt="Grabaciones con reproductor y transcripción" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Grabaciones con reproductor y transcripción</figcaption></figure>
+<hr />
+<h2 id="9-seguridad">9. Seguridad</h2>
+<ul><li><strong>Fail2ban</strong> bloquea automáticamente a quien intenta adivinar contraseñas SIP. La sección</li></ul>
+<p>  <strong>Seguridad</strong> muestra las IPs bloqueadas con su país y permite desbloquear o bloquear a mano.</p>
+<ul><li>El panel exige cambiar la contraseña del <code>admin</code> en el primer ingreso.</li><li>Los usuarios tienen <strong>roles</strong>: administrador, supervisor y agente. Cada uno ve solo lo suyo.</li></ul>
+<figure class="shot"><img src="img/cfg-13-seguridad.png" alt="Seguridad: IPs bloqueadas" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Seguridad: IPs bloqueadas</figcaption></figure>
+<hr />
+<h2 id="10-usuarios-y-roles">10. Usuarios y roles</h2>
+<p>En <strong>Usuarios</strong>. Cada persona puede tener un interno asociado.</p>
+<div class="tw"><table><thead><tr><th>Rol</th><th>Qué puede hacer</th></tr></thead><tbody><tr><td><strong>Administrador</strong></td><td>Todo</td></tr><tr><td><strong>Supervisor</strong></td><td>Monitorear colas y agentes, escuchar/susurrar/irrumpir en llamadas, gestionar clientes</td></tr><tr><td><strong>Agente</strong></td><td>Su softphone, su historial y su buzón</td></tr></tbody></table></div>
+<figure class="shot"><img src="img/cfg-14-usuarios.png" alt="Usuarios y roles" onerror="this.parentNode.classList.add('ph');this.remove();" /><figcaption>Usuarios y roles</figcaption></figure></main>
+  <footer>PBX-NG · Manual de Configuración · versión 1.1.0 · 13/07/2026</footer>
+</div>
+<button class="top" onclick="window.print()">Descargar PDF</button>
+<script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>
+</body></html>
