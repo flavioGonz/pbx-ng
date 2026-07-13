@@ -1,0 +1,101 @@
+{
+  "name": "pbxng-softphone",
+  "version": "0.4.7",
+  "private": true,
+  "type": "module",
+  "description": "Softphone WebRTC generico (registra contra cualquier PBX con internos WebRTC) - PWA + Electron",
+  "author": {
+    "name": "Infratec",
+    "email": "desarrollo@favaro.com.uy"
+  },
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "electron": "electron .",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sip.js": "^0.21.2",
+    "electron-updater": "^6.3.9",
+    "sip": "0.0.6",
+    "qrcode": "1.5.4",
+    "jsqr": "1.4.0",
+    "ws": "8.18.0",
+    "gsap": "3.12.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11",
+    "vite-plugin-pwa": "^0.21.1",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.pbxng.softphone",
+    "productName": "PBX-NG Softphone",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "msi"
+      ],
+      "icon": "electron/build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "language": "3082",
+      "installerLanguages": [
+        "es_ES"
+      ],
+      "multiLanguageInstaller": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "shortcutName": "PBX-NG Softphone",
+      "uninstallDisplayName": "PBX-NG Softphone ${version}",
+      "artifactName": "PBX-NG-Softphone-Setup-${version}.${ext}",
+      "installerIcon": "electron/build/icon.ico",
+      "uninstallerIcon": "electron/build/icon.ico",
+      "installerHeader": "electron/build/installerHeader.bmp",
+      "installerSidebar": "electron/build/installerSidebar.bmp",
+      "uninstallerSidebar": "electron/build/installerSidebar.bmp"
+    },
+    "msi": {
+      "oneClick": false,
+      "perMachine": true,
+      "runAfterFinish": false,
+      "artifactName": "PBX-NG-Softphone-${version}.${ext}"
+    },
+    "protocols": [
+      {
+        "name": "PBX-NG Softphone",
+        "schemes": [
+          "tel",
+          "sip",
+          "callto",
+          "pbxng"
+        ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "flavioGonz",
+        "repo": "pbx-ng"
+      }
+    ]
+  }
+}

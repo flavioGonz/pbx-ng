@@ -1,0 +1,80 @@
+:root { color-scheme: light; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body, #root { height: 100%; margin: 0; }
+body { font-family: -apple-system, 'Segoe UI', Inter, system-ui, sans-serif; background: #eef1f7; }
+input:focus, select:focus { border-color: #2f80ff !important; }
+.ph-key:active { transform: scale(.95); }
+.ph-key { transition: transform .08s, background .12s, filter .12s; }
+.ph-key:hover { filter: brightness(.98); }
+.ph-row { transition: background .12s; }
+.ph-row:hover { background: #f2f5fb; }
+button:disabled { cursor: default !important; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #cdd5e3; border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #b6c0d2; background-clip: content-box; }
+@keyframes phring { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes icShimmer { 0% { background-position: -500px 0; } 100% { background-position: 500px 0; } }
+.ic-skel { background: linear-gradient(100deg,#0b0f17 30%,#1a2230 50%,#0b0f17 70%); background-size: 1000px 100%; animation: icShimmer 1.3s linear infinite; }
+@keyframes icPulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.ic-pulse { animation: icPulse 1.4s ease-in-out infinite; }
+@keyframes ringPulse { 0% { transform: scale(.72); opacity: .55; } 100% { transform: scale(2.25); opacity: 0; } }
+.ringp { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(120,170,255,.75); animation: ringPulse 1.8s cubic-bezier(.2,.6,.3,1) infinite; pointer-events: none; }
+@keyframes ringShake { 0%,100% { transform: rotate(-13deg); } 50% { transform: rotate(13deg); } }
+.ring-shake { animation: ringShake .5s ease-in-out infinite; transform-origin: 50% 62%; display: inline-flex; }
+@keyframes eqBar { 0%,100% { transform: scaleY(.28); } 50% { transform: scaleY(1); } }
+.eq { display: inline-flex; align-items: flex-end; gap: 3px; height: 16px; }
+.eq span { width: 3px; height: 100%; background: #3ddc6a; border-radius: 2px; transform-origin: bottom; animation: eqBar 1s ease-in-out infinite; }
+.eq span:nth-child(2){animation-delay:.18s} .eq span:nth-child(3){animation-delay:.36s} .eq span:nth-child(4){animation-delay:.5s} .eq span:nth-child(5){animation-delay:.12s}
+@keyframes dots { 0%{opacity:.2} 20%{opacity:1} 100%{opacity:.2} }
+.dot { animation: dots 1.4s infinite; } .dot:nth-child(2){animation-delay:.2s} .dot:nth-child(3){animation-delay:.4s}
+.menu-pop { animation: popIn .12s ease; } @keyframes popIn { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform: none; } }
+
+/* View Transitions API — transiciones profesionales entre secciones */
+@keyframes vtIn{from{opacity:0;transform:translateY(10px) scale(.995)}to{opacity:1;transform:none}}
+@keyframes vtOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-8px) scale(.995)}}
+::view-transition-old(sp-content){animation:vtOut .18s cubic-bezier(.4,0,.2,1) both}
+::view-transition-new(sp-content){animation:vtIn .28s cubic-bezier(.4,0,.2,1) both}
+::view-transition-group(sp-content){overflow:hidden}
+@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
+
+/* Overlays de llamada — animaciones cuidadas */
+@keyframes callIn{from{opacity:0}to{opacity:1}}
+.call-overlay{animation:callIn .2s ease both}
+@keyframes peerPop{0%{transform:scale(.82);opacity:0}62%{transform:scale(1.04)}100%{transform:scale(1);opacity:1}}
+.peer-pop{animation:peerPop .44s cubic-bezier(.34,1.4,.5,1) both}
+@keyframes ctlUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.ctl-in{animation:ctlUp .34s .05s cubic-bezier(.4,0,.2,1) both}
+@media (prefers-reduced-motion:reduce){.call-overlay,.peer-pop,.ctl-in{animation:none!important}}
+
+/* Splash de presentacion in-app */
+@keyframes spRing{0%{transform:scale(.55);opacity:.6}100%{transform:scale(1.5);opacity:0}}
+.sp-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(120,170,255,.6);animation:spRing 1.8s ease-out infinite}
+@keyframes spShake{0%,100%{transform:rotate(-9deg)}50%{transform:rotate(9deg)}}
+.sp-handset{animation:spShake .7s ease-in-out infinite;transform-origin:50% 55%}
+@keyframes spBar{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+.sp-bar{animation:spBar 1.1s ease-in-out infinite}
+.dd-row:hover{background:#eef4ff}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin .7s linear infinite}
+
+/* Login premium: transiciones de fase + check final */
+@keyframes loginIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+.login-anim{animation:loginIn .42s cubic-bezier(.4,0,.2,1) both}
+@keyframes okPop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+.ok-pop{animation:okPop .5s cubic-bezier(.34,1.5,.5,1) both}
+
+/* Login: fondo animado (ondas + telefonos flotando) */
+@keyframes lwaveMove{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.lwave{animation:lwaveMove linear infinite}
+.lwave1{animation-duration:16s}
+.lwave2{animation-duration:11s}
+@keyframes lfloat{0%,100%{transform:translateY(0) rotate(-8deg)}50%{transform:translateY(-16px) rotate(-8deg)}}
+.lfloat{animation:lfloat 6s ease-in-out infinite}
+@keyframes lfloat2{0%,100%{transform:translateY(0) rotate(10deg)}50%{transform:translateY(14px) rotate(10deg)}}
+.lfloat2{animation:lfloat2 7.5s ease-in-out infinite}
+@keyframes turnPulse{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{box-shadow:0 0 0 9px rgba(34,197,94,0)}}
+.turn-live{animation:turnPulse 1.6s ease-out infinite}
+@keyframes bellRing{0%{transform:scale(.5);opacity:.55}100%{transform:scale(1.28);opacity:0}}
+.bell-ring{position:absolute;border-radius:50%;border:2px solid rgba(120,170,255,.55);animation:bellRing 1.6s ease-out infinite}
+.qr-btn:hover{background:rgba(76,157,255,.26)!important;transform:translateY(-1px) scale(1.04)}
+.qr-btn:active{transform:scale(.96)}

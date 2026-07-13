@@ -5,6 +5,7 @@ __pycache__/
 .next/
 out/
 dist/
+release/
 # env & secrets
 .env
 .env.local

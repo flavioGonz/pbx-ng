@@ -194,6 +194,11 @@ export default function Softphone({ sp, dark = false, directory = [], height = 4
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--mantine-color-dimmed)', fontSize: 14 }}>
             {sp.held ? 'En espera' : established ? <Timer since={sp.callInfo?.since} /> : (sp.callInfo?.dir === 'in' ? 'Entrante…' : 'Llamando…')}
             {sp.recording && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#fa5252' }}><IconCircleFilled size={9} /> REC</span>}
+            {established && sp.usingRelay != null && (
+              <span title={sp.usingRelay ? 'El RTP de esta llamada está pasando por el servidor TURN (relay)' : 'El RTP va directo entre los extremos (host/STUN), sin pasar por TURN'}
+                style={{ fontSize: 10, fontWeight: 800, letterSpacing: .6, padding: '2px 8px', borderRadius: 20, border: '1px solid', borderColor: sp.usingRelay ? 'rgba(18,184,134,.45)' : 'rgba(120,140,180,.35)', background: sp.usingRelay ? 'rgba(18,184,134,.12)' : 'transparent', color: sp.usingRelay ? '#0ca678' : 'var(--mantine-color-dimmed)' }}>
+                {sp.usingRelay ? 'VÍA TURN' : 'DIRECTO'}
+              </span>)}
           </div>
           {established && !sp.held && <Equalizer />}
           {kp ? (

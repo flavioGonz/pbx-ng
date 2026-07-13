@@ -18,6 +18,8 @@ Todo se administra desde un **dashboard web** en tiempo real.
 - [Arquitectura](#arquitectura)
 - [Características](#características)
 - [Instalación](#instalación)
+- [Firewall y NAT (requisito)](#firewall-y-nat-requisito)
+- [Softphone de escritorio (Windows)](#softphone-de-escritorio-windows)
 - [Configuración](#configuración)
 - [Estructura del repositorio](#estructura-del-repositorio)
 - [Operación y mantenimiento](#operación-y-mantenimiento)
@@ -65,7 +67,7 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 | **Dashboard** | Next.js (admin + softphone WebRTC + PWA) | 3001 |
 | **SBC (Kamailio 5.6)** | Borde SIP: seguridad, LCR, manipulación SIP | 5060, 8088 WS |
 | **rtpengine** | Relay/anclaje de medios, aislamiento de RTP | 30000-40000 |
-| **Coturn (TURN/STUN)** | Traversía NAT para WebRTC | 3478, 49152-65535 |
+| **Coturn (TURN/STUN)** | Traversía NAT para WebRTC | 3478 **UDP y TCP**, 5349 (TLS), 49152-65535 UDP (relay) |
 | **Voz IA** | TTS (Piper/Edge) + STT (faster-whisper) | 8080 |
 | **Nginx Proxy Manager** | Terminación TLS/WSS + certificados | 80, 443, 81 |
 
@@ -88,11 +90,14 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 - IVR visual (React Flow) + **IVR conversacional con IA** (STT→LLM→TTS).
 - Colas/ACD, conferencias, grupos de timbrado, buzón visual, paging.
 - Grabación por interno o global (local/NAS/S3) con transcripción y análisis.
+- **Buzón de voz activado por defecto** en cada interno (PIN inicial = número de interno, `*97` para escucharlo), con MWI vía SUBSCRIBE/NOTIFY y buzón visual en el softphone.
+- **Audios de la central en español rioplatense (voz uruguaya)**: los 326 prompts de Asterisk (buzón, números, fechas, colas, conferencias, directorio, agentes) generados con el TTS propio. Se regeneran con otra voz en un comando: `scripts/gen-sounds.py --voice es-UY-MateoNeural`.
 - Auto-aprovisionamiento de teléfonos por MAC (Yealink/Grandstream).
 - Rutas entrantes (DID) y salientes, dialplan realtime, wallboard TV-ready, mapa de llamadas.
 
 **Operación**
 - Dashboard en tiempo real (Socket.io + AMI), topología animada con salud.
+- **Diagnóstico ICE/TURN en vivo**: el panel (SBC → TURN) y el softphone levantan una `RTCPeerConnection` real y muestran los candidatos que juntan — verde solo si el TURN está *alcanzable y autenticado*, y si el RTP de la llamada va **por TURN** o **directo**.
 - Fail2Ban con geolocalización de ataques, gestión de bloqueos.
 - Watchdog de agentes (auto-recuperación de cuelgues).
 
@@ -199,6 +204,59 @@ chmod +x pbxng-proxmox.sh && ./pbxng-proxmox.sh
 
 Ver [`deploy/`](deploy/) para el detalle (mapa de roles→perfiles, red, requisitos).
 
+## Firewall y NAT (requisito)
+
+**No es un anexo: sin esto hay llamadas mudas.** La señalización (SIP/WSS) suele pasar
+sola; el audio (RTP, UDP en rangos altos) es lo primero que se rompe.
+
+Hacia Internet se publica **solo** esto:
+
+| Puerto | Proto | Para qué |
+|---|---|---|
+| `443` (y `80` para ACME) | TCP | HTTPS + **WSS** del softphone WebRTC (vía reverse proxy) |
+| `5060` / `5061` | UDP+TCP / TCP | SIP hacia Kamailio (troncales y teléfonos físicos) |
+| `30000-40000` | UDP | RTP de rtpengine (medios de troncales SIP) |
+| `3478` | **UDP y TCP** | STUN/TURN (coturn) — los dos, muchas redes bloquean UDP saliente |
+| `49152-65535` | UDP | **Rango relay del TURN** — sin esto el candidato relay se obtiene pero **no hay audio** |
+| `5349` | TCP | TURNS (TURN sobre TLS), recomendado para redes corporativas |
+
+Nunca se publican: `5432` (Postgres), `6379` (Redis), `3000`/`3001` (API/panel), `5038` (AMI),
+`8088` (ARI), `8091`/`8092` (agentes), `81` (admin del proxy).
+
+El instalador **imprime la lista exacta** según los módulos activos y al terminar **verifica el
+TURN de verdad** (STUN Binding → Allocate 401 → Allocate firmado → candidato relay):
+
+```bash
+./install.sh --print-firewall --profiles=core,sbc,turn   # solo mostrar qué abrir
+scripts/check-turn.py --env docker/.env --tcp            # verificar el TURN a mano
+```
+
+Trampas frecuentes (port-forward incompleto, `external-ip` mal seteada, **NAT hairpin**, cómo
+leer los errores ICE `701` vs `401`) y recetas de router: **[`docs/FIREWALL.md`](docs/FIREWALL.md)**.
+
+## Softphone de escritorio (Windows)
+
+Además del softphone WebRTC embebido en el panel y de la PWA, el repo trae un **softphone
+standalone** (`softphone-app/`) que se instala como aplicación de escritorio y **registra
+contra cualquier PBX**, no solo PBX-NG:
+
+- **Doble motor**: WebRTC (WSS, SIP.js) o **SIP nativo** (UDP/TCP/TLS, RTP/SRTP propio) para
+  centrales que no exponen WebSocket.
+- G.711 µ/A, DTMF RFC 4733 / SIP INFO, SDES-SRTP, REFER (transferencia ciega), DNS SRV, MWI,
+  RTCP y estadísticas de calidad reales.
+- Ventana sin bordes, **mini-widget flotante** de llamada, re-registro al despertar el equipo,
+  buzón visual, CRM screen-pop, provisioning remoto por QR/`pbxng://`, config **cifrada** (DPAPI),
+  auto-update y diagnóstico ICE/TURN en vivo.
+- Empaquetado con Electron Builder (instalador NSIS en español, `.exe` + `.msi`).
+
+```bash
+cd softphone-app
+npm install
+npm run dev        # desarrollo (Vite)
+npm run electron   # ventana de escritorio
+npm run dist       # instalador Windows en release/
+```
+
 ## Configuración
 
 - **Secretos**: nunca se versionan. El instalador genera `.env` con contraseñas y JWT aleatorios. Claves de OpenAI (IVR IA), FCM/APNs (push nativo) y SMTP se cargan **cifradas desde el panel** (no en `.env`).
@@ -208,13 +266,14 @@ Ver [`deploy/`](deploy/) para el detalle (mapa de roles→perfiles, red, requisi
 ## Estructura del repositorio
 
 ```
-control-plane/     API Node/Express (ARI+AMI, Socket.io, auth JWT)
-dashboard/         Frontend Next.js (admin + softphone + PWA)
+control-plane/     API Node/Express (ARI+AMI, Socket.io, auth JWT) + migraciones
+dashboard/         Frontend Next.js (admin + softphone web + paneles agente/supervisor)
+softphone-app/     Softphone standalone (Vite+React+SIP.js) -> PWA + Electron/Windows
 voice-service/     Microservicio de voz IA (Piper TTS + faster-whisper STT)
-docker/            docker-compose, install.sh interactivo, imágenes
+docker/            docker-compose, install.sh multi-rol, release.sh/deploy.sh, pbxng-ctl
 deploy/            orquestador de despliegue en Proxmox (pbxng-proxmox.sh)
-docs/              Documentación por componente
-scripts/           Utilidades (sync-and-push, etc.)
+docs/              FIREWALL.md · TOPOLOGY.md · PACKAGING.md · schema de referencia
+scripts/           check-turn.py (sonda TURN real), verify-pbxng.sh, sync-and-push.sh
 ```
 
 ## Operación y mantenimiento
@@ -223,6 +282,7 @@ scripts/           Utilidades (sync-and-push, etc.)
 - **Watchdog**: un timer detecta agentes colgados (por heartbeat) y los reinicia solos.
 - **Backups**: se recomienda `pg_dump` periódico de la base `pbxng` (config + CDR).
 - **Logs**: dashboard `journalctl`, SBC en `/var/log`, watchdog en `/var/log/pbxng-watchdog.log`.
+- **Verificación**: `scripts/verify-pbxng.sh` (estado del stack) y `scripts/check-turn.py` (TURN real: STUN + Allocate + candidato relay). El panel expone el mismo diagnóstico en SBC → TURN.
 
 ## Seguridad
 
@@ -236,7 +296,7 @@ Defensa en capas:
 
 ## Roadmap
 
-- TURN TLS/DTLS (5349) + credenciales efímeras.
+- TURN TLS (5349/TURNS) por defecto + credenciales efímeras (REST API de coturn).
 - Alta disponibilidad (estado en Redis, multi-instancia de la API).
 - Multi-tenant + RBAC (modo elegible en la instalación; RBAC en curso).
 - Observabilidad (Prometheus/Grafana, métricas de calidad de llamada).

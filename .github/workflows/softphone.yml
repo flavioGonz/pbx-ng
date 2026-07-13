@@ -1,0 +1,34 @@
+name: softphone-win
+
+# Construye el instalador del softphone (.exe NSIS + .msi) en un runner Windows y lo
+# sube como artifact descargable (Actions -> run -> Artifacts). Sin firmar (ver README).
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['softphone-v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps
+        working-directory: softphone-app
+        run: npm install --no-audit --no-fund
+      - name: Build installers (electron-builder, sin publicar)
+        working-directory: softphone-app
+        run: |
+          npm run build
+          npx electron-builder --win --publish never
+      - name: Subir instaladores
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbxng-softphone-win
+          if-no-files-found: error
+          path: |
+            softphone-app/release/*.exe
+            softphone-app/release/*.msi

@@ -5,6 +5,7 @@ import { IconList, IconHeadset, IconUsersGroup, IconBroadcast, IconUsers, IconMa
 import QueuePanel from '../QueuePanel';
 import CrudPanel from '../CrudPanel';
 import { toast } from '../notify';
+import VmEmailPanel from '../VmEmailPanel';
 
 function FeatureCodes() {
   const codes = [
@@ -89,6 +90,7 @@ export default function Aplicaciones() {
               { name: 'fullname', label: 'Nombre completo', icon: <IconUser size={15} />, description: 'Titular del buzón. Ej: Juan Pérez.' },
               { name: 'email', label: 'Email', icon: <IconMail size={15} />, description: 'Para recibir los mensajes por correo (opcional). Ej: juan@empresa.com.' },
             ]} emptyText="Sin buzones." />
+          <VmEmailPanel />
         </Tabs.Panel>
                 <Tabs.Panel value="codes"><FeatureCodes /></Tabs.Panel>
         <Tabs.Panel value="ai">

@@ -2,8 +2,9 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, PasswordInput, ThemeIcon, Divider, Code, ScrollArea, Box, Tooltip, ActionIcon, Loader, Center } from '@mantine/core';
-import { IconArrowsLeftRight, IconRefresh, IconDeviceFloppy, IconBolt, IconWorld, IconHash, IconKey, IconPlugConnected, IconCloud, IconTestPipe, IconReload, IconCpu } from '@tabler/icons-react';
+import { IconArrowsLeftRight, IconRefresh, IconDeviceFloppy, IconBolt, IconWorld, IconHash, IconKey, IconPlugConnected, IconCloud, IconTestPipe, IconReload, IconCpu, IconRouter, IconShieldCheck, IconShieldX } from '@tabler/icons-react';
 import { toast } from './notify';
+import { fetchIceServers, probeIce } from './iceProbe';
 
 export default function TurnConsole() {
   const [d, setD] = useState(null);
@@ -11,6 +12,15 @@ export default function TurnConsole() {
   const [busy, setBusy] = useState('');
   const [testOut, setTestOut] = useState('');
   const [logs, setLogs] = useState('');
+  const [probe, setProbe] = useState(null);
+
+  async function runProbe() {
+    setProbe({ state: 'testing' });
+    const srv = await fetchIceServers();
+    if (!srv.length) { setProbe({ state: 'error', errors: ['El backend no devolvió servidores ICE (/api/ice)'], host: 0, srflx: 0, relay: 0 }); return; }
+    setProbe(await probeIce(srv));
+  }
+  useEffect(() => { runProbe(); }, []);
 
   async function load() {
     try {
@@ -67,6 +77,37 @@ export default function TurnConsole() {
         <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">CPU (load)</Text><Text fw={700}>{m.load ?? '-'}</Text></Card>
         <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Memoria</Text><Text fw={700} size="sm">{m.mem_used_mb || 0}/{m.mem_total_mb || 0} MB</Text></Card>
       </SimpleGrid>
+
+      {(() => {
+        const p = probe || { state: 'idle', host: 0, srflx: 0, relay: 0, errors: [] };
+        const ok = p.state === 'ok', bad = p.state === 'turn-auth' || p.state === 'turn-unreachable' || p.state === 'error';
+        const col = ok ? 'teal' : bad ? 'red' : 'gray';
+        const title = p.state === 'testing' ? 'Probando…' : ok ? 'TURN alcanzable y autenticado' : p.state === 'turn-auth' ? 'Credenciales rechazadas (401)' : p.state === 'turn-unreachable' ? 'TURN no responde' : p.state === 'no-turn' ? 'Sin TURN configurado' : p.state === 'error' ? 'Error en la sonda' : 'Sin probar';
+        const sub = ok ? 'este navegador obtuvo un candidato relay del coturn' : p.state === 'turn-auth' ? 'el coturn contestó pero rechazó usuario/clave' : p.state === 'turn-unreachable' ? 'no llegó ningún candidato relay (¿puerto/firewall/IP externa?)' : 'sonda ICE real desde el navegador contra los servidores que entrega /api/ice';
+        const kpi = (label, val, good) => <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">{label}</Text><Text fw={700} size="sm" c={good ? 'teal' : undefined}>{val}</Text></Card>;
+        return (
+          <Card withBorder radius="md" padding="md">
+            <Group justify="space-between" mb="sm">
+              <Group gap="sm">
+                <ThemeIcon size={40} radius="md" variant="light" color={col}>{ok ? <IconShieldCheck size={22} /> : bad ? <IconShieldX size={22} /> : <IconRouter size={22} />}</ThemeIcon>
+                <div><Text fw={800} lh={1.1}>Diagnóstico ICE en vivo <Text span size="xs" c="dimmed">(desde este navegador)</Text></Text><Text size="xs" c="dimmed">{sub}</Text></div>
+              </Group>
+              <Group gap="xs">
+                <Badge size="lg" variant={ok ? 'filled' : 'light'} color={col}>{p.state === 'testing' ? <Loader size={10} color="gray" /> : null}{title}</Badge>
+                <Button size="xs" variant="light" leftSection={<IconTestPipe size={14} />} loading={p.state === 'testing'} onClick={runProbe}>Probar ahora</Button>
+              </Group>
+            </Group>
+            <SimpleGrid cols={{ base: 2, sm: 5 }}>
+              {kpi('Candidatos relay (TURN)', p.state === 'testing' ? '…' : (p.relay > 0 ? p.relay + ' ✓' : '0'), p.relay > 0)}
+              {kpi('Candidatos srflx (STUN)', p.state === 'testing' ? '…' : (p.srflx > 0 ? p.srflx + ' ✓' : '0'), p.srflx > 0)}
+              {kpi('Candidatos host (LAN)', p.host || 0)}
+              {kpi('IP pública (STUN)', p.publicIp || '—')}
+              {kpi('IP del relay (TURN)', p.relayIp || '—')}
+            </SimpleGrid>
+            {p.errors && p.errors.length > 0 && <Box mt="sm"><Text size="xs" c="dimmed" mb={4}>Errores ICE</Text><Code block style={{ fontSize: 11 }}>{p.errors.slice(0, 5).join('\n')}</Code></Box>}
+            <Text size="xs" c="dimmed" mt="sm">Si aparece un candidato <b>relay</b>, el coturn está alcanzable <b>y</b> autenticado desde la red de este navegador. Sin relay, las llamadas solo tendrán audio cuando exista camino directo (misma LAN o NAT permisiva).</Text>
+          </Card>);
+      })()}
 
       <Card withBorder radius="md" padding="md">
         <Group justify="space-between" mb="sm"><Text fw={700}>Sesiones / allocations en vivo</Text><Badge variant="light">{d.sessions?.length || 0}</Badge></Group>

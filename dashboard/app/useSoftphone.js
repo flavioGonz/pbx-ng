@@ -104,6 +104,7 @@ export function useSoftphone() {
   const [sharing, setSharing] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [quality, setQuality] = useState(null);
+  const [usingRelay, setUsingRelay] = useState(null);
   const wakeRef = useRef(null); const heldRef = useRef(false);
   const [filePlaying, setFilePlaying] = useState(null);
   const [creds, setCreds] = useState(null);
@@ -452,12 +453,25 @@ export function useSoftphone() {
     try { pc.addEventListener('connectionstatechange', onConn); } catch (_) {}
     const iv = setInterval(async () => {
       try {
-        const stats = await pc.getStats(); let rtt = null, jitter = null, lost = 0, recv = 0;
+        const stats = await pc.getStats(); let rtt = null, jitter = null, lost = 0, recv = 0, pairId = null, codec = null;
+        const byId = new Map();
         stats.forEach((r) => {
-          if (r.type === 'inbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) { lost = r.packetsLost || 0; recv = r.packetsReceived || 0; jitter = r.jitter; }
-          if (r.type === 'candidate-pair' && r.nominated && r.currentRoundTripTime != null) rtt = r.currentRoundTripTime;
+          byId.set(r.id, r);
+          if (r.type === 'inbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) { lost = r.packetsLost || 0; recv = r.packetsReceived || 0; jitter = r.jitter; if (r.codecId) codec = r.codecId; }
+          if (r.type === 'candidate-pair' && (r.nominated || r.state === 'succeeded')) { if (r.currentRoundTripTime != null) rtt = r.currentRoundTripTime; if (r.nominated || !pairId) pairId = r.id; }
           if (r.type === 'remote-inbound-rtp' && r.roundTripTime != null && rtt == null) rtt = r.roundTripTime;
         });
+        // ruta de medios real: local-candidate del par nominado
+        let candType = null;
+        try {
+          const pair = pairId ? byId.get(pairId) : null;
+          const loc = pair && pair.localCandidateId ? byId.get(pair.localCandidateId) : null;
+          const rem = pair && pair.remoteCandidateId ? byId.get(pair.remoteCandidateId) : null;
+          if (loc) candType = loc.candidateType || null;
+          const relay = (loc && loc.candidateType === 'relay') || (rem && rem.candidateType === 'relay');
+          if (loc || rem) setUsingRelay(!!relay);
+        } catch (_) {}
+        try { const cd = codec ? byId.get(codec) : null; if (cd && cd.mimeType) codec = String(cd.mimeType).split('/')[1]; else codec = null; } catch (_) { codec = null; }
         const dLost = Math.max(0, lost - lastLost), dRecv = Math.max(0, recv - lastRecv); lastLost = lost; lastRecv = recv;
         // Watchdog: si dejan de llegar paquetes (la otra punta colgo y el BYE no llego), colgar local
         if (recv > 0) started = true;
@@ -471,14 +485,15 @@ export function useSoftphone() {
         if (lossPct > 8 || (rttMs != null && rttMs > 500)) score = 1;
         else if (lossPct > 3 || (rttMs != null && rttMs > 300)) score = 2;
         else if (lossPct > 1 || (rttMs != null && rttMs > 180)) score = 3;
-        setQuality({ score, loss: Math.round(lossPct * 10) / 10, rtt: rttMs, jitter: jMs });
+        setQuality({ score, loss: Math.round(lossPct * 10) / 10, rtt: rttMs, jitter: jMs, codec, candType });
       } catch (_) {}
     }, 2000);
     return () => { clearInterval(iv); try { pc.removeEventListener('iceconnectionstatechange', onIce); pc.removeEventListener('connectionstatechange', onConn); } catch (_) {} };
   }, [call, hangup]);
 
+  useEffect(() => { if (!call) setUsingRelay(null); }, [call]);
   useEffect(() => { heldRef.current = held; }, [held]);
   useEffect(() => { if (typeof window !== 'undefined') window.__pbxInCall = !!(call || callInfo || incoming); }, [call, callInfo, incoming]);
 
-  return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, speaker, toggleSpeaker, quality, audioRef, remoteVideoRef, localVideoRef };
+  return { reg, call, incoming, incomingVideo, muted, held, recording, creds, hist, callInfo, connect, disconnect, placeCall, acceptIncoming, rejectIncoming, hangup, toggleMute, toggleHold, transfer, attendedCall, completeAttended, cancelAttended, attended, shareScreen, sharing, shareFile, stopFile, filePlaying, toggleRecord, tone, speaker, toggleSpeaker, quality, usingRelay, audioRef, remoteVideoRef, localVideoRef };
 }

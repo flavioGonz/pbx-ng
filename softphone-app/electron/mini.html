@@ -1,0 +1,110 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;height:100%;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;-webkit-user-select:none;background:transparent}
+  .w{height:100vh;display:flex;flex-direction:column;justify-content:center;gap:9px;padding:10px 12px;box-sizing:border-box;
+     background:linear-gradient(160deg,#1a2a4a,#0d1526);color:#eaf1ff;border:1px solid rgba(120,150,220,.32);
+     border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.5);-webkit-app-region:drag}
+  .top{display:flex;align-items:center;gap:9px}
+  .av{width:36px;height:36px;border-radius:50%;background:linear-gradient(160deg,#7c9be0,#4f6fc9);display:flex;align-items:center;
+      justify-content:center;font-weight:700;font-size:13px;flex:none;position:relative}
+  .dot{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;border:2px solid #1a2a4a;background:#9aa4bd}
+  .dot.on{background:#22c55e;box-shadow:0 0 8px rgba(34,197,94,.8)}
+  .info{flex:1;min-width:0}
+  .num{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-size:11px;color:#9db4e0}
+  .row{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag}
+  button{width:30px;height:30px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+         background:rgba(255,255,255,.12);color:#cfe0ff;transition:background .12s,color .12s;flex:none}
+  button:hover{background:rgba(255,255,255,.26);color:#fff}
+  button.red{background:#ef4444;color:#fff}button.red:hover{background:#dc2626}
+  button.green{background:#22c55e;color:#fff}button.green:hover{background:#16a34a}
+  button.blue{background:#2f80ff;color:#fff}button.blue:hover{background:#1d4ed8}
+  button.on{background:#fff;color:#0b1220}
+  .vol{display:flex;align-items:center;gap:7px;flex:1;min-width:0;-webkit-app-region:no-drag}
+  .vol svg{flex:none;color:#7f97c4}
+  input[type=range]{-webkit-appearance:none;flex:1;height:4px;border-radius:4px;outline:none;
+     background:linear-gradient(90deg,#22c55e var(--p,70%),rgba(255,255,255,.16) var(--p,70%));-webkit-app-region:no-drag}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;cursor:pointer;
+     box-shadow:0 0 0 3px rgba(34,197,94,.35)}
+  .pulse{animation:pl 1.4s ease-in-out infinite}@keyframes pl{0%,100%{opacity:1}50%{opacity:.5}}
+  .w.ring{background:linear-gradient(160deg,#14402c,#0a2a1d);border-color:rgba(34,197,94,.55);animation:glow 1.3s ease-in-out infinite}
+  @keyframes glow{0%,100%{box-shadow:0 12px 32px rgba(0,0,0,.5),0 0 0 0 rgba(34,197,94,.45)}50%{box-shadow:0 12px 32px rgba(0,0,0,.5),0 0 0 10px rgba(34,197,94,0)}}
+  .av.ringing{background:linear-gradient(160deg,#22c55e,#16a34a);animation:avp 1s ease-in-out infinite}
+  @keyframes avp{0%,100%{transform:scale(1)}50%{transform:scale(1.09)}}
+</style></head><body>
+  <div class="w" id="w">
+    <div class="top">
+      <div class="av" id="av">··<span class="dot" id="dot"></span></div>
+      <div class="info"><div class="num" id="num">—</div><div class="sub" id="sub"></div></div>
+      <button id="exp" title="Abrir softphone"></button>
+    </div>
+    <div class="row" id="row"></div>
+  </div>
+<script>
+  const $ = (i) => document.getElementById(i);
+  let st = null, iv = null;
+  const initials = (n) => (String(n || '?')).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
+  const fmt = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  const P = {
+    mic: '<path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/>',
+    micoff: '<line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v2a3 3 0 0 0 5.1 2.1"/><path d="M15 9.3V4a3 3 0 0 0-5.9-.7"/><path d="M19 10v1a7 7 0 0 1-.9 3.4"/><path d="M5 10v1a7 7 0 0 0 10.7 6"/><line x1="12" y1="19" x2="12" y2="23"/>',
+    phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z"/>',
+    max: '<polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="3" x2="10" y2="10"/><line x1="21" y1="21" x2="14" y2="14"/>',
+    video: '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>',
+    dial: '<circle cx="5" cy="5" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="12" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/>',
+    head: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
+    spk: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/>'
+  };
+  const svg = (n, s) => '<svg width="' + (s || 15) + '" height="' + (s || 15) + '" viewBox="0 0 24 24" fill="' + (n === 'dial' ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (P[n] || '') + '</svg>';
+  function btn(cls, ic, title, act, rot) {
+    const b = document.createElement('button'); if (cls) b.className = cls; b.innerHTML = svg(ic); b.title = title;
+    if (rot) b.firstChild.style.transform = 'rotate(135deg)';
+    b.onclick = () => { try { window.sphone.miniAction(act); } catch (e) {} }; return b;
+  }
+  function volCtl() {
+    const wrap = document.createElement('div'); wrap.className = 'vol';
+    wrap.innerHTML = svg('spk', 15);
+    const r = document.createElement('input'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.05;
+    const v = (st && typeof st.volume === 'number') ? st.volume : 1;
+    r.value = v; r.style.setProperty('--p', Math.round(v * 100) + '%');
+    r.oninput = () => { r.style.setProperty('--p', Math.round(r.value * 100) + '%'); try { window.sphone.miniAction('volume', parseFloat(r.value)); } catch (e) {} };
+    wrap.appendChild(r); return wrap;
+  }
+  function tick() { if (!st || !st.since) return; $('sub').textContent = fmt(Math.max(0, Math.floor((Date.now() - st.since) / 1000))); }
+  function render() {
+    const row = $('row'); row.innerHTML = '';
+    const ring = !!(st && st.active && st.incoming);
+    $('w').classList.toggle('ring', ring); $('av').classList.toggle('ringing', ring);
+    $('exp').innerHTML = svg('max'); $('exp').onclick = () => { try { window.sphone.miniAction('restore'); } catch (e) {} };
+    if (!st || !st.active) {
+      const ext = (st && st.ext) || '';
+      $('av').firstChild.textContent = initials(ext || '·');
+      $('dot').className = 'dot' + ((st && st.registered) ? ' on' : '');
+      $('num').textContent = ext ? ('Interno ' + ext) : 'Sin cuenta';
+      $('sub').textContent = (st && st.registered) ? 'En línea · listo para llamar' : 'Sin conexión';
+      $('sub').className = 'sub';
+      row.appendChild(btn('', 'dial', 'Abrir teclado', 'dial'));
+      row.appendChild(btn('', 'head', 'Dispositivos de audio', 'devices'));
+      row.appendChild(volCtl());
+      return;
+    }
+    $('av').firstChild.textContent = initials(st.name || st.number);
+    $('dot').className = 'dot on';
+    $('num').textContent = st.name || st.number || '—';
+    if (st.incoming) { $('sub').textContent = 'Llamada entrante…'; $('sub').className = 'sub pulse'; }
+    else { $('sub').className = 'sub'; if (!st.since) $('sub').textContent = 'Llamando…'; }
+    if (st.incoming) {
+      if (st.video) row.appendChild(btn('blue', 'video', 'Atender con video', 'accept-video'));
+      row.appendChild(btn('green', 'phone', 'Atender', 'accept'));
+      row.appendChild(btn('red', 'phone', 'Rechazar', 'reject', true));
+    } else {
+      row.appendChild(btn(st.muted ? 'on' : '', st.muted ? 'micoff' : 'mic', 'Silenciar', 'mute'));
+      row.appendChild(btn('red', 'phone', 'Colgar', 'hangup', true));
+      row.appendChild(volCtl());
+    }
+  }
+  try {
+    window.sphone.onMiniState((s) => { st = s; render(); if (iv) { clearInterval(iv); iv = null; } if (st && st.since) { tick(); iv = setInterval(tick, 500); } });
+    window.sphone.miniReady();
+  } catch (e) {}
+</script>
+</body></html>

@@ -46,6 +46,22 @@ export PBXNG_VERSION=X.Y.Z COMPOSE_PROFILES=core,sbc,turn,intercom
 - Nunca editar una migracion ya aplicada; agregar otra.
 - `deploy.sh` las corre solo (`node migrate.js`), registrando en `pbxng_schema_migrations`.
 
+## Verificacion post-deploy (obligatoria)
+Un deploy "verde" no garantiza audio. Antes de entregar:
+```
+cd docker && ./install.sh --print-firewall --profiles=$COMPOSE_PROFILES   # que abrir
+../scripts/check-turn.py --env .env --tcp                                  # TURN real
+```
+`check-turn.py` hace STUN Binding + TURN Allocate firmado: si devuelve **ALLOCATE 200 · relay**,
+los clientes WebRTC detras de NAT simetrico van a tener audio. Si no, ver `docs/FIREWALL.md`.
+El mismo diagnostico esta en el panel (SBC -> TURN -> "Diagnostico ICE en vivo") y en el
+softphone de escritorio (Ajustes -> Red).
+
+## Softphone de escritorio (release aparte)
+`softphone-app/` versiona por su cuenta (`softphone-app/package.json`) y se publica con
+`npm run dist` (Electron Builder -> NSIS `.exe` + `.msi` en `softphone-app/release/`), o por CI
+(`.github/workflows/softphone.yml`). No forma parte de las imagenes Docker del appliance.
+
 ## Rollback
 Volver a desplegar la version anterior: `export PBXNG_VERSION=X.Y.(Z-1); ./deploy.sh`.
 (Las migraciones NO se revierten automaticamente: escribir una migracion correctiva si hace falta.)

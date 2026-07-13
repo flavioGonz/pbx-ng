@@ -47,6 +47,8 @@ async function createWebrtcEndpoint(c, id, password, context = 'internal', tenan
   await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,$2,'yes',60,$3) ON CONFLICT (id) DO UPDATE SET max_contacts=EXCLUDED.max_contacts", [id, max_contacts, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
   await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-ws',$1,$1,$2,'all',$3,$4,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-ws',allow=EXCLUDED.allow,webrtc='yes'", [id, context, allow, tenant_id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
 }
 
 // geo (ip-api.com) con cache en memoria
@@ -348,6 +350,40 @@ app.get('/api/me/sipcreds', auth, async (req, res) => {
     res.json({ ext: String(ext), password: rows[0].password });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Aprovisionamiento remoto de un telefono: arma la config completa (SIP + ICE + CRM)
+// para un interno y devuelve tambien el prov_url (pbxng://prov#<b64url>) listo para QR.
+// Solo admin/supervisor. Expone el secret del interno + un token del telefono: uso interno.
+app.get('/api/provision', auth, async (req, res) => {
+  if (!['admin', 'supervisor'].includes(req.user.role)) return res.status(403).json({ error: 'no autorizado' });
+  const ext = String(req.query.ext || '').trim();
+  if (!ext) return res.status(400).json({ error: 'falta ext' });
+  try {
+    const { rows: au } = await pool.query('SELECT password FROM ps_auths WHERE id=$1', [ext]);
+    if (!au[0]) return res.status(404).json({ error: 'interno no existe' });
+    const getS = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] ? rows[0].value : ''; };
+    const wss = await getS('wss');
+    const domain = (await getS('domain')) || NODES.domain || process.env.DOMAIN || '';
+    const { rows: us } = await pool.query('SELECT id, username, name, role FROM pbxng_users WHERE ext=$1 LIMIT 1', [ext]);
+    const u = us[0] || null;
+    const name = (u && u.name) || ext;
+    const pub = process.env.PUBLIC_IP || process.env.DOMAIN || domain || '';
+    const tuser = process.env.TURN_USER || 'pbxng';
+    const tpass = process.env.TURN_PASS || '';
+    const stun = process.env.STUN_URL || 'stun:stun.l.google.com:19302';
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+    const host = req.headers['x-forwarded-host'] || req.get('host') || '';
+    const apiBase = (await getS('public_base')) || (host ? (proto + '://' + host) : '');
+    const useTurn = !!(pub && tpass);
+    const cfg = {
+      transport: 'webrtc', name, domain, ext, pass: au[0].password, wss,
+      stun, turn: useTurn ? ('turn:' + pub + ':3478') : '', turnUser: useTurn ? tuser : '', turnPass: useTurn ? tpass : '',
+      apiBase,
+      apiToken: u ? jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext }, SECRET, { expiresIn: '30d' }) : '',
+    };
+    const b64url = Buffer.from(JSON.stringify(cfg), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    res.json({ ...cfg, prov_url: 'pbxng://prov#' + b64url });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Estado de setup (publico): si el admin sigue con la clave por defecto, el login lo sugiere
 // ICE/TURN para el softphone WebRTC: se arma con el dominio y las credenciales de coturn (no hardcodear)
 app.get('/api/ice', (req, res) => {
@@ -448,7 +484,20 @@ app.get('/api/enroll/:token', async (req, res) => {
     if (!e) return res.status(404).json({ error: 'token invalido' });
     if (e.expires_at && new Date(e.expires_at) < new Date()) return res.status(410).json({ error: 'token expirado' });
     await pool.query('UPDATE pbxng_enroll SET used_at=COALESCE(used_at, now()) WHERE token=$1', [req.params.token]);
-    res.json({ ext: e.ext, password: e.password, server: NODES.domain });
+    // Config completa de aprovisionamiento: el mismo link/QR sirve para la PWA y para el
+    // softphone de escritorio (que consume prov_url = pbxng://prov#<b64url>).
+    const gS = async (k) => { const { rows: r2 } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return r2[0] ? r2[0].value : ''; };
+    const dom = (await gS('domain')) || NODES.domain || process.env.DOMAIN || '';
+    const wssU = (await gS('wss')) || (dom ? ('wss://' + dom + '/ws') : '');
+    const { rows: un } = await pool.query('SELECT name FROM pbxng_users WHERE ext=$1 LIMIT 1', [e.ext]);
+    const pubIp = process.env.PUBLIC_IP || process.env.DOMAIN || dom || '';
+    const tU = process.env.TURN_USER || 'pbxng', tP = process.env.TURN_PASS || '';
+    const withTurn = !!(pubIp && tP);
+    const prov = { transport: 'webrtc', name: (un[0] && un[0].name) || String(e.ext), domain: dom, ext: String(e.ext), pass: e.password, wss: wssU,
+      stun: process.env.STUN_URL || 'stun:stun.l.google.com:19302',
+      turn: withTurn ? ('turn:' + pubIp + ':3478') : '', turnUser: withTurn ? tU : '', turnPass: withTurn ? tP : '' };
+    const b64u = Buffer.from(JSON.stringify(prov), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    res.json({ ext: e.ext, password: e.password, server: dom, prov, prov_url: 'pbxng://prov#' + b64u });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -733,6 +782,8 @@ async function createSipEndpoint(c, id, password, context = 'internal', tenant_i
   await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,1,'yes',60,$2) ON CONFLICT (id) DO NOTHING", [id, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
   await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-udp',$1,$1,$2,'all','ulaw,alaw,g722',$3,'extension','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-udp'", [id, context, tenant_id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
 }
 const normMac = (m) => String(m || '').toLowerCase().replace(/[^0-9a-f]/g, '');
 async function getProvSetting(k, def) { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return (rows[0] && rows[0].value) || def; } catch (_) { return def; } }
@@ -788,6 +839,181 @@ app.post('/api/vm/read', async (req, res) => {
   try { const r = await fetch(VM_AGENT + '/vm/read', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PBXNG-Token': AGENT_TOKEN }, body: JSON.stringify(req.body || {}) }); res.json(await r.json()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Transcripcion de un mensaje de voz (Whisper): baja el WAV del agente VM, lo pasa a PCM
+// y lo manda al servicio STT (faster-whisper). No persiste (los VM los maneja el agente).
+app.post('/api/vm/transcribe', async (req, res) => {
+  try {
+    const { ext, folder, id } = req.body || {};
+    if (!ext || id == null || id === '') return res.status(400).json({ error: 'faltan ext/id' });
+    const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(ext) + '&folder=' + encodeURIComponent(folder || 'INBOX') + '&id=' + encodeURIComponent(id), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
+    if (!r.ok) return res.status(404).json({ error: 'audio no disponible' });
+    const wav = Buffer.from(await r.arrayBuffer());
+    const pc = wavToPcm(wav);
+    if (!pc) return res.status(422).json({ error: 'formato WAV no soportado (se requiere PCM 16-bit)' });
+    const base = await vozBase();
+    const sr = await fetch(base + '/stt?rate=' + pc.rate, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pc.pcm, signal: AbortSignal.timeout(180000) });
+    if (!sr.ok) return res.status(502).json({ error: 'STT fallo (' + sr.status + ')' });
+    const sd = await sr.json();
+    const text = (sd.text || '').trim();
+    const dur = Math.round((pc.pcm.length / 2) / (pc.rate || 8000));
+    const analysis = analyzeText(text, dur);
+    res.json({ transcript: text, analysis });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ============================================================================
+//  Buzon de voz -> Email  (voicemail-to-email con transcripcion)
+//  Poller: cada 45 s revisa los INBOX de los buzones con email configurado, y de
+//  cada mensaje NUEVO manda un correo con: quien llamo, cuando, cuanto duro, la
+//  transcripcion (Whisper) y el WAV adjunto. Lo enviado se registra en
+//  pbxng_vm_sent (idempotente: no se manda dos veces el mismo mensaje).
+// ============================================================================
+async function smtpFor(tenantId = 1) {
+  const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenantId]);
+  const c = rows[0];
+  return (c && c.enabled && c.host) ? c : null;
+}
+async function vmAudio(ext, folder, id) {
+  const r = await fetch(VM_AGENT + '/vm/audio?ext=' + encodeURIComponent(ext) + '&folder=' + encodeURIComponent(folder || 'INBOX') + '&id=' + encodeURIComponent(id), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } });
+  if (!r.ok) throw new Error('audio no disponible (' + r.status + ')');
+  return Buffer.from(await r.arrayBuffer());
+}
+async function vmTranscript(wav) {
+  const pc = wavToPcm(wav);
+  if (!pc) return null;
+  const base = await vozBase();
+  const sr = await fetch(base + '/stt?rate=' + pc.rate, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pc.pcm, signal: AbortSignal.timeout(180000) });
+  if (!sr.ok) return null;
+  const sd = await sr.json();
+  return (sd.text || '').trim() || null;
+}
+function vmHtml({ brand, box, msg, transcript, when, dur, hasAudio }) {
+  const esc = (t) => String(t || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  return `<div style="font-family:-apple-system,Segoe UI,Inter,sans-serif;max-width:560px;margin:0 auto;color:#0b1220">
+    <div style="background:linear-gradient(160deg,#16233f,#0f1a30);color:#fff;padding:18px 22px;border-radius:14px 14px 0 0">
+      <div style="font-size:12px;letter-spacing:.6px;opacity:.7;text-transform:uppercase">${esc(brand)}</div>
+      <div style="font-size:19px;font-weight:700;margin-top:2px">Nuevo mensaje de voz</div>
+    </div>
+    <div style="border:1px solid #e3e8f0;border-top:none;border-radius:0 0 14px 14px;padding:20px 22px;background:#fff">
+      <table style="width:100%;font-size:14px;border-collapse:collapse">
+        <tr><td style="color:#667089;padding:4px 0">De</td><td style="text-align:right;font-weight:600">${esc(msg.callerid || 'desconocido')}</td></tr>
+        <tr><td style="color:#667089;padding:4px 0">Para</td><td style="text-align:right;font-weight:600">Interno ${esc(box.mailbox)}${box.fullname ? ' · ' + esc(box.fullname) : ''}</td></tr>
+        <tr><td style="color:#667089;padding:4px 0">Fecha</td><td style="text-align:right">${esc(when)}</td></tr>
+        <tr><td style="color:#667089;padding:4px 0">Duración</td><td style="text-align:right">${dur}s</td></tr>
+      </table>
+      ${transcript ? `<div style="margin-top:16px;padding:14px 16px;background:#f3f6fc;border-left:3px solid #2f80ff;border-radius:8px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:#667089;text-transform:uppercase;margin-bottom:6px">Transcripción automática</div>
+        <div style="font-size:14px;line-height:1.5">${esc(transcript)}</div>
+        <div style="font-size:11px;color:#9aa4bd;margin-top:8px">Generada por IA; puede contener errores.</div>
+      </div>` : ''}
+      ${hasAudio ? '<div style="margin-top:16px;font-size:13px;color:#667089">El audio del mensaje va adjunto a este correo.</div>' : ''}
+      <div style="margin-top:18px;font-size:12px;color:#9aa4bd">También podés escucharlo marcando <b>*97</b> desde tu interno.</div>
+    </div>
+  </div>`;
+}
+async function vmSendOne(smtp, brand, box, msg) {
+  const wav = await vmAudio(box.mailbox, msg.folder, msg.id);
+  let transcript = null;
+  if (box.email_transcribe) { try { transcript = await vmTranscript(wav); } catch (e) { console.warn('[vm-mail] stt', e.message); } }
+  const when = new Date((msg.origtime || 0) * 1000).toLocaleString('es-UY', { timeZone: process.env.TZ || 'America/Montevideo' });
+  const tx = nodemailer.createTransport({ host: smtp.host, port: smtp.port || 587, secure: !!smtp.secure, auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined });
+  await tx.sendMail({
+    from: smtp.from_addr || smtp.username,
+    to: box.email,
+    subject: `Mensaje de voz de ${msg.callerid || 'desconocido'} · interno ${box.mailbox}`,
+    html: vmHtml({ brand, box, msg, transcript, when, dur: msg.duration || 0, hasAudio: !!box.email_attach }),
+    text: `Nuevo mensaje de voz para el interno ${box.mailbox}\nDe: ${msg.callerid || 'desconocido'}\nFecha: ${when}\nDuración: ${msg.duration || 0}s\n` + (transcript ? `\nTranscripción:\n${transcript}\n` : ''),
+    attachments: box.email_attach ? [{ filename: `mensaje-${box.mailbox}-${msg.id}.wav`, content: wav }] : [],
+  });
+}
+let VM_MAIL_BUSY = false;
+async function vmMailTick() {
+  if (VM_MAIL_BUSY) return; VM_MAIL_BUSY = true;
+  try {
+    const { rows: boxes } = await pool.query(`SELECT v.mailbox, v.fullname, COALESCE(NULLIF(v.email,''), m.email) AS email,
+        COALESCE(m.email_enabled,true) AS email_enabled, COALESCE(m.email_attach,true) AS email_attach,
+        COALESCE(m.email_transcribe,true) AS email_transcribe, COALESCE(m.email_delete,false) AS email_delete
+      FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox = v.mailbox
+      WHERE COALESCE(NULLIF(v.email,''), m.email, '') <> '' AND COALESCE(m.email_enabled,true)`);
+    if (!boxes.length) return;
+    const smtp = await smtpFor(1);
+    if (!smtp) return;
+    const { rows: br } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
+    const brand = (br[0] && br[0].value) || 'PBX-NG';
+    for (const box of boxes) {
+      let list = [];
+      try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(box.mailbox), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); list = await r.json(); } catch (e) { continue; }
+      for (const msg of (Array.isArray(list) ? list : []).filter((m) => m.folder === 'INBOX')) {
+        const { rowCount } = await pool.query('SELECT 1 FROM pbxng_vm_sent WHERE mailbox=$1 AND mid=$2', [box.mailbox, msg.id]);
+        if (rowCount) continue;
+        try {
+          await vmSendOne(smtp, brand, box, msg);
+          await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (mailbox,mid) DO NOTHING',
+            [box.mailbox, msg.id, msg.folder, msg.origtime || 0, box.email]);
+          console.log('[vm-mail] enviado', box.mailbox, msg.id, '->', box.email);
+          if (box.email_delete) {
+            try { await fetch(VM_AGENT + '/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PBXNG-Token': AGENT_TOKEN }, body: JSON.stringify({ ext: box.mailbox, folder: msg.folder, id: msg.id }) }); } catch (_) {}
+          }
+        } catch (e) {
+          console.error('[vm-mail] fallo', box.mailbox, msg.id, e.message);
+          await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok,err) VALUES ($1,$2,$3,$4,$5,false,$6) ON CONFLICT (mailbox,mid) DO UPDATE SET ok=false, err=$6',
+            [box.mailbox, msg.id, msg.folder, msg.origtime || 0, box.email, String(e.message || e).slice(0, 300)]);
+        }
+      }
+    }
+  } catch (e) { console.error('[vm-mail]', e.message); }
+  finally { VM_MAIL_BUSY = false; }
+}
+setInterval(() => { vmMailTick().catch(() => {}); }, 45000);
+setTimeout(() => { vmMailTick().catch(() => {}); }, 20000);
+
+// Config de "buzon -> email" por buzon
+app.get('/api/vm/email', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT v.mailbox, v.fullname, COALESCE(NULLIF(v.email,''), m.email, '') AS email,
+        COALESCE(m.email_enabled,true) AS email_enabled, COALESCE(m.email_attach,true) AS email_attach,
+        COALESCE(m.email_transcribe,true) AS email_transcribe, COALESCE(m.email_delete,false) AS email_delete,
+        (SELECT count(*) FROM pbxng_vm_sent s WHERE s.mailbox=v.mailbox AND s.ok) AS enviados
+      FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox=v.mailbox ORDER BY v.mailbox`);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/vm/email', async (req, res) => {
+  const b = req.body || {};
+  if (!b.mailbox) return res.status(400).json({ error: 'falta mailbox' });
+  try {
+    if (b.email !== undefined) await pool.query('UPDATE voicemail SET email=$2 WHERE mailbox=$1', [String(b.mailbox), b.email || null]);
+    await pool.query(`INSERT INTO pbxng_mailboxes (mailbox, email, email_enabled, email_attach, email_transcribe, email_delete)
+        VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (mailbox) DO UPDATE SET email=COALESCE(EXCLUDED.email, pbxng_mailboxes.email),
+          email_enabled=EXCLUDED.email_enabled, email_attach=EXCLUDED.email_attach,
+          email_transcribe=EXCLUDED.email_transcribe, email_delete=EXCLUDED.email_delete`,
+      [String(b.mailbox), b.email || null, b.email_enabled !== false, b.email_attach !== false, b.email_transcribe !== false, !!b.email_delete]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Forzar el envio de un mensaje puntual (boton "Enviar por correo" en el panel)
+app.post('/api/vm/email/send', async (req, res) => {
+  const { mailbox, id, folder } = req.body || {};
+  if (!mailbox || !id) return res.status(400).json({ error: 'faltan mailbox/id' });
+  try {
+    const smtp = await smtpFor(1);
+    if (!smtp) return res.status(400).json({ error: 'sin configuración SMTP activa' });
+    const { rows } = await pool.query(`SELECT v.mailbox, v.fullname, COALESCE(NULLIF(v.email,''), m.email, '') AS email,
+        COALESCE(m.email_attach,true) AS email_attach, COALESCE(m.email_transcribe,true) AS email_transcribe
+      FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox=v.mailbox WHERE v.mailbox=$1`, [String(mailbox)]);
+    const box = rows[0];
+    if (!box || !box.email) return res.status(400).json({ error: 'el buzón no tiene email configurado' });
+    let list = [];
+    try { const r = await fetch(VM_AGENT + '/vm/list?ext=' + encodeURIComponent(mailbox), { headers: { 'X-PBXNG-Token': AGENT_TOKEN } }); list = await r.json(); } catch (_) {}
+    const msg = (Array.isArray(list) ? list : []).find((m) => String(m.id) === String(id)) || { id, folder: folder || 'INBOX', callerid: '', origtime: Math.floor(Date.now() / 1000), duration: 0 };
+    const { rows: br } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
+    await vmSendOne(smtp, (br[0] && br[0].value) || 'PBX-NG', box, msg);
+    await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (mailbox,mid) DO UPDATE SET ok=true, err=NULL, sent_at=now()',
+      [String(mailbox), String(id), msg.folder || 'INBOX', msg.origtime || 0, box.email]);
+    res.json({ ok: true, to: box.email });
+  } catch (e) { res.status(500).json({ error: smtpHint(e) }); }
+});
+
 app.get('/api/branding', async (req, res) => { try { const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; }; res.json({ name: (await g('brand_name')) || 'PBX-NG', subtitle: (await g('brand_subtitle')) || 'Comunicaciones', tagline: (await g('brand_tagline')) || '', logo: (await g('brand_logo')) || '' , callcenter: (await g('mod_callcenter')) !== '0' }); } catch (e) { res.json({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' }); } });
 // auth ahora se aplica via gate deny-by-default arriba (isPublicApi)
 app.post('/api/branding', async (req, res) => { try { const b = req.body || {}; const setk = async (k, v) => { if (v === undefined) return; await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", [k, v || '']); }; await setk('brand_name', b.name); await setk('brand_subtitle', b.subtitle); await setk('brand_tagline', b.tagline); await setk('brand_logo', b.logo); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -1512,8 +1738,12 @@ app.post('/api/endpoints', async (req, res) => {
     await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3)", [id, password, tenant_id]);
     if (webrtc) {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes')", [id, transport, context, allow, tenant_id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
     } else {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','no','yes','yes','yes')", [id, transport, context, allow, tenant_id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
     }
     if (req.body && req.body.name) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
     await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.status(201).json({ created: id, webrtc, video });
@@ -1977,18 +2207,135 @@ app.delete('/api/ivr/:id', async (req, res) => {
   catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 
-app.get('/api/queues', async (req, res) => { try { res.json(await getQueues()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/queues', async (req, res) => {
-  const { name, label, access_exten, strategy = 'ringall', timeout = 15, musiconhold = 'default', tenant_id = 1 } = req.body || {};
-  if (!name || !access_exten) return res.status(400).json({ error: 'name y access_exten son obligatorios' });
+// ---------------------------------------------------------------------------
+//  Colas completas (bloque 1+2): los campos nativos viven en la tabla realtime
+//  `queues` (app_queue ya los soporta); pbxng_queues guarda lo nuestro (destino
+//  al vencer la espera, grabacion, anuncios por TTS).
+// ---------------------------------------------------------------------------
+const Q_NATIVE = ['strategy', 'timeout', 'musiconhold', 'maxlen', 'retry', 'wrapuptime', 'weight',
+  'servicelevel', 'joinempty', 'leavewhenempty', 'ringinuse', 'autofill', 'autopause',
+  'reportholdtime', 'memberdelay', 'announce_frequency', 'announce_holdtime', 'announce_position',
+  'periodic_announce', 'periodic_announce_frequency', 'monitor_type', 'monitor_format'];
+const Q_DEFAULTS = { strategy: 'ringall', timeout: 20, musiconhold: 'default', maxlen: 0, retry: 5,
+  wrapuptime: 10, weight: 0, servicelevel: 30, joinempty: 'yes', leavewhenempty: 'no',
+  ringinuse: 'no', autofill: 'yes', autopause: 'no', reportholdtime: 'no', memberdelay: 0,
+  announce_frequency: 0, announce_holdtime: 'no', announce_position: 'no',
+  periodic_announce: null, periodic_announce_frequency: 0, monitor_type: null, monitor_format: 'wav' };
+
+async function queueDialplan(c, q) {
+  // 1 NoOp · 2 Answer · [MixMonitor] · [Playback bienvenida] · Queue(...) · destino al vencer
+  const rows = [];
+  let p = 1;
+  rows.push([p++, 'NoOp', 'Cola ' + q.name + ' (' + (q.label || q.name) + ')']);
+  rows.push([p++, 'Answer', '']);
+  if (q.record) rows.push([p++, 'MixMonitor', 'pbxng-q' + q.name + '-${UNIQUEID}.wav,b']);
+  if (q.welcome_ref) rows.push([p++, 'Playback', q.welcome_ref]);
+  const maxw = Number(q.max_wait || 0) > 0 ? String(q.max_wait) : '';
+  rows.push([p++, 'Queue', q.name + ',tT,,,' + maxw]);
+  const dest = q.timeout_dest || 'hangup';
+  const val = String(q.timeout_value || '').trim();
+  if (dest === 'ext' && val) rows.push([p++, 'Goto', 'internal,' + val + ',1']);
+  else if (dest === 'voicemail' && val) rows.push([p++, 'VoiceMail', val + '@default,u']);
+  else if (dest === 'queue' && val) rows.push([p++, 'Queue', val + ',tT']);
+  else if (dest === 'ivr' && val) rows.push([p++, 'Goto', 'ivr,' + val + ',1']);
+  else rows.push([p++, 'Hangup', '']);
+  if (dest !== 'hangup') rows.push([p++, 'Hangup', '']);
+  await setDialplan(c, 'ivr', q.access_exten, rows);
+}
+async function queueFull(name) {
+  const { rows } = await pool.query(`SELECT pq.*, ${Q_NATIVE.map((x) => 'q.' + x).join(', ')} FROM pbxng_queues pq LEFT JOIN queues q ON q.name = pq.name WHERE pq.name=$1`, [name]);
+  return rows[0] || null;
+}
+// TTS -> prompt de Asterisk (reusa el pipeline del IVR: voz propia, sin subir WAVs)
+async function queueTts(text, voice, name) {
+  const u = await vozBase();
+  const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice: voice || undefined, rate: 8000, format: 'wav' }), signal: AbortSignal.timeout(30000) });
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (!buf.length) throw new Error('el TTS devolvió audio vacío');
+  const sr = await astFwd('POST', '/sound', { name, b64: buf.toString('base64') }, 20000).then((x) => x.json());
+  if (!sr.ok) throw new Error('no se pudo desplegar el audio: ' + (sr.error || '?'));
+  return sr.ref;   // p.ej. custom/q_ventas_welcome
+}
+app.get('/api/queues', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT pq.*, ${Q_NATIVE.map((x) => 'q.' + x).join(', ')},
+        (SELECT count(*) FROM queue_members m WHERE m.queue_name = pq.name) AS members
+      FROM pbxng_queues pq LEFT JOIN queues q ON q.name = pq.name ORDER BY pq.name`);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+function qNative(b) {
+  const out = {};
+  for (const k of Q_NATIVE) out[k] = (b[k] === undefined || b[k] === '') ? Q_DEFAULTS[k] : b[k];
+  if (out.monitor_type !== 'MixMonitor') out.monitor_type = null;   // la grabacion la maneja el dialplan
+  return out;
+}
+async function saveQueue(b, creating) {
+  const name = String(b.name || '').trim();
+  const access_exten = String(b.access_exten || '').trim();
+  if (!name) throw new Error('name es obligatorio');
+  if (creating && !access_exten) throw new Error('access_exten es obligatorio');
+  const n = qNative(b);
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    await c.query('INSERT INTO queues (name,strategy,timeout,musiconhold,maxlen,retry) VALUES ($1,$2,$3,$4,0,5)', [name, strategy, timeout, musiconhold]);
-    await c.query('INSERT INTO pbxng_queues (name,label,access_exten,tenant_id) VALUES ($1,$2,$3,$4)', [name, label || name, access_exten, tenant_id]);
-    await setDialplan(c, 'ivr', access_exten, [[1, 'Answer', ''], [2, 'Queue', name], [3, 'Hangup', '']]);
-    await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name, access_exten });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+    const cols = Object.keys(n);
+    if (creating) {
+      await c.query(`INSERT INTO queues (name, ${cols.join(',')}) VALUES ($1, ${cols.map((_, i) => '$' + (i + 2)).join(',')})`, [name, ...cols.map((k) => n[k])]);
+      await c.query('INSERT INTO pbxng_queues (name,label,access_exten,tenant_id) VALUES ($1,$2,$3,$4)', [name, b.label || name, access_exten, b.tenant_id || 1]);
+    } else {
+      await c.query(`UPDATE queues SET ${cols.map((k, i) => k + '=$' + (i + 2)).join(', ')} WHERE name=$1`, [name, ...cols.map((k) => n[k])]);
+      await c.query('UPDATE pbxng_queues SET label=$2, access_exten=COALESCE(NULLIF($3,\'\'), access_exten) WHERE name=$1', [name, b.label || name, access_exten]);
+    }
+    // metadatos propios
+    await c.query(`UPDATE pbxng_queues SET max_wait=$2, timeout_dest=$3, timeout_value=$4, record=$5, voice=COALESCE($6, voice) WHERE name=$1`,
+      [name, Number(b.max_wait || 0), b.timeout_dest || 'hangup', b.timeout_value || null, !!b.record, b.voice || null]);
+    // anuncios por TTS (solo si cambio el texto)
+    const { rows: cur } = await c.query('SELECT welcome_text, welcome_ref, periodic_text, periodic_ref, voice FROM pbxng_queues WHERE name=$1', [name]);
+    const q0 = cur[0] || {};
+    const voice = b.voice || q0.voice || null;
+    const wTxt = (b.welcome_text || '').trim(), pTxt = (b.periodic_text || '').trim();
+    let wRef = q0.welcome_ref, pRef = q0.periodic_ref;
+    if (wTxt !== (q0.welcome_text || '') || (wTxt && !wRef)) {
+      wRef = wTxt ? await queueTts(wTxt, voice, 'q_' + name.replace(/[^a-zA-Z0-9_-]/g, '') + '_welcome') : null;
+      await c.query('UPDATE pbxng_queues SET welcome_text=$2, welcome_ref=$3 WHERE name=$1', [name, wTxt || null, wRef]);
+    }
+    if (pTxt !== (q0.periodic_text || '') || (pTxt && !pRef)) {
+      pRef = pTxt ? await queueTts(pTxt, voice, 'q_' + name.replace(/[^a-zA-Z0-9_-]/g, '') + '_periodic') : null;
+      await c.query('UPDATE pbxng_queues SET periodic_text=$2, periodic_ref=$3 WHERE name=$1', [name, pTxt || null, pRef]);
+    }
+    await c.query('UPDATE queues SET periodic_announce=$2, periodic_announce_frequency=$3 WHERE name=$1',
+      [name, pRef || null, pRef ? Number(b.periodic_announce_frequency || 60) : 0]);
+    // dialplan del numero de acceso
+    const { rows: qr } = await c.query('SELECT * FROM pbxng_queues WHERE name=$1', [name]);
+    await queueDialplan(c, qr[0]);
+    await c.query('COMMIT');
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; }
+  finally { c.release(); }
+  broadcastSoon();
+  return await queueFull(name);
+}
+app.post('/api/queues', async (req, res) => {
+  try { res.status(201).json(await saveQueue(req.body || {}, true)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/queues/:name', async (req, res) => {
+  try { res.json(await saveQueue({ ...(req.body || {}), name: req.params.name }, false)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Escuchar un anuncio antes de guardarlo (devuelve el WAV, no lo despliega)
+app.post('/api/queues/preview-announce', async (req, res) => {
+  try {
+    const b = req.body || {}; const text = (b.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'texto requerido' });
+    const u = await vozBase();
+    const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: b.voice || undefined, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(30000) });
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf.length) return res.status(500).json({ error: 'el TTS devolvió audio vacío' });
+    res.set('Content-Type', 'audio/wav').send(buf);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/queues/:name', async (req, res) => {
   const { name } = req.params; const c = await pool.connect();

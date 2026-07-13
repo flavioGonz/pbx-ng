@@ -61,12 +61,19 @@ RUN useradd -r -d /var/lib/asterisk asterisk 2>/dev/null || true \
 
 # configs estáticos (endpoints van en realtime/DB). Los que llevan secretos
 # los genera el entrypoint desde variables de entorno.
+# Audios en espanol rioplatense (voz uruguaya), generados con el TTS propio:
+#   scripts/gen-sounds.py  (manifiesto: voice-service/sounds/manifest.es.json)
+# Va como tarball: preserva mayus/minus (vm-Old != vm-old) y no infla el repo.
+# Sin estos audios, defaultlanguage=es cae al set en ingles.
+ADD sounds/pbxng-sounds-es.tar.gz /var/lib/asterisk/sounds/
+
 COPY config/asterisk/ /etc/asterisk/
 COPY images/asterisk/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # Agente HTTP :8092 (estado nucleo + red + rutas). El script vive en infra/asterisk/,
 # pero el build context de compose es docker/, por eso se copia a docker/images/asterisk/.
 COPY images/asterisk/pbxng-ast-agent.py /usr/local/bin/pbxng-ast-agent.py
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/pbxng-ast-agent.py
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/pbxng-ast-agent.py \
+ && chown -R asterisk:asterisk /var/lib/asterisk/sounds
 
 EXPOSE 5060/udp 5060/tcp 5061/tcp 8088/tcp 10000-20000/udp
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

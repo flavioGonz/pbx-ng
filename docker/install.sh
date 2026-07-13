@@ -14,7 +14,11 @@
 #  No interactivo:    ./install.sh --role=core  --public-ip=1.2.3.4 --domain=pbx.x.com --edge-ip=10.0.0.20 --yes
 #                     ./install.sh --role=edge  --join=edge-join.env --public-ip=1.2.3.4 --yes
 #  Flags: --role= --profiles=a,b --core-ip= --edge-ip= --public-ip= --domain=
-#         --join=FILE --tenant=single|multi --release --yes
+#         --join=FILE --tenant=single|multi --release --yes --print-firewall
+#
+#  Firewall/NAT: es REQUISITO, no un anexo. Al terminar, el instalador imprime
+#  exactamente que abrir segun los modulos activos y verifica el TURN de verdad
+#  (STUN Binding + TURN Allocate). Detalle completo en docs/FIREWALL.md.
 # ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")"; HERE="$(pwd)"
@@ -35,13 +39,14 @@ need(){ local v w; v="$(getv "$1")"; [[ -z "$v" ]] && return 0; for w in $WEAK; 
 tcpok(){ timeout 3 bash -c "echo > /dev/tcp/$1/$2" 2>/dev/null && echo ok || echo fail; }
 
 # ---------------- flags ----------------
-ROLE=""; PROFILES=""; CORE_IP=""; EDGE_IP=""; PUBLIC_IP_F=""; DOMAIN_F=""; JOIN=""; TENANT_F=""; RELEASE=0; YES=0
+ROLE=""; PROFILES=""; CORE_IP=""; EDGE_IP=""; PUBLIC_IP_F=""; DOMAIN_F=""; JOIN=""; TENANT_F=""; RELEASE=0; YES=0; PRINT_FW=0
 for a in "$@"; do case "$a" in
   --role=*) ROLE="${a#*=}";; --profiles=*) PROFILES="${a#*=}";;
   --core-ip=*) CORE_IP="${a#*=}";; --edge-ip=*) EDGE_IP="${a#*=}";;
   --public-ip=*) PUBLIC_IP_F="${a#*=}";; --domain=*) DOMAIN_F="${a#*=}";;
   --join=*) JOIN="${a#*=}";; --tenant=*) TENANT_F="${a#*=}";;
   --release) RELEASE=1;; --yes|-y) YES=1;;
+  --print-firewall) PRINT_FW=1;;
   -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
   *) r "arg desconocido: $a"; exit 1;;
 esac; done
@@ -51,12 +56,14 @@ c "================================================================"
 c "   PBX-NG · Instalador multi-rol (all | core | edge)"
 c "================================================================"; echo
 
-command -v docker >/dev/null || { r "Falta Docker: https://docs.docker.com/engine/install/"; exit 1; }
-docker compose version >/dev/null 2>&1 || { r "Falta el plugin 'docker compose'."; exit 1; }
+if [[ "$PRINT_FW" != 1 ]]; then
+  command -v docker >/dev/null || { r "Falta Docker: https://docs.docker.com/engine/install/"; exit 1; }
+  docker compose version >/dev/null 2>&1 || { r "Falta el plugin 'docker compose'."; exit 1; }
+fi
 
 # ---------------- rol ----------------
 if [[ -z "$ROLE" ]]; then
-  if [[ "$YES" == 1 ]]; then ROLE=all; else
+  if [[ "$YES" == 1 || "$PRINT_FW" == 1 ]]; then ROLE=all; else
     c "Rol de esta VM/host"
     echo "   1) all   · Todo en esta maquina (SOHO / demo)         (RECOMENDADO chico)"
     echo "   2) core  · Nucleo (Asterisk+API+Dashboard+DB) — LAN"
@@ -113,6 +120,50 @@ deploy(){
   fi
 }
 
+# ---------------- firewall / NAT ----------------
+fw_note(){   # $1 = perfiles activos (csv)
+  local P=",${1:-core},"
+  echo; c "================================================================"
+  c "  FIREWALL / NAT — abrir SOLO esto hacia Internet"
+  c "================================================================"
+  echo "  443/TCP            HTTPS + WSS (softphone WebRTC)      -> reverse proxy"
+  echo "  80/TCP             ACME (Let's Encrypt), si aplica     -> reverse proxy"
+  if [[ "$P" == *",sbc,"* ]]; then
+  echo "  5060/UDP+TCP       SIP (troncales / telefonos)         -> $( [[ "$ROLE" == core ]] && echo "EDGE ${EDGE_IP:-<ip-edge>}" || echo "esta VM" )"
+  echo "  5061/TCP           SIP TLS (opcional)"
+  echo "  30000-40000/UDP    RTP de rtpengine (medios troncales)"
+  fi
+  if [[ "$P" == *",turn,"* ]]; then
+  y "  3478/UDP  Y  3478/TCP    STUN/TURN (coturn)               <- LOS DOS"
+  y "  49152-65535/UDP          Rango RELAY del TURN             <- SIN ESTO NO HAY AUDIO"
+  echo "  5349/TCP           TURNS (TLS) — recomendado para redes corporativas"
+  fi
+  echo
+  r "  NUNCA publicar: 5432 (Postgres), 6379 (Redis), 3000/3001 (API/panel),"
+  r "                  5038 (AMI), 8088 (ARI), 8091/8092 (agentes), 81 (NPM admin)."
+  if [[ "$P" == *",turn,"* ]]; then
+    echo
+    y "  NAT hairpin: si probas el TURN por el FQDN publico DESDE LA LAN y falla"
+    y "  (error ICE 701), tu router no hace loopback. La regla dst-nat debe matchear"
+    y "  tambien el trafico que nace en la LAN (ojo con in-interface=WAN/all-ppp)."
+  fi
+  echo "  Detalle, recetas y troubleshooting:  docs/FIREWALL.md"
+  c "================================================================"
+}
+turn_selfcheck(){   # verificacion REAL: STUN Binding + TURN Allocate (401 -> firmado -> 200 relay)
+  local CK="$HERE/../scripts/check-turn.py" H
+  [[ -x "$CK" || -f "$CK" ]] || return 0
+  command -v python3 >/dev/null || return 0
+  H="$(getv DOMAIN)"; [[ -z "$H" || "$H" == pbx.local ]] && H="$(getv PUBLIC_IP)"
+  [[ -z "$H" ]] && { y "  (sin DOMAIN/PUBLIC_IP: salteo el chequeo de TURN)"; return 0; }
+  echo; c "Verificando el TURN de verdad (candidato relay) contra $H ..."
+  python3 "$CK" --host "$H" --user "$(getv TURN_USER)" --pass "$(getv TURN_PASS)" --tcp || {
+    y "  El TURN no entrega candidato relay. Los clientes detras de NAT simetrico"
+    y "  quedaran sin audio. Revisa docs/FIREWALL.md (port-forward 3478 + rango relay)."; }
+}
+
+if [[ "$PRINT_FW" == 1 ]]; then ROLE="${ROLE:-all}"; fw_note "${PROFILES:-core,sbc,turn}"; exit 0; fi
+
 case "$ROLE" in
 # ==========================================================================
 all)
@@ -139,6 +190,8 @@ all)
   put TURN_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
   put COMPOSE_PROFILES "$CPROFILES"
   deploy
+  fw_note "$CPROFILES"
+  [[ "$CPROFILES" == *turn* ]] && turn_selfcheck
 ;;
 # ==========================================================================
 core)
@@ -176,6 +229,7 @@ core)
   echo "     # en el edge:  ./install.sh --role=edge --join=edge-join.env --public-ip=$PUBLIC_IP"
   r  "  Seguridad: restringi el acceso a Postgres (5432) SOLO desde la IP del edge."
   g "================================================================"
+  fw_note "$CPROFILES"
 ;;
 # ==========================================================================
 edge)
@@ -209,8 +263,9 @@ edge)
   echo; g "================================================================"
   g "  EDGE (SBC/TURN) desplegado. Apunta al core en $CORE_IP."
   g "  Kamailio SIP :5060 · TURN :3478 · rtpengine (media)"
-  r "  Abri al WAN solo: 5060/5061 (SIP), 3478+relay (TURN), 443 (WSS por proxy)."
   g "================================================================"
+  fw_note "$CPROFILES"
+  [[ "$CPROFILES" == *turn* ]] && turn_selfcheck
 ;;
 *) r "Rol invalido: $ROLE (usa all | core | edge)"; exit 1;;
 esac

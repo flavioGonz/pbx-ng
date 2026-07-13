@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;height:100%;overflow:hidden;font-family:Segoe UI,system-ui,sans-serif;-webkit-user-select:none}
+  .wrap{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    background:radial-gradient(120% 120% at 50% 0%,#16233f 0%,#0b1220 60%,#070c16 100%);color:#eaf1ff;
+    -webkit-app-region:drag;border:1px solid rgba(120,150,220,.25);border-radius:16px;box-sizing:border-box}
+  .ph{position:relative;width:104px;height:104px;display:flex;align-items:center;justify-content:center}
+  .ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(120,170,255,.6);animation:pulse 1.8s ease-out infinite}
+  .ring:nth-child(2){animation-delay:.6s}.ring:nth-child(3){animation-delay:1.2s}
+  @keyframes pulse{0%{transform:scale(.55);opacity:.6}100%{transform:scale(1.5);opacity:0}}
+  .badge{width:76px;height:76px;border-radius:22px;background:linear-gradient(160deg,#22c55e,#16a34a);display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px rgba(34,197,94,.45)}
+  .handset{animation:shake .7s ease-in-out infinite;transform-origin:50% 55%}
+  @keyframes shake{0%,100%{transform:rotate(-9deg)}50%{transform:rotate(9deg)}}
+  .name{font-size:22px;font-weight:700;letter-spacing:.3px;margin-top:4px}.name b{color:#4ade80}
+  .ver{font-size:13px;color:#8fa6cc;margin-top:-8px}
+  .bar{width:190px;height:4px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;width:40%;border-radius:4px;background:linear-gradient(90deg,#22c55e,#4c9dff);animation:load 1.1s ease-in-out infinite}
+  .by{position:absolute;bottom:16px;font-size:11px;color:#5c7099;letter-spacing:.4px}
+  @keyframes load{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+</style></head><body>
+  <div class="wrap">
+    <div class="ph">
+      <span class="ring"></span><span class="ring"></span><span class="ring"></span>
+      <div class="badge">
+        <svg class="handset" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z"/></svg>
+      </div>
+    </div>
+    <div class="name">PBX-NG <b>Softphone</b></div>
+    <div class="ver" id="ver">v0.0.0</div>
+    <div class="bar"><i></i></div>
+    <div class="by">Infratec · WebRTC / SIP</div>
+  </div>
+  <script>try{const p=new URLSearchParams(location.search);document.getElementById('ver').textContent='v'+(p.get('v')||'0.0.0');}catch(e){}</script>
+</body></html>
