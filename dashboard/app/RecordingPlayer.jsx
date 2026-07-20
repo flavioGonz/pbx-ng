@@ -24,7 +24,27 @@ function loadWS() {
 }
 const fmt = (s) => { s = Math.floor(s || 0); const m = Math.floor(s / 60), ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; };
 
+/* Las grabaciones dejaron de ser publicas (antes se bajaban enumerando ids: /1, /2, /3…).
+ * wavesurfer y el boton de descarga usan una URL directa, que no manda cabeceras, asi
+ * que primero traemos el audio por fetch —al que el parche global le pone el token— y
+ * trabajamos sobre un blob local. Meter el token en la URL lo dejaria escrito en los
+ * logs del proxy. */
+function useAudioBlob(src) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    if (!src) { setUrl(null); return; }
+    let vivo = true, creada = null;
+    fetch(src)
+      .then((r) => { if (!r.ok) throw new Error('sin acceso'); return r.blob(); })
+      .then((b) => { if (!vivo) return; creada = URL.createObjectURL(b); setUrl(creada); })
+      .catch(() => { if (vivo) setUrl(null); });
+    return () => { vivo = false; if (creada) URL.revokeObjectURL(creada); };
+  }, [src]);
+  return url;
+}
+
 export default function RecordingPlayer({ src, label, download = true, recId }) {
+  const blobUrl = useAudioBlob(src);
   const ref = useRef(null); const ws = useRef(null);
   const { colorScheme } = useMantineColorScheme();
   const dark = colorScheme === 'dark';
@@ -56,7 +76,7 @@ export default function RecordingPlayer({ src, label, download = true, recId }) 
       const inst = WS.create({
         container: ref.current, height: 54, barWidth: 2.5, barGap: 2, barRadius: 3,
         waveColor: dark ? '#3d4d68' : '#b9c6da', progressColor: '#16a34a',
-        cursorColor: dark ? '#e6edf6' : '#1e293b', cursorWidth: 1, normalize: true, url: src,
+        cursorColor: dark ? '#e6edf6' : '#1e293b', cursorWidth: 1, normalize: true, url: blobUrl,
       });
       ws.current = inst;
       inst.on('ready', () => { setReady(true); setDur(inst.getDuration()); });
@@ -67,7 +87,7 @@ export default function RecordingPlayer({ src, label, download = true, recId }) 
       inst.on('error', () => setErr(true));
     }).catch(() => setErr(true));
     return () => { dead = true; try { ws.current && ws.current.destroy(); } catch (_) {} };
-  }, [src]);
+  }, [blobUrl]);
 
   useEffect(() => { if (ws.current) { try { ws.current.setOptions({ waveColor: dark ? '#3d4d68' : '#b9c6da', cursorColor: dark ? '#e6edf6' : '#1e293b' }); } catch (_) {} } }, [dark]);
 
@@ -91,7 +111,7 @@ export default function RecordingPlayer({ src, label, download = true, recId }) 
           <Box key={rr} onClick={() => setSpeed(rr)} style={{ cursor: 'pointer', padding: '3px 8px', borderRadius: 8, fontSize: 12, fontWeight: 700, lineHeight: 1, background: rate === rr ? 'var(--mantine-color-teal-filled)' : 'transparent', color: rate === rr ? '#fff' : 'var(--mantine-color-dimmed)', transition: 'all .15s' }}>{rr}x</Box>
         ))}</Group>
         <Group gap={6} w={104} wrap="nowrap"><IconVolume size={16} style={{ opacity: .55, flex: 'none' }} /><Slider size="xs" color="teal" value={vol * 100} onChange={(v) => setV(v / 100)} style={{ flex: 1 }} label={null} /></Group>
-        {download && <Tooltip label="Descargar"><ActionIcon variant="default" size="lg" component="a" href={src} download><IconDownload size={17} /></ActionIcon></Tooltip>}
+        {download && <Tooltip label="Descargar"><ActionIcon variant="default" size="lg" component="a" href={blobUrl || undefined} download={(label || 'grabacion') + '.wav'}><IconDownload size={17} /></ActionIcon></Tooltip>}
       </Group>
 
       {recId && (

@@ -389,8 +389,6 @@ const PUBLIC_API = [
   ['GET',  /^\/api\/ice$/],
   ['GET',  /^\/api\/branding$/],
   ['GET',  /^\/api\/enroll\/[^/]+$/],
-  ['GET',  /^\/api\/recordings\/[^/]+\/(audio|peaks|transcript)$/],
-  ['POST', /^\/api\/recordings\/[^/]+\/transcribe$/],
   ['GET',  /^\/api\/prompts\/[^/]+\/audio$/],
   ['GET',  /^\/api\/push\/vapid$/],
   ['POST', /^\/api\/push\/(subscribe|register|unsubscribe)$/],
@@ -404,6 +402,15 @@ const PUBLIC_API = [
   ['GET',  /^\/api\/manuales\/img\/[A-Za-z0-9._-]+$/],
 ];
 function isPublicApi(req) { const full = (req.baseUrl || '') + req.path; return PUBLIC_API.some(([m, re]) => m === req.method && re.test(full)); }
+/* Nada de lo que sale de /api puede quedar guardado en un intermediario. El proxy
+ * estaba cacheando el audio de las grabaciones: despues de cerrar el acceso publico,
+ * seguia devolviendo 200 con una copia vieja a quien pedia SIN sesion. Un control de
+ * acceso que el proxy puede saltear por cache no es un control de acceso. */
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  next();
+});
 app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, next));
 app.get('/api/sbc/rtpengine/effective', async (req, res) => {
   const d = { portmin: '30000', portmax: '40000', timeout: '60', silent_timeout: '3600', loglevel: '6' };
