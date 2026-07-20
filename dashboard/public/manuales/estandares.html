@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PBX-NG · Estándares y RFCs</title>
+<style>:root{--accent:#0891b2;--soft:#0891b214}
+*{box-sizing:border-box}
+body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
+.page{max-width:900px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}   /* ~A4 a 96dpi: 794px de contenido + márgenes */
+.cover{position:relative;min-height:940px;padding:0;background:#fff;color:#0f172a;display:flex;flex-direction:column}
+.cover .bar{height:14px;background:var(--accent)}
+.cover .side{position:absolute;left:0;top:14px;bottom:0;width:8px;background:linear-gradient(180deg,var(--accent),#0f1a30)}
+.cover .inner{padding:58px 64px 46px 74px;display:flex;flex-direction:column;flex:1}
+.cover .brandline{display:flex;align-items:center;gap:14px;border-bottom:1px solid #e8edf4;padding-bottom:18px}
+.cover .mark{width:46px;height:46px;border-radius:11px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px}
+.cover .brand{font-size:19px;font-weight:800;letter-spacing:-.2px}
+.cover .brandsub{font-size:12px;color:#94a3b8}
+.cover .mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 0}
+.cover .doctype{font-size:12px;font-weight:800;letter-spacing:2.6px;text-transform:uppercase;color:var(--accent)}
+.cover h1{font-size:52px;line-height:1.05;margin:16px 0 0;font-weight:800;letter-spacing:-1px;color:#0f172a}
+.cover .rule{width:96px;height:5px;background:var(--accent);border-radius:3px;margin:26px 0 22px}
+.cover .sub{font-size:19px;color:#475569;max-width:560px;line-height:1.5}
+.cover .metatable{border-top:1px solid #e8edf4;padding-top:22px;display:flex;gap:60px;flex-wrap:wrap}
+.cover .metatable div span{display:block;font-size:10.5px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:5px}
+.cover .metatable div b{font-size:14.5px;font-weight:600;color:#334155}
+.cover .foot{margin-top:26px;font-size:11px;color:#94a3b8}
+.toc{padding:34px 60px;border-bottom:1px solid #e8edf4;background:#f8fafc}
+.toc h2{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:#94a3b8;margin:0 0 14px}
+.toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
+.toc a:hover{color:var(--accent);border-left-color:var(--accent)}
+.toc a.l3{padding-left:30px;font-size:13.5px;color:#64748b}
+main{padding:44px 64px 70px}
+h1{font-size:30px;margin:0 0 22px}
+h2{font-size:24px;margin:0 0 6px;padding:0;color:#0f172a;letter-spacing:-.3px;scroll-margin-top:20px}
+.chapter{margin:52px 0 20px;padding-top:22px;border-top:3px solid var(--accent)}
+.chapter:first-of-type{margin-top:0;border-top:none;padding-top:0}
+.chapter .num{display:inline-block;font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:7px}
+h3{font-size:17px;margin:30px 0 10px;color:#1e293b;padding-left:12px;border-left:3px solid #e2e8f0;scroll-margin-top:20px}
+h4{font-size:14.5px;margin:20px 0 8px;color:#475569;font-weight:700}
+p{margin:12px 0}
+code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font:13.5px/1.5 ui-monospace,Consolas,monospace;color:#be123c}
+pre{background:#0f1a30;color:#e2e8f0;padding:16px 18px;border-radius:11px;overflow:auto;margin:16px 0}
+pre code{background:none;color:inherit;padding:0;font-size:13.5px}
+blockquote{margin:18px 0;padding:14px 18px;background:var(--soft);border-left:4px solid var(--accent);border-radius:0 10px 10px 0}
+blockquote p{margin:5px 0;font-size:14.5px;color:#334155}
+.tw{overflow-x:auto;margin:18px 0}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th{text-align:left;background:#f8fafc;color:#475569;font-weight:700;font-size:12.5px;letter-spacing:.4px;text-transform:uppercase;padding:11px 13px;border-bottom:2px solid #e8edf4}
+td{padding:11px 13px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+tr:last-child td{border-bottom:none}
+ul,ol{margin:12px 0;padding-left:24px}
+li{margin:6px 0}
+hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
+.nav{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:14px 0 18px;padding:11px 15px;background:var(--soft);border:1px solid var(--accent);border-left-width:4px;border-radius:9px;font-size:14px;color:#334155}
+.nav .navk{font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--accent);padding-right:4px}
+.nav b{font-weight:700;color:#0f172a}
+.nav .sep{color:#94a3b8;font-weight:400}
+/* Lamina: la imagen es lo primero y ocupa la hoja; el titulo va DEBAJO, como pie de figura. */
+figure.shot{margin:34px 0 30px;text-align:center;break-inside:avoid}
+figure.shot .frame{background:linear-gradient(160deg,#f8fafc,#eef2f7);border:1px solid #e2e8f0;border-radius:14px;padding:14px}
+figure.shot img{display:block;max-width:100%;margin:0 auto;border-radius:9px;border:1px solid #e2e8f0;box-shadow:0 10px 30px rgba(15,23,42,.13)}
+figure.shot figcaption{margin-top:14px;font-size:14px;color:#334155;font-weight:600;line-height:1.4}
+figure.shot .fig{display:block;font-size:10px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+figure.shot .fn{display:block;font:11px ui-monospace,Consolas,monospace;color:#cbd5e1;margin-top:5px;font-weight:400}
+figure.shot.ph .frame{border:2px dashed #cbd5e1;background:#f8fafc;padding:56px 20px}
+figure.shot.ph .frame::before{content:'Imagen pendiente';display:block;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8}
+figure.shot.ph .fn{color:var(--accent);font-weight:700;margin-top:6px}
+footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px solid #eef1f7}
+.top{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;border:0;border-radius:11px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(15,23,42,.2)}
+@media print{
+  body{background:#fff}
+  .page{box-shadow:none;max-width:none}
+  .top{display:none}
+  .cover{padding:60px 40px;page-break-after:always}
+  .toc{page-break-after:always}
+  main{padding:0 10px}
+  .chapter{page-break-before:always;page-break-after:avoid;border-top:3px solid var(--accent)}
+  .chapter:first-of-type{page-break-before:avoid}
+  h2,h3{page-break-after:avoid}
+  @page{size:A4;margin:18mm 16mm 20mm}
+  @page:first{margin:0}
+  /* La imagen siempre empieza arriba de la hoja: se lleva su titulo consigo y nada la parte. */
+  figure.shot{break-before:page;break-inside:avoid;margin:0 0 26px}
+  figure.shot .frame{padding:10px}
+  figure.shot img{max-height:210mm}
+  table,pre,blockquote{page-break-inside:avoid}
+  p,li{orphans:3;widows:3}
+  h4{page-break-after:avoid}
+  a{color:inherit;text-decoration:none}
+}
+</style></head>
+<body>
+<div class="page">
+  <header class="cover">
+    <div class="bar"></div><div class="side"></div>
+    <div class="inner">
+      <div class="brandline">
+        <div class="mark">📜</div>
+        <div>
+          <div class="brand">PBX-NG</div>
+          <div class="brandsub">Plataforma de comunicaciones unificadas</div>
+        </div>
+      </div>
+      <div class="mid">
+        <div class="doctype">Documentación oficial</div>
+        <h1>Estándares y RFCs</h1>
+        <div class="rule"></div>
+        <div class="sub">Qué RFC cumple la central y dónde se configura</div>
+      </div>
+      <div class="metatable">
+        <div><span>Dirigido a</span><b>Integrador / Auditoría</b></div>
+        <div><span>Versión del producto</span><b>1.1.0</b></div>
+        <div><span>Actualizado</span><b>20/07/2026</b></div>
+        <div><span>Documento</span><b>ESTANDARES</b></div>
+      </div>
+      <div class="foot">© 2026 PBX-NG · Este documento puede actualizarse sin previo aviso.</div>
+    </div>
+  </header>
+  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#c-mo-leer-el-nivel">Cómo leer el nivel</a><a class="l2" href="#se-alizaci-n-sip">Señalización SIP</a><a class="l2" href="#registro-presencia-y-buz-n">Registro, presencia y buzón</a><a class="l2" href="#medios-rtp-srtp-webrtc-c-decs">Medios (RTP / SRTP / WebRTC / códecs)</a><a class="l2" href="#transporte-y-seguridad">Transporte y seguridad</a><a class="l2" href="#identidad-stir-shaken">Identidad (STIR/SHAKEN)</a></nav>
+  <main><p>Este documento lista los estándares (RFC del IETF y equivalentes) que <strong>PBX-NG implementa</strong>, con qué nivel de cumplimiento y <strong>dónde está la configuración</strong> que los sostiene. Sirve de referencia técnica para integradores, operadores y auditorías: cada fila se puede verificar en el archivo o el módulo que se indica.</p>
+<p>PBX-NG es una central de comunicaciones unificadas construida sobre <strong>Asterisk (pila SIP <code>chan_pjsip</code>)</strong>, con endpoints en base de datos (realtime), medios RTP/SRTP/DTLS y WebRTC nativo. A diferencia del SBC, la central <strong>sí termina</strong> la señalización: actúa como agente de usuario, registrar y B2BUA, así que cumple los RFC de extremo (PRACK, UPDATE, REFER, suscripciones, buzón), no solo los de tránsito.</p>
+<div class="chapter"><span class="num"></span><h2 id="c-mo-leer-el-nivel">Cómo leer el nivel</h2></div>
+<div class="tw"><table><thead><tr><th>Nivel</th><th>Qué significa</th></tr></thead><tbody><tr><td><strong>Completo</strong></td><td>Implementado y disponible; es el comportamiento estándar de la central.</td></tr><tr><td><strong>Opcional</strong></td><td>Soportado; se activa por endpoint/troncal desde el panel (o por realtime).</td></tr><tr><td><strong>Parcial</strong></td><td>Soportado por la pila pero no configurado por defecto, o cubierto en parte.</td></tr></tbody></table></div>
+<blockquote><p><strong>Núcleo cumplido al 100%.</strong> En su configuración de fábrica, PBX-NG cumple de forma completa: <strong>RFC 3261</strong> (SIP UA/registrar/B2BUA), <strong>RFC 3262</strong> (PRACK/100rel), <strong>RFC 3264</strong> (oferta/respuesta SDP), <strong>RFC 3311</strong> (UPDATE), <strong>RFC 3515</strong> (REFER/transferencias), <strong>RFC 6665</strong> (SUBSCRIBE/NOTIFY), <strong>RFC 3842</strong> (MWI/buzón), <strong>RFC 3550/3551</strong> (RTP), <strong>RFC 4733</strong> (DTMF), <strong>RFC 3711 + 4568</strong> (SRTP-SDES), <strong>RFC 5763/5764</strong> (DTLS-SRTP/WebRTC), <strong>RFC 7118</strong> (SIP sobre WebSocket) y <strong>RFC 4028</strong> (Session Timers).</p></blockquote>
+<div class="chapter"><span class="num"></span><h2 id="se-alizaci-n-sip">Señalización SIP</h2></div>
+<div class="tw"><table><thead><tr><th>RFC</th><th>Título</th><th>Nivel</th><th>Dónde está</th></tr></thead><tbody><tr><td>RFC 3261</td><td>SIP: Session Initiation Protocol (UA, registrar, proxy/B2BUA)</td><td>Completo</td><td><code>chan_pjsip</code> — <code>docker/config/asterisk/pjsip.conf</code> + endpoints realtime</td></tr><tr><td>RFC 3263</td><td>Locating SIP Servers</td><td>Completo</td><td>Resolución de <code>chan_pjsip</code> (troncales salientes)</td></tr><tr><td>RFC 3262</td><td>PRACK: respuestas provisionales fiables (100rel)</td><td>Completo</td><td><code>100rel</code> por endpoint — esquema <code>pjsip_100rel_values</code></td></tr><tr><td>RFC 3311</td><td>UPDATE</td><td>Completo</td><td><code>chan_pjsip</code> (re-negociación en diálogo)</td></tr><tr><td>RFC 3515 / 5589</td><td>REFER / Call Control Transfer (transferencias)</td><td>Completo</td><td><code>res_pjsip_refer</code> — usado por atención/ciega en el panel</td></tr><tr><td>RFC 3891 / 3892</td><td>Replaces / Referred-By</td><td>Completo</td><td><code>chan_pjsip</code> (transferencias asistidas)</td></tr><tr><td>RFC 3428</td><td>MESSAGE (mensajería SIP)</td><td>Parcial</td><td><code>res_pjsip_messaging</code> (disponible en la pila)</td></tr><tr><td>RFC 3581</td><td>Extensión <code>rport</code></td><td>Completo</td><td><code>chan_pjsip</code> (<code>rewrite_contact</code>, respuesta simétrica)</td></tr><tr><td>RFC 5626</td><td>Client-Initiated Connections (outbound/keepalive)</td><td>Parcial</td><td><code>qualify</code>/keepalive por endpoint</td></tr><tr><td>RFC 5627</td><td>GRUU</td><td>Parcial</td><td>Soportado por <code>chan_pjsip</code> (no activado por defecto)</td></tr></tbody></table></div>
+<div class="chapter"><span class="num"></span><h2 id="registro-presencia-y-buz-n">Registro, presencia y buzón</h2></div>
+<div class="tw"><table><thead><tr><th>RFC</th><th>Título</th><th>Nivel</th><th>Dónde está</th></tr></thead><tbody><tr><td>RFC 3261 §10</td><td>Registrar / REGISTER</td><td>Completo</td><td><code>chan_pjsip</code> (AOR realtime) — endpoints en la base</td></tr><tr><td>RFC 2617 / 7616</td><td>Autenticación Digest</td><td>Completo</td><td>Credenciales por endpoint (auth realtime)</td></tr><tr><td>RFC 6665 (obsoleta 3265)</td><td>SUBSCRIBE/NOTIFY (eventos)</td><td>Completo</td><td><code>res_pjsip_pubsub</code> (BLF, presencia)</td></tr><tr><td>RFC 4235</td><td>dialog-info (estado de línea, BLF)</td><td>Completo</td><td><code>res_pjsip_exten_state</code></td></tr><tr><td>RFC 3842</td><td>Message Waiting Indication (MWI, buzón)</td><td>Completo</td><td><code>res_pjsip_mwi</code> + <code>app_voicemail</code></td></tr><tr><td>RFC 3856 / 3863</td><td>Presencia SIP (PIDF)</td><td>Parcial</td><td><code>res_pjsip_pubsub</code> (presencia básica)</td></tr></tbody></table></div>
+<div class="chapter"><span class="num"></span><h2 id="medios-rtp-srtp-webrtc-c-decs">Medios (RTP / SRTP / WebRTC / códecs)</h2></div>
+<div class="tw"><table><thead><tr><th>RFC</th><th>Título</th><th>Nivel</th><th>Dónde está</th></tr></thead><tbody><tr><td>RFC 3264</td><td>Oferta/Respuesta con SDP</td><td>Completo</td><td><code>chan_pjsip</code> (negociación de medios)</td></tr><tr><td>RFC 4566</td><td>SDP</td><td>Completo</td><td><code>chan_pjsip</code> / <code>res_pjsip_sdp_rtp</code></td></tr><tr><td>RFC 3550 / 3551</td><td>RTP y perfil de audio/video</td><td>Completo</td><td><code>res_rtp_asterisk</code> — <code>docker/config/asterisk/rtp.conf</code></td></tr><tr><td>RFC 4733</td><td>Eventos DTMF (RFC 2833 fuera de banda)</td><td>Completo</td><td><code>dtmf_mode=rfc4733</code> — esquema <code>pjsip_dtmf_mode_values</code></td></tr><tr><td>RFC 3389</td><td>Comfort Noise</td><td>Parcial</td><td>Soportado por <code>res_rtp_asterisk</code></td></tr><tr><td>RFC 3711 / 4568</td><td>SRTP con SDES (<code>a=crypto</code>)</td><td>Completo</td><td><code>media_encryption=sdes</code> — esquema <code>pjsip_media_encryption_values</code></td></tr><tr><td>RFC 5763 / 5764</td><td>DTLS-SRTP (WebRTC)</td><td>Completo</td><td><code>media_encryption=dtls</code> + <code>dtls_*</code> — <code>rtp.conf</code> / endpoint</td></tr><tr><td>RFC 8445</td><td>ICE</td><td>Completo</td><td><code>ice_support=yes</code> (endpoints WebRTC)</td></tr><tr><td>RFC 8825–8834</td><td>WebRTC</td><td>Completo</td><td><code>transport-ws</code> (<code>bind=0.0.0.0:8088</code>) — <code>pjsip.conf</code></td></tr><tr><td>RFC 6716</td><td>Opus</td><td>Opcional</td><td><code>codec_opus</code> (si el códec está habilitado en el endpoint)</td></tr><tr><td>RFC 7587</td><td>Payload RTP para Opus</td><td>Opcional</td><td>Junto con <code>codec_opus</code></td></tr></tbody></table></div>
+<blockquote><p>Los códecs <strong>G.711 (µ-law/A-law)</strong>, <strong>G.722</strong> y <strong>GSM</strong> son recomendaciones de la ITU-T, no RFC; PBX-NG los soporta de forma nativa vía <code>res_format_*</code>.</p></blockquote>
+<div class="chapter"><span class="num"></span><h2 id="transporte-y-seguridad">Transporte y seguridad</h2></div>
+<div class="tw"><table><thead><tr><th>RFC</th><th>Título</th><th>Nivel</th><th>Dónde está</th></tr></thead><tbody><tr><td>RFC 7118</td><td>SIP sobre WebSocket</td><td>Completo</td><td><code>transport-ws</code> (8088) — <code>pjsip.conf</code> + <code>http.conf</code></td></tr><tr><td>RFC 3261 §26 / RFC 5630</td><td>SIP sobre TLS (<code>sips</code>)</td><td>Completo</td><td><code>transport-tls</code> (<code>bind=0.0.0.0:5061</code>, <code>method=tlsv1_2</code>) — <code>pjsip.conf</code></td></tr><tr><td>RFC 5246</td><td>TLS 1.2</td><td>Completo</td><td><code>method=tlsv1_2</code> en el transporte TLS</td></tr><tr><td>RFC 4028</td><td>Session Timers</td><td>Completo</td><td><code>timers</code> por endpoint (<code>chan_pjsip</code>)</td></tr></tbody></table></div>
+<div class="chapter"><span class="num"></span><h2 id="identidad-stir-shaken">Identidad (STIR/SHAKEN)</h2></div>
+<div class="tw"><table><thead><tr><th>RFC</th><th>Título</th><th>Nivel</th><th>Dónde está</th></tr></thead><tbody><tr><td>RFC 8224 / 8225 / 8226</td><td>Identidad autenticada (STIR/SHAKEN)</td><td>Parcial</td><td><code>res_stir_shaken</code> disponible en Asterisk; la verificación/firma de borde se hace en <strong>SBC-NG</strong> (secsipid) delante de la central</td></tr></tbody></table></div>
+<blockquote><p><strong>Nota de arquitectura.</strong> En un despliegue con SBC-NG delante, la seguridad de borde (anti-flood, filtro por país, ocultamiento de topología, STIR/SHAKEN, interworking SRTP↔RTP) la resuelve el SBC, y la central se concentra en la lógica de comunicaciones (extensiones, colas, IVR, buzón, grabación). Ver el documento equivalente <strong>"Estándares y RFCs"</strong> del manual de SBC-NG. La versión exacta de Asterisk está en <strong>Sistema → Acerca de</strong>.</p></blockquote></main>
+  <footer>PBX-NG · Estándares y RFCs · versión 1.1.0 · 20/07/2026</footer>
+</div>
+<button class="top" onclick="window.print()">Descargar PDF</button>
+<script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>
+</body></html>

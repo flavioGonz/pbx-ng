@@ -1,12 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState, Fragment } from 'react';
-import { Card, Table, Text, Stack, Badge, Group, Button, TextInput, Tabs, ActionIcon, Tooltip, SimpleGrid, ThemeIcon, Modal, SegmentedControl, Divider } from '@mantine/core';
-import { IconRefresh, IconSearch, IconDownload, IconPlayerPlay, IconPlayerPause, IconPhone, IconPhoneCheck, IconPhoneX, IconClock, IconCalendar, IconArrowUpRight, IconArrowDownLeft, IconArrowsLeftRight, IconCircleCheck, IconMicrophone2, IconRobot, IconArrowsSplit, IconWorld, IconDeviceLandlinePhone, IconRouteAltLeft, IconList, IconFileTypePdf, IconReportAnalytics } from '@tabler/icons-react';
+import { Card, Table, Text, Stack, Badge, Group, Button, TextInput, Tabs, ActionIcon, Tooltip, ThemeIcon } from '@mantine/core';
+import { IconRefresh, IconSearch, IconDownload, IconPlayerPlay, IconPlayerPause, IconPhone, IconPhoneCheck, IconPhoneX, IconClock, IconCalendar, IconArrowUpRight, IconArrowDownLeft, IconArrowsLeftRight, IconCircleCheck, IconMicrophone2, IconRobot, IconArrowsSplit, IconWorld, IconDeviceLandlinePhone, IconRouteAltLeft, IconList } from '@tabler/icons-react';
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
-import { toast } from '../notify';
 import { useLive } from '../useLive';
-import Slot from '../Slot';
 import RecordingPlayer from '../RecordingPlayer';
 
 const dispColor = (d) => d === 'ANSWERED' ? 'teal' : d === 'NO ANSWER' ? 'yellow' : d === 'BUSY' ? 'orange' : d === 'FAILED' ? 'red' : 'gray';
@@ -27,22 +25,12 @@ const MEDIA = {
 };
 const fmtDur = (s) => { s = s || 0; const m = Math.floor(s / 60), ss = s % 60; return m ? `${m}m ${ss}s` : `${ss}s`; };
 const clidName = (clid) => { if (!clid) return ''; const m = clid.match(/"?([^"<]*)"?\s*<?/); const n = (m && m[1] || '').trim(); return n && !/^\d+$/.test(n) ? n : ''; };
-const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
+const Th = ({ icon, children, tip }) => <Table.Th><Tooltip label={tip} disabled={!tip} withArrow><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap', cursor: tip ? 'help' : 'default' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Tooltip></Table.Th>;
 
-export default function Historial() {
+export default function Historial({ embedded = false }) {
   const { snap } = useLive();
   const [rows, setRows] = useState([]); const [recs, setRecs] = useState([]); const [loading, setLoading] = useState(true);
   const [q, setQ] = useState(''); const [tab, setTab] = useState('all'); const [playId, setPlayId] = useState(null); const [shown, setShown] = useState(80);
-  const [repOpen, setRepOpen] = useState(false); const [repBusy, setRepBusy] = useState(false);
-  const [preset, setPreset] = useState('30');
-  const iso = (d) => d.toISOString().slice(0, 10);
-  const [rango, setRango] = useState(() => ({ from: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) }));
-  function aplicarPreset(v) {
-    setPreset(v);
-    if (v === 'custom') return;
-    const dias = v === 'hoy' ? 0 : (+v - 1);
-    setRango({ from: iso(new Date(Date.now() - dias * 864e5)), to: iso(new Date()) });
-  }
   async function load() {
     try { const d = await fetch('/backend/api/cdr?limit=300').then(r => r.json()); setRows(Array.isArray(d) ? d : []); } catch (_) { setRows([]); }
     try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setRecs(Array.isArray(d) ? d : []); } catch (_) {}
@@ -96,33 +84,20 @@ export default function Historial() {
   const answered = rows.filter(r => r.disposition === 'ANSWERED').length;
   const talkMin = Math.round(rows.reduce((a, r) => a + (r.billsec || 0), 0) / 60);
   const today = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return rows.filter(r => r.start && new Date(r.start) >= d).length; })();
-  const kpis = [{ k: 'Llamadas', v: rows.length, icon: IconPhone, c: 'cyan' }, { k: 'Atendidas', v: answered, icon: IconPhoneCheck, c: 'teal' }, { k: 'Sin respuesta', v: rows.length - answered, icon: IconPhoneX, c: 'orange' }, { k: 'Minutos hablados', v: talkMin, icon: IconClock, c: 'grape' }, { k: 'Hoy', v: today, icon: IconCalendar, c: 'blue' }];
+  const stats = [
+    { k: 'Llamadas', v: rows.length, icon: IconPhone, c: 'cyan', tip: 'Total de registros CDR cargados (últimos 300).' },
+    { k: 'Atendidas', v: answered, icon: IconPhoneCheck, c: 'teal', tip: 'Llamadas con disposición ANSWERED.' },
+    { k: 'Sin respuesta', v: rows.length - answered, icon: IconPhoneX, c: 'orange', tip: 'No atendidas, ocupadas o fallidas.' },
+    { k: 'Min. hablados', v: talkMin, icon: IconClock, c: 'grape', tip: 'Suma del tiempo de conversación (billsec).' },
+    { k: 'Hoy', v: today, icon: IconCalendar, c: 'blue', tip: 'Llamadas registradas desde las 00:00 de hoy.' },
+  ];
   const count = (t) => t === 'all' ? counts.all : (counts[t] || 0);
 
   function exportCSV() {
-    const head = ['Fecha', 'Tipo', 'Medio', 'Origen', 'Nombre', 'Destino', 'Duracion_s', 'Hablado_s', 'Resultado'];
-    const lines = [head.join(',')].concat(fr.map(r => [r.start ? new Date(r.start).toISOString() : '', TYPES[r._t]?.label, MEDIA[r._m]?.label, r.src || '', clidName(r.clid), r.dst || '', r.duration || 0, r.billsec || 0, dispLabel(r.disposition)].map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')));
+    const head = ['Fecha', 'Tipo', 'Medio', 'Origen', 'Nombre', 'Destino', 'Duracion_s', 'Hablado_s', 'Resultado', 'GrabacionID'];
+    const lines = [head.join(',')].concat(fr.map(r => { const rec = recFor(r); return [r.start ? new Date(r.start).toISOString() : '', TYPES[r._t]?.label, MEDIA[r._m]?.label, r.src || '', clidName(r.clid), r.dst || '', r.duration || 0, r.billsec || 0, dispLabel(r.disposition), rec ? rec.id : ''].map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(','); }));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'cdr-pbxng-' + new Date().toISOString().slice(0, 10) + '.csv'; a.click(); URL.revokeObjectURL(a.href);
-  }
-
-  // Informe ejecutivo: el backend arma el HTML A4 (tapa + KPIs + graficos + detalle).
-  // Lo pedimos con fetch (asi viaja el JWT) y lo abrimos como blob en una pestana nueva.
-  async function informe() {
-    setRepBusy(true);
-    try {
-      const p = new URLSearchParams({ from: rango.from, to: rango.to, tipo: tab });
-      if (q) p.set('q', q);
-      const r = await fetch('/backend/api/cdr/report?' + p.toString());
-      if (!r.ok) throw new Error('No se pudo generar el informe');
-      const html = await r.text();
-      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-      const w = window.open(url, '_blank');
-      if (!w) toast('El navegador bloqueo la ventana emergente', 'bad');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-      setRepOpen(false);
-    } catch (e) { toast(String(e.message || e), 'bad'); }
-    setRepBusy(false);
   }
 
   const tabs = [
@@ -136,66 +111,44 @@ export default function Historial() {
   ];
 
   return (
-    <Stack gap="lg">
-      <PageHeader icon={<IconPhone size={24} />} title="Historial de llamadas" subtitle="Registros CDR · se actualiza solo" color="cyan"
-        right={<>
-          <Button variant="gradient" gradient={{ from: 'cyan.7', to: 'blue.7' }} leftSection={<IconReportAnalytics size={16} />} onClick={() => setRepOpen(true)}>Informe ejecutivo</Button>
-          <Button variant="light" leftSection={<IconDownload size={16} />} onClick={exportCSV} disabled={!fr.length}>Exportar CSV</Button>
-          <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={load}>Recargar</Button>
-        </>} />
+    <Stack gap="md">
+      {!embedded && <PageHeader icon={<IconPhone size={24} />} title="Historial de llamadas" subtitle="Registros CDR · se actualiza solo" color="cyan"
+        right={<Tooltip label="Descargar el CDR filtrado como CSV" withArrow><Button variant="light" leftSection={<IconDownload size={16} />} onClick={exportCSV} disabled={!fr.length}>Exportar CSV</Button></Tooltip>} />}
 
-      <Modal opened={repOpen} onClose={() => setRepOpen(false)} radius="lg" centered size="lg"
-        title={<Group gap={8}><ThemeIcon variant="light" color="cyan" radius="md"><IconReportAnalytics size={17} /></ThemeIcon><Text fw={700}>Informe ejecutivo de llamadas</Text></Group>}>
-        <Stack gap="md">
-          <Text size="sm" c="dimmed">
-            Genera un documento A4 con tapa corporativa, resumen ejecutivo con KPIs, graficos de volumen por dia, hora y dia de la semana,
-            composicion del trafico, rankings y el detalle de las llamadas. Se abre en una pestana nueva: desde ahi lo imprimis o lo guardas como PDF.
-          </Text>
-          <div>
-            <Text size="xs" fw={600} mb={6}>Periodo</Text>
-            <SegmentedControl fullWidth value={preset} onChange={aplicarPreset} data={[
-              { label: 'Hoy', value: 'hoy' }, { label: '7 dias', value: '7' }, { label: '30 dias', value: '30' }, { label: '90 dias', value: '90' }, { label: 'Personalizado', value: 'custom' },
-            ]} />
-          </div>
-          <Group grow>
-            <TextInput type="date" label="Desde" value={rango.from} onChange={e => { setPreset('custom'); setRango(r => ({ ...r, from: e.target.value })); }} />
-            <TextInput type="date" label="Hasta" value={rango.to} onChange={e => { setPreset('custom'); setRango(r => ({ ...r, to: e.target.value })); }} />
-          </Group>
-          <Divider />
-          <Group gap={8}>
-            <Text size="xs" c="dimmed">Se aplican los filtros actuales de la vista:</Text>
-            <Badge variant="light" color="cyan">{(tabs.find(t => t.v === tab) || {}).l || 'Todas'}</Badge>
-            {q && <Badge variant="light" color="grape">busqueda: {q}</Badge>}
-          </Group>
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setRepOpen(false)}>Cancelar</Button>
-            <Button loading={repBusy} leftSection={<IconFileTypePdf size={16} />} onClick={informe}>Generar informe</Button>
-          </Group>
-        </Stack>
-      </Modal>
-      <SimpleGrid cols={{ base: 2, sm: 3, lg: 5 }} spacing="md">
-        {kpis.map(x => (
-          <Card key={x.k} withBorder radius="lg" padding="md" shadow="sm">
-            <Group gap="sm" wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={x.c}><x.icon size={20} /></ThemeIcon><div><Text fw={800} fz={24} lh={1}><Slot value={x.v} /></Text><Text size="xs" c="dimmed">{x.k}</Text></div></Group>
-          </Card>
+      {/* números discretos sobre la tabla */}
+      <Group gap="xl" px={4}>
+        {stats.map(x => (
+          <Tooltip key={x.k} label={x.tip} withArrow position="bottom">
+            <Group gap={7} wrap="nowrap" style={{ cursor: 'help' }}>
+              <ThemeIcon size={30} radius="md" variant="light" color={x.c}><x.icon size={17} /></ThemeIcon>
+              <div><Text fw={800} fz={20} lh={1}>{x.v}</Text><Text fz={11} c="dimmed" lh={1.1}>{x.k}</Text></div>
+            </Group>
+          </Tooltip>
         ))}
-      </SimpleGrid>
+      </Group>
+
       <Card withBorder radius="lg" padding="lg" shadow="sm">
-        <Tabs value={tab} onChange={setTab} variant="pills" radius="md" mb="md">
-          <Tabs.List>
-            {tabs.map(t => <Tabs.Tab key={t.v} value={t.v} leftSection={t.icon} rightSection={<Badge size="xs" variant="light" circle>{count(t.v)}</Badge>}>{t.l}</Tabs.Tab>)}
-          </Tabs.List>
-        </Tabs>
-        <Group justify="flex-end" mb="md"><TextInput placeholder="Buscar origen / destino / nombre" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={300} /></Group>
+        {/* toolbar: tabs + buscador + export, misma fila */}
+        <Group justify="space-between" mb="md" wrap="wrap" gap="sm">
+          <Tabs value={tab} onChange={setTab} variant="pills" radius="md">
+            <Tabs.List>
+              {tabs.map(t => <Tabs.Tab key={t.v} value={t.v} leftSection={t.icon} rightSection={<Badge size="xs" variant="light" circle>{count(t.v)}</Badge>}>{t.l}</Tabs.Tab>)}
+            </Tabs.List>
+          </Tabs>
+          <Group gap="sm" wrap="nowrap">
+            <TextInput placeholder="Buscar origen / destino / nombre" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={260} />
+            <Tooltip label="Descargar el CDR filtrado como CSV" withArrow><Button variant="light" leftSection={<IconDownload size={16} />} onClick={exportCSV} disabled={!fr.length}>CSV</Button></Tooltip>
+          </Group>
+        </Group>
         {loading ? <TableSkeleton rows={8} cols={7} /> :
           fr.length === 0 ? <Text c="dimmed" ta="center" py="xl">{rows.length ? 'Sin resultados en esta vista.' : 'Aún no hay llamadas registradas.'}</Text> :
             <Table.ScrollContainer minWidth={900}>
               <Table striped highlightOnHover verticalSpacing="sm">
                 <Table.Thead><Table.Tr>
-                  <Th icon={<IconCalendar size={13} />}>Fecha</Th><Th icon={<IconArrowsLeftRight size={13} />}>Tipo</Th>
-                  <Th icon={<IconArrowUpRight size={13} />}>Origen</Th><Th icon={<IconArrowDownLeft size={13} />}>Destino</Th>
-                  <Th icon={<IconDeviceLandlinePhone size={13} />}>Medio</Th><Th icon={<IconClock size={13} />}>Duración</Th>
-                  <Th icon={<IconCircleCheck size={13} />}>Resultado</Th><Th icon={<IconMicrophone2 size={13} />}>Grabación</Th>
+                  <Th icon={<IconCalendar size={13} />} tip="Fecha y hora de inicio de la llamada">Fecha</Th><Th icon={<IconArrowsLeftRight size={13} />} tip="Dirección: entrante, saliente, interna, IVR o agente IA">Tipo</Th>
+                  <Th icon={<IconArrowUpRight size={13} />} tip="Número/interno que originó la llamada">Origen</Th><Th icon={<IconArrowDownLeft size={13} />} tip="Número/interno de destino">Destino</Th>
+                  <Th icon={<IconDeviceLandlinePhone size={13} />} tip="Tecnología: WebRTC, SIP, troncal o IA">Medio</Th><Th icon={<IconClock size={13} />} tip="Tiempo hablado (y total con timbrado)">Duración</Th>
+                  <Th icon={<IconCircleCheck size={13} />} tip="Resultado de la llamada">Resultado</Th><Th icon={<IconMicrophone2 size={13} />} tip="Grabación asociada (si existe). Cada una tiene un ID único.">Grabación</Th>
                 </Table.Tr></Table.Thead>
                 <Table.Tbody>{fr.slice(0, shown).map((r, i) => {
                   const rec = recFor(r); const T = TYPES[r._t] || TYPES.other; const M = MEDIA[r._m] || MEDIA.sip; const nm = clidName(r.clid);
@@ -206,18 +159,18 @@ export default function Historial() {
                       <Table.Td><Badge variant="light" color={T.color} leftSection={<T.icon size={12} />}>{T.label}</Badge></Table.Td>
                       <Table.Td><Text ff="monospace" fz="sm">{r.src || '—'}</Text>{nm && <Text fz="10px" c="dimmed" truncate maw={140}>{nm}</Text>}</Table.Td>
                       <Table.Td ff="monospace" fz="sm">{r.dst || '—'}</Table.Td>
-                      <Table.Td><Badge variant="dot" color={M.color} size="sm">{M.label}</Badge></Table.Td>
+                      <Table.Td><Tooltip label={M.label} withArrow><Badge variant="dot" color={M.color} size="sm">{M.label}</Badge></Tooltip></Table.Td>
                       <Table.Td><Text fz="sm" fw={500}>{fmtDur(r.billsec)}</Text>{r.duration !== r.billsec && <Text fz="10px" c="dimmed">tot {fmtDur(r.duration)}</Text>}</Table.Td>
                       <Table.Td><Badge variant="light" color={dispColor(r.disposition)}>{dispLabel(r.disposition)}</Badge></Table.Td>
-                      <Table.Td>{rec ? <Button size="compact-xs" variant={playId === rec.id ? 'filled' : 'light'} color="teal" leftSection={playId === rec.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === rec.id ? null : rec.id)}>{playId === rec.id ? 'Cerrar' : 'Ver'}</Button> : <Text c="dimmed" size="xs">—</Text>}</Table.Td>
+                      <Table.Td>{rec ? <Tooltip label={'Grabación #' + rec.id} withArrow><Button size="compact-xs" variant={playId === rec.id ? 'filled' : 'light'} color="teal" leftSection={playId === rec.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === rec.id ? null : rec.id)}>{playId === rec.id ? 'Cerrar' : 'Ver'}</Button></Tooltip> : <Text c="dimmed" size="xs">—</Text>}</Table.Td>
                     </Table.Tr>
-                    {rec && playId === rec.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={rec.id} src={'/backend/api/recordings/' + rec.id + '/audio'} label={(r.src || '?') + '  \u2192  ' + (r.dst || '?')} /></Table.Td></Table.Tr>}
+                    {rec && playId === rec.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><Group gap={8} mb={6}><Badge size="xs" variant="light" color="gray" ff="monospace">Grabación #{rec.id}</Badge></Group><RecordingPlayer recId={rec.id} src={'/backend/api/recordings/' + rec.id + '/audio'} label={(r.src || '?') + '  →  ' + (r.dst || '?')} /></Table.Td></Table.Tr>}
                     </Fragment>
                   );
                 })}</Table.Tbody>
               </Table>
             </Table.ScrollContainer>}
-        {fr.length > shown && <Group justify="center" mt="md"><Button variant="light" onClick={() => setShown(s => s + 100)}>Ver mas ({fr.length - shown})</Button></Group>}
+        {fr.length > shown && <Group justify="center" mt="md"><Button variant="light" onClick={() => setShown(s => s + 100)}>Ver más ({fr.length - shown})</Button></Group>}
       </Card>
     </Stack>
   );

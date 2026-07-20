@@ -42,7 +42,9 @@ def md(text):
             alt, src = m.group(1), m.group(2)
             fname = src.split('/')[-1]
             FIG[0] += 1
-            out.append(f'<figure class="shot"><div class="frame"><img src="{src}" alt="{inline(alt)}" '
+            # La imagen se sirve por la API (volumen persistente), no desde el repo: así
+            # el editor del panel puede pegar la captura y aparece sin recompilar nada.
+            out.append(f'<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/{fname}" alt="{inline(alt)}" '
                        f'onerror="this.parentNode.parentNode.classList.add(\'ph\');this.remove();" /></div>'
                        f'<figcaption><span class="fig">Figura {FIG[0]}</span>{inline(alt)}'
                        f'<span class="fn">{fname}</span></figcaption></figure>')

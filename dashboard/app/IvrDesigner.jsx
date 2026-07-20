@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ReactFlow, Background, Controls, Handle, Position, MarkerType, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
+import { ReactFlow, Background, Handle, Position, MarkerType, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea } from '@mantine/core';
-import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft } from '@tabler/icons-react';
+import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper } from '@mantine/core';
+import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume } from '@tabler/icons-react';
 import { toast } from './notify';
 
 const DEST = {
-  extension: { label: 'Extensión', color: '#0ea5e9', icon: IconPhoneCall },
+  extension: { label: 'Interno', color: '#0ea5e9', icon: IconPhoneCall },
   ringgroup: { label: 'Ring Group', color: '#8b5cf6', icon: IconUsersGroup },
   queue: { label: 'Cola', color: '#f59e0b', icon: IconList },
   voicemail: { label: 'Buzon', color: '#6366f1', icon: IconMail },
@@ -18,28 +18,30 @@ const DEST = {
 
 function EntryNode({ data }) {
   return (
-    <div style={{ width: 256, background: 'linear-gradient(135deg,#0f2a4a,#16467a)', color: '#fff', borderRadius: 16, padding: 14, boxShadow: '0 8px 24px rgba(15,42,74,.35)', border: '1px solid rgba(255,255,255,.15)' }}>
-      <Group gap={8} mb={6}><IconArrowsSplit size={18} /><Text fw={700} fz="sm">Menu de voz</Text></Group>
-      <Text fz={11} c="rgba(255,255,255,.7)">Acceso</Text>
-      <Text ff="monospace" fw={700} fz="lg" mb={6}>{data.exten || '-'}</Text>
+    <div style={{ width: 262, background: 'linear-gradient(135deg,#0f2a4a,#1e5aa8)', color: '#fff', borderRadius: 18, padding: 16, boxShadow: '0 14px 34px rgba(15,42,74,.40)', border: '1px solid rgba(255,255,255,.18)' }}>
+      <Group gap={8} mb={8}><div style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(255,255,255,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><IconArrowsSplit size={17} /></div><div><Text fw={800} fz="sm" lh={1}>Menú de voz</Text><Text fz={10} c="rgba(255,255,255,.6)">punto de entrada</Text></div></Group>
+      <div style={{ background: 'rgba(255,255,255,.10)', borderRadius: 10, padding: '8px 10px', marginBottom: 8 }}>
+        <Text fz={10} c="rgba(255,255,255,.6)">Número de acceso</Text>
+        <Text ff="monospace" fw={800} fz="xl" lh={1.1}>{data.exten || '—'}</Text>
+      </div>
       <Group gap={6} wrap="nowrap">
-        <Badge size="xs" variant="white" color="dark" leftSection={<IconPlayerPlay size={10} />} style={{ maxWidth: 150 }}>{data.greeting || 'sin audio'}</Badge>
-        <Badge size="xs" variant="light" color="gray">{data.timeout}s</Badge>
+        <Badge size="sm" variant="white" color="dark" leftSection={<IconPlayerPlay size={10} />} style={{ maxWidth: 160, textTransform: 'none' }}>{data.greeting || 'sin audio'}</Badge>
+        <Badge size="sm" variant="light" color="gray" style={{ background: 'rgba(255,255,255,.16)', color: '#fff' }}>{data.timeout}s</Badge>
       </Group>
-      <Handle type="source" position={Position.Right} style={{ background: '#38bdf8', width: 10, height: 10 }} />
+      <Handle type="source" position={Position.Right} style={{ background: '#38bdf8', width: 12, height: 12, border: '2px solid #fff' }} />
     </div>
   );
 }
-function OptionNode({ data }) {
+function OptionNode({ data, selected }) {
   const d = DEST[data.dest_type] || DEST.extension; const Icon = d.icon;
   return (
-    <div style={{ width: 210, background: '#ffffff', borderRadius: 14, padding: 12, boxShadow: '0 8px 22px rgba(15,42,74,.12)', border: `2px solid ${d.color}55` }}>
-      <Handle type="target" position={Position.Left} style={{ background: d.color, width: 10, height: 10 }} />
-      <Group justify="space-between" mb={6}>
-        <Badge size="lg" radius="md" variant="filled" color="dark" ff="monospace">{data.digit || '?'}</Badge>
-        <Group gap={4}><Icon size={15} color={d.color} /><Text fz={11} c="dimmed">{d.label}</Text></Group>
+    <div style={{ width: 214, background: '#fff', borderRadius: 15, padding: 13, boxShadow: selected ? `0 0 0 3px ${d.color}, 0 12px 28px rgba(15,42,74,.18)` : '0 10px 24px rgba(15,42,74,.12)', border: `2px solid ${d.color}44`, transition: 'box-shadow .15s' }}>
+      <Handle type="target" position={Position.Left} style={{ background: d.color, width: 12, height: 12, border: '2px solid #fff' }} />
+      <Group justify="space-between" mb={7} wrap="nowrap">
+        <Badge size="lg" radius="md" variant="filled" color="dark" ff="monospace" style={{ fontSize: 15 }}>{data.digit || '?'}</Badge>
+        <Group gap={5} wrap="nowrap"><div style={{ width: 24, height: 24, borderRadius: 7, background: d.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon size={14} color={d.color} /></div><Text fz={11} c="dimmed">{d.label}</Text></Group>
       </Group>
-      <Text ff="monospace" fw={600} fz="sm" c={data.dest_type === 'hangup' ? 'dimmed' : undefined}>{data.dest_type === 'hangup' ? 'fin de llamada' : (data.dest_value || '-')}</Text>
+      <Text ff="monospace" fw={700} fz="sm" c={data.dest_type === 'hangup' ? 'dimmed' : undefined}>{data.dest_type === 'hangup' ? 'fin de llamada' : (data.dest_value || '—')}</Text>
     </div>
   );
 }
@@ -70,8 +72,8 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
       const mx = Math.max(0, ...ivr.flow.nodes.filter(n => n.id[0] === 'o').map(n => +n.id.slice(1) || 0)); _id = mx + 1;
     } else {
       const opts = ivr?.options || [];
-      const en = { id: 'entry', type: 'entry', position: { x: 40, y: 180 }, data: {}, draggable: true };
-      const ons = opts.map((o, i) => ({ id: nid(), type: 'option', position: { x: 360, y: 40 + i * 130 }, data: { ...o }, draggable: true }));
+      const en = { id: 'entry', type: 'entry', position: { x: 60, y: 200 }, data: {}, draggable: true };
+      const ons = opts.map((o, i) => ({ id: nid(), type: 'option', position: { x: 420, y: 60 + i * 130 }, data: { ...o }, draggable: true }));
       setNodes([en, ...ons]);
       setEdges(ons.map(n => ({ id: 'e' + n.id, source: 'entry', target: n.id, animated: true, markerEnd: { type: MarkerType.ArrowClosed }, label: n.data.digit, style: { stroke: '#16467a', strokeWidth: 2 } })));
     }
@@ -82,9 +84,9 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
   const onConnect = useCallback((p) => setEdges(e => addEdge({ ...p, animated: true, markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: '#16467a', strokeWidth: 2 } }, e)), []);
 
   function addOption() {
-    const id = nid(); const y = 40 + (nodes.filter(n => n.type === 'option').length) * 130;
+    const id = nid(); const y = 60 + (nodes.filter(n => n.type === 'option').length) * 130;
     const data = { digit: String(nodes.filter(n => n.type === 'option').length + 1), dest_type: 'extension', dest_value: '' };
-    setNodes(ns => [...ns, { id, type: 'option', position: { x: 360, y }, data, draggable: true }]);
+    setNodes(ns => [...ns, { id, type: 'option', position: { x: 420, y }, data, draggable: true }]);
     setEdges(es => [...es, { id: 'e' + id, source: 'entry', target: id, animated: true, markerEnd: { type: MarkerType.ArrowClosed }, label: data.digit, style: { stroke: '#16467a', strokeWidth: 2 } }]);
     setSel(id);
   }
@@ -123,54 +125,61 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
   }
 
   const promptData = [...new Set([greeting, ...prompts.map(p => p.name), ...ivrAudios.map(a => a.ref), 'demo-congrats', 'vm-goodbye', 'hello-world'])].filter(Boolean).map(n => ({ value: n, label: n }));
+  const glass = { background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(12px)', border: '1px solid rgba(15,23,42,.08)', boxShadow: '0 12px 34px rgba(15,42,74,.14)' };
 
   const inner = (
-    <Stack gap={0} style={{ height: '100%' }}>
-      <Group justify="space-between" px="lg" py="sm" style={{ borderBottom: '1px solid rgba(120,130,150,.14)', background: '#ffffff', borderTopLeftRadius: embedded ? 16 : 0, borderTopRightRadius: embedded ? 16 : 0 }}>
-        <Group gap="sm">
-          <Badge size="lg" variant="gradient" gradient={{ from: '#0f2a4a', to: '#16467a' }} leftSection={<IconArrowsSplit size={14} />}>Disenador IVR</Badge>
-          <TextInput placeholder="Nombre del IVR" value={name} onChange={e => setName(e.target.value)} w={200} />
-          <TextInput placeholder="Acceso (ej 700)" value={exten} onChange={e => setExten(e.target.value)} w={130} ff="monospace" />
+    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'radial-gradient(900px 480px at 72% -12%, rgba(47,116,230,.06), transparent), #eef2f7' }}>
+      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+        onNodeClick={(_, n) => n.type === 'option' && setSel(n.id)} onPaneClick={() => setSel(null)} fitView fitViewOptions={{ padding: 0.22 }} proOptions={{ hideAttribution: true }} defaultEdgeOptions={{ animated: true }} minZoom={0.3} maxZoom={1.7}>
+        <Background color="#cbd5e1" gap={24} size={1.4} />
+      </ReactFlow>
+
+      {/* barra superior flotante */}
+      <Paper style={{ position: 'absolute', top: 14, left: 14, right: 14, padding: '8px 12px', borderRadius: 14, zIndex: 6, ...glass }}>
+        <Group justify="space-between" wrap="nowrap">
+          <Group gap="sm" wrap="nowrap">
+            <Badge size="lg" variant="gradient" gradient={{ from: '#0f2a4a', to: '#1e5aa8' }} leftSection={<IconArrowsSplit size={14} />}>Diseñador IVR</Badge>
+            <TextInput placeholder="Nombre del IVR" value={name} onChange={e => setName(e.target.value)} w={190} size="sm" />
+            <TextInput placeholder="Acceso (700)" value={exten} onChange={e => setExten(e.target.value)} w={120} ff="monospace" size="sm" />
+          </Group>
+          <Group gap="sm" wrap="nowrap">
+            <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={onClose} size="sm">{embedded ? 'Volver' : 'Cancelar'}</Button>
+            <Button leftSection={<IconDeviceFloppy size={16} />} onClick={save} size="sm">Guardar</Button>
+          </Group>
         </Group>
-        <Group gap="sm">
-          <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={onClose}>{embedded ? 'Volver' : 'Cancelar'}</Button>
-          <Button leftSection={<IconDeviceFloppy size={16} />} onClick={save}>Guardar</Button>
-        </Group>
-      </Group>
-      <Group gap={0} style={{ flex: 1, minHeight: 0 }} align="stretch" wrap="nowrap">
-        <Box style={{ flex: 1, minWidth: 0, position: 'relative', background: 'radial-gradient(700px 360px at 70% -10%, rgba(47,116,230,.05), transparent), #f6f8fb' }}>
-          <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
-            onNodeClick={(_, n) => n.type === 'option' && setSel(n.id)} fitView proOptions={{ hideAttribution: true }} defaultEdgeOptions={{ animated: true }}>
-            <Background color="#cdd7e4" gap={22} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
-          <Button pos="absolute" bottom={18} left={18} leftSection={<IconPlus size={16} />} onClick={addOption} radius="xl" style={{ boxShadow: '0 6px 18px rgba(15,42,74,.25)' }}>Anadir opcion</Button>
-        </Box>
-        <Box w={320} p="lg" style={{ borderLeft: '1px solid rgba(120,130,150,.14)', background: '#ffffff', overflowY: 'auto' }}>
-          <Text fw={700} mb="xs">Saludo y menu</Text>
+      </Paper>
+
+      {/* panel saludo + menú (izquierda) */}
+      <Paper style={{ position: 'absolute', top: 74, left: 14, width: 296, padding: 14, borderRadius: 16, zIndex: 5, ...glass }}>
+        <Group gap={8} mb="sm"><div style={{ width: 26, height: 26, borderRadius: 8, background: 'rgba(29,78,216,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><IconVolume size={15} color="#1d4ed8" /></div><Text fw={700} fz="sm">Saludo y menú</Text></Group>
+        <Stack gap="sm">
+          <Group gap="xs" align="flex-end" wrap="nowrap">
+            <Select label="Audio de saludo" data={promptData} value={greeting} onChange={setGreeting} searchable style={{ flex: 1 }} size="sm" />
+            <Tooltip label="Reproducir"><ActionIcon variant="light" size="lg" onClick={playGreeting}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>
+            <Tooltip label="Generar con voz IA (TTS)"><ActionIcon variant="light" color="grape" size="lg" onClick={() => setGenOpen(true)}><IconRobot size={16} /></ActionIcon></Tooltip>
+          </Group>
+          <FileButton onChange={uploadAudio} accept="audio/*">{(props) => <Button {...props} variant="light" leftSection={<IconUpload size={15} />} size="xs">Subir audio nuevo</Button>}</FileButton>
+          <NumberInput label="Espera de dígito (s)" value={timeout} onChange={setTimeoutV} min={1} max={30} size="sm" />
+        </Stack>
+      </Paper>
+
+      {/* editor de la opción seleccionada (derecha) */}
+      {selNode && (
+        <Paper style={{ position: 'absolute', top: 74, right: 14, width: 296, padding: 14, borderRadius: 16, zIndex: 5, ...glass }}>
+          <Group justify="space-between" mb="xs"><Group gap={8}><Badge size="lg" radius="md" variant="filled" color="dark" ff="monospace">{selNode.data.digit || '?'}</Badge><Text fw={700} fz="sm">Opción</Text></Group><ActionIcon variant="subtle" color="red" onClick={delSel}><IconTrash size={17} /></ActionIcon></Group>
           <Stack gap="sm">
-            <Group gap="xs" align="flex-end">
-              <Select label="Audio de saludo" data={promptData} value={greeting} onChange={setGreeting} searchable style={{ flex: 1 }} />
-              <Tooltip label="Reproducir"><ActionIcon variant="light" size="lg" onClick={playGreeting}><IconPlayerPlay size={16} /></ActionIcon></Tooltip><Tooltip label="Generar con voz IA (TTS)"><ActionIcon variant="light" color="grape" size="lg" onClick={() => setGenOpen(true)}><IconRobot size={16} /></ActionIcon></Tooltip>
-            </Group>
-            <FileButton onChange={uploadAudio} accept="audio/*">{(props) => <Button {...props} variant="light" leftSection={<IconUpload size={15} />} size="xs">Subir audio nuevo</Button>}</FileButton>
-            <NumberInput label="Espera de digito (s)" value={timeout} onChange={setTimeoutV} min={1} max={30} />
+            <TextInput label="Dígito marcado" value={selNode.data.digit} onChange={e => updSel('digit', e.target.value)} placeholder="1" ff="monospace" size="sm" />
+            <Select label="Destino" value={selNode.data.dest_type} onChange={v => updSel('dest_type', v)} data={Object.entries(DEST).map(([v, d]) => ({ value: v, label: d.label }))} size="sm" />
+            {selNode.data.dest_type !== 'hangup' &&
+              <TextInput label={selNode.data.dest_type === 'extension' ? 'Interno' : selNode.data.dest_type === 'queue' ? 'Cola' : selNode.data.dest_type === 'voicemail' ? 'Buzón' : selNode.data.dest_type === 'ivr' ? 'Acceso del IVR' : selNode.data.dest_type === 'ai' ? 'Acceso del agente IA' : 'Número de acceso'}
+                value={selNode.data.dest_value} onChange={e => updSel('dest_value', e.target.value)} placeholder="1001" ff="monospace" size="sm" />}
           </Stack>
-          <Divider my="md" />
-          {selNode ? (
-            <>
-              <Group justify="space-between" mb="xs"><Text fw={700}>Opcion seleccionada</Text><ActionIcon variant="subtle" color="red" onClick={delSel}><IconTrash size={17} /></ActionIcon></Group>
-              <Stack gap="sm">
-                <TextInput label="Digito" value={selNode.data.digit} onChange={e => updSel('digit', e.target.value)} placeholder="1" ff="monospace" />
-                <Select label="Destino" value={selNode.data.dest_type} onChange={v => updSel('dest_type', v)} data={Object.entries(DEST).map(([v, d]) => ({ value: v, label: d.label }))} />
-                {selNode.data.dest_type !== 'hangup' &&
-                  <TextInput label={selNode.data.dest_type === 'extension' ? 'Extensión' : selNode.data.dest_type === 'queue' ? 'Cola' : selNode.data.dest_type === 'voicemail' ? 'Buzon' : selNode.data.dest_type === 'ivr' ? 'Acceso del IVR' : selNode.data.dest_type === 'ai' ? 'Acceso del agente IA' : 'Numero de acceso'}
-                    value={selNode.data.dest_value} onChange={e => updSel('dest_value', e.target.value)} placeholder="1001" ff="monospace" />}
-              </Stack>
-            </>
-          ) : <Text c="dimmed" fz="sm" ta="center" py="lg">Hace clic en una opcion del lienzo para editarla, o "Anadir opcion".</Text>}
-        </Box>
-      </Group>
+        </Paper>
+      )}
+
+      {/* FAB añadir opción */}
+      <Button pos="absolute" style={{ bottom: 20, left: 20, zIndex: 6, boxShadow: '0 10px 26px rgba(15,42,74,.30)' }} leftSection={<IconPlus size={16} />} onClick={addOption} radius="xl" size="md">Añadir opción</Button>
+
       <Modal opened={genOpen} onClose={() => setGenOpen(false)} title="Generar audio del saludo con IA (TTS)" centered radius="lg" zIndex={3000}>
         <Stack gap="sm">
           <Textarea label="Texto del saludo" placeholder="Bienvenido a la empresa. Marque 1 para ventas, 2 para soporte." autosize minRows={3} value={genText} onChange={(e) => setGenText(e.currentTarget.value)} />
@@ -180,11 +189,11 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
         </Stack>
       </Modal>
       <audio ref={audioRef} style={{ display: 'none' }} />
-    </Stack>
+    </div>
   );
 
   if (embedded) return (
-    <Box style={{ height: 'calc(100vh - 150px)', minHeight: 460, borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(120,130,150,.16)' }}>{inner}</Box>
+    <Box style={{ height: 'calc(100vh - 130px)', minHeight: 480, borderRadius: 16, overflow: 'hidden' }}>{inner}</Box>
   );
   return (
     <Modal opened onClose={onClose} fullScreen radius={0} padding={0} withCloseButton={false} styles={{ body: { height: '100vh', padding: 0 } }}>{inner}</Modal>

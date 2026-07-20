@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider } from '@mantine/core';
 import Slot from './Slot';
-import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard } from '@tabler/icons-react';
+import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard, IconBolt, IconPlugConnected } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import SystemOverview from './SystemOverview';
 import { useLive } from './useLive';
@@ -51,6 +51,7 @@ export default function Resumen() {
   const { snap, connected } = useLive();
   const [m, setM] = useState(null); const [sys, setSys] = useState(null); const [trunks, setTrunks] = useState([]);
   const [topo, setTopo] = useState(null);
+  const [core, setCore] = useState(null);
   const [hist, setHist] = useState({ cpu: [], mem: [] });
   const histRef = useRef({ cpu: [], mem: [] });
 
@@ -71,7 +72,9 @@ export default function Resumen() {
     fetch('/backend/api/topology').then(r => r.json()).then(d => alive && setTopo(d)).catch(() => {});
     fetch('/backend/api/trunks').then(r => r.json()).then(d => alive && setTrunks(Array.isArray(d) ? d : [])).catch(() => {});
     const ts = setInterval(() => { fetch('/backend/api/trunks').then(r => r.json()).then(d => alive && setTrunks(Array.isArray(d) ? d : [])).catch(() => {}); }, 10000);
-    return () => { alive = false; clearInterval(t); clearInterval(ts); };
+    const loadCore = () => fetch('/backend/api/asterisk/core').then(r => r.json()).then(d => alive && setCore(d)).catch(() => {});
+    loadCore(); const tc = setInterval(loadCore, 6000);
+    return () => { alive = false; clearInterval(t); clearInterval(ts); clearInterval(tc); };
   }, []);
 
   const eps = snap?.extensions || [], ch = snap?.channels || [], qs = snap?.queues || [], h = snap?.health || {};
@@ -97,6 +100,29 @@ export default function Resumen() {
     <Stack gap="lg">
       <PageHeader icon={<IconLayoutDashboard size={24} />} title="Resumen" subtitle="Estado de la plataforma en tiempo real" color="pbx"
         right={<Badge size="lg" radius="sm" variant="light" color={connected ? 'teal' : 'gray'} leftSection={<IconCircleFilled size={9} className="pbx-pulse" />}>{connected ? 'En vivo' : 'Conectando…'}</Badge>} />
+
+      {/* Núcleo de Asterisk: el estado vivo del motor (versión, canales, endpoints,
+          transportes y módulos) — antes vivía en la pestaña "PBX" del menú. */}
+      <Card withBorder radius="lg" padding="lg" shadow="sm">
+        <Group justify="space-between" mb="md">
+          <Group gap="sm">
+            <ThemeIcon size={42} radius="md" variant="light" color="pbx"><IconServer2 size={22} /></ThemeIcon>
+            <div><Text fw={800} lh={1.1}>Núcleo de Asterisk</Text><Text size="xs" c="dimmed">{core?.version || 'Consultando el motor…'}</Text></div>
+          </Group>
+          <Group gap={6}>
+            <Badge variant={h.ami ? 'filled' : 'light'} color={h.ami ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{h.ami ? 'AMI' : 'Sin AMI'}</Badge>
+            <Badge variant="light" color={h.ari ? 'teal' : 'gray'}>{h.ari ? 'ARI' : 'Sin ARI'}</Badge>
+          </Group>
+        </Group>
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Versión</Text><Text fw={700} size="sm">{core?.version || '—'}</Text></Card>
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Canales activos</Text><Text fw={800} size="xl">{core?.channels ?? ch.length}</Text></Card>
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Endpoints</Text><Text fw={800} size="xl">{core?.endpoints ?? eps.length}</Text></Card>
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Uptime del motor</Text><Text fw={700} size="sm">{(core?.uptime || '—').replace(/^System uptime:\s*/i, '')}</Text></Card>
+        </SimpleGrid>
+        {core?.transports?.length > 0 && <><Text fw={600} size="sm" mt="md" mb={6}>Transportes PJSIP</Text><Group gap="xs">{core.transports.map(t => <Badge key={t.id} variant="light" color="pbx" leftSection={<IconPlugConnected size={12} />}>{t.id} · {(t.proto || '').toUpperCase()}</Badge>)}</Group></>}
+        {core?.modules && <><Text fw={600} size="sm" mt="md" mb={6}>Módulos clave</Text><Group gap="xs">{Object.entries(core.modules).map(([k, v]) => <Badge key={k} variant="light" color={v ? 'teal' : 'red'}>{k}: {v ? 'cargado' : 'no'}</Badge>)}</Group></>}
+      </Card>
 
       {/* Infraestructura completa: cada nodo con sus recursos, interfaces y servicios */}
       <SystemOverview />

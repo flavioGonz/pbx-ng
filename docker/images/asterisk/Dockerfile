@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libjansson4 libxml2 libsqlite3-0 libedit2 libssl3 libpq5 libsrtp2-1 \
       libcurl4 libspeex1 libspeexdsp1 libogg0 libvorbis0a libgsm1 libuuid1 \
       openssl ca-certificates gettext-base postgresql-client procps \
-      python3 iproute2 tcpdump \
+      python3 iproute2 tcpdump iputils-ping traceroute \
     && rm -rf /var/lib/apt/lists/*
 
 # binarios + módulos + datos de Asterisk desde el build

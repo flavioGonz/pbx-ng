@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PBX-NG · App de Escritorio (Windows)</title>
+<style>:root{--accent:#f59e0b;--soft:#f59e0b14}
+*{box-sizing:border-box}
+body{margin:0;background:#eef1f6;color:#0f172a;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif}
+.page{max-width:900px;margin:0 auto;background:#fff;box-shadow:0 4px 30px rgba(15,23,42,.07)}   /* ~A4 a 96dpi: 794px de contenido + márgenes */
+.cover{position:relative;min-height:940px;padding:0;background:#fff;color:#0f172a;display:flex;flex-direction:column}
+.cover .bar{height:14px;background:var(--accent)}
+.cover .side{position:absolute;left:0;top:14px;bottom:0;width:8px;background:linear-gradient(180deg,var(--accent),#0f1a30)}
+.cover .inner{padding:58px 64px 46px 74px;display:flex;flex-direction:column;flex:1}
+.cover .brandline{display:flex;align-items:center;gap:14px;border-bottom:1px solid #e8edf4;padding-bottom:18px}
+.cover .mark{width:46px;height:46px;border-radius:11px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px}
+.cover .brand{font-size:19px;font-weight:800;letter-spacing:-.2px}
+.cover .brandsub{font-size:12px;color:#94a3b8}
+.cover .mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 0}
+.cover .doctype{font-size:12px;font-weight:800;letter-spacing:2.6px;text-transform:uppercase;color:var(--accent)}
+.cover h1{font-size:52px;line-height:1.05;margin:16px 0 0;font-weight:800;letter-spacing:-1px;color:#0f172a}
+.cover .rule{width:96px;height:5px;background:var(--accent);border-radius:3px;margin:26px 0 22px}
+.cover .sub{font-size:19px;color:#475569;max-width:560px;line-height:1.5}
+.cover .metatable{border-top:1px solid #e8edf4;padding-top:22px;display:flex;gap:60px;flex-wrap:wrap}
+.cover .metatable div span{display:block;font-size:10.5px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:5px}
+.cover .metatable div b{font-size:14.5px;font-weight:600;color:#334155}
+.cover .foot{margin-top:26px;font-size:11px;color:#94a3b8}
+.toc{padding:34px 60px;border-bottom:1px solid #e8edf4;background:#f8fafc}
+.toc h2{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:#94a3b8;margin:0 0 14px}
+.toc a{display:block;color:#334155;text-decoration:none;padding:4px 0;font-size:14.5px;border-left:2px solid transparent;padding-left:12px}
+.toc a:hover{color:var(--accent);border-left-color:var(--accent)}
+.toc a.l3{padding-left:30px;font-size:13.5px;color:#64748b}
+main{padding:44px 64px 70px}
+h1{font-size:30px;margin:0 0 22px}
+h2{font-size:24px;margin:0 0 6px;padding:0;color:#0f172a;letter-spacing:-.3px;scroll-margin-top:20px}
+.chapter{margin:52px 0 20px;padding-top:22px;border-top:3px solid var(--accent)}
+.chapter:first-of-type{margin-top:0;border-top:none;padding-top:0}
+.chapter .num{display:inline-block;font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:7px}
+h3{font-size:17px;margin:30px 0 10px;color:#1e293b;padding-left:12px;border-left:3px solid #e2e8f0;scroll-margin-top:20px}
+h4{font-size:14.5px;margin:20px 0 8px;color:#475569;font-weight:700}
+p{margin:12px 0}
+code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font:13.5px/1.5 ui-monospace,Consolas,monospace;color:#be123c}
+pre{background:#0f1a30;color:#e2e8f0;padding:16px 18px;border-radius:11px;overflow:auto;margin:16px 0}
+pre code{background:none;color:inherit;padding:0;font-size:13.5px}
+blockquote{margin:18px 0;padding:14px 18px;background:var(--soft);border-left:4px solid var(--accent);border-radius:0 10px 10px 0}
+blockquote p{margin:5px 0;font-size:14.5px;color:#334155}
+.tw{overflow-x:auto;margin:18px 0}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th{text-align:left;background:#f8fafc;color:#475569;font-weight:700;font-size:12.5px;letter-spacing:.4px;text-transform:uppercase;padding:11px 13px;border-bottom:2px solid #e8edf4}
+td{padding:11px 13px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+tr:last-child td{border-bottom:none}
+ul,ol{margin:12px 0;padding-left:24px}
+li{margin:6px 0}
+hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
+.nav{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:14px 0 18px;padding:11px 15px;background:var(--soft);border:1px solid var(--accent);border-left-width:4px;border-radius:9px;font-size:14px;color:#334155}
+.nav .navk{font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--accent);padding-right:4px}
+.nav b{font-weight:700;color:#0f172a}
+.nav .sep{color:#94a3b8;font-weight:400}
+/* Lamina: la imagen es lo primero y ocupa la hoja; el titulo va DEBAJO, como pie de figura. */
+figure.shot{margin:34px 0 30px;text-align:center;break-inside:avoid}
+figure.shot .frame{background:linear-gradient(160deg,#f8fafc,#eef2f7);border:1px solid #e2e8f0;border-radius:14px;padding:14px}
+figure.shot img{display:block;max-width:100%;margin:0 auto;border-radius:9px;border:1px solid #e2e8f0;box-shadow:0 10px 30px rgba(15,23,42,.13)}
+figure.shot figcaption{margin-top:14px;font-size:14px;color:#334155;font-weight:600;line-height:1.4}
+figure.shot .fig{display:block;font-size:10px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+figure.shot .fn{display:block;font:11px ui-monospace,Consolas,monospace;color:#cbd5e1;margin-top:5px;font-weight:400}
+figure.shot.ph .frame{border:2px dashed #cbd5e1;background:#f8fafc;padding:56px 20px}
+figure.shot.ph .frame::before{content:'Imagen pendiente';display:block;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8}
+figure.shot.ph .fn{color:var(--accent);font-weight:700;margin-top:6px}
+footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px solid #eef1f7}
+.top{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;border:0;border-radius:11px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(15,23,42,.2)}
+@media print{
+  body{background:#fff}
+  .page{box-shadow:none;max-width:none}
+  .top{display:none}
+  .cover{padding:60px 40px;page-break-after:always}
+  .toc{page-break-after:always}
+  main{padding:0 10px}
+  .chapter{page-break-before:always;page-break-after:avoid;border-top:3px solid var(--accent)}
+  .chapter:first-of-type{page-break-before:avoid}
+  h2,h3{page-break-after:avoid}
+  @page{size:A4;margin:18mm 16mm 20mm}
+  @page:first{margin:0}
+  /* La imagen siempre empieza arriba de la hoja: se lleva su titulo consigo y nada la parte. */
+  figure.shot{break-before:page;break-inside:avoid;margin:0 0 26px}
+  figure.shot .frame{padding:10px}
+  figure.shot img{max-height:210mm}
+  table,pre,blockquote{page-break-inside:avoid}
+  p,li{orphans:3;widows:3}
+  h4{page-break-after:avoid}
+  a{color:inherit;text-decoration:none}
+}
+</style></head>
+<body>
+<div class="page">
+  <header class="cover">
+    <div class="bar"></div><div class="side"></div>
+    <div class="inner">
+      <div class="brandline">
+        <div class="mark">🖥️</div>
+        <div>
+          <div class="brand">PBX-NG</div>
+          <div class="brandsub">Plataforma de comunicaciones unificadas</div>
+        </div>
+      </div>
+      <div class="mid">
+        <div class="doctype">Documentación oficial</div>
+        <h1>App de Escritorio (Windows)</h1>
+        <div class="rule"></div>
+        <div class="sub">Instalación, uso y despliegue del softphone</div>
+      </div>
+      <div class="metatable">
+        <div><span>Dirigido a</span><b>Usuario / Admin</b></div>
+        <div><span>Versión del producto</span><b>1.1.0</b></div>
+        <div><span>Actualizado</span><b>20/07/2026</b></div>
+        <div><span>Documento</span><b>ESCRITORIO</b></div>
+      </div>
+      <div class="foot">© 2026 PBX-NG · Este documento puede actualizarse sin previo aviso.</div>
+    </div>
+  </header>
+  <nav class="toc"><h2>Contenido</h2><a class="l2" href="#1-cu-ndo-conviene-la-app-de-escritorio">1. Cuándo conviene la app de escritorio</a><a class="l2" href="#2-requisitos">2. Requisitos</a><a class="l2" href="#3-instalaci-n">3. Instalación</a><a class="l3" href="#3-1-instalador-individual-exe">3.1 Instalador individual (`.exe`)</a><a class="l3" href="#3-2-despliegue-en-la-empresa-msi">3.2 Despliegue en la empresa (`.msi`)</a><a class="l3" href="#3-3-versi-n-portable-sin-instalar">3.3 Versión portable (sin instalar)</a><a class="l3" href="#3-4-primer-arranque">3.4 Primer arranque</a><a class="l2" href="#4-configurar-tu-cuenta">4. Configurar tu cuenta</a><a class="l3" href="#4-1-con-el-qr-o-el-enlace-lo-normal">4.1 Con el QR o el enlace (lo normal)</a><a class="l3" href="#4-2-a-mano-modo-webrtc">4.2 A mano: modo WebRTC</a><a class="l3" href="#4-3-a-mano-modo-sip-nativo">4.3 A mano: modo SIP nativo</a><a class="l3" href="#4-4-c-decs-de-audio">4.4 Códecs de audio</a><a class="l3" href="#4-4-1-video-qu-modo-lo-soporta">4.4.1 Video: qué modo lo soporta</a><a class="l3" href="#4-5-stun-y-turn-para-que-haya-audio-detr-s-de-nat">4.5 STUN y TURN (para que haya audio detrás de NAT)</a><a class="l3" href="#4-6-varias-cuentas">4.6 Varias cuentas</a><a class="l3" href="#4-7-d-nde-se-guardan-tus-datos-cifrado">4.7 Dónde se guardan tus datos (cifrado)</a><a class="l2" href="#5-el-d-a-a-d-a">5. El día a día</a><a class="l3" href="#5-1-llamar">5.1 Llamar</a><a class="l3" href="#5-2-recibir">5.2 Recibir</a><a class="l3" href="#5-3-durante-la-llamada">5.3 Durante la llamada</a><a class="l3" href="#5-4-elegir-micr-fono-altavoz-y-c-mara">5.4 Elegir micrófono, altavoz y cámara</a><a class="l2" href="#6-la-ventana-flotante-modo-mini">6. La ventana flotante (modo mini)</a><a class="l2" href="#7-bandeja-del-sistema-y-arranque-con-windows">7. Bandeja del sistema y arranque con Windows</a><a class="l2" href="#8-atajos-de-teclado-globales">8. Atajos de teclado globales</a><a class="l2" href="#9-click-to-call-desde-otras-aplicaciones">9. Click-to-call desde otras aplicaciones</a><a class="l2" href="#10-notificaciones-y-re-registro-autom-tico">10. Notificaciones y re-registro automático</a><a class="l2" href="#11-actualizaciones-autom-ticas">11. Actualizaciones automáticas</a><a class="l2" href="#12-problemas-frecuentes">12. Problemas frecuentes</a><a class="l2" href="#13-para-el-administrador-construir-y-firmar-el-instalador">13. Para el administrador: construir y firmar el instalador</a><a class="l3" href="#13-1-generar-los-instaladores">13.1 Generar los instaladores</a><a class="l3" href="#13-2-si-npm-run-dist-falla-en-wincodesign">13.2 Si `npm run dist` falla en `winCodeSign`</a><a class="l3" href="#13-3-auto-update-y-firma">13.3 Auto-update y firma</a></nav>
+  <main><blockquote><p><strong>Para quién es este manual</strong></p><p>Para quien va a usar el <strong>PBX-NG Softphone</strong> en una PC con Windows, y para el</p><p>administrador que lo instala y lo mantiene en la empresa. La app es el mismo teléfono que</p><p>corre en el navegador y en el celular, pero <strong>empaquetado como programa de Windows</strong>: se</p><p>instala con un <code>.exe</code>, vive en la bandeja del sistema, suena aunque esté minimizada, tiene</p><p>atajos de teclado globales y una ventana flotante para tenerla siempre a la vista.</p></blockquote>
+<p>La app se llama <strong>PBX-NG Softphone</strong>. Es la opción que conviene a quien pasa el día llamando: recepción, ventas, soporte, un puesto de operador. Si sólo llamás de vez en cuando, con el teléfono del navegador alcanza; si el teléfono es tu herramienta principal, la app de escritorio te da lo que el navegador no puede (timbre en segundo plano, atajos globales, click-to-call desde otras aplicaciones, arranque con Windows).</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 1</span><h2 id="1-cu-ndo-conviene-la-app-de-escritorio">Cuándo conviene la app de escritorio</h2></div>
+<div class="tw"><table><thead><tr><th></th><th>Navegador</th><th>Celular (PWA)</th><th><strong>App de escritorio (Windows)</strong></th></tr></thead><tbody><tr><td>Instalar algo</td><td>No</td><td>Se agrega a la pantalla de inicio</td><td>Sí, un <code>.exe</code></td></tr><tr><td>Suena si está minimizada / en segundo plano</td><td>Limitado</td><td>Limitado (iOS)</td><td><strong>Sí, siempre</strong></td></tr><tr><td>Atajos de teclado globales</td><td>No</td><td>No</td><td><strong>Sí (atender/colgar/silenciar)</strong></td></tr><tr><td>Ventana flotante siempre visible</td><td>No</td><td>No</td><td><strong>Sí (modo mini)</strong></td></tr><tr><td>Arranca solo con la PC</td><td>No</td><td>No</td><td><strong>Sí (iniciar con Windows)</strong></td></tr><tr><td>Click-to-call desde el CRM / navegador</td><td>No</td><td>No</td><td><strong>Sí (<code>tel:</code> / <code>sip:</code> / <code>callto:</code>)</strong></td></tr><tr><td>Se actualiza sola</td><td>Recargando la web</td><td>Sola</td><td><strong>Sí (auto-update)</strong></td></tr></tbody></table></div>
+<p>La app y el navegador <strong>no pelean</strong>: podés tener las dos, con la misma extensión, al mismo tiempo. La central entrega la llamada al que esté disponible.</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 2</span><h2 id="2-requisitos">Requisitos</h2></div>
+<ul><li><strong>Windows 10 o Windows 11</strong>, 64 bits. (No hay build de 32 bits.)</li><li><strong>Micrófono</strong> — cualquier auricular USB o el del notebook. Para video, una cámara.</li><li><strong>Salida a Internet</strong> hacia tu central o hacia el borde SBC. La app tolera estar detrás</li></ul>
+<p>  de NAT y de casi cualquier router; para eso usa STUN/TURN (ver §4.5).</p>
+<ul><li><strong>Permisos de instalación</strong>: el <code>.exe</code> se instala por usuario y <strong>no pide administrador</strong>.</li></ul>
+<p>  El <code>.msi</code> (despliegue corporativo) sí instala para toda la máquina y requiere admin.</p>
+<blockquote><p>La app pesa poco y consume poco: en reposo es una pestaña de bandeja. El grueso del trabajo</p><p>(audio, cifrado) sólo ocurre durante la llamada.</p></blockquote>
+<hr />
+<div class="chapter"><span class="num">Capítulo 3</span><h2 id="3-instalaci-n">Instalación</h2></div>
+<p>Hay tres formas de poner la app, según el escenario. Para un usuario suelto, el <code>.exe</code>. Para una flota de PCs administradas, el <code>.msi</code>. Y si no querés instalar nada, la versión portable.</p>
+<h3 id="3-1-instalador-individual-exe">3.1 Instalador individual (<code>.exe</code>)</h3>
+<p>Es el camino normal. El administrador te pasa un archivo llamado <code>PBX-NG-Softphone-Setup-x.y.z.exe</code> (donde <code>x.y.z</code> es la versión).</p>
+<ol><li>Doble clic en el <code>.exe</code>.</li><li>El instalador está <strong>en español</strong>. Te deja <strong>elegir la carpeta</strong> de instalación si querés,</li></ol>
+<p>   o dejar la que propone.</p>
+<ol><li>Crea <strong>acceso directo en el escritorio</strong> y en el <strong>menú Inicio</strong>.</li><li>Al terminar, la app arranca sola.</li></ol>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-01-instalador.png" alt="Instalador del softphone en español, eligiendo carpeta" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 1</span>Instalador del softphone en español, eligiendo carpeta<span class="fn">sfd-01-instalador.png</span></figcaption></figure>
+<blockquote><p><strong>No pide permisos de administrador.</strong> Se instala dentro de tu perfil de usuario. Por eso</p><p>cualquiera puede instalarlo en su PC sin depender de IT.</p></blockquote>
+<h3 id="3-2-despliegue-en-la-empresa-msi">3.2 Despliegue en la empresa (<code>.msi</code>)</h3>
+<p>Para instalar en muchas PCs a la vez, el administrador usa el instalador <strong><code>.msi</code></strong> (<code>PBX-NG-Softphone-x.y.z.msi</code>). A diferencia del <code>.exe</code>, el <code>.msi</code>:</p>
+<ul><li>Instala <strong>para toda la máquina</strong> (per-machine), no por usuario.</li><li>Se despliega en silencio por <strong>GPO (Directiva de grupo)</strong>, <strong>Microsoft Intune</strong> o <strong>SCCM</strong>.</li><li>Es lo que se usa cuando IT quiere que la app aparezca sola en el parque de equipos.</li></ul>
+<p>Instalación silenciosa típica desde una consola con permisos:</p>
+<pre><code>msiexec /i "PBX-NG-Softphone-x.y.z.msi" /qn</code></pre>
+<blockquote><p>El <code>.msi</code> <strong>no</strong> arranca la app al terminar (a diferencia del <code>.exe</code>), justamente para no</p><p>molestar durante un despliegue masivo.</p></blockquote>
+<h3 id="3-3-versi-n-portable-sin-instalar">3.3 Versión portable (sin instalar)</h3>
+<p>Si no querés (o no podés) instalar, existe la carpeta <strong><code>win-unpacked</code></strong> con el ejecutable <code>PBX-NG Softphone.exe</code> adentro: corre tal cual, sin instalación, desde un pendrive o una carpeta. No trae auto-update ni accesos directos, pero es idéntica por dentro.</p>
+<h3 id="3-4-primer-arranque">3.4 Primer arranque</h3>
+<p>La primera vez vas a ver una <strong>pantalla de bienvenida</strong> (splash) mientras la app carga, y después la pantalla de acceso. Windows puede preguntarte por el <strong>permiso del micrófono</strong> (y de la cámara, si vas a hacer video): aceptá, si no, no te van a escuchar.</p>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-02-splash.png" alt="Pantalla de bienvenida al abrir la app" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 2</span>Pantalla de bienvenida al abrir la app<span class="fn">sfd-02-splash.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 4</span><h2 id="4-configurar-tu-cuenta">Configurar tu cuenta</h2></div>
+<h3 id="4-1-con-el-qr-o-el-enlace-lo-normal">4.1 Con el QR o el enlace (lo normal)</h3>
+<p>El administrador te manda un <strong>correo con un código QR</strong> y un enlace. Con eso la app se configura sola: no anotás contraseñas ni servidores.</p>
+<ol><li>Abrí la app y tocá el <strong>botón de QR</strong>, arriba a la derecha del título *"Conectar a tu</li></ol>
+<p>   central"*.</p>
+<ol><li>En una PC (sin cámara) elegí <strong>"Pegar código"</strong> y pegá el enlace del correo.</li><li>La app detecta sola si tu extensión es <strong>WebRTC</strong> o <strong>SIP</strong>, se configura y queda en línea.</li></ol>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-03-qr.png" alt="Pegar el código de aprovisionamiento" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 3</span>Pegar el código de aprovisionamiento<span class="fn">sfd-03-qr.png</span></figcaption></figure>
+<blockquote><p><strong>Enlace <code>pbxng://</code></strong> — el correo puede traer un enlace que empieza con <code>pbxng://</code>. Si hacés</p><p>clic desde la misma PC, Windows abre la app y la configura de una: la app se registra como</p><p>dueña de ese tipo de enlace al instalarse.</p></blockquote>
+<blockquote><p>El acceso del correo <strong>vence en 24 horas</strong>. Si se te venció, pedile al administrador uno nuevo.</p></blockquote>
+<h3 id="4-2-a-mano-modo-webrtc">4.2 A mano: modo WebRTC</h3>
+<p>Es el modo habitual: el teléfono habla con la central <strong>por Internet</strong>, cifrado, sin abrir puertos en tu red. Anda desde casa, desde una sucursal, detrás de casi cualquier router.</p>
+<div class="tw"><table><thead><tr><th>Campo</th><th>Qué poner</th><th>Ejemplo</th></tr></thead><tbody><tr><td><strong>Servidor WebSocket (WSS)</strong></td><td>La dirección que te dio el administrador</td><td><code>wss://pbx.tu-empresa.com/ws</code></td></tr><tr><td><strong>Servidor WSS de respaldo</strong> <em>(opcional)</em></td><td>Un segundo WSS por si el primero cae</td><td><code>wss://pbx2.tu-empresa.com/ws</code></td></tr><tr><td><strong>Dominio SIP</strong></td><td>Suele ser el mismo dominio, sin <code>wss://</code></td><td><code>pbx.tu-empresa.com</code></td></tr><tr><td><strong>Extensión / usuario</strong></td><td>Tu número</td><td><code>2001</code></td></tr><tr><td><strong>Contraseña</strong></td><td>La de tu extensión</td><td>—</td></tr><tr><td><strong>Nombre para mostrar</strong> <em>(opcional)</em></td><td>Cómo te ven los demás</td><td><code>Recepción</code></td></tr></tbody></table></div>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-04-webrtc.png" alt="Configuración en modo WebRTC" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 4</span>Configuración en modo WebRTC<span class="fn">sfd-04-webrtc.png</span></figcaption></figure>
+<h3 id="4-3-a-mano-modo-sip-nativo">4.3 A mano: modo SIP nativo</h3>
+<p>Es el modo clásico, el de los teléfonos de escritorio. La app trae un <strong>motor SIP propio</strong> que habla <strong>UDP, TCP o TLS</strong> directo contra la central (no necesita WebSocket). Se usa cuando la central <strong>no expone WebRTC</strong>, cuando estás dentro de la red de la empresa, o cuando te registrás como <strong>extensión SIP a través del borde SBC</strong>.</p>
+<div class="tw"><table><thead><tr><th>Campo</th><th>Qué poner</th><th>Ejemplo</th></tr></thead><tbody><tr><td><strong>Servidor SIP</strong></td><td>Host o IP de la central / del borde</td><td><code>192.168.1.10</code></td></tr><tr><td><strong>Puerto</strong></td><td>5060 para UDP/TCP, 5061 para TLS</td><td><code>5060</code></td></tr><tr><td><strong>Transporte</strong></td><td>UDP, TCP o TLS</td><td><code>UDP</code></td></tr><tr><td><strong>Dominio SIP</strong></td><td>El dominio de la central</td><td><code>pbx.tu-empresa.com</code></td></tr><tr><td><strong>Extensión y contraseña</strong></td><td>Los tuyos</td><td><code>2001</code></td></tr></tbody></table></div>
+<p>Opciones avanzadas del modo SIP nativo:</p>
+<div class="tw"><table><thead><tr><th>Opción</th><th>Para qué</th></tr></thead><tbody><tr><td><strong>SRTP</strong></td><td>Cifra el audio (<code>none</code> / <code>sdes</code> / obligatorio). Si la central lo exige, activalo.</td></tr><tr><td><strong>DTMF</strong></td><td>Cómo se mandan los tonos del teclado: <code>RFC 4733</code> (recomendado) o <code>inband</code>.</td></tr><tr><td><strong>Verificar TLS</strong></td><td>Valida el certificado del servidor. Desactivalo sólo con certificados internos.</td></tr><tr><td><strong>Buscar por SRV (DNS)</strong></td><td>Deja que el DNS resuelva el servidor SIP por registros <code>_sip._udp</code>.</td></tr><tr><td><strong>MWI</strong></td><td>Aviso de mensajes en espera (se enciende el ícono del buzón cuando hay uno).</td></tr></tbody></table></div>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-05-sip.png" alt="Configuración en modo SIP nativo con opciones avanzadas" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 5</span>Configuración en modo SIP nativo con opciones avanzadas<span class="fn">sfd-05-sip.png</span></figcaption></figure>
+<blockquote><p><strong>¿Cuál te toca?</strong> No adivines. Si el administrador te mandó el enlace, la app resuelve el</p><p>modo sola. Una extensión <strong>WebRTC no funciona</strong> en modo SIP nativo (la central le exige</p><p>cifrado y el audio no levanta), y una extensión SIP clásica <strong>no tiene WebSocket</strong> al que</p><p>conectarse.</p></blockquote>
+<h3 id="4-4-c-decs-de-audio">4.4 Códecs de audio</h3>
+<div class="nav"><span class="navk">Cómo llegar</span><b>En la app: **Ajustes</b> <span class="sep">›</span> <b>Registro</b> <span class="sep">›</span> <b>Códec de audio**</b></div>
+<p>Es el mismo selector en los dos modos, pero <strong>las opciones cambian</strong> según el transporte, porque no ambos pueden hacer lo mismo:</p>
+<div class="tw"><table><thead><tr><th>Modo</th><th>Opciones disponibles</th><th>Por qué</th></tr></thead><tbody><tr><td><strong>WebRTC</strong></td><td>Automático · Opus · G.722 · G.711 µ · G.711 A</td><td>El audio lo maneja el motor del navegador, que sabe todos esos códecs</td></tr><tr><td><strong>SIP nativo</strong></td><td>Automático · G.711 µ · G.711 A</td><td>El motor nativo codifica <strong>sólo G.711</strong>. Ofrecer Opus sería mentir: no lo podría codificar</td></tr></tbody></table></div>
+<ul><li><strong>Automático</strong> (por defecto): se ofrecen todos los que la app soporta y elige el otro extremo.</li></ul>
+<p>  Es lo correcto casi siempre.</p>
+<ul><li><strong>Elegir uno</strong>: en SIP nativo se ofrece <strong>sólo ese</strong> (µ-law o A-law). En WebRTC se ofrece</li></ul>
+<p>  primero, y con la casilla <strong>Forzar</strong> se descartan los demás.</p>
+<ul><li><strong>Forzar</strong> (sólo WebRTC): sirve para <strong>probar el transcoding</strong> del borde — poné Opus acá, y si</li></ul>
+<p>  el operador habla G.711, el SBC transcodifica en el medio y lo ves en su pantalla <em>Transcoding</em>.</p>
+<blockquote><p><strong>Cuidado al forzar.</strong> Si el otro extremo no soporta el códec que forzaste, la llamada conecta</p><p>pero <strong>no arma audio</strong>. Es una herramienta de prueba, no una configuración para dejar puesta.</p></blockquote>
+<blockquote><p><strong>µ-law o A-law.</strong> En América se usa <strong>µ-law (PCMU)</strong> y en Europa <strong>A-law (PCMA)</strong>. Con</p><p><em>Automático</em> no tenés que acordarte: se ofrecen los dos.</p></blockquote>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-06-codec.png" alt="Selector de códec en Ajustes" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 6</span>Selector de códec en Ajustes<span class="fn">sfd-06-codec.png</span></figcaption></figure>
+<h3 id="4-4-1-video-qu-modo-lo-soporta">4.4.1 Video: qué modo lo soporta</h3>
+<p>No es lo mismo según cómo estés registrado, y conviene saberlo antes de prometerle video a un cliente:</p>
+<div class="tw"><table><thead><tr><th></th><th><strong>WebRTC</strong></th><th><strong>SIP nativo</strong></th></tr></thead><tbody><tr><td>Video</td><td>✅ Sí</td><td>✅ Sí (H.264)</td></tr><tr><td>Audio de banda ancha (Opus / G.722)</td><td>✅ Sí</td><td>❌ Sólo G.711</td></tr><tr><td>Cómo se inicia</td><td>Botón de cámara al llamar, o encenderla en la llamada</td><td>Botón de cámara <strong>al llamar</strong>: se negocia al inicio</td></tr></tbody></table></div>
+<p>En <strong>modo nativo</strong>, el video se decide <strong>cuando arranca la llamada</strong>: usás el botón de cámara del marcador, o atendés una entrante con el botón de video. No se puede "encender la cámara" a mitad de una llamada que empezó como audio (eso requiere renegociar la sesión, y hoy no está).</p>
+<p>Para recibir una videollamada, el otro extremo también tiene que ofrecer video: si te llaman en audio, la llamada es de audio aunque tengas cámara.</p>
+<blockquote><p><strong>Si el video no arranca en modo nativo</strong>, mirá primero que el otro extremo realmente esté</p><p>ofreciendo video, y después que la central tenga habilitado el video en ese interno. En el</p><p>panel de diagnóstico de la app se ve el códec real que quedó negociado.</p></blockquote>
+<h3 id="4-5-stun-y-turn-para-que-haya-audio-detr-s-de-nat">4.5 STUN y TURN (para que haya audio detrás de NAT)</h3>
+<p>El audio de una llamada viaja aparte de la señalización, y detrás de NAT a veces no encuentra el camino (la llamada conecta pero <strong>no se escucha</strong>). Para resolverlo:</p>
+<ul><li><strong>STUN</strong> le dice a la app cuál es su IP pública. Viene uno público configurado por defecto.</li><li><strong>TURN</strong> es un relay: cuando el audio directo no es posible, pasa por ahí. Lo da el</li></ul>
+<p>  administrador con su usuario y clave.</p>
+<p>Durante la llamada, una etiqueta te dice por dónde va el audio: <strong>DIRECTO</strong> (peer-to-peer) o <strong>VÍA TURN</strong> (relay). Es informativa; si tenés cortes, ese dato le sirve al administrador.</p>
+<h3 id="4-6-varias-cuentas">4.6 Varias cuentas</h3>
+<p>La app guarda <strong>varias cuentas</strong> y te deja cambiar de una a otra sin recargar los datos cada vez (por ejemplo, tu interno personal y el de un puesto compartido). Se administran desde el selector de cuentas en la pantalla de acceso.</p>
+<h3 id="4-7-d-nde-se-guardan-tus-datos-cifrado">4.7 Dónde se guardan tus datos (cifrado)</h3>
+<p>En la app de escritorio, tu configuración y tu contraseña se guardan <strong>cifradas con DPAPI de Windows</strong> (el mismo mecanismo que usa el navegador para tus claves): quedan atadas a tu usuario de Windows y no se pueden leer desde otra cuenta ni copiando el archivo a otra PC. En el navegador, en cambio, caen a almacenamiento local sin ese cifrado — otra razón para preferir la app de escritorio en un puesto fijo.</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 5</span><h2 id="5-el-d-a-a-d-a">El día a día</h2></div>
+<h3 id="5-1-llamar">5.1 Llamar</h3>
+<p>Marcá el número en el teclado y tocá el botón verde. También podés <strong>escribir el nombre</strong> de un compañero: aparece solo mientras tipeás. Tus <strong>favoritos</strong> y tu <strong>historial</strong> quedan a mano.</p>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-07-marcador.png" alt="Marcador y búsqueda de contactos" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 7</span>Marcador y búsqueda de contactos<span class="fn">sfd-07-marcador.png</span></figcaption></figure>
+<h3 id="5-2-recibir">5.2 Recibir</h3>
+<p>Cuando te llaman, la app <strong>suena y salta al frente</strong>, y Windows te muestra una <strong>notificación</strong> aunque estés en otra aplicación. Si el número está en el sistema de clientes, ves <strong>su ficha</strong> antes de atender. Atendés con el verde, rechazás con el rojo.</p>
+<h3 id="5-3-durante-la-llamada">5.3 Durante la llamada</h3>
+<div class="tw"><table><thead><tr><th>Botón</th><th>Qué hace</th></tr></thead><tbody><tr><td><strong>Silenciar</strong></td><td>El otro deja de escucharte; vos lo seguís escuchando.</td></tr><tr><td><strong>Teclado</strong></td><td>Manda tonos DTMF ("marque 1 para…").</td></tr><tr><td><strong>Retener</strong></td><td>Deja a la persona en espera con música.</td></tr><tr><td><strong>Transferir</strong></td><td>Le pasás la llamada a otra extensión.</td></tr><tr><td><strong>Video</strong></td><td>Encendés la cámara.</td></tr><tr><td><strong>Invitar</strong></td><td>Sumás a otra persona a la conversación.</td></tr><tr><td><strong>Grabar</strong></td><td>Empieza a grabar la llamada.</td></tr><tr><td><strong>Volumen</strong></td><td>Ajustás cuánto escuchás al otro lado.</td></tr></tbody></table></div>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-08-en-llamada.png" alt="Pantalla de llamada en curso" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 8</span>Pantalla de llamada en curso<span class="fn">sfd-08-en-llamada.png</span></figcaption></figure>
+<h3 id="5-4-elegir-micr-fono-altavoz-y-c-mara">5.4 Elegir micrófono, altavoz y cámara</h3>
+<p>En <strong>Ajustes → Dispositivos</strong> elegís qué micrófono, qué altavoz y qué cámara usa la app. Útil cuando tenés varios (el del notebook y un auricular USB). La app se acuerda de tu elección.</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 6</span><h2 id="6-la-ventana-flotante-modo-mini">La ventana flotante (modo mini)</h2></div>
+<p>Tocá el botón <strong>mini</strong> en la barra superior y el teléfono se encoge a una <strong>ventanita chica que queda siempre arriba de todo</strong>, aunque estés trabajando en otra aplicación. Desde ahí atendés, silenciás, cortás y controlás el volumen sin volver a la ventana grande. Cuando entra una llamada, la ventanita <strong>vibra</strong> para llamarte la atención.</p>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-09-mini.png" alt="La ventana flotante siempre visible" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 9</span>La ventana flotante siempre visible<span class="fn">sfd-09-mini.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 7</span><h2 id="7-bandeja-del-sistema-y-arranque-con-windows">Bandeja del sistema y arranque con Windows</h2></div>
+<p>Cuando cerrás la ventana con la <strong>X</strong>, la app <strong>no se cierra</strong>: se esconde en la <strong>bandeja del sistema</strong> (al lado del reloj) y sigue registrada, lista para recibir. Es a propósito: un softphone tiene que estar disponible aunque no lo tengas en pantalla.</p>
+<p>Clic derecho en el ícono de la bandeja:</p>
+<ul><li><strong>Abrir</strong> — trae la ventana de vuelta.</li><li><strong>Iniciar con Windows</strong> — la app arranca sola al prender la PC, <strong>minimizada en la bandeja</strong>,</li></ul>
+<p>  ya registrada. Ideal para un puesto de trabajo.</p>
+<ul><li><strong>Salir</strong> — cierra la app de verdad.</li></ul>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-10-bandeja.png" alt="Menú de la bandeja del sistema" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 10</span>Menú de la bandeja del sistema<span class="fn">sfd-10-bandeja.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 8</span><h2 id="8-atajos-de-teclado-globales">Atajos de teclado globales</h2></div>
+<p>La app registra <strong>atajos que funcionan desde cualquier aplicación</strong>, incluso sin la ventana al frente. Sirven para atender sin buscar la ventana cuando estás escribiendo un mail o en el CRM:</p>
+<div class="tw"><table><thead><tr><th>Atajo</th><th>Acción</th></tr></thead><tbody><tr><td><strong>Ctrl + Shift + A</strong></td><td>Atender la llamada entrante</td></tr><tr><td><strong>Ctrl + Shift + H</strong></td><td>Colgar (o rechazar la entrante)</td></tr><tr><td><strong>Ctrl + Shift + M</strong></td><td>Silenciar / reactivar el micrófono</td></tr></tbody></table></div>
+<hr />
+<div class="chapter"><span class="num">Capítulo 9</span><h2 id="9-click-to-call-desde-otras-aplicaciones">Click-to-call desde otras aplicaciones</h2></div>
+<p>La app se registra como manejadora de los enlaces <strong><code>tel:</code></strong>, <strong><code>sip:</code></strong> y <strong><code>callto:</code></strong>. En la práctica: si en tu CRM, en una planilla o en una página web hacés clic en un número de teléfono, <strong>Windows abre el softphone y marca solo</strong>. No hay que copiar y pegar.</p>
+<p>También funciona desde la línea de comandos o un acceso directo:</p>
+<pre><code>start tel:099123456</code></pre>
+<hr />
+<div class="chapter"><span class="num">Capítulo 10</span><h2 id="10-notificaciones-y-re-registro-autom-tico">Notificaciones y re-registro automático</h2></div>
+<ul><li><strong>Notificaciones de Windows</strong> cuando entra una llamada (con quién es), aunque la app esté en</li></ul>
+<p>  la bandeja.</p>
+<ul><li><strong>Re-registro automático</strong>: cuando la PC <strong>vuelve de suspensión</strong>, <strong>se desbloquea la sesión</strong></li></ul>
+<p>  o <strong>vuelve la red</strong>, la app se re-registra sola. No tenés que reconectar a mano después de   levantar la notebook.</p>
+<hr />
+<div class="chapter"><span class="num">Capítulo 11</span><h2 id="11-actualizaciones-autom-ticas">Actualizaciones automáticas</h2></div>
+<p>La app <strong>se actualiza sola</strong>. Al abrirla, chequea si hay una versión nueva; si la hay, la descarga en segundo plano y te avisa para instalarla (se aplica al reiniciar la app). No tenés que volver a bajar el instalador cada vez.</p>
+<blockquote><p>El administrador publica las versiones nuevas; a los usuarios les llegan solas.</p></blockquote>
+<hr />
+<div class="chapter"><span class="num">Capítulo 12</span><h2 id="12-problemas-frecuentes">Problemas frecuentes</h2></div>
+<div class="nav"><span class="navk">Cómo llegar</span><b>Ajustes</b> <span class="sep">›</span> <b>Dispositivos  ·  Ajustes</b> <span class="sep">›</span> <b>Diagnóstico</b></div>
+<div class="tw"><table><thead><tr><th>Qué te pasa</th><th>Qué hacer</th></tr></thead><tbody><tr><td>Dice <strong>"sin conectar"</strong></td><td>Fijate que tengas Internet. La app muestra <strong>el motivo real</strong> del fallo abajo del estado (por ejemplo <em>"Registro rechazado (401) — revisá extensión/contraseña"</em>).</td></tr><tr><td><strong>No te escuchan</strong></td><td>Revisá el micrófono en Ajustes → Dispositivos y que Windows le haya dado permiso a la app.</td></tr><tr><td><strong>No escuchás</strong></td><td>Revisá el altavoz en Ajustes → Dispositivos y el volumen de la llamada.</td></tr><tr><td><strong>Conecta pero no hay audio</strong></td><td>Es NAT/medios. Pasale al administrador la etiqueta <em>VÍA TURN / DIRECTO</em> y la sección Diagnóstico; puede faltar TURN.</td></tr><tr><td><strong>Con certificado interno no conecta (TLS)</strong></td><td>En modo SIP nativo, desactivá <em>Verificar TLS</em>; para WebRTC/HTTPS interno la app ya tolera certificados internos.</td></tr><tr><td><strong>Se venció el acceso</strong></td><td>Pedile al administrador un enlace nuevo (vencen a las 24 h).</td></tr><tr><td><strong>El antivirus marca el <code>.exe</code></strong></td><td>Es porque el instalador puede no estar firmado (ver §13). Es la app; el administrador puede firmarlo para que deje de avisar.</td></tr></tbody></table></div>
+<figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/sfd-11-diagnostico.png" alt="Sección de diagnóstico de la app" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 11</span>Sección de diagnóstico de la app<span class="fn">sfd-11-diagnostico.png</span></figcaption></figure>
+<hr />
+<div class="chapter"><span class="num">Capítulo 13</span><h2 id="13-para-el-administrador-construir-y-firmar-el-instalador">Para el administrador: construir y firmar el instalador</h2></div>
+<p>Esta sección es para quien <strong>arma</strong> el instalador (no para el usuario final). El softphone es un proyecto único: una sola base de código sale como <strong>PWA</strong> (móvil), <strong>web</strong> (navegador) y <strong>app de Windows</strong> (Electron).</p>
+<h3 id="13-1-generar-los-instaladores">13.1 Generar los instaladores</h3>
+<p>Desde la carpeta <code>softphone-app/</code>, en <strong>Windows</strong> (o Linux + wine):</p>
+<pre><code>npm install
+npm run dist          # genera .exe (NSIS) y .msi (WiX) en release/</code></pre>
+<p>Para una prueba rápida sin empaquetar:</p>
+<pre><code>npm run build &amp;&amp; npm run electron</code></pre>
+<p><code>npm run dist</code> deja en <code>release/</code>:</p>
+<ul><li><strong><code>PBX-NG-Softphone-Setup-x.y.z.exe</code></strong> — instalador individual (NSIS), con auto-update.</li><li><strong><code>PBX-NG-Softphone-x.y.z.msi</code></strong> — instalador corporativo (WiX), per-machine, para GPO/Intune/SCCM.</li><li><strong><code>win-unpacked/</code></strong> — la versión portable.</li></ul>
+<h3 id="13-2-si-npm-run-dist-falla-en-wincodesign">13.2 Si <code>npm run dist</code> falla en <code>winCodeSign</code></h3>
+<p>Si el build corta en <code>winCodeSign</code> con <em>"Cannot create symbolic link … privilegio requerido"</em>, es porque electron-builder extrae symlinks y Windows los bloquea sin permiso:</p>
+<ul><li>La app <strong>igual queda armada</strong> en <code>release/win-unpacked/PBX-NG Softphone.exe</code> (corre sin instalar).</li><li>Para generar los instaladores: activá el <strong>Modo de desarrollador</strong> de Windows (Configuración →</li></ul>
+<p>  Para desarrolladores) <strong>o</strong> corré la terminal <strong>como Administrador</strong>, y reintentá <code>npm run dist</code>.</p>
+<ul><li>En <strong>CI</strong> (runner de Windows) no ocurre: usar el workflow de build de Windows.</li></ul>
+<h3 id="13-3-auto-update-y-firma">13.3 Auto-update y firma</h3>
+<ul><li>El <strong>auto-update</strong> sale por <strong>GitHub Releases</strong> (configurado en <code>package.json → build.publish</code>).</li></ul>
+<p>  Cada release nueva llega sola a los usuarios.</p>
+<ul><li><strong>Firma de código</strong>: sin firmar, Windows SmartScreen y algunos antivirus advierten al instalar.</li></ul>
+<p>  Para producción conviene firmar el <code>.exe</code>/<code>.msi</code> con un certificado de firma de código (ver   <code>softphone-app/SIGNING.md</code>).</p>
+<hr />
+<p>Con esto tenés la app de escritorio de punta a punta: instalada, configurada, en uso, y —del lado del administrador— construida y distribuida. Para el resto del teléfono (buzón de voz, colas, códigos útiles) mirá el <strong>Manual de Usuario</strong>.</p></main>
+  <footer>PBX-NG · App de Escritorio (Windows) · versión 1.1.0 · 20/07/2026</footer>
+</div>
+<button class="top" onclick="window.print()">Descargar PDF</button>
+<script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>
+</body></html>

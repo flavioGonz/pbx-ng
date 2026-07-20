@@ -4,6 +4,7 @@
 // Devuelve la MISMA forma que useSip para poder intercambiarlo en App.jsx.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDevPrefs } from './useSip.js';
+import { createNativeVideo } from './video-native.js';
 
 const HIST = 'sp_hist';
 const loadHist = () => { try { return JSON.parse(localStorage.getItem(HIST) || '[]'); } catch { return []; } };
@@ -40,6 +41,29 @@ export function useSipNative() {
   const audio = useRef({ ctx: null, mic: null, cap: null, play: null, ring: [], vol: 1 });
   const infoRef = useRef(null);
 
+  // --- video (Etapa 2, WebCodecs) ---
+  const [videoOn, setVideoOn] = useState(false);
+  const [incomingVideo, setIncomingVideo] = useState(false);
+  const veng = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const localVideoRef = useRef(null);
+
+  const stopVideo = useCallback(() => { try { veng.current && veng.current.stop(); } catch {} veng.current = null; setVideoOn(false); }, []);
+  const startVideoEngine = useCallback(async () => {
+    if (veng.current) return;
+    try {
+      const p = getDevPrefs();
+      const eng = createNativeVideo({
+        sendFrame: (b64, ts) => { try { window.sphone && window.sphone.sipVideoOut && window.sphone.sipVideoOut(b64, ts); } catch {} },
+        requestKeyframe: () => { try { window.sphone && window.sphone.sipVideoKeyframe && window.sphone.sipVideoKeyframe(); } catch {} },
+      });
+      veng.current = eng;
+      eng.startRemote();
+      await eng.startLocal(p && p.cam);
+      setVideoOn(true);
+    } catch (e) { try { console.error('[sipnat] video', e); } catch {} }
+  }, []);
+
   const pushHist = useCallback((e) => { const h = loadHist(); h.unshift({ ...e, t: Date.now() }); saveHist(h); setHist(h.slice(0, 100)); }, []);
 
   const stopAudio = useCallback(() => {
@@ -75,20 +99,28 @@ export function useSipNative() {
       if (!evt) return;
       if (evt.type === 'stats') { setQuality({ score: evt.score, loss: evt.loss, jitter: evt.jitter, rtt: evt.rtt || null, codec: evt.codec || null, candType: evt.candType || null }); return; }
       if (evt.type === 'reg') { setReg(evt.state); }
+      else if (evt.type === 'video') { if (evt.state === 'on') startVideoEngine(); }
+      else if (evt.type === 'video-keyframe') { try { veng.current && veng.current.forceKeyframe(); } catch {} }
       else if (evt.type === 'call') {
         if (evt.state === 'calling') { const ci = { dir: 'out', number: evt.number, since: 0 }; infoRef.current = ci; setCallInfo(ci); setCall('calling'); setNote('Llamando…'); setIncoming(null); }
         else if (evt.state === 'ringing') setNote('Timbrando…');
-        else if (evt.state === 'incoming') { setIncoming({ number: evt.number, remoteIdentity: { uri: { user: evt.number } } }); infoRef.current = { dir: 'in', number: evt.number, since: 0 }; }
+        else if (evt.state === 'incoming') { setIncoming({ number: evt.number, remoteIdentity: { uri: { user: evt.number } } }); setIncomingVideo(!!evt.video); infoRef.current = { dir: 'in', number: evt.number, since: 0 }; }
         else if (evt.state === 'answered') { const ci = { ...(infoRef.current || { dir: 'out', number: evt.number }), since: Date.now() }; infoRef.current = ci; setCallInfo(ci); setCall('answered'); setNote(''); setIncoming(null); setMuted(false); startAudio(); }
         else if (evt.state === 'ended') { setQuality(null);
-          stopAudio();
+          stopAudio(); stopVideo(); setIncomingVideo(false);
           const ci = infoRef.current;
           if (ci) { const dur = ci.since ? Math.round((Date.now() - ci.since) / 1000) : 0; pushHist({ dir: ci.dir, number: ci.number, dur, missed: ci.dir === 'in' && !ci.since }); }
           infoRef.current = null; setCall(null); setCallInfo(null); setIncoming(null); setNote(evt.reason || ''); setMuted(false);
         }
       }
     });
-  }, [startAudio, stopAudio, pushHist]);
+  }, [startAudio, stopAudio, pushHist, startVideoEngine, stopVideo]);
+
+  // NALs de video entrantes desde el main → decoder
+  useEffect(() => {
+    if (!window.sphone || !window.sphone.onSipVideo) return;
+    window.sphone.onSipVideo((b64) => { try { veng.current && veng.current.onNal(b64); } catch {} });
+  }, []);
 
   // audio entrante desde el main (PCM Int16 @8k) → parlante
   useEffect(() => {
@@ -107,8 +139,8 @@ export function useSipNative() {
 
   const connect = useCallback((cfg) => { setReg('connecting'); if (window.sphone && window.sphone.sipConnect) window.sphone.sipConnect(cfg); else setReg('failed'); }, []);
   const disconnect = useCallback(() => { try { window.sphone && window.sphone.sipDisconnect(); } catch {} setReg('idle'); }, []);
-  const placeCall = useCallback((number) => { try { window.sphone && window.sphone.sipCall(String(number)); } catch {} return Promise.resolve({ ok: true }); }, []);
-  const accept = useCallback(() => { try { window.sphone && window.sphone.sipAccept(); } catch {} }, []);
+  const placeCall = useCallback((number, video) => { try { window.sphone && window.sphone.sipCall(String(number), !!video); } catch {} return Promise.resolve({ ok: true }); }, []);
+  const accept = useCallback((video) => { try { window.sphone && window.sphone.sipAccept(!!video); } catch {} }, []);
   const reject = useCallback(() => { try { window.sphone && window.sphone.sipReject(); } catch {} setIncoming(null); }, []);
   const hangup = useCallback(() => { try { window.sphone && window.sphone.sipHangup(); } catch {} }, []);
   const toggleMute = useCallback(() => { setMuted(m => { const n = !m; try { window.sphone && window.sphone.sipMute(n); } catch {} return n; }); }, []);
@@ -120,13 +152,14 @@ export function useSipNative() {
   const inCall = !!callInfo;
   const registered = reg === 'registered';
   return {
-    reg, registered, call, inCall, incoming, incomingVideo: false, muted, held: false, speaker: false, videoOn: false,
+    reg, registered, call, inCall, incoming, incomingVideo, muted, held: false, speaker: false, videoOn,
     callInfo, quality, hist, volume, note, usingRelay: null,
     connect, disconnect, placeCall, accept, reject, hangup, toggleMute,
     toggleHold: noop, toggleVideo: noop, toggleSpeaker: noop, applySpeaker: noop, setVolume, transfer: (t) => { try { window.sphone && window.sphone.sipTransfer && window.sphone.sipTransfer(t); } catch {} }, sendDtmf, clearHist,
     attended: null, attendedCall: noop, completeAttended: noop, cancelAttended: noop,
     heldInfo: null, switchLine: noop, conf: false, conference: noop,
-    audioRef: dummyRef, remoteVideoRef: dummyRef, localVideoRef: dummyRef,
-    getRemoteStream: () => null, getLocalStream: () => null,
+    audioRef: dummyRef, remoteVideoRef, localVideoRef,
+    getRemoteStream: () => (veng.current ? veng.current.getRemoteStream() : null),
+    getLocalStream: () => (veng.current ? veng.current.getLocalStream() : null),
   };
 }

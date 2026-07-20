@@ -63,7 +63,7 @@ async function sendPushToExt(ext, payload) {
 
 async function createWebrtcEndpoint(c, id, password, context = 'internal', tenant_id = 1, video = false, max_contacts = 2) {
   const allow = video ? 'ulaw,alaw,g722,vp8,h264' : 'ulaw,alaw,g722';
-  await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,$2,'yes',60,$3) ON CONFLICT (id) DO UPDATE SET max_contacts=EXCLUDED.max_contacts", [id, max_contacts, tenant_id]);
+  await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,$2,'no','yes','yes',60,$3) ON CONFLICT (id) DO UPDATE SET max_contacts=EXCLUDED.max_contacts,remove_existing='no',remove_unavailable='yes',support_path='yes'", [id, max_contacts, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
   await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-ws',$1,$1,$2,'all',$3,$4,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-ws',allow=EXCLUDED.allow,webrtc='yes'", [id, context, allow, tenant_id]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
@@ -110,7 +110,23 @@ const pool = new Pool(CFG.db);
 const diagtrunk = require('./diagtrunk');
 const app = express();
 const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
-app.use(express.json());
+/* Las capturas de los manuales viajan como data URL dentro del JSON: una captura de
+ * pantalla pegada del portapapeles pesa varios MB, muy por encima de los 100 kB que
+ * trae express.json() por defecto. Sin esto la subida moria con un 413 que ademas
+ * responde HTML (no JSON), asi que el panel mostraba un error rojo sin texto.
+ * Se monta ANTES del parser global: body-parser marca req._body y no vuelve a parsear. */
+app.use('/api/manuales/img', express.json({ limit: '32mb' }));
+app.use(express.json({ limit: '4mb' }));
+/* Un 413 (o cualquier body ilegible) tiene que salir como JSON, para que el panel
+ * pueda mostrar un mensaje util en vez de un toast vacio. */
+app.use((err, req, res, next) => {
+  if (!err || !err.type) return next(err);
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'El archivo es demasiado grande. Probá con una captura de menos de 32 MB.' });
+  }
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'El cuerpo del pedido no es JSON válido.' });
+  return next(err);
+});
 const state = { ari: false, ami: false };
 let ari = null;
 (async () => { try { ari = await AriClient.connect(CFG.ari.url, CFG.ari.user, CFG.ari.pass); await ari.start(CFG.ari.app); state.ari = true; console.log('[ARI] ok'); try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { console.error('[AI] init', e.message); } } catch (e) { console.error('[ARI]', e.message); } })();
@@ -870,7 +886,7 @@ setInterval(c2cCleanup, 120000);
 // ============================================================
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_phones (id serial PRIMARY KEY, mac text UNIQUE, vendor text, model text, ext text, label text, line_label text, password text, tenant_id int DEFAULT 1, last_seen timestamptz, created_at timestamptz DEFAULT now())").catch(e => console.error('[PROV] table', e.message));
 async function createSipEndpoint(c, id, password, context = 'internal', tenant_id = 1) {
-  await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,1,'yes',60,$2) ON CONFLICT (id) DO NOTHING", [id, tenant_id]);
+  await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,1,'no','yes','yes',60,$2) ON CONFLICT (id) DO NOTHING", [id, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
   await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-udp',$1,$1,$2,'all','ulaw,alaw,g722',$3,'extension','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-udp'", [id, context, tenant_id]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
@@ -2125,7 +2141,7 @@ app.post('/api/endpoints', async (req, res) => {
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,$2,'yes',60,$3)", [id, max_contacts, tenant_id]);
+    await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,$2,'no','yes','yes',60,$3)", [id, max_contacts, tenant_id]);
     await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3)", [id, password, tenant_id]);
     if (webrtc) {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact,dtmf_mode) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes',$6)", [id, transport, context, allow, tenant_id, dtmf]);

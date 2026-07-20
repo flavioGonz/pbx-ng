@@ -4,6 +4,7 @@
 const os = require('os');
 const dgram = require('dgram');
 let srtp = null; try { srtp = require('./srtp.cjs'); } catch (_) {}
+let createVideoRtp = null; try { createVideoRtp = require('./rtp-video.cjs'); } catch (_) {}
 let sip = null, digest = null, LIBERR = '';
 try { sip = require('sip'); } catch (e) { LIBERR = 'require(sip): ' + e.message; }
 try { digest = require('sip/digest'); } catch (e) { LIBERR = LIBERR || ('require(sip/digest): ' + e.message); }
@@ -23,7 +24,10 @@ function decOf(pt) { return pt === 8 ? aDec : muDec; }
 
 let engine = null;
 function stop() { if (!engine) return; try { engine.timer && clearTimeout(engine.timer); } catch (_) {} try { engine.regTimer && clearTimeout(engine.regTimer); } catch (_) {} stopRtp(); try { sip && sip.stop && sip.stop(); } catch (_) {} engine = null; }
-function stopRtp() { if (!engine || !engine.rtp) return; try { engine.rtp.statsInt && clearInterval(engine.rtp.statsInt); } catch (_) {} try { engine.rtp.sendInt && clearInterval(engine.rtp.sendInt); } catch (_) {} try { engine.rtp.rtcpInt && clearInterval(engine.rtp.rtcpInt); } catch (_) {} try { engine.rtp.rtcpSock && engine.rtp.rtcpSock.close(); } catch (_) {} try { engine.rtp.sock && engine.rtp.sock.close(); } catch (_) {} engine.rtp = null; }
+function stopRtp() {
+  try { if (engine && engine.video) { engine.video.stop(); engine.video = null; } } catch (_) {}
+  if (!engine || !engine.rtp) return; try { engine.rtp.statsInt && clearInterval(engine.rtp.statsInt); } catch (_) {} try { engine.rtp.sendInt && clearInterval(engine.rtp.sendInt); } catch (_) {} try { engine.rtp.rtcpInt && clearInterval(engine.rtp.rtcpInt); } catch (_) {} try { engine.rtp.rtcpSock && engine.rtp.rtcpSock.close(); } catch (_) {} try { engine.rtp.sock && engine.rtp.sock.close(); } catch (_) {} engine.rtp = null;
+}
 
 function start(cfg, onEvent) {
   const emit = (e) => { try { onEvent && onEvent(e); } catch (_) {} };
@@ -67,27 +71,49 @@ function start(cfg, onEvent) {
   engine.timer = setTimeout(() => { if (engine && !engine.done) { engine.done = true; failReg('sin respuesta del servidor en 9s — revisá host/puerto/transporte y firewall (' + transport.toUpperCase() + ' ' + port + ')'); } }, 9000);
 
   // ---------- SDP ----------
-  // offer: ambos G.711 (0=PCMU, 8=PCMA) + telephone-event (RFC 4733). answer: solo el códec elegido.
-  function buildSdp(rtpPort, only, cryptoB64) {
+  // offer: G.711 (0=PCMU, 8=PCMA) + telephone-event (RFC 4733). answer: solo el códec elegido.
+  // El stack nativo sólo sabe G.711; el selector de códec de la app elige cuál OFRECER:
+  //   pcmu -> sólo PCMU · pcma -> sólo PCMA · auto/otros -> ambos (deja elegir al otro lado).
+  function offerPts() {
+    const pref = String((cfg && cfg.codec) || 'auto').toLowerCase();
+    if (pref === 'pcmu') return [0, 101];
+    if (pref === 'pcma') return [8, 101];
+    return [0, 8, 101];
+  }
+  // vopts = { port, pt } agrega una línea m=video H.264 (Etapa 1: solo RTP/AVP en claro).
+  function buildSdp(rtpPort, only, cryptoB64, vopts) {
     const aip = advIp();
-    const m = only ? [only.pt, only.dtmf] : [0, 8, 101];
+    const m = only ? [only.pt, only.dtmf] : offerPts();
     const proto = cryptoB64 ? 'RTP/SAVP' : 'RTP/AVP';
     const lines = ['v=0', 'o=- ' + Date.now() + ' ' + Date.now() + ' IN IP4 ' + aip, 's=PBX-NG', 'c=IN IP4 ' + aip, 't=0 0', 'm=audio ' + rtpPort + ' ' + proto + ' ' + m.join(' ')];
     if (cryptoB64) lines.push(srtp.cryptoLine(cryptoB64, 1));
     if (m.indexOf(0) >= 0) lines.push('a=rtpmap:0 PCMU/8000');
     if (m.indexOf(8) >= 0) lines.push('a=rtpmap:8 PCMA/8000');
     const dtmfPt = only ? only.dtmf : 101;
-    lines.push('a=rtpmap:' + dtmfPt + ' telephone-event/8000', 'a=fmtp:' + dtmfPt + ' 0-15', 'a=ptime:20', 'a=sendrecv', '');
+    lines.push('a=rtpmap:' + dtmfPt + ' telephone-event/8000', 'a=fmtp:' + dtmfPt + ' 0-15', 'a=ptime:20', 'a=sendrecv');
+    if (vopts) {
+      lines.push('m=video ' + vopts.port + ' RTP/AVP ' + vopts.pt,
+        'a=rtpmap:' + vopts.pt + ' H264/90000',
+        'a=fmtp:' + vopts.pt + ' profile-level-id=42e01f;packetization-mode=1',
+        'a=rtcp-fb:' + vopts.pt + ' nack pli',
+        'a=sendrecv');
+    }
+    lines.push('');
     return lines.join('\r\n');
   }
   function parseSdp(body) {
-    let rip = null, rport = null, audioPts = [], rtpmap = {};
+    let rip = null, rport = null, audioPts = [], rtpmap = {}, vport = null, vpts = [];
     String(body || '').split(/\r?\n/).forEach(l => {
-      if (l.indexOf('c=') === 0) { const m = l.match(/IN IP4 ([\d.]+)/); if (m) rip = m[1]; }
-      if (l.indexOf('m=audio') === 0) { const m = l.match(/m=audio (\d+) RTP\/AVP (.+)/); if (m) { rport = parseInt(m[1], 10); audioPts = m[2].trim().split(/\s+/).map(Number); } }
+      if (l.indexOf('c=') === 0) { const m = l.match(/IN IP4 ([\d.]+)/); if (m && !rip) rip = m[1]; }
+      if (l.indexOf('m=audio') === 0) { const m = l.match(/m=audio (\d+) RTP\/S?AVP F?(.+)/); if (m) { rport = parseInt(m[1], 10); audioPts = m[2].trim().split(/\s+/).map(Number); } }
+      if (l.indexOf('m=video') === 0) { const m = l.match(/m=video (\d+) RTP\/S?AVP F?(.+)/); if (m) { vport = parseInt(m[1], 10); vpts = m[2].trim().split(/\s+/).map(Number); } }
       const rm = l.match(/a=rtpmap:(\d+) ([^\/]+)\/(\d+)/); if (rm) rtpmap[rm[1]] = rm[2].toUpperCase();
     });
-    return { ip: rip, port: rport, audioPts, rtpmap };
+    // pt de video = el que mapea a H264, o el primero de la m=video
+    let vpt = null;
+    for (const pt of vpts) { if (rtpmap[pt] === 'H264') { vpt = pt; break; } }
+    if (vpt == null && vpts.length) vpt = vpts[0];
+    return { ip: rip, port: rport, audioPts, rtpmap, vport, vpt };
   }
   function pickAudioPt(sdp) { for (const pt of sdp.audioPts) { if (pt === 0 || pt === 8) return pt; const nm = sdp.rtpmap[pt]; if (nm === 'PCMU' || nm === 'PCMA') return pt; } return 0; }
   function findDtmfPt(sdp) { for (const pt in sdp.rtpmap) if (sdp.rtpmap[pt] === 'TELEPHONE-EVENT') return parseInt(pt, 10); return 101; }
@@ -147,6 +173,24 @@ function start(cfg, onEvent) {
   function pushOut(pcm) { if (engine && engine.rtp) { const a = engine.rtp.outBuf; for (let i = 0; i < pcm.length; i++) a.push(pcm[i]); } }
   function freeRtpPort() { return 40000 + (Math.floor(Math.random() * 4000) * 2); }
 
+  // ---------- Video RTP (H.264 · Etapa 1) ----------
+  function stopVideo() { if (engine && engine.video) { try { engine.video.stop(); } catch (_) {} engine.video = null; } }
+  function startVideo(remoteIp, remotePort, localPort, pt) {
+    if (!createVideoRtp) { log('info', 'video: módulo rtp-video no disponible (reconstruí la app)'); return; }
+    stopVideo();
+    const v = createVideoRtp({ log: (d, l) => log(d, l) });
+    v.start({
+      remoteIp, remotePort, localPort, pt: pt || 96,
+      onFrame: (au) => emit({ type: 'video-in', nal: au.toString('base64') }),   // Annex-B → renderer (decodifica)
+      onPli: () => emit({ type: 'video-keyframe' }),                             // el otro lado pide un keyframe
+    });
+    engine.video = v;
+    emit({ type: 'video', state: 'on' });
+    log('info', 'video ON → ' + remoteIp + ':' + remotePort + ' (pt ' + (pt || 96) + ')');
+  }
+  function sendVideoFrame(b64, ts90) { if (engine && engine.video) { try { engine.video.sendFrame(Buffer.from(b64, 'base64'), ts90 >>> 0); } catch (_) {} } }
+  function reqKeyframe() { if (engine && engine.video) { try { engine.video.requestKeyframe(); } catch (_) {} } }
+
   // ---------- DTMF (RFC 4733) ----------
   const DTMF_CODES = { '0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '*': 10, '#': 11, 'A': 12, 'B': 13, 'C': 14, 'D': 15 };
   function sendInfoDtmf(digit) {
@@ -176,12 +220,15 @@ function start(cfg, onEvent) {
   }
 
   // ---------- SALIENTE ----------
-  function placeCall(number) {
+  function placeCall(number, withVideo) {
     const n = String(number).replace(/[^\d*#+a-zA-Z]/g, ''); if (!n) return; stopRtp();
     const rtpPort = freeRtpPort(), callId = rstr() + '@' + ip, fromTag = rstr();
     const localMaster = secure ? srtp.newMasterB64() : null;
-    const rq = { method: 'INVITE', uri: 'sip:' + n + '@' + server + ':' + port + tparam, headers: { to: { uri: 'sip:' + n + '@' + cfg.domain }, from: { uri: 'sip:' + cfg.ext + '@' + cfg.domain, params: { tag: fromTag } }, 'call-id': callId, cseq: { method: 'INVITE', seq: ++engine.cseq }, contact: [{ uri: mkContact() }], 'content-type': 'application/sdp', 'user-agent': 'PBX-NG Softphone', via: [] }, content: buildSdp(rtpPort, null, localMaster) };
-    engine.call = { dir: 'out', number: n, callId, fromTag, toTag: null, rtpPort, remoteTarget: null, established: false, inviteRq: rq };
+    const wantVid = !!withVideo && !secure && !!createVideoRtp;   // Etapa 1: video solo en llamadas sin SRTP
+    const vPort = wantVid ? freeRtpPort() : 0;
+    const vopts = wantVid ? { port: vPort, pt: 96 } : null;
+    const rq = { method: 'INVITE', uri: 'sip:' + n + '@' + server + ':' + port + tparam, headers: { to: { uri: 'sip:' + n + '@' + cfg.domain }, from: { uri: 'sip:' + cfg.ext + '@' + cfg.domain, params: { tag: fromTag } }, 'call-id': callId, cseq: { method: 'INVITE', seq: ++engine.cseq }, contact: [{ uri: mkContact() }], 'content-type': 'application/sdp', 'user-agent': 'PBX-NG Softphone', via: [] }, content: buildSdp(rtpPort, null, localMaster, vopts) };
+    engine.call = { dir: 'out', number: n, callId, fromTag, toTag: null, rtpPort, remoteTarget: null, established: false, inviteRq: rq, video: { wanted: wantVid, localPort: vPort, pt: 96 } };
     emit({ type: 'call', state: 'calling', number: n });
     let authed = false;
     const cb = (rs) => {
@@ -195,7 +242,10 @@ function start(cfg, onEvent) {
         try { sip.send({ method: 'ACK', uri: engine.call.remoteTarget, headers: { to: rs.headers.to, from: rs.headers.from, 'call-id': callId, cseq: { method: 'ACK', seq: rs.headers.cseq.seq }, via: [] } }); } catch (_) {}
         const rem = parseSdp(rs.content);
         let sctx = null; if (secure) { const rc = srtp.parseCrypto(rs.content); const txk = srtp.keysFromB64(localMaster), rxk = rc && srtp.keysFromB64(rc); if (txk && rxk) sctx = { tx: { keys: txk, ctx: { roc: 0 } }, rx: { keys: rxk, ctx: { roc: 0 } } }; else log('info', 'SRTP: el remoto no devolvió a=crypto — media podría fallar'); }
-        if (rem.ip && rem.port) { startRtp(rem.ip, rem.port, rtpPort, pickAudioPt(rem), findDtmfPt(rem), sctx); engine.call.established = true; emit({ type: 'call', state: 'answered', number: n }); }
+        if (rem.ip && rem.port) {
+          startRtp(rem.ip, rem.port, rtpPort, pickAudioPt(rem), findDtmfPt(rem), sctx); engine.call.established = true; emit({ type: 'call', state: 'answered', number: n });
+          if (engine.call.video && engine.call.video.wanted && rem.vport) startVideo(rem.ip, rem.vport, engine.call.video.localPort, rem.vpt);
+        }
         else emit({ type: 'call', state: 'ended', reason: 'sin SDP remoto' });
       } else if (rs.status >= 300) { emit({ type: 'call', state: 'ended', reason: rs.status + ' ' + (rs.reason || '') }); engine.call = null; }
     };
@@ -208,8 +258,9 @@ function start(cfg, onEvent) {
       if (rq.method === 'OPTIONS') { sip.send(sip.makeResponse(rq, 200, 'OK')); return; }
       if (rq.method === 'INVITE') {
         const from = (rq.headers.from && rq.headers.from.uri && sip.parseUri(rq.headers.from.uri).user) || 'desconocido';
-        engine.call = { dir: 'in', number: from, callId: rq.headers['call-id'], rtpPort: freeRtpPort(), inviteRq: rq, established: false, remote: parseSdp(rq.content) };
-        sip.send(sip.makeResponse(rq, 180, 'Ringing')); emit({ type: 'call', state: 'incoming', number: from }); return;
+        const rem = parseSdp(rq.content);
+        engine.call = { dir: 'in', number: from, callId: rq.headers['call-id'], rtpPort: freeRtpPort(), inviteRq: rq, established: false, remote: rem, video: { offered: !!rem.vport, localPort: freeRtpPort(), pt: 96 } };
+        sip.send(sip.makeResponse(rq, 180, 'Ringing')); emit({ type: 'call', state: 'incoming', number: from, video: !!rem.vport }); return;
       }
       if (rq.method === 'ACK') return;
       if (rq.method === 'BYE' || rq.method === 'CANCEL') { sip.send(sip.makeResponse(rq, 200, 'OK')); stopRtp(); if (engine) engine.call = null; emit({ type: 'call', state: 'ended', reason: rq.method === 'CANCEL' ? 'cancelada' : 'colgó el otro lado' }); return; }
@@ -217,21 +268,26 @@ function start(cfg, onEvent) {
       sip.send(sip.makeResponse(rq, 405, 'Method Not Allowed'));
     } catch (_) {}
   }
-  function accept() {
+  function accept(withVideo) {
     if (!engine || !engine.call || engine.call.dir !== 'in') return;
     const c = engine.call, rq = c.inviteRq, rem = c.remote || {};
     const txPt = pickAudioPt(rem), dtmfPt = findDtmfPt(rem);
     const rc = secure ? srtp.parseCrypto((rq && rq.content) || '') : null;
     const ourMaster = (secure && rc) ? srtp.newMasterB64() : null;
+    const ansVid = !!withVideo && !!rem.vport && !secure && !!createVideoRtp;  // solo si el otro ofreció video y no es SRTP
+    const vopts = ansVid ? { port: c.video.localPort, pt: rem.vpt || 96 } : null;
     const rs = sip.makeResponse(rq, 200, 'OK');
     rs.headers.contact = [{ uri: mkContact() }]; rs.headers['content-type'] = 'application/sdp';
-    rs.content = buildSdp(c.rtpPort, { pt: txPt, dtmf: dtmfPt }, ourMaster);
+    rs.content = buildSdp(c.rtpPort, { pt: txPt, dtmf: dtmfPt }, ourMaster, vopts);
     const localTag = rs.headers.to && rs.headers.to.params && rs.headers.to.params.tag;
     const fromH = rq.headers.from || {};
     c.dialog = { callId: rq.headers['call-id'], localUri: 'sip:' + cfg.ext + '@' + cfg.domain, localTag, remoteUri: fromH.uri || '', remoteTag: fromH.params && fromH.params.tag, remoteTarget: (rq.headers.contact && rq.headers.contact[0] && rq.headers.contact[0].uri) || fromH.uri, cseq: (rq.headers.cseq && rq.headers.cseq.seq) || 1 };
     sip.send(rs);
     let sctx = null; if (ourMaster && rc) { const txk = srtp.keysFromB64(ourMaster), rxk = srtp.keysFromB64(rc); if (txk && rxk) sctx = { tx: { keys: txk, ctx: { roc: 0 } }, rx: { keys: rxk, ctx: { roc: 0 } } }; }
-    if (rem.ip && rem.port) { startRtp(rem.ip, rem.port, c.rtpPort, txPt, dtmfPt, sctx); c.established = true; emit({ type: 'call', state: 'answered', number: c.number }); }
+    if (rem.ip && rem.port) {
+      startRtp(rem.ip, rem.port, c.rtpPort, txPt, dtmfPt, sctx); c.established = true; emit({ type: 'call', state: 'answered', number: c.number });
+      if (ansVid && rem.vport) startVideo(rem.ip, rem.vport, c.video.localPort, rem.vpt);
+    }
     else emit({ type: 'call', state: 'ended', reason: 'sin SDP remoto' });
   }
   function reject() { if (engine && engine.call && engine.call.dir === 'in') { try { sip.send(sip.makeResponse(engine.call.inviteRq, 486, 'Busy Here')); } catch (_) {} engine.call = null; emit({ type: 'call', state: 'ended', reason: 'rechazada' }); } }
@@ -258,7 +314,7 @@ function start(cfg, onEvent) {
     const rq = { method: 'SUBSCRIBE', uri: 'sip:' + cfg.ext + '@' + server + ':' + port + tparam, headers: { to: { uri: 'sip:' + cfg.ext + '@' + cfg.domain }, from: { uri: 'sip:' + cfg.ext + '@' + cfg.domain, params: { tag: rstr() } }, 'call-id': cid, cseq: { method: 'SUBSCRIBE', seq: ++engine.cseq }, contact: [{ uri: mkContact() }], event: 'message-summary', accept: 'application/simple-message-summary', expires: 3600, 'user-agent': 'PBX-NG Softphone', via: [] }, content: '' };
     try { sip.send(rq, (rs) => { if (!engine) return; if ((rs.status === 401 || rs.status === 407) && !auth) { try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = ++engine.cseq; rq.headers.via = []; sip.send(rq, () => {}); } catch (_) {} } log('in', 'SUBSCRIBE(mwi) → ' + rs.status); }); } catch (_) {}
   }
-  engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf;
+  engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf; engine.sendVideoFrame = sendVideoFrame; engine.reqKeyframe = reqKeyframe;
   function kick() { setTimeout(doRegister, 120); }
   if (wantSrv && !/^[0-9.]+$/.test(server)) {
     try { require('dns').resolveSrv('_sip._' + transport + '.' + server, (err, recs) => { if (!err && recs && recs.length) { recs.sort((a, b) => (a.priority - b.priority) || (b.weight - a.weight)); server = recs[0].name; port = recs[0].port; log('info', 'SRV → ' + server + ':' + port); } kick(); }); }
@@ -267,12 +323,14 @@ function start(cfg, onEvent) {
   return { ok: true };
 }
 
-function call(n) { engine && engine.placeCall && engine.placeCall(n); }
-function accept() { engine && engine.accept && engine.accept(); }
+function call(n, video) { engine && engine.placeCall && engine.placeCall(n, video); }
+function accept(video) { engine && engine.accept && engine.accept(video); }
 function reject() { engine && engine.reject && engine.reject(); }
 function hangup() { engine && engine.hangup && engine.hangup(); }
 function audioOut(pcm) { engine && engine.pushOut && engine.pushOut(pcm); }
 function setMuted(m) { engine && engine.setMuted && engine.setMuted(m); }
 function dtmf(d) { engine && engine.dtmf && engine.dtmf(d); }
 function transfer(t) { engine && engine.transfer && engine.transfer(t); }
-module.exports = { start, stop, call, accept, reject, hangup, audioOut, setMuted, dtmf, transfer };
+function videoOut(b64, ts90) { engine && engine.sendVideoFrame && engine.sendVideoFrame(b64, ts90); }
+function reqKeyframe() { engine && engine.reqKeyframe && engine.reqKeyframe(); }
+module.exports = { start, stop, call, accept, reject, hangup, audioOut, setMuted, dtmf, transfer, videoOut, reqKeyframe };

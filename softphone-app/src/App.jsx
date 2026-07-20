@@ -14,7 +14,7 @@ import QrProvision from './QrProvision.jsx';
 
 function withVT(fn) { try { if (typeof document !== 'undefined' && document.startViewTransition) { document.startViewTransition(() => flushSync(fn)); return; } } catch {} fn(); }
 const initials = (n) => (String(n || '?')).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
-const APP_VERSION = 'v0.4.7';
+const APP_VERSION = 'v0.4.9';
 const getPhoto = () => { try { return localStorage.getItem('sp_photo') || ''; } catch { return ''; } };
 
 function Svg({ s = 22, c = 'currentColor', w = 2, children }) { return <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke={c} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round">{children}</svg>; }
@@ -592,6 +592,33 @@ export default function App() {
                   <div style={{ flex: 1, minWidth: 0 }}>{LF(IcUser({ c: '#9db4e0', s: 17 }), 'Interno / usuario', 'ext', 'Tu interno o usuario SIP, ej. 2001.', 'text', '2001')}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>{LF(IcPower({ c: '#9db4e0', s: 17 }), 'Contraseña', 'pass', 'Contraseña del interno SIP.', 'password')}</div>
                 </div>
+                {(() => {
+                  // WebRTC: lista completa (el SDP se remuxa). SIP nativo: sólo G.711 (el stack
+                  // nativo encodea µ-law/A-law; Opus/G.722 no se pueden ofrecer de verdad).
+                  const opts = sipMode
+                    ? [['auto', 'Auto'], ['pcmu', 'G.711 µ'], ['pcma', 'G.711 A']]
+                    : [['auto', 'Auto'], ['opus', 'Opus'], ['g722', 'G.722'], ['pcmu', 'G.711 µ'], ['pcma', 'G.711 A']];
+                  const cur = cfg.codec || 'auto';
+                  const isG711 = cur === 'pcmu' || cur === 'pcma';
+                  return (
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 12, color: '#8fa6cc', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>Códec de audio <span style={{ color: '#5c7099', fontSize: 11 }}>{sipMode ? '· G.711 (SIP nativo)' : '· para probar transcoding'}</span></div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {opts.map(([v, lb]) => { const on = sipMode ? (v === 'auto' ? !isG711 : cur === v) : (cur === v); return (
+                          <button key={v} type="button" onClick={() => setCfg(c => ({ ...c, codec: v }))} style={{ padding: '7px 11px', borderRadius: 9, border: `1px solid ${on ? '#4c9dff' : 'rgba(255,255,255,.16)'}`, background: on ? 'rgba(76,157,255,.15)' : 'rgba(255,255,255,.04)', color: on ? '#cfe0ff' : '#8fa6cc', cursor: 'pointer', fontWeight: 600, fontSize: 12.5 }}>{lb}</button>); })}
+                      </div>
+                      {!sipMode && cur !== 'auto' && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12.5, color: '#9fb0d6', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={!!cfg.codecForce} onChange={e => setCfg(c => ({ ...c, codecForce: e.target.checked }))} />
+                          Forzar (ofrecer sólo este códec) — obliga al SBC a transcodificar
+                        </label>
+                      )}
+                      {sipMode && isG711 && (
+                        <div style={{ fontSize: 11.5, color: '#5c7099', marginTop: 6 }}>Se ofrece sólo {cur === 'pcmu' ? 'G.711 µ-law' : 'G.711 A-law'}; en Auto se ofrecen ambos y elige el otro extremo.</div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <button onClick={loginConnect} disabled={!isComplete(cfg)} style={{ width: '100%', marginTop: 8, padding: '13px 0', borderRadius: 11, border: 'none', background: isComplete(cfg) ? 'linear-gradient(90deg,#22c55e,#16a34a)' : 'rgba(255,255,255,.1)', color: '#fff', fontWeight: 700, fontSize: 15, cursor: isComplete(cfg) ? 'pointer' : 'not-allowed', opacity: isComplete(cfg) ? 1 : .6 }}>Conectar y verificar</button>
                 <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: '#5c7099' }}>{APP_VERSION} · datos cifrados en este equipo</div>
               </div>
@@ -878,7 +905,20 @@ export default function App() {
                     {!sipMode && F('WSS de respaldo (failover, opcional)', 'wssBackup', 'text', 'wss://backup/ws')}
                     {F('Dominio SIP', 'domain', 'text', 'tu-pbx.com')}{F('Interno / usuario', 'ext', 'text', '2001')}
                     <div style={{ padding: '8px 0' }}><div style={S.fieldLbl}>Contraseña</div><input style={S.inp} type="password" value={cfg.pass || ''} onChange={e => setCfg(c => ({ ...c, pass: e.target.value }))} /></div>
-                    {sipMode && <div style={{ fontSize: 11, color: C.sub, margin: '2px 0 8px' }}>Modo SIP nativo (solo app Windows): registro UDP/TCP/TLS + llamadas con audio <b>G.711</b> (µ-law/A-law), DTMF (RFC 4733 / INFO), SRTP-SDES, RTCP y transferencia REGISTER/REFER. Sin video ni banda ancha (G.722/Opus) por ahora.</div>}
+                    {sipMode && <div style={{ fontSize: 11, color: C.sub, margin: '2px 0 8px' }}>Modo SIP nativo (solo app Windows): registro UDP/TCP/TLS + audio <b>G.711</b> (µ-law/A-law), <b>video H.264</b> (WebCodecs, RTP RFC 6184), DTMF (RFC 4733 / INFO), SRTP-SDES, RTCP y transferencia REGISTER/REFER. El video se negocia al iniciar la llamada (botón de cámara); el audio de <b>banda ancha</b> (Opus/G.722) sigue siendo solo del modo <b>WebRTC</b>.</div>}
+                    <div style={{ padding: '8px 0' }}>
+                      <div style={S.fieldLbl}>Códec de audio</div>
+                      <select style={S.sel} value={(sipMode && !['auto', 'pcmu', 'pcma'].includes(cfg.codec)) ? 'auto' : (cfg.codec || 'auto')} onChange={e => setCfg(c => ({ ...c, codec: e.target.value }))}>
+                        <option value="auto">Auto (deja elegir a la central)</option>
+                        {!sipMode && <option value="opus">Opus (banda ancha)</option>}
+                        {!sipMode && <option value="g722">G.722 (banda ancha)</option>}
+                        <option value="pcmu">G.711 µ-law (PCMU)</option>
+                        <option value="pcma">G.711 A-law (PCMA)</option>
+                      </select>
+                      {sipMode
+                        ? (cfg.codec === 'pcmu' || cfg.codec === 'pcma') && <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>Se ofrece sólo {cfg.codec === 'pcmu' ? 'G.711 µ-law' : 'G.711 A-law'}. En <b>Auto</b> se ofrecen ambos.</div>
+                        : cfg.codec && cfg.codec !== 'auto' && <ToggleRow label="Forzar este códec" desc="Ofrece sólo este códec: obliga al SBC a transcodificar si la central usa otro." on={!!cfg.codecForce} onChange={v => setCfg(c => ({ ...c, codecForce: v }))} />}
+                    </div>
                     <button style={{ ...S.primary, margin: '4px 0 6px' }} disabled={!isComplete(cfg)} onClick={connectNow}>{registered ? 'Reconectar' : 'Conectar'}</button>
                     <button onClick={() => setShowDiag(true)} style={{ width: '100%', padding: 9, borderRadius: 9, border: `1px solid ${C.line}`, background: '#fff', color: C.sub, cursor: 'pointer', fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>{IcShield({ c: C.sub, s: 15 })} Diagnóstico</button>
                     {sipMode && sipMsg && <div style={{ fontSize: 12, color: sipReg === 'registered' ? '#15803d' : C.red, marginBottom: 6 }}>{sipReg === 'registered' ? '✓ ' : '✗ '}{sipMsg}</div>}

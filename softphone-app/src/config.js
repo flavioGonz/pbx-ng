@@ -4,6 +4,7 @@ const DEFAULTS = {
   wss: '', wssBackup: '', domain: '', ext: '', pass: '', name: '',
   stun: 'stun:stun.l.google.com:19302', turn: '', turnUser: '', turnPass: '',
   sipServer: '', sipPort: '5060', sipTransport: 'udp', sipSrtp: 'none', sipDtmf: 'rfc4733', tlsVerify: false, sipSrv: false, sipMwi: false, soundsUi: true,
+  codec: 'auto', codecForce: false,   // preferencia de códec de audio (para probar transcoding del SBC)
 };
 // Almacen unico: { config, accounts }. En Electron va cifrado (safeStorage/DPAPI);
 // en navegador cae a localStorage. Migra el formato viejo (config plana) al vuelo.

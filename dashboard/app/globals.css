@@ -99,23 +99,11 @@ body, .mantine-AppShell-navbar, .mantine-AppShell-header, .mantine-AppShell-main
 .pbx-tk-draw { stroke-dasharray: 40; stroke-dashoffset: 40; animation: pbxDraw .5s .12s ease forwards; }
 @keyframes pbxDraw { to { stroke-dashoffset: 0; } }
 
-/* ── Notificaciones (sileo + iconografía PBX-NG) ───────────────────────────── */
-.pbx-nico { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 9px; background: color-mix(in srgb, var(--nc) 14%, transparent); }
-.pbx-draw { stroke-dasharray: 42; stroke-dashoffset: 42; animation: pbx-draw .42s cubic-bezier(.2,.9,.3,1) forwards; }
-@keyframes pbx-draw { to { stroke-dashoffset: 0; } }
-.pbx-nico-spin { animation: pbx-spin .9s linear infinite; transform-origin: 50% 50%; }
-@keyframes pbx-spin { to { transform: rotate(360deg); } }
-.pbx-shake { animation: pbx-shake .7s ease-in-out infinite; transform-origin: 50% 50%; }
-@keyframes pbx-shake { 0%,100% { transform: rotate(0); } 20% { transform: rotate(-11deg); } 40% { transform: rotate(9deg); } 60% { transform: rotate(-6deg); } 80% { transform: rotate(4deg); } }
-.pbx-wave path { animation: pbx-wave 1s ease-in-out infinite; }
-@keyframes pbx-wave { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .pbx-draw, .pbx-nico-spin, .pbx-shake, .pbx-wave path { animation: none; stroke-dashoffset: 0; } }
-
-/* ── Entradas y salidas de las fichas / pestañas ───────────────────────────── */
-.pbx-fade-in { animation: pbx-fade-in .28s cubic-bezier(.2,.9,.3,1) both; }
-@keyframes pbx-fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.pbx-tabin { animation: pbx-tabin .3s cubic-bezier(.2,.9,.3,1) both; }
-@keyframes pbx-tabin { from { opacity: 0; transform: translateX(10px) scale(.995); } to { opacity: 1; transform: none; } }
-.pbx-row { padding: 5px 6px; border-radius: 8px; transition: background .16s ease; }
-.pbx-row:hover { background: var(--mantine-color-default-hover); }
-@media (prefers-reduced-motion: reduce) { .pbx-fade-in, .pbx-tabin { animation: none; } }
+/* PBX-NG · logo grande flotante del login */
+.pbx-login-float {
+  display: flex; justify-content: center; margin-bottom: 8px;
+  animation: pbxFlota 5.5s ease-in-out infinite;
+  filter: drop-shadow(0 18px 40px rgba(124, 58, 237, .45));
+}
+@keyframes pbxFlota { 0%, 100% { transform: translateY(-6px); } 50% { transform: translateY(10px); } }
+@media (prefers-reduced-motion: reduce) { .pbx-login-float { animation: none; } }

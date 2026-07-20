@@ -39,6 +39,38 @@ function constraints(video) {
 }
 
 // ---------- ICE ----------
+// Prefiere (o fuerza) un códec de audio reordenando/filtrando la m=audio del SDP local.
+// Es la forma de PROBAR el transcoding del SBC: si el softphone ofrece solo G.722/Opus y
+// la otra punta habla G.711, el borde tiene que transcodificar. 'auto' = no toca nada.
+function preferCodec(nombre, forzar) {
+  return (description) => {
+    try {
+      if (!nombre || nombre === 'auto' || !description || !description.sdp) return Promise.resolve(description);
+      const objetivo = String(nombre).toLowerCase();
+      const lines = description.sdp.split(/\r?\n/);
+      const mIdx = lines.findIndex((l) => l.startsWith('m=audio'));
+      if (mIdx < 0) return Promise.resolve(description);
+      const rtpmap = {};
+      for (const l of lines) { const m = l.match(/^a=rtpmap:(\d+)\s+([A-Za-z0-9.\-]+)\//); if (m) rtpmap[m[1]] = m[2].toLowerCase(); }
+      const parts = lines[mIdx].split(' ');
+      const head = parts.slice(0, 3);                 // m=audio <port> <proto>
+      const pts = parts.slice(3);
+      const dtmf = pts.filter((pt) => rtpmap[pt] === 'telephone-event');
+      const pref = pts.filter((pt) => rtpmap[pt] === objetivo);
+      if (!pref.length) return Promise.resolve(description);   // el navegador no ofrece ese códec: no tocar
+      const orden = forzar ? [...pref, ...dtmf] : [...pref, ...pts.filter((pt) => !pref.includes(pt))];
+      lines[mIdx] = [...head, ...orden].join(' ');
+      let out = lines;
+      if (forzar) {
+        const keep = new Set(orden);
+        out = lines.filter((l) => { const m = l.match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/); return !(m && !keep.has(m[1])); });
+      }
+      description.sdp = out.join('\r\n');
+    } catch (e) { try { console.warn('[sip] preferCodec', e); } catch {} }
+    return Promise.resolve(description);
+  };
+}
+
 function iceServersFrom(cfg) {
   const list = [];
   (cfg.stun || 'stun:stun.l.google.com:19302').split(',').map(s => s.trim()).filter(Boolean)
@@ -291,7 +323,7 @@ export function useSip() {
       try { await primeMedia(useVid); } catch (e) { const msg = e && e.name === 'NotAllowedError' ? 'Micrófono/cámara denegado' : 'Sin micrófono/cámara: ' + (e && e.message || e); setNote(msg); try { console.error('[sip] getUserMedia', e); } catch {} return { error: msg }; }
       const target = UserAgent.makeURI(`sip:${n}@${cfg.domain}`);
       const inviter = new Inviter(ua.current, target, {
-        sessionDescriptionHandlerOptions: { constraints: constraints(useVid), iceGatheringTimeout: 1500 },
+        sessionDescriptionHandlerOptions: { constraints: constraints(useVid), iceGatheringTimeout: 1500, modifiers: [preferCodec(cfg.codec, cfg.codecForce)] },
         earlyMedia: true,
       });
       wire(inviter, { dir: 'out', number: n, since: 0, video: useVid });
@@ -316,7 +348,7 @@ export function useSip() {
     try { await primeMedia(useVid); } catch (e) { try { console.error('[sip] getUserMedia accept', e); } catch {} }
     wire(inv, { dir: 'in', number: from, since: 0, video: useVid });
     setNote('Conectando…');
-    try { await inv.accept({ sessionDescriptionHandlerOptions: { constraints: constraints(useVid), iceGatheringTimeout: 1500 } }); setNote(''); }
+    try { const _c = cfgRef.current || {}; await inv.accept({ sessionDescriptionHandlerOptions: { constraints: constraints(useVid), iceGatheringTimeout: 1500, modifiers: [preferCodec(_c.codec, _c.codecForce)] } }); setNote(''); }
     catch (e) { setNote('Error al atender: ' + e.message); try { console.error('[sip] accept', e); } catch {} }
   }, [incoming, incomingVideo, wire]);
 

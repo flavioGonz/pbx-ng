@@ -12,14 +12,12 @@
 ### 1.1 No es una central: es el director de orquesta
 
 PBX-NG **no reemplaza** a las piezas clásicas de la telefonía IP: las **coordina**. Debajo del capó
-corren tres motores libres, cada uno excelente en lo suyo y ninguno pensado para conversar con el
+corren varios motores libres, cada uno excelente en lo suyo y ninguno pensado para conversar con el
 otro. PBX-NG es la capa que los hace trabajar juntos, y la única cara que ves.
 
 | Motor | Qué resuelve | Qué NO hace |
 |---|---|---|
 | **Asterisk 22** | Las llamadas: dialplan, colas, IVR, buzón, grabación, conferencias | No sabe defenderse de Internet ni hablar con navegadores |
-| **Kamailio** (el SBC) | El borde: seguridad SIP, enrutamiento por operador, ocultamiento de topología | No procesa llamadas ni maneja audio |
-| **rtpengine** | El audio: ancla los medios, resuelve NAT, cifra y traduce | No entiende de señalización |
 | **coturn** | STUN y TURN: que un teléfono detrás de cualquier NAT tenga audio | No es una central |
 | **go2rtc** | Traduce el video RTSP de porteros y cámaras a WebRTC | Solo video |
 | **PostgreSQL** | La memoria: configuración, llamadas, grabaciones, CRM | — |
@@ -33,28 +31,25 @@ que cada motor necesita.
 El recorrido de **una llamada que entra desde la calle** cuenta la historia mejor que cualquier
 diagrama:
 
-1. El operador manda la llamada a tu IP pública. **La recibe el SBC (Kamailio)**, no Asterisk.
-2. El SBC decide si es legítima (¿viene del operador o de un robot?), le esconde la topología
-   interna, y la manda al Asterisk que corresponde (*dispatcher*).
-3. **El audio no lo toca Asterisk**: queda anclado en **rtpengine**, en el borde. Por eso el núcleo
-   nunca queda expuesto.
-4. **Asterisk** hace lo suyo: mira el dialplan, decide si va a una extensión, una cola o un IVR, graba
+1. El operador manda la llamada a tu enlace. Si tenés un **borde** adelante (SBC-NG u otro), la
+   recibe él y le pasa a la central sólo lo que es legítimo; si no lo tenés, la troncal llega
+   directo a Asterisk. Las dos formas son válidas — ver *§5 · El borde*.
+2. **Asterisk** hace lo suyo: mira el dialplan, decide si va a una extensión, una cola o un IVR, graba
    si corresponde, deja el mensaje en el buzón si nadie atiende.
-5. Si el que atiende es un **softphone WebRTC**, el navegador negocia el audio con **coturn**, que le
+3. Si el que atiende es un **softphone WebRTC**, el navegador negocia el audio con **coturn**, que le
    da un camino aunque esté detrás del NAT de su casa.
-6. Todo lo que pasó queda en **PostgreSQL**: el registro de la llamada, la grabación, la encuesta.
-7. Y el **control-plane** lo muestra en el panel, y te manda un correo si algo salió mal.
+4. Todo lo que pasó queda en **PostgreSQL**: el registro de la llamada, la grabación, la encuesta.
+5. Y el **control-plane** lo muestra en el panel, y te manda un correo si algo salió mal.
 
 ![Cómo se comunican los componentes](img/inst-01-arquitectura.svg)
 
 ### 1.3 Qué implica esto para vos
 
-- **Cada motor se puede prender y apagar** (Configuración → Módulos). Sin SBC, la central sigue
-  andando en una LAN; sin TURN, los softphones remotos se quedan sin audio; sin el motor de IA, hay
-  que subir los audios a mano.
+- **Cada motor se puede prender y apagar** (Configuración → Módulos). Sin TURN, los softphones
+  remotos se quedan sin audio; sin el motor de IA, hay que subir los audios a mano.
 - **Cada motor tiene su panel de diagnóstico** en PBX-NG. Cuando algo falla, la pregunta correcta es
   *"¿qué motor falló?"*, y este manual te lleva a la pantalla de ese motor.
-- **No hay que configurar Asterisk ni Kamailio a mano.** El panel genera su configuración. Si editás
+- **No hay que configurar Asterisk a mano.** El panel genera su configuración. Si editás
   archivos por debajo, el panel los va a sobrescribir la próxima vez que guardes algo.
 
 
@@ -100,8 +95,8 @@ tenés que volver atrás a rehacer algo que ya habías configurado.
 | 3 | **Dominio y certificado** | Configuración → Proxy / TLS | **Recién ahora** el dominio: apuntás el DNS, emitís el certificado y pasás a entrar por `https://tu-dominio`. Sin TLS, las extensiones WebRTC no funcionan (el navegador no da micrófono sin HTTPS). |
 | 4 | Componentes (IPs) | Configuración → Componentes | El panel necesita saber dónde vive cada pieza. |
 | 5 | Marca | Configuración → Branding | Aparece en el panel, en los correos y en los informes. |
-| 6 | **SBC** | SBC-NG | El borde: seguridad, anti-flood, operadores y medios. |
-| 7 | TURN | SBC-NG → TURN | El que hace que WebRTC funcione detrás de cualquier NAT. |
+| 6 | *(opcional)* **Borde** | Panel de SBC-NG | Sólo si vas a exponer la central a Internet. Es otro producto: ver su manual. |
+| 7 | TURN | Configuración → Módulos | El que hace que WebRTC funcione detrás de cualquier NAT. |
 | 8 | Troncal | Troncales | La línea con el mundo. |
 | 9 | Rutas salientes | Rutas → Salientes | Qué se marca y por dónde sale. |
 | 10 | Rutas entrantes | Rutas → Entrantes | Qué pasa cuando te llaman. |
@@ -326,7 +321,7 @@ router hacia el servidor**. Estos son los mínimos:
 | `5060` / `5061` | UDP+TCP / TCP | SIP (troncales y teléfonos) |
 | `3478` | **UDP y TCP** | STUN/TURN — los dos |
 | `49152-65535` | UDP | Rango de relay del TURN |
-| `30000-40000` | UDP | Audio de las troncales (rtpengine) |
+| `30000-40000` | UDP | Audio (RTP) de las troncales y los teléfonos |
 
 > **Los dos errores que dejan las llamadas mudas:**
 > 1. Abrir `3478` y **olvidar el rango de relay** (`49152-65535/UDP`). El teléfono obtiene la
@@ -389,304 +384,55 @@ texto y que lo sintetice la central** con su propia voz.
 
 ---
 
-## 5. SBC-NG · el borde de la central
+## 5. El borde: SBC-NG
 
-» Menú lateral → Telefonía → SBC-NG
+» Menú lateral → Telefonía → SBC-NG *(sólo aparece si tenés SBC-NG instalado)*
 
-Esta es la sección más importante del sistema, y la que menos se entiende. Vale la pena leerla
-entera **antes** de conectar la primera troncal.
+**SBC-NG es un producto aparte de PBX-NG.** Tiene su propia licencia, su propio panel, su propio
+manual y su propio ciclo de versiones. Esta sección explica únicamente **cómo se relaciona con la
+central**; todo lo que sea configurarlo está en el **Manual de Configuración de SBC-NG**.
 
-### 5.1 ¿Qué es el SBC y por qué existe?
+### 5.1 PBX-NG funciona con SBC y sin SBC
 
-Un **SBC** (Session Border Controller) es un guardián que se para entre Internet y tu central.
-Asterisk sabe manejar llamadas, pero no está pensado para estar desnudo frente a Internet: en
-cuestión de horas empieza a recibir miles de intentos de registro de robots buscando extensiones con
-contraseñas débiles.
+La central no depende del borde. Son dos escenarios válidos y soportados:
 
-El SBC hace cinco cosas que Asterisk no debería hacer solo:
-
-1. **Escudo.** Filtra, limita y bloquea antes de que el tráfico llegue a la central.
-2. **Ocultamiento de topología.** El operador y los atacantes ven al SBC, nunca a tu Asterisk. Las
-   IPs internas no salen a la luz.
-3. **Enrutamiento por operador (LCR).** Elige por qué proveedor sale cada llamada, con failover si
-   uno se cae.
-4. **Traducción SIP.** Cada operador pide las cosas a su manera; el SBC reescribe las cabeceras
-   para que la llamada sea aceptada.
-5. **Anclaje de medios.** El audio pasa por el SBC (rtpengine), no directo a Asterisk: eso resuelve
-   NAT y evita exponer los puertos RTP del núcleo.
-
-> **Regla práctica:** si la central está expuesta a Internet, el SBC **no es opcional**. Es la
-> diferencia entre una central que dura años y una que te vacían la cuenta un fin de semana.
-
-![SBC-NG · panel principal](img/cfg-19-sbc-inicio.png)
-
-### 5.2 Monitoreo
-
-» SBC-NG → Monitoreo
-
-La pantalla de entrada del SBC. Muestra en vivo:
-
-| Indicador | Qué te dice |
-|---|---|
-| **Uptime** | Hace cuánto que el SBC está levantado (si se reinicia solo, hay un problema) |
-| **Requests SIP / s** | El pulso del borde. Un pico sin llamadas = ataque |
-| **Sesiones de medios** | Cuántas llamadas tienen el audio anclado ahora mismo |
-| **IPs bloqueadas** | Cuántos atacantes están en la lista negra |
-| **Conexiones TCP** | Registros por TCP/TLS activos |
-| **Memoria compartida** | Salud interna del SBC |
-
-![SBC · Monitoreo](img/cfg-20-sbc-monitoreo.png)
-
-### 5.3 Seguridad
-
-» SBC-NG → Seguridad
-
-Tres mecanismos, y conviene entender la diferencia porque se complementan:
-
-**Anti-flood (pike).** Automático. Si una IP manda paquetes SIP a un ritmo anormal, se la corta en
-el acto. Es la defensa contra la inundación.
-
-**IPs bloqueadas (ipban).** La lista negra dinámica: quien falla el registro varias veces cae acá.
-El panel muestra **la IP, su país (con bandera) y el ISP**, y permite desbloquear, bloquear a mano,
-o **bloquear el país entero** de un clic — si nunca vas a recibir llamadas legítimas desde ese
-país, no hay razón para dejarlo tocar el timbre.
-
-**Lista de bloqueo SIP (secfilter).** Filtro por contenido: bloquea *user-agents* de escaneo
-conocidos (`friendly-scanner`, `sipvicious`), usuarios que se prueban a mansalva (`100`, `admin`,
-`test`) o países en la cabecera. Es la defensa quirúrgica.
-
-![SBC · Seguridad e IPs bloqueadas](img/cfg-21-sbc-seguridad.png)
-
-### 5.4 Ruteo → Operadores (LCR)
-
-» SBC-NG → Ruteo → Operadores
-
-Acá se define **por dónde sale cada llamada**.
-
-**Un operador** se carga con:
-
-| Campo | Qué es | Ejemplo |
+| Escenario | Cómo entra y sale el tráfico | Cuándo elegirlo |
 |---|---|---|
-| **Dirección** | Host y puerto del proveedor | `sip.operador.com:5060` |
-| **Strip** | Cuántos dígitos sacarle al número marcado | `1` (para quitar el 0 de salida) |
-| **Prefijo** | Qué agregarle antes de mandarlo | `598` |
-| **Descripción** | Para que se entienda en la lista | `Antel SIP` |
+| **PBX-NG sola** | Las troncales del operador llegan directo a la central, y los teléfonos se registran contra ella. | Instalaciones en LAN, o cuando el operador entrega el enlace por una red privada o un túnel. |
+| **PBX-NG + SBC-NG** | El operador y los teléfonos remotos llegan al borde, y el borde habla con la central por la red interna. | Siempre que la central quede expuesta a Internet. |
 
-**Una regla** dice: "lo que empieza con este prefijo, mandalo a estos operadores, en este orden".
-Si el primero no responde, la llamada **se va sola al siguiente** (failover). Ahí está la gracia:
-podés tener el operador barato primero y el confiable de respaldo.
+El panel se adapta solo: si detecta un borde configurado, **Rutas** y **Topología** muestran el
+camino pasando por él; si no lo hay, muestran las troncales conectadas directamente a la central.
+No hay que tocar nada para cambiar de escenario más allá de dar de alta o de baja la troncal.
 
-> El SBC sondea a los operadores con **OPTIONS** constantemente. Un operador caído se saltea antes
-> de intentar la llamada, no después de que el cliente escuchó silencio.
+> **Si tu central está expuesta a Internet, poner un borde adelante no es un lujo.** Una central
+> desnuda empieza a recibir intentos de registro automatizados en cuestión de horas. Ahora bien:
+> ese borde puede ser SBC-NG o el que ya tengas — a PBX-NG le da igual, habla SIP estándar con
+> cualquiera.
 
-![SBC · Operadores y reglas LCR](img/cfg-22-sbc-lcr.png)
+### 5.2 Qué mira la central del borde
 
-### 5.5 Ruteo → Manipulación SIP
+Desde PBX-NG sólo vas a necesitar tres cosas del borde, y las tres se configuran **acá**, no allá:
 
-» SBC-NG → Ruteo → Manipulación SIP
+1. **La troncal hacia el borde** (Troncales). Es una troncal SIP común, apuntada a la IP interna
+   del borde. Ver *§7 · Troncales*.
+2. **El estado del enlace** (Topología). Muestra si la central y el borde se ven entre sí. Ver
+   *§23 · Topología*.
+3. **El origen de cada llamada** (Historial). El CDR marca si la llamada entró por el borde o
+   directo, para que puedas distinguir tráfico interno de tráfico de Internet. Ver *§21*.
 
-**El problema.** Cada operador quiere las cabeceras SIP a su manera. Uno exige el número de origen en
-`P-Asserted-Identity`; otro lo lee de `From`; otro rechaza la llamada si ve un `Remote-Party-ID`.
-Cuando el operador dice *"me llegan las llamadas sin identificar"* o *"rechazadas 403"*, casi siempre
-se arregla acá.
+Todo lo demás — reglas de seguridad, bloqueo por país, enrutamiento por operador (LCR),
+manipulación de cabeceras SIP, anclaje de medios, STIR/SHAKEN — **es configuración del borde y vive
+en su panel**. No lo busques en este manual.
 
-**El principio.** Por defecto **no hay ninguna manipulación**: el SBC manda el SIP tal cual. Eso es a
-propósito — una regla de más rompe llamadas que funcionaban. Se agrega solo lo que el operador exija.
+### 5.3 Dónde seguir
 
-#### Las 7 acciones disponibles
-
-| Acción | Qué hace | Cuándo la vas a necesitar |
-|---|---|---|
-| **Quitar header** | Elimina una cabecera de la llamada saliente | El operador rechaza una cabecera que no entiende |
-| **Agregar header** | Inserta una cabecera con un valor fijo | El operador exige una cabecera propietaria |
-| **Modificar (regex)** | Busca un patrón dentro de una cabecera y lo reemplaza | Arreglar un formato de número |
-| **Forzar From-user** | Reemplaza el usuario del `From` por un valor fijo | El operador exige que el `From` sea **tu número de cuenta**, no el de la extensión |
-| **P-Asserted-Identity** | Agrega `P-Asserted-Identity` con el número de origen | El operador toma de ahí el identificador del llamante |
-| **P-Preferred-Identity** | Igual, pero con `P-Preferred-Identity` | Algunos operadores usan esta y no la anterior |
-| **Diversion** | Agrega la cabecera `Diversion` | Desvíos: el operador necesita saber que la llamada fue redirigida |
-
-#### Las cabeceras que se tocan habitualmente
-
-| Cabecera | Para qué la usa el operador | Nota |
-|---|---|---|
-| `From` | El identificador "público" de quien llama | Muchos operadores exigen que sea tu cuenta SIP |
-| `P-Asserted-Identity` (PAI) | Identidad **verificada** por la red | La más pedida en Uruguay y la región |
-| `P-Preferred-Identity` (PPI) | Identidad **sugerida** por el cliente | El operador decide si la respeta |
-| `Remote-Party-ID` (RPID) | Identidad, cabecera **antigua** | Muchos operadores la **rechazan**: conviene quitarla |
-| `Diversion` | Indica que la llamada viene desviada | Necesaria para desvíos y buzones remotos |
-| `Contact` | Dónde contestar | La reescribe el SBC solo (ocultamiento de topología) |
-| `Allow` | Qué métodos soporta el equipo | Se puede quitar; algunos operadores prefieren no verla |
-| `User-Agent` | Qué software sos | Se quita para no revelar la versión |
-| `Privacy` | Llamada anónima | Va junto con PAI cuando se oculta el número |
-
-#### Variables que podés usar en el valor
-
-| Variable | Qué contiene |
+| Si querés… | Andá a |
 |---|---|
-| `$fU` | El **usuario del From**: el número de la extensión que llama |
-| `$rU` | El usuario del destino (a quién se llama) |
-| `$si` | La IP de origen |
-| texto fijo | Lo que escribas tal cual (por ejemplo, tu número de cuenta) |
-
-**Ejemplo real.** El operador te da la cuenta `59824001234` y exige que **todas** las llamadas salgan
-identificadas con ella, sin importar qué extensión llame:
-
-| Acción | Valor |
-|---|---|
-| Forzar From-user | `59824001234` |
-| P-Asserted-Identity | `59824001234` |
-| Quitar header | `Remote-Party-ID` |
-
-#### El botón "Generar reglas compatibles"
-
-Carga una **librería de reglas comunes** de una sola vez. Vienen **desactivadas**, salvo la única que
-es 100% segura (quitar `Remote-Party-ID`). La idea es que no tengas que escribirlas: las activás una
-por una según lo que tu operador pida, y probás.
-
-> **Cómo se prueba una regla:** activás **una sola**, hacés una llamada, y mirás en
-> **SBC → SIP debug** qué salió realmente. Cambiar tres reglas juntas y llamar es la forma más rápida
-> de no entender nada.
-
-![SBC · Manipulación SIP](img/cfg-23-sbc-manipulacion.png)
-
-### 5.6 Ruteo → Dispatcher
-
-» SBC-NG → Ruteo → Dispatcher
-
-El **dispatcher** es lo que el SBC usa para saber **hacia qué Asterisk mandar las llamadas que
-entran**. Podés tener más de uno, con **prioridad**: el de mayor prioridad recibe todo, y si deja
-de responder, el SBC pasa al siguiente. Es alta disponibilidad del núcleo.
-
-El SBC mide la latencia de cada destino con OPTIONS automáticamente.
-
-> **Ojo con el sentido:** el dispatcher cubre lo que **entra** hacia el núcleo. Lo que **sale**
-> (Asterisk → operador) se resuelve con las reglas de LCR de la sección anterior. Son dos caminos
-> distintos y se configuran por separado.
-
-![SBC · Dispatcher](img/cfg-24-sbc-dispatcher.png)
-
-### 5.7 Extensiones SIP registradas en el SBC
-
-» SBC-NG → **Extensiones SIP**
-
-**No es ruteo, son extensiones.** Antes esta pantalla se llamaba "Remotos" y colgaba de Ruteo, lo que
-confundía: acá no se configura nada de ruteo. Lo que se ve es, **en vivo, qué extensiones están
-registradas contra Kamailio** (el SBC) en lugar de registrarse directo contra Asterisk.
-
-**Quiénes caen acá.** Todo el que no está en la oficina: el que trabaja desde su casa, el vendedor
-con el softphone en el celular, la sucursal chica sin central propia. Su REGISTER entra por el SBC
-—que es el único que da la cara a internet—, el SBC lo filtra y recién ahí se lo pasa a Asterisk.
-
-**Por qué existe esta pantalla.** Porque una extensión remota es el punto más frágil de la central, y
-el que más preguntas genera:
-
-| Pregunta | Dónde se responde acá |
-|---|---|
-| *"¿Está conectada o no?"* | Columna **Estado**: registrada, en llamada o desconectada. |
-| *"¿Desde dónde se conecta?"* | Columna **Origen real**: la IP pública desde la que registró. Si el que trabaja en Montevideo aparece conectándose desde otro país, tenés un problema de seguridad — y esta es la pantalla donde se ve. |
-| *"¿Por qué no le entran las llamadas?"* | Si la extensión **no figura acá**, no está registrada: no es un problema de rutas ni del operador, es que el teléfono nunca llegó a la central. |
-| *"¿Está lejos o cerca?"* | Columna **RTT**: el tiempo de ida y vuelta hasta el equipo. |
-| *"¿Por qué protocolo?"* | Columna **Proto**: UDP, TCP o TLS. |
-
-**Ejemplo de uso real.** Un vendedor dice que "el teléfono no le suena". Antes de revisar colas,
-rutas y troncales, mirás esta pantalla: si su extensión no está en la lista, el diagnóstico terminó
-ahí — su softphone no está registrado (se quedó sin internet, cerró la app, o se le venció el
-acceso). Si **sí** está, el problema es aguas abajo y seguís buscando.
-
-> **La diferencia con "Telefonía → Extensiones":** aquella pantalla lista **todas** las extensiones que
-> existen (la configuración, el padrón). Esta lista sólo las que están **registradas desde afuera,
-> ahora mismo** (la realidad, quién vino a votar).
-
-![SBC · Extensiones SIP registradas](img/cfg-25-sbc-remotos.png)
-
-### 5.8 Red y Media → Red
-
-» SBC-NG → Red y Media → Red
-
-El SBC puede tener **varias salidas a Internet** (multi-WAN). Acá ves las interfaces, la **tabla de
-ruteo del kernel en vivo**, y podés agregar **rutas estáticas** — por ejemplo: "el tráfico hacia la
-red del operador sale por la WAN 2".
-
-![SBC · Red y multi-WAN](img/cfg-26-sbc-red.png)
-
-### 5.9 Red y Media → rtpengine
-
-» SBC-NG → Red y Media → rtpengine
-
-**rtpengine es por donde pasa el audio.** El SBC ancla los medios: la llamada entra por él y sale
-por él, y así el Asterisk nunca queda expuesto ni tiene que pelear con el NAT.
-
-Acá se ve el estado del motor, las sesiones activas, y se configura el rango de puertos y la IP
-que se anuncia. **Ese rango de puertos tiene que estar abierto en el firewall** (`30000-40000/UDP`
-por defecto): si no, la llamada conecta pero nadie escucha nada.
-
-![SBC · rtpengine](img/cfg-27-sbc-rtpengine.png)
-
-### 5.10 Red y Media → SIP debug
-
-» SBC-NG → Red y Media → SIP debug
-
-La herramienta de diagnóstico. Muestra el **diálogo SIP como una escalera** (quién le dijo qué a
-quién, en orden), permite **capturar el tráfico** en un archivo `.pcap` para abrirlo con Wireshark,
-y reproducir el audio de la captura.
-
-Cuando el operador dice "el problema es de ustedes", acá está la prueba de qué mandó cada uno.
-
-![SBC · Diálogo SIP y captura](img/cfg-28-sbc-sipdebug.png)
-
-### 5.11 TURN
-
-» SBC-NG → TURN
-
-El TURN (coturn) es lo que hace que un softphone **detrás de cualquier NAT** tenga audio. Acá se
-configuran el *realm*, los puertos, el rango de relay y las credenciales.
-
-Y hay un **diagnóstico ICE en vivo**: el panel levanta una conexión real desde tu navegador y te
-dice si el TURN está **alcanzable y autenticado** (candidato *relay*), o si falla y por qué. El
-verde no es decorativo: significa que funciona de verdad.
-
-![SBC · TURN y diagnóstico ICE](img/cfg-29-sbc-turn.png)
-
-### 5.12 Sistema → Módulos y Configuración
-
-» SBC-NG → Sistema → Módulos  /  SBC-NG → Sistema → Configuración
-
-Esta es la sala de máquinas del SBC. Todo lo que configuraste en las secciones anteriores
-(seguridad, LCR, manipulación SIP, dispatcher) termina siendo **configuración de Kamailio**, y
-Kamailio es modular: cada capacidad la aporta un módulo que se carga al arrancar. Acá se ve y se
-toca eso, sin entrar por SSH.
-
-**Módulos** — la lista de módulos de Kamailio con su estado. Sirve para responder la pregunta que
-aparece cuando algo no anda: *"¿el SBC tiene siquiera cargado lo que necesito?"*. Si `pike` no está
-cargado, el anti-flood no existe por más que la pantalla de Seguridad se vea linda; si `rtpengine`
-no está, no hay relay de medios.
-
-| Módulo | Qué aporta | Se usa en |
-|---|---|---|
-| `pike` | Cuenta paquetes por IP y detecta ráfagas. | Seguridad → anti-flood |
-| `htable` | Las tablas en memoria donde vive la lista negra. | Seguridad → IP ban |
-| `secfilter` | Filtra User-Agents y patrones de escaneo conocidos. | Seguridad |
-| `dispatcher` | Balanceo y failover entre destinos. | Ruteo → Dispatcher |
-| `rtpengine` | Manda el audio por el relay de medios. | Red y Media → rtpengine |
-| `uac` | Registra al SBC contra el operador. | Troncales con registro |
-| `dialog`, `tm`, `sl` | El motor de transacciones y diálogos SIP. | Todo |
-
-**Configuración** — el archivo de configuración del SBC, tal cual, para verlo o editarlo cuando
-hace falta algo que la interfaz todavía no cubre: una regla exótica del operador, una cabecera rara,
-una prueba puntual. **Es la puerta de escape.**
-
-| Acción | Qué hace |
-|---|---|
-| **Ver** | Muestra el archivo con resaltado de sintaxis. Leerlo no rompe nada; es la mejor forma de entender qué generó el panel a partir de lo que cargaste. |
-| **Editar y guardar** | Escribe el archivo y recarga Kamailio. Si el archivo tiene un error de sintaxis, el SBC **no arranca** y te quedás sin señalización. |
-| **Recargar** | Aplica los cambios sin reiniciar el proceso. |
-
-> **Regla de oro**: lo que se puede hacer desde las pantallas del SBC, hacelo desde las pantallas. El
-> panel regenera esta configuración cuando cambiás algo en Seguridad, LCR o Dispatcher, y **puede
-> pisar tus ediciones a mano**. Editá el archivo sólo para lo que la interfaz no cubre, y anotá qué
-> tocaste.
-
-![SBC · Sistema, módulos y configuración](img/cfg-45-sbc-sistema.png)
+| Configurar el borde | Manual de Configuración de **SBC-NG** |
+| Operarlo y diagnosticar | Manual de Operación de **SBC-NG** |
+| Conectar la central al borde | *§7 · Troncales*, en este manual |
+| Ver el camino de una llamada | *§23 · Topología*, en este manual |
 
 ---
 
@@ -715,7 +461,7 @@ los IVR y las rutas. Es para **ver** y para **diagnosticar**.
 
 ## 7. Troncales
 
-» Menú lateral → Telefonía → SBC-NG → Troncales
+» Menú lateral → Telefonía → Troncales
 
 La **troncal** es la línea que te conecta con el mundo.
 
@@ -1024,6 +770,94 @@ adjunto y la transcripción automática**.
 
 Salas de conferencia con PIN, grupos que suenan a la vez, voceo por parlantes, y los códigos de
 función (`*97`, `*98`, etc.).
+
+### 13.5 Aparcado de llamadas
+
+» Menú lateral → Aplicaciones → Aparcado · Captura · MoH → **Aparcado**
+
+Es el *"te la dejo en la 701"* de toda la vida. Sirve cuando atendés una llamada y hay que
+buscar a alguien que no está en su escritorio: en vez de transferir a ciegas o dejar al que
+llama esperando en tu teléfono, la **aparcás** y cualquiera la levanta desde cualquier interno.
+
+**Cómo se usa (esto es lo que le explicás al usuario):**
+
+1. Con la llamada en curso, hacés una **transferencia** al número de aparcado (por defecto
+   el **700**).
+2. Asterisk te dice en voz **en qué plaza quedó** (por ejemplo, "setecientos uno").
+3. Avisás por el medio que sea: *"Juan, tenés una llamada en la 701"*.
+4. Juan marca **701** desde cualquier teléfono y la toma.
+5. Si nadie la levanta en el tiempo configurado, la llamada **vuelve a timbrar** donde estaba.
+
+**Configuración:**
+
+| Campo | Qué hace | Valor típico |
+|---|---|---|
+| **Número para aparcar** | A dónde se transfiere para aparcar | `700` |
+| **Primera plaza** / **Última plaza** | El rango de casilleros disponibles | `701` a `720` (20 plazas) |
+| **Tiempo de espera** | Cuánto aguanta antes de volver a timbrar | `300` s (5 min) |
+| **Vuelve a quien la aparcó** | Si al vencer suena en el teléfono de quien la dejó | activado |
+
+> **Elegí bien el rango.** Las plazas ocupan números reales del plan de marcado: si tus internos
+> son 7xx, el rango 701–720 te los pisa. Cambialo a algo que no choque (por ejemplo 801–820).
+
+**Ver qué hay aparcado.** El botón *Ver plazas ocupadas* abre una tabla con **todas** las plazas
+del rango: cuáles están libres, quién está esperando en cada ocupada (nombre y número), quién la
+aparcó y cuántos segundos faltan para que vuelva. Se refresca sola cada 5 segundos, así que sirve
+para dejarla abierta en recepción.
+
+> Después de cambiar cualquier valor hay que tocar **Aplicar en Asterisk**: guardar sólo lo
+> anota en la base; aplicar es lo que recarga el motor.
+
+![Tabla de plazas de aparcado con ocupadas y libres](img/cfg-13-aparcado.png)
+
+### 13.6 Captura de llamada
+
+» Menú lateral → Aplicaciones → Aparcado · Captura · MoH → **Captura**
+
+Atender el teléfono que está sonando **en el escritorio de al lado**, sin levantarse. Hay dos
+formas, y conviene enseñar las dos:
+
+| Código | Qué hace | Cuándo se usa |
+|---|---|---|
+| **`*8`** | Atiende el teléfono que suena **en tu grupo** | El caso normal: alguien de tu sector no está y su teléfono suena |
+| **`**<interno>`** | Atiende el de **ese interno** en concreto (ej. `**1001`) | Cuando sabés exactamente cuál querés tomar, aunque no sea de tu grupo |
+
+**Los grupos.** Para que `*8` funcione, los internos que se cubren entre sí tienen que estar en
+el **mismo grupo de captura**. Se asigna por interno desde esta pantalla, escribiendo un nombre
+libre: `ventas`, `recepcion`, `soporte`. Un interno sin grupo no captura ni puede ser capturado
+con `*8` (sí con `**`).
+
+> **Es simétrico a propósito.** Al asignar un grupo, el panel configura tanto "a quién puedo
+> capturar" como "quién me puede capturar". Es lo que espera la gente: si compartís el grupo,
+> se cubren mutuamente. Si necesitás una relación en un solo sentido, es un caso raro que hoy
+> no se cubre desde el panel.
+
+### 13.7 Música en espera
+
+» Menú lateral → Aplicaciones → Aparcado · Captura · MoH → **Música en espera**
+
+Lo que escucha quien está en espera o en una cola. La central trae la música de fábrica
+(clase `default`), y desde acá podés subir **la tuya**: la del cliente, una locución
+institucional, o música distinta por sector.
+
+**Una clase = una carpeta de audios.** Los archivos suenan en orden alfabético (o al azar, según
+la clase). Para armar una:
+
+1. Escribí el nombre y tocá **Nueva clase** (por ejemplo `ventas`).
+2. Subí los audios con **Subir audio**. Formatos: `wav`, `gsm`, `ulaw`, `alaw`, `sln`, `g722`.
+3. Tocá **Aplicar en Asterisk**.
+4. Elegí esa clase en la cola o donde corresponda.
+
+> **Sobre el formato.** Lo que mejor rinde es **WAV mono, 8 kHz, 16 bits**: es el formato nativo
+> de la telefonía y no obliga a la central a convertir en cada llamada. Un MP3 estéreo de 44 kHz
+> anda, pero le hace trabajar el procesador de más en cada persona en espera.
+
+> **Derechos de autor.** La música comercial en espera necesita licencia. Es un problema legal
+> real del cliente, no un detalle técnico: conviene usar música libre de regalías o una locución
+> propia, y dejarlo por escrito.
+
+La clase `default` es la de fábrica y no se toca desde el panel: si borrás una clase propia, se
+borran también sus audios.
 
 ---
 
@@ -1458,6 +1292,40 @@ y **cuáles están sanos**. Un componente en rojo es un problema antes de que al
 Es la pantalla que conviene abrir primero cuando algo "no anda" y no sabés por dónde empezar.
 
 ![Topología de la instalación](img/cfg-43-topologia.png)
+
+### 23.1 Red del núcleo: modo router o switch
+
+» Menú lateral → Infraestructura → **Red**
+
+Define **cómo se para la central en la red del cliente**. Son dos formas de trabajar, y la
+elección depende de la instalación, no del gusto:
+
+| Modo | Qué hace | Cuándo usarlo |
+|---|---|---|
+| **Router** | Dos placas separadas: una **WAN** (hacia internet) y una **LAN** (hacia la red interna). Opcionalmente enmascara (NAT) y rutea entre ellas | La central **es** el router de esa red, o querés separar la red de telefonía del resto |
+| **Switch** | Las placas se unen en un **puente** de capa 2. La central no rutea ni enmascara: queda como un equipo más de la red existente | Lo habitual: ya hay un router en la oficina y la central sólo se cuelga de esa red |
+
+En modo **router** elegís qué placa es WAN y cuál LAN, y si querés **NAT** (enmascarar la LAN al
+salir) y **ruteo entre placas**. En modo **switch** se unen al puente todas las placas marcadas
+como LAN — hacen falta **al menos dos**.
+
+**El flujo es en tres tiempos, y es así a propósito:**
+
+1. **Ver el plan.** Antes de ejecutar nada, el panel muestra los comandos exactos que va a
+   correr, cada uno con su explicación. Un cambio de red no se aplica a ciegas.
+2. **Aplicar.** Se ejecutan los pasos en orden; si uno falla, se corta ahí y te dice cuál fue.
+3. **Confirmar.** Al aplicar arranca un **reloj de 2 minutos**. Si confirmás, el modo queda
+   fijo. Si **no** confirmás, la central vuelve sola al modo anterior.
+
+> **Por qué ese tercer paso existe.** Cambiar el modo de red puede dejarte sin acceso al panel:
+> si te comés justo la placa por la que estás entrando, perdés la sesión y ya no podés arreglar
+> nada. El reloj es la red de seguridad: **si te quedaste afuera, no hagas nada** y esperá; la
+> central se revierte sola y volvés a entrar como antes.
+
+> **Consejo de campo:** hacé el cambio con la consola del hipervisor (Proxmox, iDRAC, lo que
+> tengas) abierta al lado. Si algo sale mal, entrás por ahí sin depender de la red.
+
+![Modo de red: router y switch, con el plan de cambios](img/cfg-44-red-modo.png)
 
 ---
 

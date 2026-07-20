@@ -1,14 +1,19 @@
-/* TrunkEditor.jsx - editor de troncal SIP en wizard por pasos (compartido) */
+/* TrunkEditor.jsx - editor de troncal SIP: tipo por pilares + wizard por pasos + diagnóstico animado */
 'use client';
 import { useEffect, useState } from 'react';
-import { Modal, Stepper, Group, Button, Stack, Text, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, FileButton, Box, CopyButton, ActionIcon, Tooltip } from '@mantine/core';
-import { IconDeviceLandlinePhone, IconTag, IconUser, IconWorld, IconHash, IconLock, IconKey, IconPlugConnected, IconWaveSine, IconBroadcast, IconRouteAltLeft, IconPhoto, IconCloud, IconServer2, IconCheck, IconCopy } from '@tabler/icons-react';
+import { Modal, Stepper, Group, Button, Stack, Text, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, FileButton, Box, CopyButton, ActionIcon, Tooltip, Card, SimpleGrid, Loader, Collapse } from '@mantine/core';
+import { IconDeviceLandlinePhone, IconTag, IconUser, IconWorld, IconHash, IconLock, IconKey, IconPlugConnected, IconWaveSine, IconBroadcast, IconRouteAltLeft, IconPhoto, IconCloud, IconServer2, IconCheck, IconCopy, IconStethoscope, IconCircleCheck, IconCircleX, IconInfoCircle, IconChevronRight } from '@tabler/icons-react';
 const CopyField = ({ label, value }) => (
   <TextInput label={label} value={value} readOnly styles={{ input: { fontFamily: 'monospace' } }} rightSection={<CopyButton value={value}>{({ copied, copy }) => <Tooltip label={copied ? 'Copiado' : 'Copiar'}><ActionIcon variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copy}>{copied ? <IconCheck size={16} /> : <IconCopy size={16} />}</ActionIcon></Tooltip>}</CopyButton>} />
 );
 import { toast } from './notify';
 
 const CODECS = ['ulaw', 'alaw', 'g722', 'g729', 'opus', 'gsm'];
+const TYPES = [
+  { value: 'asterisk', label: 'SIP · Directa', desc: 'Se registra directo en Asterisk', icon: IconServer2, color: '#1d4ed8' },
+  { value: 'kamailio', label: 'SIP · vía SBC', desc: 'La seguridad vive en el SBC-NG', icon: IconRouteAltLeft, color: '#7c3aed' },
+  { value: 'webrtc', label: 'WebRTC (WSS)', desc: 'SIP sobre WebSocket + DTLS-SRTP', icon: IconWaveSine, color: '#0e9488' },
+];
 export const trunkBlank = {
   name: '', kind: 'asterisk', callerid: '', mode: 'register',
   provider_host: '', provider_port: '5060', transport: 'udp',
@@ -18,13 +23,57 @@ export const trunkBlank = {
   outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0, logo: '', dids: [], channels: 0, gateway: '',
 };
 
+/* ── Diagnóstico animado (pre-conexión) ─────────────────────────────────── */
+function DiagBlock({ f, wmode }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null);
+  async function run() {
+    setBusy(true); setRes(null); setOpen(true);
+    const body = f.kind === 'webrtc'
+      ? (wmode === 'client' ? { kind: 'webrtc-client', remote_url: f.remote_url } : { kind: 'webrtc', mode: 'register' })
+      : { kind: f.kind, mode: f.mode, provider_host: f.provider_host, provider_port: f.provider_port, transport: f.transport };
+    try { const d = await fetch('/backend/api/trunks/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()); setRes(d); }
+    catch (_) { setRes({ ok: false, pasos: [{ paso: 'Error', ok: false, detalle: 'no se pudo ejecutar el diagnóstico' }] }); }
+    setBusy(false);
+  }
+  const canRun = f.kind === 'webrtc' ? (wmode === 'client' ? !!f.remote_url : true) : !!f.provider_host;
+  const wserver = f.kind === 'webrtc' && wmode === 'server';
+  return (
+    <Card withBorder radius="md" padding="sm" style={{ background: 'rgba(37,99,235,.03)' }}>
+      <Group justify="space-between" wrap="nowrap">
+        <Group gap={8} wrap="nowrap"><ThemeIcon variant="light" color="blue" radius="md"><IconStethoscope size={16} /></ThemeIcon><div><Text fw={700} fz="sm" lh={1.1}>Diagnóstico</Text><Text fz={11} c="dimmed">{wserver ? 'La troncal servidor se prueba cuando el remoto se conecta' : 'Probá el enlace antes de guardar (DNS, ruta, SIP, NAT)'}</Text></div></Group>
+        <Button size="xs" variant="light" leftSection={<IconStethoscope size={14} />} loading={busy} disabled={!canRun || wserver} onClick={run}>Probar troncal</Button>
+      </Group>
+      <Collapse in={open}>
+        <Stack gap={6} mt="sm">
+          {busy && <Group gap={8}><Loader size="xs" /><Text fz="xs" c="dimmed">Diagnosticando el enlace…</Text></Group>}
+          {res && res.pasos && res.pasos.map((p, i) => (
+            <Group key={i} gap={8} wrap="nowrap" align="flex-start" className="diag-row" style={{ animationDelay: (i * 60) + 'ms' }}>
+              <ThemeIcon size={22} radius="xl" variant="light" color={p.info ? 'blue' : p.ok ? 'teal' : 'red'} style={{ flex: 'none', marginTop: 1 }}>
+                {p.info ? <IconInfoCircle size={13} /> : p.ok ? <IconCircleCheck size={13} /> : <IconCircleX size={13} />}
+              </ThemeIcon>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <Group gap={6} wrap="nowrap"><Text fz="xs" fw={700}>{p.paso}</Text>{p.ms != null && p.ms > 0 && <Text fz={10} c="dimmed" ff="monospace">{p.ms}ms</Text>}</Group>
+                <Text fz="xs" c="dimmed">{p.detalle}</Text>
+              </div>
+            </Group>
+          ))}
+          {res && !busy && <Group gap={6} mt={4}><ThemeIcon size={20} radius="xl" variant="light" color={res.ok ? 'teal' : 'orange'}>{res.ok ? <IconCircleCheck size={12} /> : <IconInfoCircle size={12} />}</ThemeIcon><Text fz="xs" fw={600} c={res.ok ? 'teal' : 'orange'}>{res.ok ? 'El enlace responde: podés guardar con confianza.' : 'Revisá lo marcado. Algunos operadores igual funcionan al registrar.'}</Text></Group>}
+        </Stack>
+      </Collapse>
+      <style jsx>{`.diag-row{ animation: diagIn .32s ease both; } @keyframes diagIn{ from{ opacity:0; transform: translateX(-6px);} to{ opacity:1; transform:none;} }`}</style>
+    </Card>
+  );
+}
+
 export default function TrunkEditor({ opened, onClose, initialName, defaultKind, onSaved }) {
   const [f, setF] = useState(trunkBlank);
   const [active, setActive] = useState(0);
   const [saving, setSaving] = useState(false);
   const [gwOpts, setGwOpts] = useState([]);
-  const [wr, setWr] = useState(null); // resultado troncal WebRTC (enlace + credenciales)
-  const [wmode, setWmode] = useState('server'); // webrtc: 'server' (expone) | 'client' (conecta)
+  const [wr, setWr] = useState(null);
+  const [wmode, setWmode] = useState('server');
   const editing = !!initialName;
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
@@ -105,10 +154,26 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
   return (
     <Modal opened={opened} onClose={onClose} centered radius="lg" size={760}
       title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color="teal"><IconDeviceLandlinePhone size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>{editing ? 'Configurar troncal' : 'Nueva troncal'}</Text><Text size="xs" c="dimmed">Enlace con tu operador SIP</Text></div></Group>}>
-      <div style={{ marginBottom: 14 }}>
-        <Text size="sm" fw={500} mb={4}>Tipo de troncal</Text>
-        <SegmentedControl fullWidth value={f.kind} onChange={(v) => set('kind', v)} disabled={editing} data={[{ value: 'asterisk', label: 'SIP · Asterisk' }, { value: 'kamailio', label: 'SIP · SBC-NG' }, { value: 'webrtc', label: 'WebRTC (WSS)' }]} />
-      </div>
+
+      {/* Paso 0: tipo por pilares */}
+      {editing ? (
+        <Group gap="xs" mb="md">{(() => { const T = TYPES.find(x => x.value === f.kind) || TYPES[0]; const I = T.icon; return <><ThemeIcon variant="light" radius="md" style={{ color: T.color }}><I size={16} /></ThemeIcon><Text fw={600} fz="sm">{T.label}</Text><Text fz="xs" c="dimmed">· {T.desc}</Text></>; })()}</Group>
+      ) : (
+        <div style={{ marginBottom: 16 }}>
+          <Text size="sm" fw={600} mb={8}>¿Qué tipo de troncal querés crear?</Text>
+          <SimpleGrid cols={3} spacing="sm">
+            {TYPES.map((t) => { const I = t.icon; const on = f.kind === t.value; return (
+              <Card key={t.value} withBorder radius="md" padding="md" onClick={() => set('kind', t.value)}
+                style={{ cursor: 'pointer', transition: 'all .15s', borderColor: on ? t.color : undefined, borderWidth: on ? 2 : 1, background: on ? t.color + '10' : undefined }}>
+                <ThemeIcon size={40} radius="md" variant="light" style={{ color: t.color, background: t.color + '1a' }} mb={8}><I size={22} /></ThemeIcon>
+                <Text fw={700} fz="sm" lh={1.1}>{t.label}</Text>
+                <Text fz={11} c="dimmed" mt={2}>{t.desc}</Text>
+              </Card>
+            ); })}
+          </SimpleGrid>
+        </div>
+      )}
+
       {f.kind === 'webrtc' ? (
         <Stack gap="md">
           <SegmentedControl fullWidth value={wmode} onChange={setWmode} disabled={editing} color="grape"
@@ -122,6 +187,7 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
               </Group>
               <TextInput label="URL WSS remota" leftSection={<IconWorld size={15} />} placeholder="wss://peer.dominio/ws" value={f.remote_url || ''} onChange={(e) => set('remote_url', e.target.value)} required description="El enlace WSS que te dio el otro extremo (UCM, PBX-NG, etc.)" />
               <PasswordInput label="Contraseña (remoto)" leftSection={<IconLock size={15} />} value={f.password} onChange={(e) => set('password', e.target.value)} required={!editing} placeholder={editing ? '(sin cambios)' : ''} />
+              <DiagBlock f={f} wmode={wmode} />
             </>
           ) : (!wr ? (
             <>
@@ -183,6 +249,7 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
               <Select label="Transporte" value={f.transport} onChange={(v) => set('transport', v)} data={[{ value: 'udp', label: 'UDP' }, { value: 'tcp', label: 'TCP' }, { value: 'tls', label: 'TLS (cifrado)' }]} w={150} leftSection={<IconPlugConnected size={15} />} />
             </Group>
             <Select label="¿Por dónde se llega a esta troncal?" value={f.gateway || ''} onChange={(v) => set('gateway', v || '')} data={gwData} leftSection={f.gateway === 'internet' ? <IconCloud size={15} /> : <IconRouteAltLeft size={15} />} description="Define cómo se dibuja en la topología: directa, por Internet (nube) o por una ruta estática del SBC." />
+            <DiagBlock f={f} wmode={wmode} />
           </Stack>
         </Stepper.Step>
 
@@ -230,6 +297,7 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
                 <NumberInput label="Quitar dígitos" value={f.outbound_strip} onChange={(v) => set('outbound_strip', v)} min={0} max={10} description="Dígitos a quitar antes de enviar" />
               </Group>}
             </Box>
+            <DiagBlock f={f} wmode={wmode} />
           </Stack>
         </Stepper.Step>
       </Stepper>
@@ -247,7 +315,7 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
           <>
             <Button variant="default" onClick={prev} disabled={active === 0}>Atrás</Button>
             {active < STEPS - 1
-              ? <Button onClick={next} color="teal">Siguiente</Button>
+              ? <Button onClick={next} color="teal" rightSection={<IconChevronRight size={16} />}>Siguiente</Button>
               : <Button onClick={save} loading={saving} color="teal" leftSection={<IconCheck size={16} />}>{editing ? 'Guardar cambios' : 'Crear troncal'}</Button>}
           </>
         )}

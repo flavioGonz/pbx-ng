@@ -60,9 +60,10 @@ export default function Troncales() {
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [gwOpts, setGwOpts] = useState([]);
   const [topo, setTopo] = useState(null);
+  const [sbcTrunks, setSbcTrunks] = useState([]); const [sbcInfo, setSbcInfo] = useState({ live: false, age_s: null });
   useEffect(() => { fetch('/backend/api/topology').then(r => r.json()).then(setTopo).catch(() => {}); }, []);
   useEffect(() => { fetch('/backend/api/sbc/routes').then((r) => r.json()).then((d) => Array.isArray(d) && setGwOpts(d.map((r) => ({ value: String(r.id), label: (r.note || r.dest) + ' (via ' + (r.gw || r.dev) + ')' })))).catch(() => {}); }, []);
-  async function load() { try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {} }
+  async function load() { try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {} try { const d = await fetch('/backend/api/sbc/trunks').then(r => r.json()); setSbcTrunks(Array.isArray(d.trunks) ? d.trunks : []); setSbcInfo({ live: !!d.live, age_s: d.age_s }); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
   async function onLogo(file) {
@@ -92,15 +93,16 @@ export default function Troncales() {
   async function del(t) { if (!confirm('¿Eliminar la troncal ' + t.name + '?')) return; await fetch('/backend/api/trunks/' + t.name, { method: 'DELETE' }); toast('Troncal eliminada', 'info'); setSel(null); load(); }
 
   const ch = (snap?.channels || []).length;
-  const online = trunks.filter(t => t.status === 'online').length;
-  const kamTrunks = trunks.filter(t => t.kind === 'kamailio'); const astTrunks = trunks.filter(t => t.kind !== 'kamailio');
+  const ownTrunks = trunks.filter(t => t.kind !== 'kamailio');
+  const online = ownTrunks.filter(t => t.status === 'online').length;
+  const kamTrunks = (sbcTrunks || []).map((t) => ({ ...t, kind: 'kamailio', status: 'sbc', mode: t.mode || 'ip' })); const astTrunks = ownTrunks.filter(t => t.kind !== 'sbc');
 
   const { nodes: computedNodes, edges } = useMemo(() => {
     const ns = [], es = [];
     const COL_T = 40, COL_KAM = 380, COL_AST = 660, COL_INT = 940; const ROW = 230, STEP = 160;
     ns.push({ id: 'kam', type: 't', position: { x: COL_KAM, y: ROW }, data: { title: 'SBC-NG', sub: topo?.nodes?.sbc || '-', icon: <IconRouteAltLeft size={16} />, accent: 'kam', status: 'sbc', badge: kamTrunks.length + ' troncal(es)', tag: trunks.some((t) => t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'WebRTC WSS' : undefined } });
     ns.push({ id: 'ast', type: 't', position: { x: COL_AST, y: ROW }, data: { title: 'Asterisk PBX', sub: topo?.nodes?.asterisk || '-', icon: <IconServer2 size={16} />, accent: 'ast', status: snap?.health?.ami ? 'online' : 'down', badge: ch + ' llamada(s)' } });
-    ns.push({ id: 'int', type: 't', position: { x: COL_INT, y: ROW }, data: { title: 'Extensiones', icon: <IconUsers size={16} />, dot: false, badge: (snap?.extensions || []).length + ' extensiones' } });
+    ns.push({ id: 'int', type: 't', position: { x: COL_INT, y: ROW }, data: { title: 'Internos', icon: <IconUsers size={16} />, dot: false, badge: (snap?.extensions || []).length + ' extensiones' } });
     es.push({ id: 'k-a', source: 'kam', target: 'ast', type: 'default', animated: true, label: 'dispatcher', style: { stroke: '#7c3aed', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c3aed' } });
     es.push({ id: 'a-i', source: 'ast', target: 'int', type: 'default', animated: true, style: { stroke: '#16a34a', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#16a34a' } });
     const all = [...kamTrunks.map(t => ({ t, kind: 'kamailio' })), ...astTrunks.map(t => ({ t, kind: 'asterisk' }))];
@@ -113,7 +115,7 @@ export default function Troncales() {
       es.push({ id: 'e-' + id, source: id, target: (kind === 'kamailio' || it.t.kind === 'webrtc' || it.t.kind === 'webrtc-client') ? 'kam' : 'ast', type: 'default', animated: true, label: it.t.rtt != null ? (Math.round(it.t.rtt) + ' ms') : (on ? 'levantada' : off ? 'caida' : undefined), labelStyle: { fontSize: 10, fontWeight: 700, fill: ecol }, labelBgStyle: { fill: 'var(--mantine-color-body)', fillOpacity: 0.85 }, labelBgPadding: [4, 2], labelBgBorderRadius: 6, style: { stroke: ecol, strokeWidth: 2.2, strokeDasharray: off ? '6 4' : undefined }, markerEnd: { type: MarkerType.ArrowClosed, color: ecol } });
     });
     return { nodes: ns, edges: es };
-  }, [trunks, snap, topo]);
+  }, [trunks, snap, topo, sbcTrunks]);
 
   useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_trunks_nodepos') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
 
@@ -139,7 +141,7 @@ export default function Troncales() {
           </div>
           <Divider orientation="vertical" />
           <Group gap={14}>
-            <div style={{ textAlign: 'center' }}><Text fw={800} fz="lg" lh={1}>{trunks.length}</Text><Text fz={10} c="dimmed">totales</Text></div>
+            <div style={{ textAlign: 'center' }}><Text fw={800} fz="lg" lh={1}>{ownTrunks.length}</Text><Text fz={10} c="dimmed">propias</Text></div>
             <div style={{ textAlign: 'center' }}><Text fw={800} fz="lg" lh={1} c="teal">{online}</Text><Text fz={10} c="dimmed">activas</Text></div>
           </Group>
         </Group>
@@ -155,20 +157,20 @@ export default function Troncales() {
       {/* overlay: lista */}
       {showList && (
         <Paper style={{ position: 'absolute', top: 70, right: 16, width: 300, maxHeight: 'calc(100% - 90px)', borderRadius: 16, overflow: 'hidden', ...glass }}>
-          <Group justify="space-between" px="md" py="xs" style={{ borderBottom: '1px solid rgba(15,23,42,.06)' }}><Text fw={700} fz="sm">Configuradas</Text><Badge variant="light" color="gray">{trunks.length}</Badge></Group>
-          {trunks.length === 0 ? <Text c="dimmed" ta="center" py="xl" px="md" size="sm">Sin troncales todavía. Creá una hacia tu operador SIP.</Text> :
-            <ScrollArea.Autosize mah={460}><Stack gap={6} p={8}>
-              {trunks.map(t => (
-                <Card key={t.name} withBorder radius="md" padding="xs" style={{ cursor: 'pointer', borderColor: sel?.name === t.name ? 'var(--mantine-color-teal-4)' : undefined, background: t.kind === 'kamailio' ? 'rgba(124,58,237,.04)' : 'rgba(29,78,216,.04)' }} onClick={() => setSel(t)}>
+          <Group justify="space-between" px="md" py="xs" style={{ borderBottom: '1px solid rgba(15,23,42,.06)' }}><Text fw={700} fz="sm">De la central</Text><Badge variant="light" color="gray">{ownTrunks.length}</Badge></Group>
+          {ownTrunks.length === 0 ? <Text c="dimmed" ta="center" py="lg" px="md" size="sm">La central sólo tiene la troncal hacia el SBC.</Text> :
+            <ScrollArea.Autosize mah={360}><Stack gap={6} p={8}>
+              {ownTrunks.map(t => (
+                <Card key={t.name} withBorder radius="md" padding="xs" style={{ cursor: 'pointer', borderColor: sel?.name === t.name ? 'var(--mantine-color-teal-4)' : undefined, background: t.kind === 'kamailio' ? 'rgba(124,58,237,.04)' : t.kind === 'sbc' ? 'rgba(16,163,74,.06)' : 'rgba(29,78,216,.04)' }} onClick={() => setSel(t)}>
                   <Group justify="space-between" wrap="nowrap" gap={6}>
                     <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                      {t.logo ? <div style={{ width: 28, height: 28, borderRadius: 8, background: '#fff', border: '1px solid var(--mantine-color-default-border)', overflow: 'hidden', flex: 'none', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src={t.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></div> : <ThemeIcon size={28} radius="md" variant="light" color={t.kind === 'kamailio' ? 'grape' : 'blue'}>{t.kind === 'kamailio' ? <IconRouteAltLeft size={15} /> : <IconServer2 size={15} />}</ThemeIcon>}
+                      {t.logo ? <div style={{ width: 28, height: 28, borderRadius: 8, background: '#fff', border: '1px solid var(--mantine-color-default-border)', overflow: 'hidden', flex: 'none', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src={t.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></div> : <ThemeIcon size={28} radius="md" variant="light" color={t.kind === 'kamailio' ? 'grape' : t.kind === 'sbc' ? 'teal' : 'blue'}>{t.kind === 'sbc' ? <IconRouteAltLeft size={15} /> : t.kind === 'kamailio' ? <IconRouteAltLeft size={15} /> : <IconServer2 size={15} />}</ThemeIcon>}
                       <div style={{ minWidth: 0 }}><Text fw={600} fz="sm" truncate>{t.name}</Text><Text fz={11} c="dimmed" ff="monospace" truncate>{(t.kind === 'webrtc' || t.kind === 'webrtc-client') ? (t.link || ('wss://' + t.provider_host + '/ws')) : (t.provider_host + ':' + t.provider_port)}</Text></div>
                     </Group>
                     <Group gap={2} wrap="nowrap"><ActionIcon variant="subtle" color="gray" size="sm" onClick={e => { e.stopPropagation(); openEdit(t); }}><IconEdit size={15} /></ActionIcon><ActionIcon variant="subtle" color="red" size="sm" onClick={e => { e.stopPropagation(); del(t); }}><IconTrash size={15} /></ActionIcon></Group>
                   </Group>
                   <Group gap={6} mt={6}>
-                    <Badge size="xs" variant="light" color={(t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'grape' : (t.mode === 'ip' ? 'indigo' : 'blue')}>{t.kind === 'webrtc-client' ? 'WebRTC cliente' : t.kind === 'webrtc' ? 'WebRTC servidor' : (t.mode === 'ip' ? 'IP / Peer' : 'Registro')}</Badge>
+                    <Badge size="xs" variant="light" color={t.kind === 'sbc' ? 'teal' : (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'grape' : (t.mode === 'ip' ? 'indigo' : 'blue')}>{t.kind === 'sbc' ? 'Troncal del SBC · borde' : t.kind === 'webrtc-client' ? 'WebRTC cliente' : t.kind === 'webrtc' ? 'WebRTC servidor' : (t.mode === 'ip' ? 'IP / Peer' : 'Registro')}</Badge>
                     <Badge size="xs" variant="light" color="gray">{(t.transport || 'udp').toUpperCase()}</Badge>
                     {t.channels ? <Badge size="xs" variant="light" color="cyan">{t.channels} ch</Badge> : null}
                     {t.dids && t.dids.length ? <Badge size="xs" variant="light" color="indigo">{t.dids.length} DID</Badge> : null}
@@ -177,6 +179,26 @@ export default function Troncales() {
                 </Card>
               ))}
             </Stack></ScrollArea.Autosize>}
+          {sbcTrunks.length > 0 && (<>
+            <Group justify="space-between" px="md" py="xs" style={{ borderTop: '1px solid rgba(15,23,42,.06)' }}>
+              <Group gap={6}><IconRouteAltLeft size={14} color="var(--mantine-color-grape-6)" /><Text fw={700} fz="sm">En el SBC (operador)</Text></Group>
+              <Badge size="xs" variant="dot" color={sbcInfo.live ? 'teal' : 'gray'}>{sbcInfo.live ? 'en vivo' : 'sin datos'}</Badge>
+            </Group>
+            <Stack gap={6} p={8} pt={0}>
+              {sbcTrunks.map((t) => (
+                <Card key={'sbc-' + t.name} withBorder radius="md" padding="xs" style={{ background: 'rgba(124,58,237,.05)' }}>
+                  <Group justify="space-between" wrap="nowrap" gap={6}>
+                    <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                      <ThemeIcon size={28} radius="md" variant="light" color="grape"><IconRouteAltLeft size={15} /></ThemeIcon>
+                      <div style={{ minWidth: 0 }}><Text fw={600} fz="sm" truncate>{t.name}</Text><Text fz={11} c="dimmed" ff="monospace" truncate>{t.provider_host}:{t.provider_port}</Text></div>
+                    </Group>
+                    <Badge size="xs" variant="light" color="grape">{(t.transport || 'udp').toUpperCase()}</Badge>
+                  </Group>
+                </Card>
+              ))}
+            </Stack>
+            <Text fz={10} c="dimmed" px="md" pb="xs">Se administran en el SBC — la central no las conoce, sólo las lee.</Text>
+          </>)}
         </Paper>
       )}
 
@@ -184,7 +206,7 @@ export default function Troncales() {
       {sel && (
         <Paper style={{ position: 'absolute', bottom: 16, left: 16, width: 320, borderRadius: 16, padding: 14, ...glass }}>
           <Group justify="space-between" mb={6}>
-            <Group gap={8}><ThemeIcon size={30} radius="md" variant="light" color={sel.kind === 'kamailio' ? 'grape' : 'blue'}>{sel.kind === 'kamailio' ? <IconRouteAltLeft size={16} /> : <IconDeviceLandlinePhone size={16} />}</ThemeIcon><Text fw={800}>{sel.name}</Text></Group>
+            <Group gap={8}><ThemeIcon size={30} radius="md" variant="light" color={sel.kind === 'kamailio' ? 'grape' : sel.kind === 'sbc' ? 'teal' : 'blue'}>{(sel.kind === 'kamailio' || sel.kind === 'sbc') ? <IconRouteAltLeft size={16} /> : <IconDeviceLandlinePhone size={16} />}</ThemeIcon><Text fw={800}>{sel.name}</Text></Group>
             <ActionIcon variant="subtle" color="gray" onClick={() => setSel(null)}><IconX size={16} /></ActionIcon>
           </Group>
           <Stack gap={5}>

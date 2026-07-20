@@ -1,18 +1,14 @@
-# PBX-NG · stack Docker. Perfiles (profiles) = MODULOS. Un contenedor existe solo si
-# su perfil esta activo. Se controla con COMPOSE_PROFILES en .env (recomendado) o con
-# --profile en la linea de comandos.
-#   core      -> postgres, redis, asterisk, api, dashboard   (siempre)
-#   sbc       -> kamailio, rtpengine, wsbridge               (SBC / troncales WebRTC)
-#   turn      -> coturn                                       (TURN/STUN para WebRTC)
-#   ai        -> voz (TTS/STT, IVR con IA)
-#   intercom  -> go2rtc (RTSP -> WebRTC/MSE, video de intercom/camaras)
-#   proxy     -> nginx-proxy-manager                          (TLS/WSS, opcional)
-# Uso:  export COMPOSE_PROFILES=core,sbc,turn,intercom ; docker compose up -d
-#       (o: pbxng-ctl up   ·   o el instalador)
+# PBX-NG · stack Docker completo. Perfiles (profiles) para instalar separado o junto:
+#   core  -> postgres, redis, asterisk, api, dashboard
+#   sbc   -> kamailio, rtpengine
+#   media -> coturn
+#   ai    -> voz (TTS/STT)
+#   proxy -> nginx-proxy-manager
+# Uso:  docker compose --profile core --profile sbc up -d --build   (o usar install.sh)
 #
 # NOTA: asterisk/kamailio/coturn usan network_mode: host (SIP/RTP necesitan la red
-# real). Para que alcancen a Postgres, este publica 5432 en el host; por eso DB_HOST
-# para esos servicios es la IP del host (o 127.0.0.1 en single-node).
+# real). Para que alcancen a Postgres, éste publica 5432 en el host; por eso
+# DB_HOST para esos servicios es la IP del host (o 127.0.0.1 en single-node).
 name: pbxng
 
 networks:
@@ -25,10 +21,11 @@ volumes:
   npm_data:
   npm_letsencrypt:
   asterisk_sounds:
+  asterisk_conf:
   voz_models:
-  go2rtc_config:
-  recordings:          # grabaciones: compartido asterisk (escribe) <-> api (lee)
-  voicemail:           # buzones de voz: asterisk (escribe) <-> api (lee/borra) — sin agente HTTP
+  recordings:
+  voicemail:
+  certs:
 
 services:
   postgres:
@@ -41,8 +38,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./config/initdb:/docker-entrypoint-initdb.d:ro
-    ports: ["5432:5432"]
+      - ./config/initdb:/docker-entrypoint-initdb.d:ro   # esquema realtime + app (primer arranque)
+    ports: ["5432:5432"]                                  # host-net asterisk/kamailio alcanzan la DB
     networks: [pbxng]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
@@ -55,6 +52,7 @@ services:
     profiles: ["core"]
     restart: unless-stopped
     volumes: [redis_data:/data]
+    ports: ["6379:6379"]
     networks: [pbxng]
 
   asterisk:
@@ -64,7 +62,9 @@ services:
     image: pbxng/asterisk:22
     profiles: ["core"]
     restart: unless-stopped
-    network_mode: host
+    network_mode: host                 # SIP/RTP necesitan red del host
+    cap_add:
+      - NET_ADMIN                     # cambiar IP / activar-desactivar placas desde el panel
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -81,8 +81,12 @@ services:
       DOMAIN: ${DOMAIN:-pbx.local}
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
-      - recordings:/var/spool/asterisk/monitor      # grabaciones MixMonitor
-      - voicemail:/var/spool/asterisk/voicemail    # buzones de voz (compartido con la api)
+      - recordings:/var/spool/asterisk/monitor
+      - voicemail:/var/spool/asterisk/voicemail
+      # Config que GENERA el panel (aparcado, captura, música en espera). Los .conf
+      # horneados hacen #include de este directorio: así el panel cambia comportamiento
+      # sin reconstruir la imagen.
+      - asterisk_conf:/etc/asterisk/pbxng.d
 
   api:
     build: ../control-plane
@@ -93,6 +97,7 @@ services:
       postgres: { condition: service_healthy }
     environment:
       PORT: 3000
+      CONF_DIR: /etc/pbxng
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-pbxng}
@@ -105,6 +110,10 @@ services:
       AMI_PORT: 5038
       AMI_USER: ${AMI_USER:-pbxng-ami}
       AMI_PASS: ${AMI_PASS:?}
+      # Dónde vive el agente del núcleo (:8092): placas de red, rutas y diagnóstico.
+      # Sin esta variable la API arma "http://:8092" y NADA del agente funciona
+      # (no se ven las interfaces ni se puede cambiar el modo de red).
+      ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       TENANT_MODE: ${TENANT_MODE:-single}
       DOMAIN: ${DOMAIN:-}
@@ -112,7 +121,7 @@ services:
       TURN_USER: ${TURN_USER:-pbxng}
       TURN_PASS: ${TURN_PASS:-}
       DEFAULT_COMPANY: ${DEFAULT_COMPANY:-Mi Empresa}
-      ADMIN_DEFAULT_PASS: ${ADMIN_DEFAULT_PASS:-}
+      # --- topologia de nodos (parametriza IPs mostradas/usadas; sin lab viejo) ---
       SBC_HOST: ${SBC_HOST:-}
       NPM_HOST: ${NPM_HOST:-}
       TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
@@ -121,10 +130,14 @@ services:
       AST_AGENT: ${AST_AGENT:-}
       TURN_AGENT: ${TURN_AGENT:-}
       VM_AGENT: ${VM_AGENT:-}
-      GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}    # gestion interna de go2rtc (modulo intercom)
     volumes:
-      - recordings:/recordings                           # grabaciones (leer + subir a NAS/S3 y liberar disco)
-      - voicemail:/voicemail                            # buzones de voz (listar/escuchar/borrar)
+      - recordings:/recordings
+      - voicemail:/voicemail
+      - certs:/etc/pbxng
+      # El panel escribe acá la config de aparcado/captura/MoH que Asterisk incluye,
+      # y deja los audios de música en espera junto a los sonidos personalizados.
+      - asterisk_conf:/etc/asterisk/pbxng.d
+      - asterisk_sounds:/var/lib/asterisk/sounds/custom
     ports: ["3000:3000"]
     networks: [pbxng]
 
@@ -195,15 +208,15 @@ services:
       context: .
       dockerfile: images/coturn/Dockerfile
     image: pbxng/coturn
-    profiles: ["turn"]
+    profiles: ["media"]
     restart: unless-stopped
     network_mode: host
     environment:
       DOMAIN: ${DOMAIN:-pbx.local}
       TURN_REALM: ${TURN_REALM:-${DOMAIN:-pbx.local}}
       TURN_USER: ${TURN_USER:-pbxng}
-      TURN_PASS: ${TURN_PASS:?set TURN_PASS in .env (lo genera install.sh)}
-      TURN_CLI_PASS: ${TURN_CLI_PASS:?set TURN_CLI_PASS in .env}
+      TURN_PASS: ${TURN_PASS:-pbxng-turn-changeme}
+      TURN_CLI_PASS: ${TURN_CLI_PASS:-pbxng-cli}
       PUBLIC_IP: ${PUBLIC_IP:-}
 
   voz:
@@ -215,18 +228,6 @@ services:
     restart: unless-stopped
     volumes: [voz_models:/opt/voz/models]
     ports: ["8080:8080"]
-    networks: [pbxng]
-
-  go2rtc:
-    image: alexxit/go2rtc:latest
-    profiles: ["intercom"]
-    restart: unless-stopped
-    volumes:
-      - go2rtc_config:/config
-    ports:
-      - "1984:1984"        # API/HTTP (MSE/WebRTC signaling); el proxy publica /go2rtc/
-      - "8555:8555/tcp"    # WebRTC (opcional)
-      - "8555:8555/udp"    # WebRTC (opcional)
     networks: [pbxng]
 
   npm:

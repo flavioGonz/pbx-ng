@@ -22,9 +22,14 @@ export default function CallPage() {
     if (sp.reg === 'error' && phase === 'calling') { setErr('No se pudo conectar la llamada. Revisá tu conexión.'); setPhase('error'); }
   }, [sp.reg, phase]);
   useEffect(() => {
-    if (sp.call === 'Established') setPhase('incall');
-    else if (sp.call === 'Terminated' && (phase === 'incall' || phase === 'calling')) setPhase('ended');
-  }, [sp.call]);
+    // El otro colgó (BYE) o el watchdog cortó por RTP muerto: wire() pone call en
+    // 'Terminated' e INMEDIATAMENTE en null, y React batchea ambos setState, así que el
+    // widget sólo ve el null. Por eso reaccionamos a "ya no está Established" (Terminated
+    // o null), no al string 'Terminated' — antes se quedaba "En llamada" para siempre.
+    if (sp.call === 'Established') { setPhase('incall'); return; }
+    if (phase === 'incall' && sp.call !== 'Established') setPhase('ended');
+    else if (phase === 'calling' && sp.call === 'Terminated') setPhase('ended');
+  }, [sp.call, phase]);
   useEffect(() => { if (phase !== 'incall') return; setSecs(0); const t = setInterval(() => setSecs(s => s + 1), 1000); return () => clearInterval(t); }, [phase]);
 
   async function getGeo() {

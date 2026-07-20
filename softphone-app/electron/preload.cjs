@@ -8,16 +8,19 @@ contextBridge.exposeInMainWorld('sphone', {
   // motor SIP nativo: registro + llamadas + audio
   sipConnect: (cfg) => ipcRenderer.invoke('sipnat-connect', cfg),
   sipDisconnect: () => ipcRenderer.invoke('sipnat-disconnect'),
-  sipCall: (num) => ipcRenderer.invoke('sipnat-call', num),
-  sipAccept: () => ipcRenderer.invoke('sipnat-accept'),
+  sipCall: (num, video) => ipcRenderer.invoke('sipnat-call', num, video),
+  sipAccept: (video) => ipcRenderer.invoke('sipnat-accept', video),
   sipReject: () => ipcRenderer.invoke('sipnat-reject'),
   sipHangup: () => ipcRenderer.invoke('sipnat-hangup'),
   sipMute: (m) => ipcRenderer.invoke('sipnat-mute', m),
   sipDtmf: (d) => ipcRenderer.invoke('sipnat-dtmf', d),
   sipTransfer: (t) => ipcRenderer.invoke('sipnat-transfer', t),
   sipAudioOut: (b64) => ipcRenderer.send('sipnat-audio-out', b64),
+  sipVideoOut: (b64, ts) => ipcRenderer.send('sipnat-video-out', b64, ts),        // Annex-B (base64) → main
+  sipVideoKeyframe: () => ipcRenderer.invoke('sipnat-video-keyframe'),             // pedir IDR al otro lado
   onSipEvent: (cb) => ipcRenderer.on('sipnat-event', (_e, evt) => cb(evt)),
   onSipAudio: (cb) => ipcRenderer.on('sipnat-audio', (_e, pcm) => cb(pcm)),
+  onSipVideo: (cb) => ipcRenderer.on('sipnat-video', (_e, nal) => cb(nal)),        // Annex-B (base64) del otro lado
   onProvision: (cb) => ipcRenderer.on('provision', (_e, url) => cb(url)),
   // config cifrada (safeStorage/DPAPI)
   secureAvailable: () => ipcRenderer.invoke('secure-available'),

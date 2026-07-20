@@ -10,6 +10,16 @@ set -e
 # redes autorizadas para AMI (la API). Por defecto rangos privados + loopback.
 : "${AMI_PERMIT:=127.0.0.1/255.255.255.255,10.0.0.0/255.0.0.0,172.16.0.0/255.240.0.0,192.168.0.0/255.255.0.0}"
 
+# --- config que genera el panel (aparcado, captura, música en espera) ---
+# Los .conf horneados hacen #include de pbxng.d/. Si el panel todavía no escribió nada,
+# dejamos los archivos vacíos para que Asterisk no avise por cada include faltante.
+mkdir -p /etc/asterisk/pbxng.d
+for f in parking.conf moh.conf features.conf; do
+  [ -f "/etc/asterisk/pbxng.d/$f" ] || echo "; generado por el panel PBX-NG (vacío por ahora)" > "/etc/asterisk/pbxng.d/$f"
+done
+# Carpeta de audios de música en espera administrada desde el panel.
+mkdir -p /var/lib/asterisk/sounds/custom/moh 2>/dev/null || true
+
 # --- res_pgsql.conf (realtime ARA) ---
 cat > /etc/asterisk/res_pgsql.conf <<EOF
 [general]

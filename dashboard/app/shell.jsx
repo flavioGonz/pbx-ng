@@ -4,49 +4,46 @@ import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider } from '@mantine/core';
 import {
-  IconSitemap, IconServer2, IconDatabase,
+  IconSitemap, IconServer2, IconDatabase, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
-  IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute,
-  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2,
-  IconDeviceCctv, IconAddressBook, IconBook,
-} from '@tabler/icons-react';
+  IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk,
+  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook} from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
+import PbxLogo from './PbxLogo';
 
 function Logo({ logo, name }) {
   if (logo) return <img src={logo} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 8 }} />;
-  return (
-    <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#557bd7" /><stop offset="1" stopColor="#143196" /></linearGradient></defs>
-      <path d="M24 2 L42 9 V25 C42 36 34 43 24 46 C14 43 6 36 6 25 V9 Z" fill="url(#g)" />
-      <text x="24" y="29" textAnchor="middle" fontFamily="Inter,sans-serif" fontWeight="800" fontSize="15" fill="#fff">IES</text>
-    </svg>
-  );
+  return <PbxLogo size={32} />;
 }
 const groups = [
-  // El Resumen es la puerta de entrada: primero de todo y sin grupo, para llegar en un click.
-  { label: 'Panel', icon: IconLayoutDashboard, items: [
-    { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
-  ] },
   { label: 'Telefonía', icon: IconPhoneCall, items: [
+    { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
     { href: '/topologia', label: 'Topología', icon: IconSitemap },
-    { href: '/sbc', label: 'SBC-NG', icon: IconShieldLock },
-    { href: '/asterisk', label: 'Asterisk', icon: IconServer2 },
+    { href: '/red', label: 'Red', icon: IconNetwork },
     { href: '/internos', label: 'Extensiones', icon: IconUsers },
-    { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
+    { href: '/troncales', label: 'Troncales', icon: IconDeviceLandlinePhone },
+    { href: '/rutas', label: 'Rutas', icon: IconRoute },
     { href: '/ivr', label: 'IVR', icon: IconArrowsSplit },
     { href: '/ia-voz', label: 'IA & Voz', icon: IconRobot },
     { href: '/click-to-call', label: 'Click-to-Call', icon: IconWorldShare },
-    { href: '/aplicaciones', label: 'Aplicaciones', icon: IconApps },
-    { href: '/historial', label: 'Historial', icon: IconHistory },
-    { href: '/grabaciones', label: 'Grabaciones', icon: IconMicrophone2 },
-    { href: '/intercom', label: 'Intercom', icon: IconDeviceCctv },
+    { href: '/cdr', label: 'CDR', icon: IconHistory },
+  ] },
+  { label: 'Aplicaciones', icon: IconApps, items: [
+    { href: '/aplicaciones/colas', label: 'Colas', icon: IconHeadset },
+    { href: '/aplicaciones/rg', label: 'Ring Groups', icon: IconUsersGroup },
+    { href: '/aplicaciones/paging', label: 'Paging', icon: IconBroadcast },
+    { href: '/aplicaciones/conf', label: 'Conferencias', icon: IconUsers },
+    { href: '/aplicaciones/vm', label: 'Buzones', icon: IconMail },
+    { href: '/aplicaciones/codes', label: 'Códigos', icon: IconAsterisk },
+    { href: '/funciones', label: 'Aparcado · Captura · MoH', icon: IconAsterisk },
+    { href: '/aplicaciones/ai', label: 'AI IVR', icon: IconRobot },
   ] },
   { label: 'Operación', icon: IconDeviceAnalytics, items: [
+    { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
     { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
     { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
     { href: '/mapa', label: 'Mapa', icon: IconMap2 },
-    { href: '/clientes', label: 'Clientes', icon: IconAddressBook },
   ] },
   { label: 'Sistema', icon: IconAdjustmentsCog, items: [
     { href: '/dialplan', label: 'Dialplan', icon: IconTerminal2 },
@@ -54,6 +51,7 @@ const groups = [
     { href: '/usuarios', label: 'Usuarios', icon: IconUsersGroup },
     { href: '/basedatos', label: 'Base de datos', icon: IconDatabase },
     { href: '/seguridad', label: 'Seguridad', icon: IconShieldCheck },
+    { href: '/certificados', label: 'Certificados TLS', icon: IconCertificate },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
     { href: '/configuracion', label: 'Configuración', icon: IconSettings },
     { href: '/manuales', label: 'Manuales', icon: IconBook },
@@ -63,10 +61,10 @@ const groups = [
 export default function Shell({ children }) {
   const path = usePathname();
   const [rail, setRail] = useState(false);
-  const [openG, setOpenG] = useState({});
+  const [abiertos, setAbiertos] = useState([]);  // acordeón: máximo 2 grupos abiertos a la vez (como el SBC)
   const [mods, setMods] = useState({});
   useEffect(() => { fetch('/backend/api/modules').then((r) => r.json()).then(setMods).catch(() => {}); }, []);
-  const MOD_MAP = { '/sbc': 'sbc', '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/intercom': 'intercom' };
+  const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai' };
   const visibleItem = (it) => !MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false;
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
   useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then((bb) => { setBrand(bb); if (bb && bb.name && typeof document !== 'undefined') document.title = bb.name; }).catch(() => {}); }, []);
@@ -74,21 +72,25 @@ export default function Shell({ children }) {
   const isActive = (it) => it.href === '/' ? path === '/' : path.startsWith(it.href);
   // por defecto: abrir el grupo que contiene la ruta activa
   useEffect(() => {
-    setOpenG(prev => {
-      if (Object.keys(prev).length) return prev;
-      const init = {}; groups.forEach(g => { init[g.label] = g.label === 'Telefonía' || g.items.some(isActive); });
-      return init;
+    setAbiertos(prev => {
+      if (prev.length) return prev;
+      const act = groups.filter(g => g.items.some(isActive)).map(g => g.label);
+      return [act[0] || 'Telefonía'];
     });
   }, [path]);
   const toggleRail = () => setRail(v => { const n = !v; try { localStorage.setItem('pbxng_rail', n ? '1' : '0'); } catch (_) {} return n; });
-  const toggleGroup = (l) => setOpenG(s => ({ ...s, [l]: !s[l] }));
+  const toggleGroup = (l) => setAbiertos(a => (a.includes(l) ? [] : [l]));
 
-  if (path && (path.startsWith('/phone') || path.startsWith('/enroll') || path.startsWith('/call') || path.startsWith('/agente') || path.startsWith('/supervisor') || path === '/login')) return children;
+  // Hooks SIEMPRE antes de cualquier return (Rules of Hooks): con el early-return de abajo
+  // dejandolos afuera en /phone,/agente,etc. el conteo de hooks cambiaba entre renders
+  // (React #300) y rompia la hidratacion (#418/#423). Ahora se llaman incondicionalmente.
   const { connected } = useLive();
   const { user } = useAuth();
   const { setColorScheme } = useMantineColorScheme();
   const scheme = useComputedColorScheme('dark');
   const toggleScheme = () => setColorScheme(scheme === 'dark' ? 'light' : 'dark');
+
+  if (path && (path.startsWith('/phone') || path.startsWith('/enroll') || path.startsWith('/call') || path.startsWith('/agente') || path.startsWith('/supervisor') || path === '/login')) return children;
 
   const navItem = (it) => {
     const active = isActive(it); const Icon = it.icon;
@@ -114,12 +116,12 @@ export default function Shell({ children }) {
           {/* navegación */}
           <ScrollArea style={{ flex: 1, marginTop: 14 }} type="hover">
             {groups.map(g => {
-              const opened = rail ? true : (openG[g.label] ?? false);
+              const opened = rail ? true : abiertos.includes(g.label);
               const GIcon = g.icon;
               return (
                 <Box key={g.label} mb={6}>
                   {!rail ? (
-                    <UnstyledButton onClick={() => toggleGroup(g.label)} style={{ width: '100%', borderRadius: 8, padding: '5px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <UnstyledButton onClick={(e) => { const el = e.currentTarget; toggleGroup(g.label); setTimeout(() => { try { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (_) {} }, 70); }} style={{ width: '100%', borderRadius: 8, padding: '5px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Group gap={7}><GIcon size={14} stroke={1.8} style={{ opacity: .7 }} /><Text size="xs" fw={700} c="dimmed" tt="uppercase" style={{ letterSpacing: '.06em' }}>{g.label}</Text></Group>
                       <IconChevronRight size={14} style={{ opacity: .6, transform: opened ? 'rotate(90deg)' : 'none', transition: 'transform .18s' }} />
                     </UnstyledButton>

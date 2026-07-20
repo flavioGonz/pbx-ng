@@ -1,8 +1,11 @@
 # PBX-NG · Control Plane (Node/Express + ARI/AMI + Socket.io)
 FROM node:20-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates socat openssl \
     && rm -rf /var/lib/apt/lists/*
+# acme.sh (un solo script) para emitir/renovar certificados Let's Encrypt sin proxy adelante
+RUN curl -fsSL https://raw.githubusercontent.com/acmesh-official/acme.sh/master/acme.sh -o /usr/local/bin/acme.sh \
+ && chmod +x /usr/local/bin/acme.sh
 COPY package*.json ./
 RUN npm ci --omit=dev || npm install --omit=dev
 COPY . .

@@ -25,6 +25,22 @@
    "audience": "Usuario final",
    "icon": "📱",
    "accent": "#0d9488"
+  },
+  {
+   "id": "estandares",
+   "title": "Estándares y RFCs",
+   "subtitle": "Qué RFC cumple la central y dónde se configura",
+   "audience": "Integrador / Auditoría",
+   "icon": "📜",
+   "accent": "#0891b2"
+  },
+  {
+   "id": "escritorio",
+   "title": "App de Escritorio (Windows)",
+   "subtitle": "Instalación, uso y despliegue del softphone",
+   "audience": "Usuario / Admin",
+   "icon": "🖥️",
+   "accent": "#f59e0b"
   }
  ]
 }

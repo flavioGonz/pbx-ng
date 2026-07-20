@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import PbxLogo from '../PbxLogo';
 
 const ROLES = {
   admin: { label: 'Administrador', icon: 'admin_panel_settings', heading: 'Panel de administración' },
@@ -8,7 +9,7 @@ const ROLES = {
 };
 
 const FEATURES = [
-  { icon: 'monitor_heart', title: 'Dashboard live', desc: 'Estado de extensiones, colas y troncales en tiempo real.' },
+  { icon: 'monitor_heart', title: 'Dashboard live', desc: 'Estado de internos, colas y troncales en tiempo real.' },
   { icon: 'swap_horiz', title: 'Hotdesking dinámico', desc: 'Los agentes inician sesión en cualquier puesto disponible.' },
   { icon: 'assessment', title: 'Reportes detallados', desc: 'CDR, métricas de colas y exportación a PDF / Excel.' },
   { icon: 'sensors', title: 'Monitoreo real-time', desc: 'Escucha, susurro e irrupción sobre llamadas activas.' },
@@ -98,7 +99,7 @@ export default function Login() {
           <div className="hzn-login-mobile-logo">
             {brand.logo
               ? <img src={brand.logo} alt="" style={{ width: 40, height: 40, objectFit: 'contain' }} />
-              : <span className="material-icons-round" style={{ color: 'var(--horizon-green)', fontSize: 34 }}>shield</span>}
+              : <PbxLogo size={38} />}
             <span className="hzn-logo-text-mobile">{brandName}</span>
           </div>
 
@@ -256,6 +257,10 @@ export default function Login() {
         <div className="hzn-login-hero-overlay" />
         <button type="button" className="hzn-hero-mute" onClick={toggleMute} aria-label={muted ? 'Activar sonido' : 'Silenciar'}><span className="material-icons-round">{muted ? 'volume_off' : 'volume_up'}</span></button>
         <div className="hzn-login-hero-content">
+          {/* El logo, grande y flotando: es lo primero que se ve del producto. */}
+          <div className="pbx-login-float" aria-hidden>
+            <PbxLogo size={150} />
+          </div>
           <div className="hzn-logo">
             <div style={{ textAlign: 'right' }}>
               <div className="hzn-logo-text">{brandName}</div>
@@ -264,7 +269,7 @@ export default function Login() {
             <div className="hzn-logo-mark">
               {brand.logo
                 ? <img src={brand.logo} alt="" style={{ width: 30, height: 30, objectFit: 'contain' }} />
-                : <span className="material-icons-round" style={{ color: 'var(--horizon-green)', fontSize: 28 }}>shield</span>}
+                : <PbxLogo size={30} />}
             </div>
           </div>
 
@@ -275,7 +280,7 @@ export default function Login() {
             </span>
             <h1>{brand.tagline || 'Central telefónica unificada'}</h1>
             <p>
-              Extensiones WebRTC, troncales SIP, colas, IVR, conferencias y monitoreo en tiempo real,
+              Internos WebRTC, troncales SIP, colas, IVR, conferencias y monitoreo en tiempo real,
               en una sola consola centralizada.
             </p>
 

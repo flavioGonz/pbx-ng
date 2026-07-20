@@ -42,6 +42,11 @@ Podés usar el que más te sirva. Los tres funcionan igual y podés tener varios
 
 Cuando el punto de tu nombre está **verde**, estás en línea y podés llamar y recibir llamadas.
 
+> **¿Querés el detalle completo de la app de Windows?** Instalación (`.exe` / `.msi` / portable),
+> bandeja del sistema, arranque con Windows, atajos de teclado globales, ventana flotante,
+> click-to-call, códecs, actualizaciones automáticas y solución de problemas están en el **Manual
+> de la App de Escritorio (Windows)**. Este capítulo es el resumen para empezar rápido.
+
 ---
 
 ## 4. Iniciar sesión

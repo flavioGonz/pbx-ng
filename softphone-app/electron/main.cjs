@@ -59,11 +59,13 @@ ipcMain.handle('sp-api-blob', (_e, opts) => httpRequest(opts, true));
 
 // ---- motor SIP nativo (UDP/TCP/TLS) + llamadas + audio RTP ----
 let sipNat = null; try { sipNat = require('./sip-udp.cjs'); } catch (_) {}
-function sipEvt(evt) { try { if (!win) return; if (evt && evt.type === 'audio') win.webContents.send('sipnat-audio', evt.pcm); else win.webContents.send('sipnat-event', evt); } catch (_) {} }
+function sipEvt(evt) { try { if (!win) return; if (evt && evt.type === 'audio') win.webContents.send('sipnat-audio', evt.pcm); else if (evt && evt.type === 'video-in') win.webContents.send('sipnat-video', evt.nal); else win.webContents.send('sipnat-event', evt); } catch (_) {} }
 ipcMain.handle('sipnat-connect', (_e, cfg) => { if (!sipNat) return { error: 'motor SIP no disponible' }; return sipNat.start(cfg, sipEvt); });
 ipcMain.handle('sipnat-disconnect', () => { try { sipNat && sipNat.stop(); } catch (_) {} return { ok: true }; });
-ipcMain.handle('sipnat-call', (_e, num) => { try { sipNat && sipNat.call(num); } catch (_) {} return { ok: true }; });
-ipcMain.handle('sipnat-accept', () => { try { sipNat && sipNat.accept(); } catch (_) {} return { ok: true }; });
+ipcMain.handle('sipnat-call', (_e, num, video) => { try { sipNat && sipNat.call(num, video); } catch (_) {} return { ok: true }; });
+ipcMain.handle('sipnat-accept', (_e, video) => { try { sipNat && sipNat.accept(video); } catch (_) {} return { ok: true }; });
+ipcMain.on('sipnat-video-out', (_e, b64, ts) => { try { sipNat && sipNat.videoOut(b64, ts); } catch (_) {} });
+ipcMain.handle('sipnat-video-keyframe', () => { try { sipNat && sipNat.reqKeyframe(); } catch (_) {} return { ok: true }; });
 ipcMain.handle('sipnat-reject', () => { try { sipNat && sipNat.reject(); } catch (_) {} return { ok: true }; });
 ipcMain.handle('sipnat-hangup', () => { try { sipNat && sipNat.hangup(); } catch (_) {} return { ok: true }; });
 ipcMain.handle('sipnat-mute', (_e, m) => { try { sipNat && sipNat.setMuted(m); } catch (_) {} return { ok: true }; });

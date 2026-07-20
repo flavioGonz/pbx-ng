@@ -153,4 +153,67 @@ async function test() {
   return { ok: true, msg: 'Subida a S3 correcta: ' + url };
 }
 
-module.exports = { init, sweep, upload, test, REC_DIR };
+const { execFile } = require('child_process');
+const net = require('net');
+function dfPath(p) {
+  return new Promise((ok) => {
+    execFile('df', ['-kP', p], { timeout: 5000 }, (e, so) => {
+      if (e) return ok(null);
+      const lines = (so || '').trim().split('\n'); const parts = (lines[lines.length - 1] || '').split(/\s+/);
+      const totalK = +parts[1], usedK = +parts[2]; if (!totalK) return ok(null);
+      ok({ total: totalK * 1024, used: usedK * 1024, avail: (+parts[3] || 0) * 1024, pct: Math.round(usedK * 100 / totalK) });
+    });
+  });
+}
+async function usage() {
+  const cfg = await config();
+  const local = await dfPath(REC_DIR);
+  let nas = null;
+  if (cfg.nas_path) { const ex = fs.existsSync(cfg.nas_path); nas = ex ? Object.assign({ mounted: true, path: cfg.nas_path }, (await dfPath(cfg.nas_path)) || {}) : { mounted: false, path: cfg.nas_path }; }
+  let by = {};
+  try { const { rows } = await pool.query("SELECT COALESCE(storage,'local') storage, count(*)::int n, COALESCE(sum(bytes),0)::bigint bytes FROM pbxng_recordings WHERE deleted=false GROUP BY 1"); rows.forEach(r => by[r.storage] = { n: r.n, bytes: Number(r.bytes) }); } catch (_) {}
+  return {
+    backend: cfg.backend || 'local',
+    local: Object.assign({}, local || {}, { files: (by.local && by.local.n) || 0, bytes: (by.local && by.local.bytes) || 0 }),
+    nas: nas ? Object.assign({}, nas, { files: (by.nas && by.nas.n) || 0, bytes: (by.nas && by.nas.bytes) || 0 }) : null,
+    s3: { files: (by.s3 && by.s3.n) || 0, bytes: (by.s3 && by.s3.bytes) || 0 },
+  };
+}
+function tcpProbe(host, port, label, seg = 4) {
+  return new Promise((ok) => {
+    const c = net.connect({ host, port });
+    const to = setTimeout(() => { c.destroy(); ok({ paso: label, ok: false, detalle: 'sin conexion a ' + host + ':' + port + ' en ' + seg + 's' }); }, seg * 1000);
+    c.on('connect', () => { clearTimeout(to); c.end(); ok({ paso: label, ok: true, detalle: 'puerto ' + port + ' abierto en ' + host }); });
+    c.on('error', (e) => { clearTimeout(to); ok({ paso: label, ok: false, detalle: e.code || e.message }); });
+  });
+}
+function mountHint(type, p) {
+  if (type === 'nfs') return 'mount -t nfs ' + (p.nas_server || 'SERVIDOR') + ':' + (p.nas_share || '/export') + ' ' + (p.nas_path || '/mnt/nas');
+  if (type === 'cifs') return 'mount -t cifs //' + (p.nas_server || 'SERVIDOR') + '/' + (p.nas_share || 'share') + ' ' + (p.nas_path || '/mnt/nas') + ' -o username=' + (p.nas_user || 'usuario') + ',password=***,uid=asterisk';
+  return '';
+}
+async function nastest(p) {
+  p = p || {};
+  const type = p.nas_type || 'mount';
+  const pasos = [];
+  if (type === 'mount') {
+    if (!p.nas_path) return { ok: false, pasos: [{ paso: 'Ruta', ok: false, detalle: 'falta la ruta montada' }] };
+    const ex = fs.existsSync(p.nas_path);
+    pasos.push({ paso: 'Existe la ruta', ok: ex, detalle: ex ? p.nas_path + ' existe' : 'no existe (esta montado el NAS en el server de Asterisk?)' });
+    if (ex) {
+      try { const t = path.join(p.nas_path, '.pbxng-test'); fs.writeFileSync(t, 'x'); fs.unlinkSync(t); pasos.push({ paso: 'Escritura', ok: true, detalle: 'permiso de escritura OK' }); }
+      catch (e) { pasos.push({ paso: 'Escritura', ok: false, detalle: e.code || e.message }); }
+      const u = await dfPath(p.nas_path); if (u) pasos.push({ paso: 'Espacio', ok: true, info: true, detalle: (u.used / 1e9).toFixed(1) + ' GB de ' + (u.total / 1e9).toFixed(1) + ' GB usados (' + u.pct + '%)' });
+    }
+  } else {
+    if (!p.nas_server) return { ok: false, pasos: [{ paso: 'Servidor', ok: false, detalle: 'falta el servidor NAS' }] };
+    const port = type === 'nfs' ? 2049 : 445;
+    pasos.push(await tcpProbe(p.nas_server, port, 'Alcance ' + type.toUpperCase() + ' (' + port + ')'));
+    pasos.push({ paso: 'Comando de montaje', ok: true, info: true, detalle: mountHint(type, p) });
+    if (p.nas_path && fs.existsSync(p.nas_path)) { const u = await dfPath(p.nas_path); if (u) pasos.push({ paso: 'Ya montado', ok: true, info: true, detalle: 'montado en ' + p.nas_path + ' (' + u.pct + '% usado)' }); }
+  }
+  const ok = pasos.filter((x) => !x.info).every((x) => x.ok);
+  return { ok, pasos, mount_cmd: mountHint(type, p) };
+}
+
+module.exports = { init, sweep, upload, test, usage, nastest, REC_DIR };

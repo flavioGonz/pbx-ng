@@ -1,16 +1,21 @@
 'use client';
-import dynamic from 'next/dynamic';
-import { Stack } from '@mantine/core';
-import { IconRouteAltLeft } from '@tabler/icons-react';
-import PageHeader from '../PageHeader';
+/* La configuración del borde se mudó a su propio producto: SBC-NG. PBX-NG ya no
+ * administra el SBC desde acá — solo se conecta a él. Esta ruta quedó como cortesía
+ * para cualquier enlace viejo: redirige al panel. */
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Center, Stack, Loader, Text } from '@mantine/core';
 
-const SbcConsole = dynamic(() => import('../SbcConsole'), { ssr: false });
-
-export default function SbcPage() {
+export default function SbcMoved() {
+  const router = useRouter();
+  useEffect(() => { const t = setTimeout(() => router.replace('/'), 1800); return () => clearTimeout(t); }, [router]);
   return (
-    <Stack gap="lg">
-      <PageHeader icon={<IconRouteAltLeft size={24} />} title="SBC-NG" subtitle="Session Border Controller - configuracion, seguridad y flujo de llamadas" color="grape" />
-      <SbcConsole inline />
-    </Stack>
+    <Center h="60vh">
+      <Stack align="center" gap="sm">
+        <Loader />
+        <Text fw={600}>El SBC ahora es un producto aparte: SBC-NG</Text>
+        <Text size="sm" c="dimmed">PBX-NG se conecta a él, pero ya no lo configura desde acá. Te llevamos al panel…</Text>
+      </Stack>
+    </Center>
   );
 }
