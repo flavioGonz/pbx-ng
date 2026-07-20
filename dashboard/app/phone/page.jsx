@@ -18,6 +18,30 @@ import {
 } from '@tabler/icons-react';
 
 const CK = 'pbxng_contacts';
+/* El buzon ya no es publico: hay que mandar el token. Un <audio src> no manda
+ * cabeceras, y meter el token en la URL lo dejaria escrito en los logs del proxy.
+ * Asi que se baja por fetch (que el parche global firma) y se reproduce del blob. */
+function VmAudio({ ext, folder, id }) {
+  const [url, setUrl] = useState(null);
+  const [estado, setEstado] = useState('idle');   // idle | cargando | error
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  const traer = async () => {
+    if (url || estado === 'cargando') return;
+    setEstado('cargando');
+    try {
+      const r = await fetch(`/backend/api/vm/audio?ext=${encodeURIComponent(ext)}&folder=${encodeURIComponent(folder)}&id=${encodeURIComponent(id)}`);
+      if (!r.ok) throw new Error('no se pudo');
+      setUrl(URL.createObjectURL(await r.blob())); setEstado('idle');
+    } catch (_) { setEstado('error'); }
+  };
+  if (url) return <audio controls autoPlay style={{ width: '100%', height: 34, marginTop: 8 }} src={url} />;
+  return (
+    <button onClick={traer} style={{ width: '100%', height: 34, marginTop: 8, borderRadius: 8, border: '1px solid #d1d1d6', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+      {estado === 'cargando' ? 'Cargando…' : estado === 'error' ? 'No se pudo cargar' : '▶ Escuchar'}
+    </button>
+  );
+}
+
 const loadC = () => { try { return JSON.parse(localStorage.getItem(CK) || '[]'); } catch (_) { return []; } };
 const saveC = (c) => localStorage.setItem(CK, JSON.stringify(c));
 
@@ -491,7 +515,7 @@ export default function Phone() {
                     <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{m.callerid || 'Desconocido'}{m.new && <span style={{ color: '#ff3b30', marginLeft: 6, fontSize: 12 }}>nuevo</span>}</div><div style={{ fontSize: 12, color: '#8e8e93' }}>{m.origtime ? new Date(m.origtime * 1000).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''} - {m.duration}s</div></div>
                     <button style={S.iconBtn} onClick={() => vmDel(m)}><IconTrash size={16} color="#ff3b30" /></button>
                   </div>
-                  <audio controls preload="none" style={{ width: '100%', height: 34, marginTop: 8 }} src={'/backend/api/vm/audio?ext=' + (sp.creds?.ext || '') + '&folder=' + m.folder + '&id=' + m.id} />
+                  <VmAudio ext={sp.creds?.ext || ''} folder={m.folder} id={m.id} />
                 </div>
               ))}
           </div>

@@ -12,7 +12,10 @@ function patchFetch() {
     try {
       const u = typeof url === 'string' ? url : (url && url.url);
       if (u && u.indexOf('/backend') === 0) {
-        const t = localStorage.getItem('pbxng_jwt');
+        // La sesión de panel manda; si no hay, se usa el token del softphone (que sólo
+        // habilita lo de SU extensión). Así el administrador que abre /phone no pierde
+        // sus permisos, y el que sólo tiene credenciales SIP igual ve su buzón.
+        const t = localStorage.getItem('pbxng_jwt') || localStorage.getItem('pbxng_phone_jwt');
         opts = { ...opts, headers: { ...(opts.headers || {}), ...(t ? { Authorization: 'Bearer ' + t } : {}) } };
       }
     } catch (_) {}

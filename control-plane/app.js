@@ -333,11 +333,58 @@ function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const t = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!t) return res.status(401).json({ error: 'no autenticado' });
-  try { req.user = jwt.verify(t, SECRET); next(); } catch (e) { res.status(401).json({ error: 'sesión inválida' }); }
+  try { req.user = jwt.verify(t, SECRET); } catch (e) { return res.status(401).json({ error: 'sesión inválida' }); }
+
+  /* Un token de softphone (scope 'phone') NO es una sesión de panel. Lo emite quien
+   * demuestra tener las credenciales SIP de una extensión, así que sólo puede tocar
+   * lo de ESA extensión — nunca la configuración de la central. Sin esta barrera,
+   * cerrar el buzón habría abierto algo peor: cualquiera con una clave SIP entrando
+   * al panel. La lista es explícita a propósito: lo que no está acá, no se puede. */
+  if (req.user && req.user.scope === 'phone') {
+    // El middleware va montado en '/api', así que req.path acá es '/vm', no '/api/vm'.
+    // Hay que rearmar la ruta completa igual que isPublicApi, o no matchea nada.
+    const full = (req.baseUrl || '') + req.path;
+    const permitido = FONO_PERMITIDO.some(([m, rx]) => (m === req.method || m === '*') && rx.test(full));
+    if (!permitido) return res.status(403).json({ error: 'este token sólo sirve para el softphone' });
+  }
+  next();
+}
+
+/* Lo único que un token de softphone puede pedir. Las rutas con extensión además
+ * verifican, adentro, que la extensión sea la suya (ver mismaExt). */
+const FONO_PERMITIDO = [
+  ['GET',  /^\/api\/vm$/],
+  ['GET',  /^\/api\/vm\/audio$/],
+  ['POST', /^\/api\/vm\/(del|read|transcribe)$/],
+  ['GET',  /^\/api\/directory$/],
+  ['GET',  /^\/api\/presence$/],
+  ['GET',  /^\/api\/ice$/],
+  ['GET',  /^\/api\/branding$/],
+  ['POST', /^\/api\/calls\/(record|conference)$/],
+  ['*',    /^\/api\/push\//],
+];
+
+/* ¿El que pide puede meterse con la extensión `ext`?
+ *   - token de softphone  -> sólo la suya
+ *   - sesión de panel     -> admin y supervisor ven todo; el resto, la suya
+ * Antes esto no existía: alcanzaba con mandar ?ext=NNNN y te daban el buzón ajeno. */
+function mismaExt(req, ext) {
+  const u = req.user || {};
+  const e = String(ext || '');
+  if (!e) return false;
+  if (u.scope === 'phone') return String(u.ext) === e;
+  if (u.role === 'admin' || u.role === 'supervisor') return true;
+  return String(u.ext || '') === e;
+}
+function exigirExt(req, res, ext) {
+  if (mismaExt(req, ext)) return true;
+  res.status(403).json({ error: 'no podés acceder a los datos de otra extensión' });
+  return false;
 }
 // --- Gate de autenticacion deny-by-default: TODA /api requiere JWT salvo la allowlist publica explicita ---
 const PUBLIC_API = [
   ['POST', /^\/api\/auth\/login$/],
+  ['POST', /^\/api\/phone\/token$/],
   ['GET',  /^\/api\/auth\/setup$/],
   ['GET',  /^\/api\/ice$/],
   ['GET',  /^\/api\/branding$/],
@@ -347,16 +394,10 @@ const PUBLIC_API = [
   ['GET',  /^\/api\/prompts\/[^/]+\/audio$/],
   ['GET',  /^\/api\/push\/vapid$/],
   ['POST', /^\/api\/push\/(subscribe|register|unsubscribe)$/],
-  ['POST', /^\/api\/calls\/(record|conference)$/],
-  ['GET',  /^\/api\/directory$/],
-  ['GET',  /^\/api\/presence$/],
   ['GET',  /^\/api\/internal\/wake$/],
   ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
   ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
   ['POST', /^\/api\/geo\/report$/],
-  ['GET',  /^\/api\/vm$/],
-  ['GET',  /^\/api\/vm\/audio$/],
-  ['POST', /^\/api\/vm\/(del|read)$/],
   ['GET',  /^\/api\/sbc\/rtpengine\/effective$/],
   // Las capturas de los manuales se piden con <img src>, que NO manda el token.
   // Sólo la LECTURA es pública (subir y borrar siguen pidiendo sesión).
@@ -548,6 +589,39 @@ pool.query("CREATE TABLE IF NOT EXISTS pbxng_rec_config (id int PRIMARY KEY DEFA
 pool.query("ALTER TABLE pbxng_rec_config ADD COLUMN IF NOT EXISTS nas_type text DEFAULT 'mount', ADD COLUMN IF NOT EXISTS nas_server text, ADD COLUMN IF NOT EXISTS nas_share text, ADD COLUMN IF NOT EXISTS nas_user text, ADD COLUMN IF NOT EXISTS nas_pass text").catch(()=>{});
 
 // Enrollment: canje publico del token (la PWA lo usa sin JWT)
+/* Canje de credenciales SIP por un token del softphone.
+ *
+ * El softphone tiene la extensión y su clave SIP (con eso se registra), pero no una
+ * sesión de panel. Antes, el buzón de voz confiaba en el parámetro ?ext= que mandaba
+ * el cliente: cualquiera en internet podía pedir —y borrar— los mensajes de otro.
+ * Ahora prueba que tiene la clave de ESA extensión y recibe un token atado a ella.
+ *
+ * No hace falta volver a enrolar ningún teléfono: el softphone ya guarda ext y clave,
+ * así que canjea solo la primera vez que arranca. */
+const FONO_INTENTOS = new Map();   // ip -> { n, hasta }
+app.post('/api/phone/token', async (req, res) => {
+  const { ext, password } = req.body || {};
+  const ip = clientIp(req);
+  const ahora = Date.now();
+  const reg = FONO_INTENTOS.get(ip);
+  // Freno simple contra la fuerza bruta: las claves SIP son largas y generadas, pero
+  // un endpoint que valida contraseñas sin límite es una invitación.
+  if (reg && reg.hasta > ahora) return res.status(429).json({ error: 'demasiados intentos, esperá un minuto' });
+  if (!ext || !password) return res.status(400).json({ error: 'ext y password son obligatorios' });
+  try {
+    const { rows } = await pool.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
+    const ok = rows[0] && String(rows[0].password) === String(password);
+    if (!ok) {
+      const n = (reg && reg.hasta > ahora ? reg.n : (reg ? reg.n : 0)) + 1;
+      FONO_INTENTOS.set(ip, { n, hasta: n >= 8 ? ahora + 60000 : 0 });
+      return res.status(401).json({ error: 'extensión o clave incorrecta' });
+    }
+    FONO_INTENTOS.delete(ip);
+    const token = jwt.sign({ scope: 'phone', ext: String(ext) }, SECRET, { expiresIn: '30d' });
+    res.json({ token, ext: String(ext) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/enroll/:token', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT token,ext,password,expires_at FROM pbxng_enroll WHERE token=$1', [req.params.token]);
@@ -995,24 +1069,29 @@ async function vmMarkRead(ext, id) {   // INBOX -> Old (como hace *97 al guardar
   return nid;
 }
 app.get('/api/vm', async (req, res) => {
+  if (!exigirExt(req, res, req.query.ext)) return;
   try { res.json(await vmList(req.query.ext || '')); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/vm/audio', async (req, res) => {
+  if (!exigirExt(req, res, req.query.ext)) return;
   try { const buf = await vmAudio(req.query.ext, req.query.folder, req.query.id); res.set('Content-Type', 'audio/wav').send(buf); }
   catch (e) { res.status(404).end(); }
 });
 app.post('/api/vm/del', async (req, res) => {
+  if (!exigirExt(req, res, (req.body || {}).ext)) return;
   try { const { ext, folder, id } = req.body || {}; await vmDelete(ext, folder, id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/vm/read', async (req, res) => {
+  if (!exigirExt(req, res, (req.body || {}).ext)) return;
   try { const { ext, id } = req.body || {}; const nid = await vmMarkRead(ext, id); res.json({ ok: true, id: nid }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Transcripcion de un mensaje de voz (Whisper): baja el WAV del agente VM, lo pasa a PCM
 // y lo manda al servicio STT (faster-whisper). No persiste (los VM los maneja el agente).
 app.post('/api/vm/transcribe', async (req, res) => {
+  if (!exigirExt(req, res, (req.body || {}).ext)) return;
   try {
     const { ext, folder, id } = req.body || {};
     if (!ext || id == null || id === '') return res.status(400).json({ error: 'faltan ext/id' });

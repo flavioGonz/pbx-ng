@@ -176,6 +176,17 @@ export function useSoftphone() {
       r.stateChange.addListener((s) => setReg(s === 'Registered' ? 'registered' : s === 'Unregistered' ? 'connecting' : 'connecting'));
       await r.register();
       setCreds({ ext, pass, video });
+      /* Canje por el token del softphone. El buzón de voz ya no confía en el ?ext= que
+       * manda el cliente (antes, con eso se podía leer y borrar el buzón de cualquiera):
+       * ahora hay que probar que se tiene la clave SIP de ESA extensión. Se guarda aparte
+       * del token del panel para no pisar la sesión de quien además es administrador. */
+      try {
+        const rt = await fetch('/backend/api/phone/token', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ext, password: pass }),
+        });
+        if (rt.ok) { const dt = await rt.json(); if (dt && dt.token) localStorage.setItem('pbxng_phone_jwt', dt.token); }
+      } catch (_) { /* sin token el softphone igual llama; sólo no ve el buzón */ }
       if (remember) localStorage.setItem(LS, JSON.stringify({ ext, pass, video }));
       primeMedia(video);
     } catch (e) { setReg('error'); throw e; }
@@ -185,6 +196,7 @@ export function useSoftphone() {
     wantConnected.current = false;
     try { if (registerer.current) await registerer.current.unregister(); if (ua.current) await ua.current.stop(); } catch (_) {}
     ua.current = null; setReg('idle'); setCall(null); setCreds(null);
+    try { localStorage.removeItem('pbxng_phone_jwt'); } catch (_) {}
     localStorage.removeItem(LS);
   }, []);
 
