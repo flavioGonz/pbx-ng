@@ -108,6 +108,7 @@ const NODES = {
 // (VM_AGENT retirado: los buzones se leen del volumen compartido /voicemail, sin agente HTTP)
 const pool = new Pool(CFG.db);
 const diagtrunk = require('./diagtrunk');
+const backup = require('./backup');     // respaldo y restauracion del appliance
 const app = express();
 const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
 /* Las capturas de los manuales viajan como data URL dentro del JSON: una captura de
@@ -3086,6 +3087,61 @@ app.delete('/api/manuales/img/:name', (req, res) => {
   try { _fsm.rmSync(_pathm.join(MAN_IMG_DIR, name), { force: true }); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ---------------- Respaldo y restauración ----------------
+// El respaldo NO lleva contraseñas: ver la explicación al principio de backup.js.
+app.get('/api/backup', async (req, res) => {
+  try { res.json({ respaldos: await backup.listar(), partes: backup.PARTES.map(p => ({ id: p.id, desc: p.desc, opcional: !!p.opcional })) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/backup', async (req, res) => {
+  try {
+    const r = await backup.crear({ grabaciones: !!(req.body && req.body.grabaciones), nota: (req.body && req.body.nota) || '' });
+    res.status(201).json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Descarga por streaming: un respaldo con grabaciones puede pesar cientos de MB y no
+// tiene por qué pasar por memoria.
+app.get('/api/backup/:nombre/archivo', (req, res) => {
+  let f; try { f = backup.seguro(req.params.nombre); } catch (e) { return res.status(400).json({ error: e.message }); }
+  res.download(f, req.params.nombre, (e) => { if (e && !res.headersSent) res.status(404).json({ error: 'no existe ese respaldo' }); });
+});
+
+// Leer el manifiesto sin restaurar: es lo que se le muestra al operador ANTES de decidir.
+app.get('/api/backup/:nombre/inspeccionar', async (req, res) => {
+  try { res.json(await backup.inspeccionar(req.params.nombre)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/backup/:nombre', async (req, res) => {
+  try { await backup.borrar(req.params.nombre); res.json({ borrado: req.params.nombre }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Subir un respaldo traído de otra instalación. Va como stream crudo, no como JSON:
+// un base64 dentro de un JSON multiplica por 1.33 y se come la memoria del proceso.
+app.post('/api/backup/subir/:nombre', express.raw({ type: '*/*', limit: '2gb' }), async (req, res) => {
+  try {
+    const f = backup.seguro(req.params.nombre);
+    if (!req.body || !req.body.length) return res.status(400).json({ error: 'el archivo llegó vacío' });
+    require('fs').writeFileSync(f, req.body);
+    const m = await backup.inspeccionar(req.params.nombre).catch((e) => ({ error: e.message }));
+    if (m && m.error) { try { require('fs').unlinkSync(f); } catch (_) {} return res.status(400).json({ error: m.error }); }
+    res.status(201).json({ subido: req.params.nombre, manifiesto: m });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/backup/:nombre/restaurar', async (req, res) => {
+  try {
+    const r = await backup.restaurar(req.params.nombre, {
+      partes: (req.body && Array.isArray(req.body.partes)) ? req.body.partes : null,
+      confirmar: !!(req.body && req.body.confirmar),
+    });
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.get('/api/manuales/img-list', (req, res) => {
   try {
     const files = _fsm.existsSync(MAN_IMG_DIR) ? _fsm.readdirSync(MAN_IMG_DIR).filter((f) => IMG_OK.test(f)) : [];

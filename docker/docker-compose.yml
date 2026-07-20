@@ -26,6 +26,9 @@ volumes:
   recordings:
   voicemail:
   certs:
+  # Los archivos de respaldo. Volumen propio: no se mezclan con las grabaciones
+  # ni viven en el disco del contenedor (se perderian al recrearlo).
+  respaldos:
 
 services:
   postgres:
@@ -138,6 +141,7 @@ services:
       # y deja los audios de música en espera junto a los sonidos personalizados.
       - asterisk_conf:/etc/asterisk/pbxng.d
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
+      - respaldos:/respaldos
     ports: ["3000:3000"]
     networks: [pbxng]
 

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider } from '@mantine/core';
 import {
-  IconSitemap, IconServer2, IconDatabase, IconNetwork,
+  IconSitemap, IconServer2, IconDatabase, IconDatabaseExport, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk,
   IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook} from '@tabler/icons-react';
@@ -50,6 +50,7 @@ const groups = [
     { href: '/empresas', label: 'Empresas', icon: IconBuilding },
     { href: '/usuarios', label: 'Usuarios', icon: IconUsersGroup },
     { href: '/basedatos', label: 'Base de datos', icon: IconDatabase },
+    { href: '/respaldos', label: 'Respaldos', icon: IconDatabaseExport },
     { href: '/seguridad', label: 'Seguridad', icon: IconShieldCheck },
     { href: '/certificados', label: 'Certificados TLS', icon: IconCertificate },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
