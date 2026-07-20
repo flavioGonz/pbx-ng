@@ -115,10 +115,13 @@ export default function Respaldos() {
       <PageHeader icon={<IconDatabaseExport size={24} />} title="Respaldo y restauración"
         subtitle="Guardá la central entera en un archivo, y volvé a levantarla desde él." />
 
-      <Alert color="blue" variant="light" icon={<IconShieldLock size={18} />} title="El respaldo no contiene contraseñas">
-        Ni las claves de la base, ni el secreto de sesiones, ni las de AMI/ARI. Así el archivo se
-        puede guardar y mover sin exponer el sistema. La instalación donde lo restaures usa
-        <b> sus propias</b> credenciales, configuradas en su archivo de entorno.
+      <Alert color="orange" variant="light" icon={<IconShieldLock size={18} />} title="Tratá el archivo como material sensible">
+        <b>Incluye los certificados TLS con sus claves privadas</b> — sin ellas el respaldo no
+        serviría para volver a levantar la central. Guardalo como guardarías una llave: no lo
+        mandes por correo ni lo dejes en una carpeta compartida.
+        <br />
+        No incluye, en cambio, las credenciales del entorno (base de datos, secreto de sesiones,
+        AMI/ARI): la instalación donde lo restaures usa <b>las suyas</b>.
       </Alert>
 
       <Card withBorder radius="md" p="md">

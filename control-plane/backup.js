@@ -20,11 +20,16 @@
  *
  *  Qué NO se respalda, a propósito:
  *
- *    Las credenciales del entorno (DB_PASS, JWT_SECRET, claves de AMI/ARI). Un
- *    archivo de respaldo se baja a una notebook, se manda por correo y se guarda en
- *    un pendrive: no puede llevar adentro las llaves del sistema. Y no hacen falta:
- *    el restore es lógico, así que la instalación destino usa las suyas. El
+ *    Las credenciales del entorno (DB_PASS, JWT_SECRET, claves de AMI/ARI). No hacen
+ *    falta: el restore es lógico, así que la instalación destino usa las suyas. El
  *    manifiesto deja anotado qué variables tiene que tener configuradas el destino.
+ *
+ *  OJO, el archivo SÍ es material sensible:
+ *
+ *    La parte `certs` lleva los certificados TLS CON sus claves privadas. No hay forma
+ *    de evitarlo sin que el respaldo deje de servir para levantar la central, así que
+ *    la decisión es incluirlas y decirlo fuerte en la pantalla, en vez de dar una
+ *    falsa sensación de que el archivo se puede mandar por correo.
  * ==========================================================================*/
 'use strict';
 
@@ -128,9 +133,11 @@ async function crear({ grabaciones = false, nota = '' } = {}) {
       nota: String(nota || '').slice(0, 300),
       incluye_grabaciones: !!grabaciones,
       partes,
-      // El respaldo no lleva secretos: esto le dice al destino qué necesita tener.
+      // El respaldo no lleva las credenciales del entorno: esto le dice al destino qué
+      // tiene que tener configurado por su cuenta para que la restauración sirva.
       entorno_requerido: ENV_REQUERIDAS,
-      aviso: 'Este archivo NO contiene contraseñas ni claves. La instalación destino usa las suyas.',
+      aviso: 'No contiene las credenciales del entorno (base, sesiones, AMI/ARI): el destino usa las suyas. '
+           + 'SÍ contiene los certificados TLS con sus claves privadas: tratá el archivo como material sensible.',
     };
     await fsp.writeFile(path.join(trabajo, 'manifiesto.json'), JSON.stringify(manifiesto, null, 2));
 
