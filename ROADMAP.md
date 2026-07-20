@@ -17,69 +17,70 @@ mucha competencia:
 | Área | Estado |
 |---|---|
 | **Telefonía base** | Extensiones (realtime en base), troncales, rutas entrantes y salientes, dialplan explicado en el panel |
-| **Atención de llamadas** | IVR con diseñador visual, colas/ACD, grupos de timbrado, conferencias, buzón de voz por defecto en cada interno |
+| **Atención de llamadas** | IVR con diseñador visual, colas/ACD, grupos de timbrado, conferencias, buzón de voz por defecto en cada interno, **aparcado de llamadas y captura**, **música en espera administrable** |
 | **Softphones** | Web/PWA WebRTC + **app de escritorio Windows** (Electron) con modo WebRTC **y** SIP nativo (UDP/TCP/TLS), SRTP, DTMF, transferencias, y **video H.264 en modo nativo** (recién implementado, sin probar en runtime) |
 | **Operación** | CDR propio, grabaciones, monitor de componentes, topología en vivo, wallboard, panel de agente y panel de supervisor (escucha/susurro/irrupción) |
 | **Diferenciales** | CRM propio (clientes/personas/espacios/dispositivos), **intercom de video** (porteros/cámaras vía go2rtc), **IA de voz** (TTS con voces uruguayas + STT), click-to-call web, aprovisionamiento de teléfonos, mapa de clientes |
+| **Interoperabilidad** | Modo **DTMF por extensión** (RFC 4733 / SIP INFO, para porteros Dahua y Hikvision), **RFC 5626 (Outbound)** con Path, múltiples flujos y keepalive, documento de RFCs cumplidos in-panel |
 | **Plataforma** | Appliance por módulos (Docker), instalador interactivo y no interactivo, imágenes versionadas con migraciones, manuales in-panel (instalación, configuración, usuario, escritorio, RFCs) |
 
 ---
 
 ## 2. Brechas reales para "PBX completa"
 
-Estas son funciones **clásicas** que un cliente o un competidor va a preguntar y hoy **no
-están** (verificado en el código, no supuesto):
+Verificado en el código el **2026-07-20**, no supuesto. Lo que cerramos desde la revisión
+anterior salió de esta tabla y está en §1.
 
 | Brecha | Estado real | Por qué importa |
 |---|---|---|
-| **Horarios / condiciones de tiempo** | Prácticamente ausente | Es *la* función que pide todo cliente: "de 9 a 18 al IVR, fuera de hora al buzón". Sin esto, la central no se puede vender como completa |
-| **Música en espera gestionable** | Mínima, sin administración | Subir/elegir MoH por cola o por sistema es expectativa básica |
-| **Fax / T.38** | **No existe** | Todavía hay clientes (estudios, salud, gobierno) que lo exigen para licitar |
-| **Aparcado de llamadas (parking)** | **No existe** | Función de recepción clásica: "te la dejo en la 701" |
-| **Captura de llamada (pickup)** | **No existe** | "Atender el teléfono del compañero que suena" — se pide siempre en oficinas |
-| **Multi-inquilino** | Parcial (`TENANT_MODE`, pantalla de empresas) | Define si podés vender la central **como servicio** a varios clientes desde una instalación |
-| **Respaldo y restauración** | Parcial, sin flujo en el panel | Hoy hay que saber qué copiar. Un producto se respalda y restaura desde la pantalla |
+| **Respaldo y restauración** | **No existe** (0 endpoints en el control-plane) | Es lo que separa un appliance de un proyecto. Hoy, si se muere un disco, recuperar depende de que alguien sepa qué copiar |
+| **Reportería histórica** | **No existe** (hay wallboard en vivo y CDR crudo) | Nivel de servicio, abandono, tiempo medio de atención por cola/agente/troncal, exportable. Lo pide cualquier cliente con call center |
+| **Migraciones automáticas** | Parcial: existe `migrate.js` pero **el servidor no tiene el directorio `migrations/`** | Hoy actualizar en casa de un cliente depende de acordarse de correr el SQL a mano. Funciona en el lab y falla en la instalación número siete |
+| **API pública + webhooks** | No existe | Es lo que hace que un integrador elija esta central sobre otra |
+| **Multi-inquilino** | Parcial (`TENANT_MODE`, pantalla de empresas) | Define si se puede vender la central **como servicio** a varios clientes desde una instalación |
+| **Alta disponibilidad** | No existe | Requisito para clientes medianos y para pliegos públicos |
+| **Horarios / condiciones de tiempo** | No existe | *Decisión de producto: fuera de alcance por ahora.* Se deja anotado porque es lo que más se pregunta en un pliego |
+| **Fax / T.38** | No existe | Sólo si aparece la demanda: es trabajo aparte y el mercado se achica todos los años |
+
+### Implementado pero sin probar
+
+Esto es deuda distinta: el código está, nadie lo ejerció.
+
+| Qué | Qué falta para darlo por cerrado |
+|---|---|
+| **Video en el softphone nativo (SIP, H.264)** | Build de Windows (`npm run dist`) y prueba de interoperabilidad contra Asterisk |
+| **Modo router/switch del núcleo** | Un cambio de modo real con commit-confirm, en un equipo que se pueda dejar sin red |
 
 ---
 
 ## 3. Roadmap propuesto
 
-### 3.1 Ahora — cerrar lo que impide decir "PBX completa"
+### 3.1 Ahora — continuidad
 
-Son las que más ruido hacen en una demo o en un pliego, y ninguna es enorme:
-
-1. **Horarios / condiciones de tiempo.** Tabla de franjas + feriados, y un nodo en el
-   diseñador de IVR y en las rutas entrantes: *si está en horario → X; si no → Y*.
-2. **Aparcado (parking) y captura (pickup).** Ambas se resuelven en el dialplan con
-   configuración; el trabajo real es la UI y los códigos de marcado.
-3. **Música en espera administrable.** Subir audios desde el panel (ya tenés el pipeline de
-   audios de la IA de voz) y elegir MoH por cola/sistema.
-4. **Probar el video del softphone nativo** y cerrar sus dos limitaciones conocidas
-   (escalado audio→video en llamada, y video sobre SRTP).
+1. **Respaldo y restauración desde el panel.** Un archivo con base + configuración +
+   certificados + **manifiesto de versión**, y un restore que valide el manifiesto *antes* de
+   tocar nada. No cuenta como hecho hasta que un restore real levante en el lab.
+2. **Migraciones automáticas al arrancar**, registradas y transaccionales por archivo. Elimina
+   una clase entera de fallas en campo.
+3. **Probar el video del softphone nativo** y cerrar sus dos limitaciones conocidas (escalado
+   audio→video en llamada, y video sobre SRTP — esto último depende del borde).
 
 ### 3.2 Próximo — profesionalizar la operación
 
-5. **Respaldo y restauración desde el panel**: un botón que exporta base + `.env` + grabaciones
-   con un manifiesto de versión, y un restore verificado. Es lo que separa un appliance de un
-   proyecto.
-6. **Reportería histórica** por cola/agente/troncal (hoy hay wallboard en vivo y CDR crudo):
-   nivel de servicio, abandono, tiempo medio de atención, exportable.
-7. **Multi-inquilino de verdad**: aislamiento por empresa en todas las pantallas y en la API,
-   con administrador por inquilino. Habilita el modelo "PBX como servicio".
-8. **API pública documentada + webhooks**: eventos de llamada hacia sistemas del cliente. Es
-   lo que hace que un integrador elija tu central sobre otra.
+4. **Reportería histórica** por cola/agente/troncal, exportable.
+5. **API pública documentada + webhooks** de eventos de llamada.
+6. **Multi-inquilino de verdad**: aislamiento por empresa en todas las pantallas y en la API,
+   con administrador por inquilino.
 
 ### 3.3 Después — diferenciación y escala
 
-9. **Fax T.38** (o pasarela fax-a-email), sólo si aparece la demanda: es trabajo aparte y
-   el mercado se achica todos los años.
-10. **Alta disponibilidad**: núcleo activo/pasivo con base replicada. Es requisito para
-    clientes medianos y para pliegos públicos.
-11. **App móvil nativa** (hoy PWA): push real para llamadas entrantes con la app cerrada, que
-    es lo único que la PWA no resuelve bien.
-12. **IA aplicada**: ya tenés TTS/STT propios. El salto es transcripción y **resumen automático
-    de llamadas** en la ficha del cliente, y detección de intención en el IVR. Acá hay
-    diferenciación real frente a centrales tradicionales.
+7. **Alta disponibilidad**: núcleo activo/pasivo con base replicada.
+8. **App móvil nativa** (hoy PWA): push real con la app cerrada, que es lo único que la PWA no
+   resuelve bien.
+9. **IA aplicada**: ya hay TTS/STT propios. El salto es transcripción y **resumen automático de
+   llamadas** en la ficha del cliente, y detección de intención en el IVR. Acá hay
+   diferenciación real frente a centrales tradicionales.
+10. **Fax T.38**, sólo contra demanda concreta.
 
 ---
 
@@ -89,7 +90,8 @@ Una instalación nueva debería poder: instalarse en menos de una hora, dar de a
 troncal, **atender según horario**, grabar, reportar, respaldarse desde el panel, y entregarle al
 cliente su softphone de Windows y su PWA — con los manuales adentro del producto.
 
-Hoy falta, de esa lista, **horarios** y **respaldo desde el panel**. El resto está.
+Hoy falta, de esa lista, **respaldo desde el panel** y **reportería**. (*Horarios* quedó fuera de
+alcance por decisión de producto.) El resto está.
 
 ---
 
