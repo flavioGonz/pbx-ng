@@ -3,8 +3,14 @@ import numpy as np
 from fastapi import FastAPI, Request, Response
 from faster_whisper import WhisperModel
 
-PIPER = "/opt/piper/piper/piper"
-VOICES = "/opt/piper/voices"
+# Motor Piper: preferimos el binario si esta, y si no el CLI que instala el paquete pip
+# (piper-tts). Antes se asumia una ruta fija que la imagen ni siquiera traia -> el TTS local
+# nunca funcionaba y todo salia por Edge sin que nadie se enterara.
+import shutil as _sh
+PIPER = os.environ.get("PIPER_BIN") or (
+    "/opt/piper/piper/piper" if os.path.exists("/opt/piper/piper/piper") else (_sh.which("piper") or "piper"))
+# Los modelos van al volumen persistente: si se recrea el contenedor, no hay que bajarlos de nuevo.
+VOICES = os.environ.get("VOICES_DIR", "/opt/voz/models")
 ENVFILE = "/etc/voz.env"
 HF = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 DEFAULT_VOICE = os.environ.get("VOZ_VOICE", "es_MX-claude-high")
@@ -175,13 +181,38 @@ async def adm_install(req: Request):
     item = next((c for c in CATALOG if c["key"] == key), None)
     if not item:
         return {"error": "voz no esta en el catalogo"}
+    # Descarga del modelo. Los .onnx de HuggingFace viajan por su CDN "xet", que rechaza los
+    # GET planos (403 AccessDenied) -> por eso "instalar voz" fallaba. La libreria oficial
+    # huggingface_hub habla ese protocolo; si no esta disponible, caemos a HTTP directo (que
+    # alcanza para los .json y para mirrors que no usen xet).
+    import shutil, tempfile, urllib.request
+    os.makedirs(VOICES, exist_ok=True)
+    try:
+        from huggingface_hub import hf_hub_download
+        for ext in (".onnx", ".onnx.json"):
+            src = hf_hub_download("rhasspy/piper-voices", f"{item['path']}/{key}{ext}")
+            shutil.copyfile(src, f"{VOICES}/{key}{ext}")
+        return {"ok": True, "key": key, "via": "huggingface_hub"}
+    except ImportError:
+        pass
+    except Exception as e:
+        return {"error": f"no se pudo descargar el modelo: {e}"}
+
     base = f"{HF}/{item['path']}/{key}"
     try:
         for ext in (".onnx", ".onnx.json"):
-            r = subprocess.run(["curl", "-fsSL", "-o", f"{VOICES}/{key}{ext}", f"{base}{ext}"], timeout=180)
-            if r.returncode != 0:
-                return {"error": "fallo la descarga de " + ext}
-        return {"ok": True, "key": key}
+            req = urllib.request.Request(f"{base}{ext}", headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "*/*",
+            })
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                if resp.status != 200:
+                    return {"error": f"fallo la descarga de {ext} (HTTP {resp.status})"}
+                with tempfile.NamedTemporaryFile(delete=False, dir=VOICES) as tmp:
+                    shutil.copyfileobj(resp, tmp)
+                    tmp_path = tmp.name
+            os.replace(tmp_path, f"{VOICES}/{key}{ext}")
+        return {"ok": True, "key": key, "via": "http"}
     except Exception as e:
         return {"error": str(e)}
 

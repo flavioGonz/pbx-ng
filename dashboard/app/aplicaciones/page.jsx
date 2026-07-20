@@ -11,8 +11,8 @@ function FeatureCodes() {
   const codes = [
     { code: '*43', name: 'Prueba de eco', desc: 'Repite tu voz para verificar el audio' },
     { code: '*44', name: 'Prueba de audio (ES)', desc: 'Reproduce un mensaje en español' },
-    { code: '*65', name: 'Decir mi número', desc: 'Locuta el número del interno' },
-    { code: '*97', name: 'Mi buzón de voz', desc: 'Entra al buzón del interno que llama' },
+    { code: '*65', name: 'Decir mi número', desc: 'Locuta el número dla extensión' },
+    { code: '*97', name: 'Mi buzón de voz', desc: 'Entra al buzón dla extensión que llama' },
     { code: '*98', name: 'Buzón de otro', desc: 'Pide número de buzón y PIN' },
     { code: '600', name: 'Eco (alias)', desc: 'Igual que *43' },
   ];
@@ -21,7 +21,7 @@ function FeatureCodes() {
       <Group justify="space-between" mb="md">
         <Group gap="xs"><Text fw={600}>Códigos de función</Text><Badge variant="light" color="teal">Integrados</Badge></Group>
       </Group>
-      <Text size="xs" c="dimmed" mb="sm">Atajos que cualquier interno puede marcar (audios en español). Vienen activos en el plan de marcado interno.</Text>
+      <Text size="xs" c="dimmed" mb="sm">Atajos que cualquier extensión puede marcar (audios en español). Vienen activos en el plan de marcado extensión.</Text>
       <Table striped highlightOnHover verticalSpacing="sm">
         <Table.Thead><Table.Tr><Table.Th>Código</Table.Th><Table.Th>Función</Table.Th><Table.Th>Descripción</Table.Th></Table.Tr></Table.Thead>
         <Table.Tbody>{codes.map(f => (
@@ -52,23 +52,23 @@ export default function Aplicaciones() {
         </Tabs.List>
         <Tabs.Panel value="colas"><QueuePanel /></Tabs.Panel>
         <Tabs.Panel value="rg">
-          <CrudPanel icon={<IconUsersGroup size={18} />} color="teal" title="Ring Groups" subtitle="Timbran varios internos a la vez" idKey="name" fetchUrl="/backend/api/ringgroups" createUrl="/backend/api/ringgroups" deleteUrl={(r) => '/backend/api/ringgroups/' + r.name}
-            columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'members', label: 'Internos', icon: <IconUsers size={13} /> }, { key: 'strategy', label: 'Estrategia' }]}
+          <CrudPanel icon={<IconUsersGroup size={18} />} color="teal" title="Ring Groups" subtitle="Timbran varios extensiones a la vez" idKey="name" fetchUrl="/backend/api/ringgroups" createUrl="/backend/api/ringgroups" deleteUrl={(r) => '/backend/api/ringgroups/' + r.name}
+            columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'members', label: 'Extensiones', icon: <IconUsers size={13} /> }, { key: 'strategy', label: 'Estrategia' }]}
             fields={[
               { name: 'name', label: 'Nombre', required: true, icon: <IconTag size={15} />, placeholder: 'soporte', description: 'Identificador del grupo. Ej: soporte, ventas.' },
               { name: 'label', label: 'Etiqueta', icon: <IconTag size={15} />, description: 'Texto descriptivo opcional. Ej: Equipo de Soporte.' },
               { name: 'access_exten', label: 'Número de acceso', required: true, icon: <IconHash size={15} />, placeholder: '8500', description: 'Número que se marca para timbrar al grupo. Ej: 8500.' },
-              { name: 'members', label: 'Internos (separados por coma)', required: true, icon: <IconUsers size={15} />, placeholder: '1001,1002,1003', description: 'Internos que suenan a la vez. Ej: 1001,1002,1003.' },
+              { name: 'members', label: 'Extensiones (separados por coma)', required: true, icon: <IconUsers size={15} />, placeholder: '1001,1002,1003', description: 'Extensiones que suenan a la vez. Ej: 1001,1002,1003.' },
             ]} emptyText="Sin ring groups." />
         </Tabs.Panel>
         <Tabs.Panel value="paging">
           <CrudPanel icon={<IconBroadcast size={18} />} color="orange" title="Paging / Intercom" subtitle="Aviso por altavoz a un grupo (auto-respuesta)" idKey="name" fetchUrl="/backend/api/paging" createUrl="/backend/api/paging" deleteUrl={(r) => '/backend/api/paging/' + r.name}
-            columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'members', label: 'Internos', icon: <IconUsers size={13} /> }]}
+            columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'members', label: 'Extensiones', icon: <IconUsers size={13} /> }]}
             fields={[
               { name: 'name', label: 'Nombre', required: true, icon: <IconTag size={15} />, placeholder: 'piso1', description: 'Identificador del grupo de paging. Ej: piso1.' },
               { name: 'label', label: 'Etiqueta', icon: <IconTag size={15} />, description: 'Texto descriptivo opcional. Ej: Planta baja.' },
               { name: 'access_exten', label: 'Número de acceso', required: true, icon: <IconHash size={15} />, placeholder: '7001', description: 'Número que se marca para hablar por altavoz al grupo. Ej: 7001.' },
-              { name: 'members', label: 'Internos (separados por coma)', required: true, icon: <IconUsers size={15} />, placeholder: '1001,1002', description: 'Internos que reciben el aviso con auto-respuesta. Ej: 1001,1002.' },
+              { name: 'members', label: 'Extensiones (separados por coma)', required: true, icon: <IconUsers size={15} />, placeholder: '1001,1002', description: 'Extensiones que reciben el aviso con auto-respuesta. Ej: 1001,1002.' },
             ]} emptyText="Sin grupos de paging." />
         </Tabs.Panel>
         <Tabs.Panel value="conf">
@@ -82,10 +82,10 @@ export default function Aplicaciones() {
             ]} emptyText="Sin salas de conferencia." />
         </Tabs.Panel>
         <Tabs.Panel value="vm">
-          <CrudPanel icon={<IconMail size={18} />} color="indigo" title="Buzones de voz" subtitle="Marcá *97 desde el interno para escuchar mensajes" idKey="mailbox" fetchUrl="/backend/api/mailboxes" createUrl="/backend/api/mailboxes" deleteUrl={(r) => '/backend/api/mailboxes/' + r.mailbox}
+          <CrudPanel icon={<IconMail size={18} />} color="indigo" title="Buzones de voz" subtitle="Marcá *97 desde la extensión para escuchar mensajes" idKey="mailbox" fetchUrl="/backend/api/mailboxes" createUrl="/backend/api/mailboxes" deleteUrl={(r) => '/backend/api/mailboxes/' + r.mailbox}
             columns={[{ key: 'mailbox', label: 'Buzón', mono: true }, { key: 'fullname', label: 'Nombre' }, { key: 'email', label: 'Email' }]}
             fields={[
-              { name: 'mailbox', label: 'Buzón (interno)', required: true, icon: <IconHash size={15} />, placeholder: '1001', description: 'Número del interno dueño del buzón. Ej: 1001.' },
+              { name: 'mailbox', label: 'Buzón (extensión)', required: true, icon: <IconHash size={15} />, placeholder: '1001', description: 'Número dla extensión dueño del buzón. Ej: 1001.' },
               { name: 'password', label: 'PIN', type: 'password', required: true, icon: <IconKey size={15} />, description: 'Clave para escuchar los mensajes marcando *97. Ej: 1234.' },
               { name: 'fullname', label: 'Nombre completo', icon: <IconUser size={15} />, description: 'Titular del buzón. Ej: Juan Pérez.' },
               { name: 'email', label: 'Email', icon: <IconMail size={15} />, description: 'Para recibir los mensajes por correo (opcional). Ej: juan@empresa.com.' },

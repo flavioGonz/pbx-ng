@@ -123,7 +123,7 @@ function SelfCam({ name, ext, paused, registered }) {
       <div className="ov">
         <div style={{ minWidth: 0 }}>
           <Text fw={800} c="#fff" fz="md" truncate style={{ textShadow: '0 1px 4px rgba(0,0,0,.7)' }}>{name}</Text>
-          <Text fz={11} c="rgba(255,255,255,.8)" ff="monospace">Interno {ext || '\u2014'}</Text>
+          <Text fz={11} c="rgba(255,255,255,.8)" ff="monospace">Extensión {ext || '\u2014'}</Text>
         </div>
         <Group gap={6} wrap="nowrap">
           {on && <Tooltip label="Apagar cámara"><ActionIcon size={26} radius="xl" variant="filled" color="dark" onClick={stop}><IconVideoOff size={14} /></ActionIcon></Tooltip>}
@@ -196,7 +196,7 @@ export default function AgentePanel() {
 
   useEffect(() => {
     if (connectedRef.current) return; connectedRef.current = true;
-    fetch('/backend/api/me/sipcreds').then(r => r.json()).then(d => { if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {}); else toast('Tu usuario no tiene interno asignado', 'bad'); }).catch(() => {});
+    fetch('/backend/api/me/sipcreds').then(r => r.json()).then(d => { if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {}); else toast('Tu usuario no tiene extensión asignado', 'bad'); }).catch(() => {});
     fetch('/backend/api/survey/fields').then(r => r.json()).then(d => Array.isArray(d) && setSurveyFields(d)).catch(() => {});
     fetch('/backend/api/agent/state').then(r => r.json()).then(d => { if (d) { setPaused(!!d.paused); setAgentState(d); } }).catch(() => {});
   }, []);

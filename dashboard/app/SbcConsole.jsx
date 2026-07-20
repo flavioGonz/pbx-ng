@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl, Switch, Select, Menu } from '@mantine/core';
+import { Modal, Tabs, Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, Textarea, ThemeIcon, Progress, ActionIcon, Tooltip, Code, ScrollArea, Divider, SegmentedControl, Switch, Select, Menu, HoverCard } from '@mantine/core';
 import { IconActivity, IconShieldLock, IconRouteAltLeft, IconArrowsLeftRight, IconFileCode, IconBan, IconRefresh, IconTrash, IconPlugConnected, IconPlugConnectedX, IconDeviceFloppy, IconAlertTriangle, IconClock, IconCpu, IconReload, IconSitemap, IconServer2 } from '@tabler/icons-react';
 import { toast } from './notify';
 import SbcFlow from './SbcFlow';
@@ -10,7 +10,7 @@ import Troncales from './troncales/page';
 import RoutesPanel from './RoutesPanel';
 import TurnConsole from './TurnConsole';
 import { useLive } from './useLive';
-import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud, IconReplace, IconChevronDown } from '@tabler/icons-react';
+import { IconPlus, IconInfoCircle, IconPhone, IconNetwork, IconRouter, IconRoute, IconWorld, IconBug, IconDeviceLandlinePhone, IconCloud, IconReplace, IconChevronDown, IconUsers } from '@tabler/icons-react';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const SECF_TYPE = { 0: 'User-Agent', 1: 'Pais', 2: 'Dominio', 3: 'IP', 4: 'Usuario', 5: 'Destino' };
@@ -146,13 +146,14 @@ function ConsoleBody({ sbc, load, hist }) {
   const SBC_NAV = [
     { v: 'mon', label: 'Monitoreo', icon: <IconActivity size={16} /> },
     { v: 'trunks', label: 'Troncales', icon: <IconDeviceLandlinePhone size={16} /> },
+    // No es ruteo: son extensiones SIP que registran contra Kamailio (el SBC), no contra Asterisk.
+    { v: 'remext', label: 'Extensiones SIP', icon: <IconUsers size={16} />, badge: remExt.length || 0, bcolor: 'grape' },
     { v: 'turn', label: 'TURN', icon: <IconCloud size={16} /> },
     { v: 'sec', label: 'Seguridad', icon: <IconShieldLock size={16} />, badge: banned.length || 0, bcolor: 'red' },
     { key: 'route', label: 'Ruteo', icon: <IconRoute size={16} />, items: [
       { v: 'lcr', label: 'Operadores', icon: <IconRoute size={15} /> },
       { v: 'smanip', label: 'Manipulación SIP', icon: <IconReplace size={15} /> },
       { v: 'disp', label: 'Dispatcher', icon: <IconRouteAltLeft size={15} /> },
-      { v: 'remext', label: 'Remotos', icon: <IconWorld size={15} />, badge: remExt.length || 0, bcolor: 'grape' },
     ] },
     { key: 'netmedia', label: 'Red y Media', icon: <IconNetwork size={16} />, items: [
       { v: 'net', label: 'Red', icon: <IconNetwork size={15} /> },
@@ -334,7 +335,7 @@ function ConsoleBody({ sbc, load, hist }) {
       <Tabs.Panel value="lcr">
         <Stack gap="md" mt="md">
           <Card withBorder radius="md" padding="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
-            <Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="blue" size="md"><IconInfoCircle size={16} /></ThemeIcon><Text size="xs">En las llamadas salientes a operadores, el SBC anuncia su IP publica y oculta la topologia interna (version de software y headers internos) para maxima interoperabilidad y privacidad. El failover entre operadores es automatico segun el orden de la regla.</Text></Group>
+            <Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="blue" size="md"><IconInfoCircle size={16} /></ThemeIcon><Text size="xs">En las llamadas salientes a operadores, el SBC anuncia su IP publica y oculta la topologia interna (version de software y headers extensiones) para maxima interoperabilidad y privacidad. El failover entre operadores es automatico segun el orden de la regla.</Text></Group>
           </Card>
           <Card withBorder radius="md" padding="lg">
             <Group justify="space-between" mb="sm">
@@ -374,13 +375,40 @@ function ConsoleBody({ sbc, load, hist }) {
         <Stack gap="md" mt="md">
           <Card withBorder radius="md" padding="md">
             <Group justify="space-between" mb="sm">
-              <Group gap="xs"><Text fw={700}>Extensiones remotas (por el SBC)</Text><Badge color="grape" variant="light">{remExt.length}</Badge></Group>
-              <Text size="xs" c="dimmed">Internos que registran a través de SBC-NG (no directo a Asterisk)</Text>
+              <Group gap="xs">
+                <ThemeIcon size={30} radius="md" variant="light" color="grape"><IconUsers size={16} /></ThemeIcon>
+                <div>
+                  <Text fw={700}>Extensiones SIP registradas en el SBC</Text>
+                  <Text size="xs" c="dimmed">Teléfonos y softphones que registran contra Kamailio (el borde) y no directo contra Asterisk</Text>
+                </div>
+                <Badge color="grape" variant="light">{remExt.length}</Badge>
+              </Group>
+              <HoverCard width={380} shadow="lg" radius="md" position="left-start" withArrow openDelay={100} transitionProps={{ transition: 'pop', duration: 180 }}>
+                <HoverCard.Target><ActionIcon variant="subtle" color="gray" style={{ cursor: 'help' }}><IconInfoCircle size={17} /></ActionIcon></HoverCard.Target>
+                <HoverCard.Dropdown>
+                  <Stack gap={7}>
+                    <Text fw={700} size="sm">Qué son estas extensiones</Text>
+                    <Text size="xs">
+                      Son las mismas extensiones de <b>Telefonía → Extensiones</b>, pero vistas desde el borde: acá aparecen
+                      sólo las que <b>registran a través del SBC</b>. Es el caso típico del que trabaja desde afuera
+                      (casa, celular, otra sede): su REGISTER entra por Kamailio, que lo filtra y lo reenvía a Asterisk.
+                    </Text>
+                    <Text size="xs">
+                      <b>Origen real</b> es la IP pública desde la que se registró — sirve para reconocer al que trabaja
+                      remoto y para detectar un registro desde un lugar que no corresponde.
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      Si una extensión no aparece acá pero tampoco en Asterisk, el REGISTER no llegó: revisá el firewall
+                      y la lista de bloqueos en Seguridad.
+                    </Text>
+                  </Stack>
+                </HoverCard.Dropdown>
+              </HoverCard>
             </Group>
             {remExt.length === 0
-              ? <Text c="dimmed" size="sm" py="md" ta="center">Ningún interno registrado por el SBC en este momento.</Text>
+              ? <Text c="dimmed" size="sm" py="md" ta="center">Ninguna extensión registrada por el SBC en este momento.</Text>
               : <Table striped highlightOnHover verticalSpacing="sm">
-                  <Table.Thead><Table.Tr><Table.Th>Interno</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Origen real</Table.Th><Table.Th>Proto</Table.Th><Table.Th>RTT</Table.Th></Table.Tr></Table.Thead>
+                  <Table.Thead><Table.Tr><Table.Th>Extensión</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Origen real</Table.Th><Table.Th>Proto</Table.Th><Table.Th>RTT</Table.Th></Table.Tr></Table.Thead>
                   <Table.Tbody>
                     {remExt.map(e => <Table.Tr key={e.id}>
                       <Table.Td ff="monospace" fw={600}>{e.id}</Table.Td>
@@ -465,7 +493,7 @@ function ConsoleBody({ sbc, load, hist }) {
           {[{ id: 'topos', mod: 'topos', label: 'Topology hiding', icon: <IconShieldLock size={18} />, desc: 'Oculta IPs y rutas internas a proveedores y clientes (privacidad/seguridad).' },
             { id: 'dialog_limits', mod: 'dialog', label: 'Límite de llamadas concurrentes', icon: <IconActivity size={18} />, desc: 'Máximo de llamadas simultáneas global y por troncal/IP (anti-fraude y capacidad).' },
             { id: 'acc', mod: 'acc', label: 'Accounting / CDR en el borde', icon: <IconFileCode size={18} />, desc: 'Registro de llamadas en el SBC, independiente de Asterisk.' },
-            { id: 'topohide', label: 'Topology hiding (salientes)', icon: <IconShieldLock size={18} />, desc: 'En salientes a operadores anuncia la IP pública y oculta versión y headers internos.' },
+            { id: 'topohide', label: 'Topology hiding (salientes)', icon: <IconShieldLock size={18} />, desc: 'En salientes a operadores anuncia la IP pública y oculta versión y headers extensiones.' },
             { id: 'sst', label: 'Session Timers (anti-zombi)', icon: <IconClock size={18} />, desc: 'Refresco de sesión RFC 4028: detecta y limpia llamadas colgadas/zombi en el borde.' },
             { id: 'drouting', mod: 'drouting', label: 'Routing avanzado / LCR', icon: <IconRoute size={18} />, desc: 'Ruteo de salientes por prefijo con failover entre operadores.', manage: 'lcr' },
             { id: 'secfilter', mod: 'secfilter', label: 'Filtro de seguridad', icon: <IconBan size={18} />, desc: 'Bloqueo por patrones, User-Agent y país.', manage: 'sec' },

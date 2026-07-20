@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState, Fragment } from 'react';
-import { Card, Table, Text, Stack, Badge, Group, Button, TextInput, Tabs, ActionIcon, Tooltip, SimpleGrid, ThemeIcon } from '@mantine/core';
-import { IconRefresh, IconSearch, IconDownload, IconPlayerPlay, IconPlayerPause, IconPhone, IconPhoneCheck, IconPhoneX, IconClock, IconCalendar, IconArrowUpRight, IconArrowDownLeft, IconArrowsLeftRight, IconCircleCheck, IconMicrophone2, IconRobot, IconArrowsSplit, IconWorld, IconDeviceLandlinePhone, IconRouteAltLeft, IconList } from '@tabler/icons-react';
+import { Card, Table, Text, Stack, Badge, Group, Button, TextInput, Tabs, ActionIcon, Tooltip, SimpleGrid, ThemeIcon, Modal, SegmentedControl, Divider } from '@mantine/core';
+import { IconRefresh, IconSearch, IconDownload, IconPlayerPlay, IconPlayerPause, IconPhone, IconPhoneCheck, IconPhoneX, IconClock, IconCalendar, IconArrowUpRight, IconArrowDownLeft, IconArrowsLeftRight, IconCircleCheck, IconMicrophone2, IconRobot, IconArrowsSplit, IconWorld, IconDeviceLandlinePhone, IconRouteAltLeft, IconList, IconFileTypePdf, IconReportAnalytics } from '@tabler/icons-react';
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
+import { toast } from '../notify';
 import { useLive } from '../useLive';
 import Slot from '../Slot';
 import RecordingPlayer from '../RecordingPlayer';
@@ -32,6 +33,16 @@ export default function Historial() {
   const { snap } = useLive();
   const [rows, setRows] = useState([]); const [recs, setRecs] = useState([]); const [loading, setLoading] = useState(true);
   const [q, setQ] = useState(''); const [tab, setTab] = useState('all'); const [playId, setPlayId] = useState(null); const [shown, setShown] = useState(80);
+  const [repOpen, setRepOpen] = useState(false); const [repBusy, setRepBusy] = useState(false);
+  const [preset, setPreset] = useState('30');
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const [rango, setRango] = useState(() => ({ from: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) }));
+  function aplicarPreset(v) {
+    setPreset(v);
+    if (v === 'custom') return;
+    const dias = v === 'hoy' ? 0 : (+v - 1);
+    setRango({ from: iso(new Date(Date.now() - dias * 864e5)), to: iso(new Date()) });
+  }
   async function load() {
     try { const d = await fetch('/backend/api/cdr?limit=300').then(r => r.json()); setRows(Array.isArray(d) ? d : []); } catch (_) { setRows([]); }
     try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setRecs(Array.isArray(d) ? d : []); } catch (_) {}
@@ -95,6 +106,25 @@ export default function Historial() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'cdr-pbxng-' + new Date().toISOString().slice(0, 10) + '.csv'; a.click(); URL.revokeObjectURL(a.href);
   }
 
+  // Informe ejecutivo: el backend arma el HTML A4 (tapa + KPIs + graficos + detalle).
+  // Lo pedimos con fetch (asi viaja el JWT) y lo abrimos como blob en una pestana nueva.
+  async function informe() {
+    setRepBusy(true);
+    try {
+      const p = new URLSearchParams({ from: rango.from, to: rango.to, tipo: tab });
+      if (q) p.set('q', q);
+      const r = await fetch('/backend/api/cdr/report?' + p.toString());
+      if (!r.ok) throw new Error('No se pudo generar el informe');
+      const html = await r.text();
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      const w = window.open(url, '_blank');
+      if (!w) toast('El navegador bloqueo la ventana emergente', 'bad');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setRepOpen(false);
+    } catch (e) { toast(String(e.message || e), 'bad'); }
+    setRepBusy(false);
+  }
+
   const tabs = [
     { v: 'all', l: 'Todas', icon: <IconList size={15} /> },
     { v: 'inbound', l: 'Entrantes', icon: <IconArrowDownLeft size={15} /> },
@@ -109,9 +139,40 @@ export default function Historial() {
     <Stack gap="lg">
       <PageHeader icon={<IconPhone size={24} />} title="Historial de llamadas" subtitle="Registros CDR · se actualiza solo" color="cyan"
         right={<>
+          <Button variant="gradient" gradient={{ from: 'cyan.7', to: 'blue.7' }} leftSection={<IconReportAnalytics size={16} />} onClick={() => setRepOpen(true)}>Informe ejecutivo</Button>
           <Button variant="light" leftSection={<IconDownload size={16} />} onClick={exportCSV} disabled={!fr.length}>Exportar CSV</Button>
           <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={load}>Recargar</Button>
         </>} />
+
+      <Modal opened={repOpen} onClose={() => setRepOpen(false)} radius="lg" centered size="lg"
+        title={<Group gap={8}><ThemeIcon variant="light" color="cyan" radius="md"><IconReportAnalytics size={17} /></ThemeIcon><Text fw={700}>Informe ejecutivo de llamadas</Text></Group>}>
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Genera un documento A4 con tapa corporativa, resumen ejecutivo con KPIs, graficos de volumen por dia, hora y dia de la semana,
+            composicion del trafico, rankings y el detalle de las llamadas. Se abre en una pestana nueva: desde ahi lo imprimis o lo guardas como PDF.
+          </Text>
+          <div>
+            <Text size="xs" fw={600} mb={6}>Periodo</Text>
+            <SegmentedControl fullWidth value={preset} onChange={aplicarPreset} data={[
+              { label: 'Hoy', value: 'hoy' }, { label: '7 dias', value: '7' }, { label: '30 dias', value: '30' }, { label: '90 dias', value: '90' }, { label: 'Personalizado', value: 'custom' },
+            ]} />
+          </div>
+          <Group grow>
+            <TextInput type="date" label="Desde" value={rango.from} onChange={e => { setPreset('custom'); setRango(r => ({ ...r, from: e.target.value })); }} />
+            <TextInput type="date" label="Hasta" value={rango.to} onChange={e => { setPreset('custom'); setRango(r => ({ ...r, to: e.target.value })); }} />
+          </Group>
+          <Divider />
+          <Group gap={8}>
+            <Text size="xs" c="dimmed">Se aplican los filtros actuales de la vista:</Text>
+            <Badge variant="light" color="cyan">{(tabs.find(t => t.v === tab) || {}).l || 'Todas'}</Badge>
+            {q && <Badge variant="light" color="grape">busqueda: {q}</Badge>}
+          </Group>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setRepOpen(false)}>Cancelar</Button>
+            <Button loading={repBusy} leftSection={<IconFileTypePdf size={16} />} onClick={informe}>Generar informe</Button>
+          </Group>
+        </Stack>
+      </Modal>
       <SimpleGrid cols={{ base: 2, sm: 3, lg: 5 }} spacing="md">
         {kpis.map(x => (
           <Card key={x.k} withBorder radius="lg" padding="md" shadow="sm">

@@ -8,7 +8,7 @@ const ROLES = {
 };
 
 const FEATURES = [
-  { icon: 'monitor_heart', title: 'Dashboard live', desc: 'Estado de internos, colas y troncales en tiempo real.' },
+  { icon: 'monitor_heart', title: 'Dashboard live', desc: 'Estado de extensiones, colas y troncales en tiempo real.' },
   { icon: 'swap_horiz', title: 'Hotdesking dinámico', desc: 'Los agentes inician sesión en cualquier puesto disponible.' },
   { icon: 'assessment', title: 'Reportes detallados', desc: 'CDR, métricas de colas y exportación a PDF / Excel.' },
   { icon: 'sensors', title: 'Monitoreo real-time', desc: 'Escucha, susurro e irrupción sobre llamadas activas.' },
@@ -275,7 +275,7 @@ export default function Login() {
             </span>
             <h1>{brand.tagline || 'Central telefónica unificada'}</h1>
             <p>
-              Internos WebRTC, troncales SIP, colas, IVR, conferencias y monitoreo en tiempo real,
+              Extensiones WebRTC, troncales SIP, colas, IVR, conferencias y monitoreo en tiempo real,
               en una sola consola centralizada.
             </p>
 

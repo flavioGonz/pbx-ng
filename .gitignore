@@ -32,3 +32,6 @@ vosk-model-*/
 # os
 .DS_Store
 Thumbs.db
+
+# SBC-NG es un producto (y un repo) aparte: github.com/flavioGonz/SBC-NG
+sbc-ng/

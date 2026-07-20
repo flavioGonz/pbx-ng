@@ -22,12 +22,12 @@ export default function Telefonos() {
   function nuevo() { setForm(empty); setOpened(true); }
   function edit(p) { setForm({ ...empty, ...p }); setOpened(true); }
   async function save() {
-    if (!form.mac || !form.ext) { toast('MAC e interno son obligatorios', 'bad'); return; }
+    if (!form.mac || !form.ext) { toast('MAC e extensión son obligatorios', 'bad'); return; }
     setSaving(true);
     const url = form.id ? '/backend/api/phones/' + form.id : '/backend/api/phones';
     const r = await fetch(url, { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }).then(x => x.json()).catch(() => ({ error: 'red' }));
     setSaving(false);
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(form.id ? 'Teléfono actualizado' : 'Teléfono aprovisionado (interno ' + form.ext + ')', 'ok'); setOpened(false); load(); }
+    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(form.id ? 'Teléfono actualizado' : 'Teléfono aprovisionado (extensión ' + form.ext + ')', 'ok'); setOpened(false); load(); }
   }
   async function del(p) { if (!confirm('¿Eliminar el teléfono ' + p.mac + '?')) return; await fetch('/backend/api/phones/' + p.id, { method: 'DELETE' }); toast('Teléfono eliminado', 'info'); load(); }
   async function saveSrv() { setSrvSaving(true); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prov_sip_server: srv }) }).then(x => x.json()).catch(() => ({ error: 1 })); setSrvSaving(false); toast(r.error ? 'Error' : 'Servidor SIP guardado', r.error ? 'bad' : 'ok'); }
@@ -42,7 +42,7 @@ export default function Telefonos() {
         <Group gap="xs" mb={8}><Code>{base}/prov</Code><CopyButton value={base + '/prov'}>{({ copied, copy }) => <Button size="compact-xs" variant="light" color={copied ? 'teal' : 'blue'} leftSection={copied ? <IconCheck size={12} /> : <IconCopy size={12} />} onClick={copy}>{copied ? 'Copiado' : 'Copiar URL'}</Button>}</CopyButton></Group>
         <List size="xs" spacing={2} c="dimmed">
           <List.Item>Yealink pide <Code>&lt;mac&gt;.cfg</Code> · Grandstream pide <Code>cfg&lt;mac&gt;.xml</Code> — se generan solos según la base de datos.</List.Item>
-          <List.Item>El teléfono toma su interno, contraseña y codecs automáticamente al arrancar; el usuario solo lo enchufa a la red.</List.Item>
+          <List.Item>El teléfono toma su extensión, contraseña y codecs automáticamente al arrancar; el usuario solo lo enchufa a la red.</List.Item>
         </List>
       </Alert>
 
@@ -57,7 +57,7 @@ export default function Telefonos() {
         {list.length === 0 ? <Text c="dimmed" ta="center" py="xl">Sin teléfonos. Agregá uno con «Nuevo teléfono».</Text> :
           <Table.ScrollContainer minWidth={720}>
             <Table striped highlightOnHover verticalSpacing="sm">
-              <Table.Thead><Table.Tr><Th icon={<IconRouter size={13} />}>MAC</Th><Th icon={<IconDeviceLandlinePhone size={13} />}>Modelo</Th><Th icon={<IconHash size={13} />}>Interno</Th><Th>Etiqueta</Th><Th icon={<IconBolt size={13} />}>Estado</Th><Th icon={<IconWifi size={13} />}>Archivo</Th><Table.Th /></Table.Tr></Table.Thead>
+              <Table.Thead><Table.Tr><Th icon={<IconRouter size={13} />}>MAC</Th><Th icon={<IconDeviceLandlinePhone size={13} />}>Modelo</Th><Th icon={<IconHash size={13} />}>Extensión</Th><Th>Etiqueta</Th><Th icon={<IconBolt size={13} />}>Estado</Th><Th icon={<IconWifi size={13} />}>Archivo</Th><Table.Th /></Table.Tr></Table.Thead>
               <Table.Tbody>{list.map(p => (
                 <Table.Tr key={p.id}>
                   <Table.Td ff="monospace" fw={600} style={{ cursor: 'pointer' }} onClick={() => edit(p)}>{p.mac}</Table.Td>
@@ -82,13 +82,13 @@ export default function Telefonos() {
           </SimpleGrid>
           <SimpleGrid cols={2}>
             <TextInput label="Modelo (opcional)" value={form.model} onChange={e => up('model', e.currentTarget.value)} placeholder="T31P / GRP2601" />
-            <TextInput label="Interno" description="Extensión SIP que usará el teléfono" value={form.ext} onChange={e => up('ext', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
+            <TextInput label="Extensión" description="Extensión SIP que usará el teléfono" value={form.ext} onChange={e => up('ext', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
           </SimpleGrid>
           <SimpleGrid cols={2}>
             <TextInput label="Nombre a mostrar" value={form.label} onChange={e => up('label', e.currentTarget.value)} placeholder="Recepción" />
             <TextInput label="Etiqueta de línea" description="Texto en la tecla de línea" value={form.line_label} onChange={e => up('line_label', e.currentTarget.value)} placeholder="Recepción IES" />
           </SimpleGrid>
-          <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />}>Se crea/actualiza el interno SIP (UDP) con su contraseña. El teléfono lo toma al pedir <Code>{fileFor(form.vendor, form.mac || '<mac>')}</Code>.</Alert>
+          <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />}>Se crea/actualiza la extensión SIP (UDP) con su contraseña. El teléfono lo toma al pedir <Code>{fileFor(form.vendor, form.mac || '<mac>')}</Code>.</Alert>
           <Divider />
           <Group justify="flex-end"><Button variant="default" onClick={() => setOpened(false)}>Cancelar</Button><Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Aprovisionar'}</Button></Group>
         </Stack>

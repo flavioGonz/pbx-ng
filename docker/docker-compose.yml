@@ -123,7 +123,7 @@ services:
       VM_AGENT: ${VM_AGENT:-}
       GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}    # gestion interna de go2rtc (modulo intercom)
     volumes:
-      - recordings:/recordings:ro                        # grabaciones (lectura directa)
+      - recordings:/recordings                           # grabaciones (leer + subir a NAS/S3 y liberar disco)
       - voicemail:/voicemail                            # buzones de voz (listar/escuchar/borrar)
     ports: ["3000:3000"]
     networks: [pbxng]

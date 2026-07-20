@@ -4,6 +4,7 @@ import { Stack, Title, Text, Card, Group, Badge, Table, Button, Modal, TextInput
 import { IconHeadphones, IconMicrophone, IconUsersGroup, IconPhone, IconActivity, IconEar, IconBroadcast } from '@tabler/icons-react';
 import { useLive } from '../useLive';
 import { toast } from '../notify';
+import Slot from '../Slot';
 
 const SUPKEY = 'pbxng_sup_ext';
 const MODES = {
@@ -31,11 +32,11 @@ export default function Monitor() {
   function ask(target) { setSel(target); }
   async function go(mode) {
     const s = (sup || '').trim();
-    if (!s) { toast('Indicá tu interno', 'bad'); return; }
+    if (!s) { toast('Indicá tu extensión', 'bad'); return; }
     try { localStorage.setItem(SUPKEY, s); } catch (_) {}
     const r = await fetch('/backend/api/calls/spy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sup: s, target: sel, mode }) }).then(x => x.json()).catch(() => ({ error: 1 }));
     setSel(null);
-    toast(r.error ? 'Error: ' + (r.error || '') : 'Llamando a tu interno ' + s + '…', r.error ? 'bad' : 'ok');
+    toast(r.error ? 'Error: ' + (r.error || '') : 'Llamando a tu extensión ' + s + '…', r.error ? 'bad' : 'ok');
   }
 
   const kpis = [
@@ -51,20 +52,20 @@ export default function Monitor() {
       <SimpleGrid cols={{ base: 1, sm: 3 }}>
         {kpis.map(x => (
           <Card key={x.k} withBorder radius="lg" padding="lg" shadow="sm"><Group><ThemeIcon size={44} radius="md" variant="light" color={x.c}><x.icon size={22} /></ThemeIcon>
-            <div><Text fw={800} fz={24} lh={1.1}>{x.v}</Text><Text size="sm" c="dimmed">{x.k}</Text></div></Group></Card>
+            <div><Text fw={800} fz={24} lh={1.1}>{typeof x.v === 'number' ? <Slot value={x.v} /> : x.v}</Text><Text size="sm" c="dimmed">{x.k}</Text></div></Group></Card>
         ))}
       </SimpleGrid>
 
       <Card withBorder radius="lg" padding="lg" shadow="sm">
         <Group justify="space-between" mb="md">
           <Text fw={600}>{calls.length} llamadas en curso</Text>
-          <TextInput placeholder="Tu interno (supervisor)" value={sup} onChange={e => setSup(e.target.value)} leftSection={<IconHeadphones size={15} />} w={220} />
+          <TextInput placeholder="Tu extensión (supervisor)" value={sup} onChange={e => setSup(e.target.value)} leftSection={<IconHeadphones size={15} />} w={220} />
         </Group>
         {!snap ? <Text c="dimmed" ta="center" py="xl">Cargando…</Text> :
           calls.length === 0 ? <Text c="dimmed" ta="center" py="xl">No hay llamadas activas en este momento.</Text> :
             <Table.ScrollContainer minWidth={620}>
               <Table striped highlightOnHover verticalSpacing="sm">
-                <Table.Thead><Table.Tr><Th icon={<IconPhone size={13} />}>Interno</Th><Th icon={<IconUsersGroup size={13} />}>En llamada con</Th><Th icon={<IconActivity size={13} />}>Estado</Th><Th icon={<IconHeadphones size={13} />}>Acciones</Th></Table.Tr></Table.Thead>
+                <Table.Thead><Table.Tr><Th icon={<IconPhone size={13} />}>Extensión</Th><Th icon={<IconUsersGroup size={13} />}>En llamada con</Th><Th icon={<IconActivity size={13} />}>Estado</Th><Th icon={<IconHeadphones size={13} />}>Acciones</Th></Table.Tr></Table.Thead>
                 <Table.Tbody>{calls.map((c, i) => (
                   <Table.Tr key={i}>
                     <Table.Td><Group gap={6}><ThemeIcon size="sm" radius="xl" variant="light" color="teal"><IconPhone size={13} /></ThemeIcon><Text ff="monospace" fw={600}>{c.ext}</Text></Group></Table.Td>
@@ -77,9 +78,9 @@ export default function Monitor() {
             </Table.ScrollContainer>}
       </Card>
 
-      <Modal opened={!!sel} onClose={() => setSel(null)} centered radius="lg" title={<Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="pbx"><IconHeadphones size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>Supervisar interno {sel}</Text><Text size="xs" c="dimmed">Sonará tu interno {sup || '—'} y se conectará a la llamada</Text></div></Group>}>
+      <Modal opened={!!sel} onClose={() => setSel(null)} centered radius="lg" title={<Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="pbx"><IconHeadphones size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>Supervisar extensión {sel}</Text><Text size="xs" c="dimmed">Sonará tu extensión {sup || '—'} y se conectará a la llamada</Text></div></Group>}>
         <Stack>
-          <TextInput label="Tu interno (supervisor)" value={sup} onChange={e => setSup(e.target.value)} required />
+          <TextInput label="Tu extensión (supervisor)" value={sup} onChange={e => setSup(e.target.value)} required />
           <SimpleGrid cols={1} spacing="xs">
             {Object.entries(MODES).map(([m, info]) => (
               <Button key={m} variant="light" color={info.color} justify="flex-start" h={56} leftSection={<info.icon size={20} />} disabled={!sup} onClick={() => go(m)}>

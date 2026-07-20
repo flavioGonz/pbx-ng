@@ -6,7 +6,7 @@ import { IconWorldShare, IconPlus, IconEdit, IconTrash, IconQrcode, IconCopy, Ic
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
 
-const DTYPES = [{ value: 'extension', label: 'Interno' }, { value: 'queue', label: 'Cola' }, { value: 'ringgroup', label: 'Ring Group' }, { value: 'ivr', label: 'IVR' }, { value: 'ai', label: 'Agente IA' }];
+const DTYPES = [{ value: 'extension', label: 'Extensión' }, { value: 'queue', label: 'Cola' }, { value: 'ringgroup', label: 'Ring Group' }, { value: 'ivr', label: 'IVR' }, { value: 'ai', label: 'Agente IA' }];
 const DLABEL = Object.fromEntries(DTYPES.map(d => [d.value, d.label]));
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 const empty = { name: '', dest_type: 'extension', dest_value: '', intro: '', require_name: true, collect_geo: false, video: false, enabled: true };
@@ -69,7 +69,7 @@ export default function Click2Call() {
           <TextInput label="Nombre del enlace" description="Lo ve el cliente como título. Ej: Hablá con Ventas" value={form.name} onChange={e => up('name', e.currentTarget.value)} required />
           <SimpleGrid cols={2}>
             <Select label="Tipo de destino" data={DTYPES} value={form.dest_type} onChange={v => up('dest_type', v)} />
-            <TextInput label="Destino" description="Número del interno/cola/IVR/agente. Ej: 1001" value={form.dest_value} onChange={e => up('dest_value', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
+            <TextInput label="Destino" description="Número dla extensión/cola/IVR/agente. Ej: 1001" value={form.dest_value} onChange={e => up('dest_value', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
           </SimpleGrid>
           <Textarea label="Texto de bienvenida" description="Subtítulo que ve el cliente en la página. Ej: Te respondemos al instante." value={form.intro} onChange={e => up('intro', e.currentTarget.value)} autosize minRows={2} />
           <Divider label="Opciones" labelPosition="center" />

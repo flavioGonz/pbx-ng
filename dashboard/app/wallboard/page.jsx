@@ -94,12 +94,12 @@ export default function Wallboard() {
       {/* KPIs principales */}
       <SimpleGrid cols={{ base: 2, md: 4 }}>
         <Kpi label="Llamadas activas" value={snap ? ch.length : '—'} sub={waiting > 0 ? `${waiting} en espera` : 'sin cola de espera'} accent spark={hist} />
-        <Kpi label="Internos en línea" value={snap ? `${online}` : '—'} sub={`de ${eps.length} · ${inCall} en llamada`} icon={IconUsers} color="blue" />
+        <Kpi label="Extensiones en línea" value={snap ? `${online}` : '—'} sub={`de ${eps.length} · ${inCall} en llamada`} icon={IconUsers} color="blue" />
         <Kpi label="Agentes disponibles" value={snap ? agents : '—'} sub={`de ${agentsTotal} en colas`} icon={IconUserCheck} color="grape" />
         <Kpi label="Llamadas hoy" value={t.total != null ? t.total : '—'} sub={`${answeredPct}% atendidas`} icon={IconPhoneCall} color="teal" />
       </SimpleGrid>
 
-      {/* tira de hoy + desglose internos */}
+      {/* tira de hoy + desglose extensiones */}
       <SimpleGrid cols={{ base: 1, lg: 2 }}>
         <Card withBorder radius="lg" padding="lg" shadow="sm">
           <Text fw={700} fz="sm" tt="uppercase" c="dimmed" mb="md">Resumen de hoy</Text>
@@ -115,7 +115,7 @@ export default function Wallboard() {
         </Card>
 
         <Card withBorder radius="lg" padding="lg" shadow="sm">
-          <Text fw={700} fz="sm" tt="uppercase" c="dimmed" mb="md">Estado de los internos</Text>
+          <Text fw={700} fz="sm" tt="uppercase" c="dimmed" mb="md">Estado de las extensiones</Text>
           <Group align="center" gap="xl">
             <RingProgress size={150} thickness={16} roundCaps
               sections={[{ value: eps.length ? idle * 100 / eps.length : 0, color: 'teal' }, { value: eps.length ? inCall * 100 / eps.length : 0, color: 'blue' }, { value: eps.length ? offline * 100 / eps.length : 0, color: 'gray.4' }]}

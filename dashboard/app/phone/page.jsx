@@ -122,7 +122,7 @@ export default function Phone() {
   }, [pendIn, sp.incoming]);
   async function buscarUpdate() { try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch (_) {} try { const r = await navigator.serviceWorker?.getRegistration(); await r?.update(); } catch (_) {} notify('Buscando actualización…'); setTimeout(() => { try { location.reload(); } catch (_) {} }, 600); }
 
-  // Presencia: estado online de los internos (para los contactos)
+  // Presencia: estado online de las extensiones (para los contactos)
   useEffect(() => {
     if (!registered) return;
     let live = true;
@@ -226,8 +226,8 @@ export default function Phone() {
         <div style={S.loginCard}>
           <svg width="56" height="56" viewBox="0 0 48 48"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5b8fd6" /><stop offset="1" stopColor="#1e40af" /></linearGradient></defs><path d="M24 2 L42 9 V25 C42 36 34 43 24 46 C14 43 6 36 6 25 V9 Z" fill="url(#lg)" /><text x="24" y="30" textAnchor="middle" fontWeight="800" fontSize="15" fill="#fff">IES</text></svg>
           <div style={{ fontSize: 24, fontWeight: 700, marginTop: 14 }}>PBX-NG Phone</div>
-          <div style={{ color: '#8e8e93', marginBottom: 22, fontSize: 14 }}>{sp.reg === 'connecting' ? 'Conectando…' : 'Iniciá sesión con tu interno'}</div>
-          <input placeholder="Interno (ej 9100)" value={ext} onChange={e => setExt(e.target.value)} style={S.linp} />
+          <div style={{ color: '#8e8e93', marginBottom: 22, fontSize: 14 }}>{sp.reg === 'connecting' ? 'Conectando…' : 'Iniciá sesión con tu extensión'}</div>
+          <input placeholder="Extensión (ej 9100)" value={ext} onChange={e => setExt(e.target.value)} style={S.linp} />
           <input placeholder="Contraseña SIP" type="password" value={pass} onChange={e => setPass(e.target.value)} style={S.linp} />
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#3c3c43', fontSize: 14, alignSelf: 'flex-start', margin: '4px 0 14px' }}><input type="checkbox" checked={video} onChange={e => setVideo(e.target.checked)} /> Habilitar video</label>
           <button onClick={() => sp.connect(ext, pass, video).catch(() => {})} style={S.lbtn}>{sp.reg === 'connecting' ? 'Conectando…' : 'Conectar'}</button>
@@ -252,7 +252,7 @@ export default function Phone() {
 
   return (
     <div style={S.app}>
-      <div style={S.statusbar}><span style={{ color: registered ? '#34c759' : '#8e8e93', fontWeight: 600 }}>●</span> Interno {sp.creds?.ext} · {registered ? 'en línea' : sp.reg}{dnd && <span style={{ marginLeft: 8, color: '#ff9500', fontWeight: 600 }}>· No molestar</span>}</div>
+      <div style={S.statusbar}><span style={{ color: registered ? '#34c759' : '#8e8e93', fontWeight: 600 }}>●</span> Extensión {sp.creds?.ext} · {registered ? 'en línea' : sp.reg}{dnd && <span style={{ marginLeft: 8, color: '#ff9500', fontWeight: 600 }}>· No molestar</span>}</div>
       {flash && <div style={S.flash}>{flash}</div>}
       <div className="ph-view" key={tab} style={S.body}>
         {tab === 'teclado' && (
@@ -287,11 +287,11 @@ export default function Phone() {
             </div>
             <div style={S.searchBox}><IconSearch size={16} color="#8e8e93" /><input placeholder="Buscar" value={q} onChange={e => setQ(e.target.value)} style={S.searchInp} /></div>
             {cTab === 'dir' ? (
-              fd.length === 0 ? <div style={S.empty}>Sin internos en el directorio.</div> :
+              fd.length === 0 ? <div style={S.empty}>Sin extensiones en el directorio.</div> :
                 fd.map(d => (
                   <div key={d.ext} style={S.crow} onClick={() => callNum(d.ext)}>
                     <Avatar name={d.name || d.ext} online={d.status === 'online' || d.status === 'in_call'} />
-                    <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 16 }}>{d.name || ('Interno ' + d.ext)}</div><div style={{ fontSize: 13, color: stColor[d.status] === '#c7c7cc' ? '#8e8e93' : stColor[d.status] }}>{(stLabel[d.status] || 'Desconectado') + ' · ' + d.ext}</div></div>
+                    <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 16 }}>{d.name || ('Extensión ' + d.ext)}</div><div style={{ fontSize: 13, color: stColor[d.status] === '#c7c7cc' ? '#8e8e93' : stColor[d.status] }}>{(stLabel[d.status] || 'Desconectado') + ' · ' + d.ext}</div></div>
                     <button style={S.iconBtn} onClick={(e) => { e.stopPropagation(); callNum(d.ext, true); }}><IconVideo size={18} color="#007aff" /></button>
                     <button style={S.iconBtn} onClick={(e) => { e.stopPropagation(); callNum(d.ext); }}><IconPhone size={20} color="#34c759" /></button>
                   </div>
@@ -314,7 +314,7 @@ export default function Phone() {
           <div style={{ padding: '8px 0' }}>
             <div style={S.title}>Ajustes</div>
             <div style={S.aSection}>
-              <div style={S.aRow}><span>Interno</span><b>{sp.creds?.ext}</b></div>
+              <div style={S.aRow}><span>Extensión</span><b>{sp.creds?.ext}</b></div>
               <div style={S.aRow}><span>Estado</span><b style={{ color: '#34c759' }}>{registered ? 'En línea' : sp.reg}</b></div>
               <div style={S.aRow}><span>Video</span><b>{sp.creds?.video ? 'Sí' : 'No'}</b></div>
               <div style={S.aRow}><span>Servidor</span><b style={{ fontSize: 12 }}>{typeof window!=='undefined' ? window.location.hostname : ''}</b></div>
@@ -363,7 +363,7 @@ export default function Phone() {
           <div style={S.modal} onClick={e => e.stopPropagation()}>
             <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 14 }}>Nuevo contacto</div>
             <input placeholder="Nombre" value={nc.name} onChange={e => setNc(s => ({ ...s, name: e.target.value }))} style={S.minp} />
-            <input placeholder="Número / interno" value={nc.number} onChange={e => setNc(s => ({ ...s, number: e.target.value }))} style={S.minp} />
+            <input placeholder="Número / extensión" value={nc.number} onChange={e => setNc(s => ({ ...s, number: e.target.value }))} style={S.minp} />
             <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
               <button style={{ ...S.mbtn, background: '#e5e5ea', color: '#000' }} onClick={() => setAddOpen(false)}>Cancelar</button>
               <button style={{ ...S.mbtn, background: '#007aff', color: '#fff' }} onClick={addContact}>Guardar</button>
@@ -435,7 +435,7 @@ export default function Phone() {
             <div style={S.modalWrap} onClick={() => setXfer(false)}>
               <div style={S.modal} onClick={e => e.stopPropagation()}>
                 <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6, color: '#000' }}>Transferir o conferenciar</div>
-                <div style={{ color: '#8e8e93', fontSize: 13, marginBottom: 12 }}>Ingresá el interno o número de destino.</div>
+                <div style={{ color: '#8e8e93', fontSize: 13, marginBottom: 12 }}>Ingresá la extensión o número de destino.</div>
                 <input autoFocus placeholder="Destino (ej 9102)" value={xferNum} onChange={e => setXferNum(e.target.value)} style={S.minp} />
                 <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
                   <button style={{ ...S.mbtn, background: '#eef1f7', color: '#1f2733' }} onClick={doTransfer} disabled={!xferNum}>Ciega</button>

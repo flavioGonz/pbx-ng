@@ -10,7 +10,7 @@ const YN = [['yes', 'Sí'], ['no', 'No']];
 const JOIN = [['yes', 'Siempre (aunque no haya agentes)'], ['no', 'No entrar si no hay agentes conectados'], ['strict', 'Estricto: tampoco si están todos en pausa']];
 const LEAVE = [['no', 'Quedarse en la cola'], ['yes', 'Sacar la llamada si no quedan agentes'], ['strict', 'Estricto: también si están todos en pausa']];
 const HOLD = [['no', 'No anunciar'], ['once', 'Una sola vez'], ['yes', 'En cada anuncio']];
-const DEST = [['hangup', 'Colgar'], ['ext', 'Interno'], ['voicemail', 'Buzón de voz'], ['queue', 'Otra cola'], ['ivr', 'IVR / número interno']];
+const DEST = [['hangup', 'Colgar'], ['ext', 'Extensión'], ['voicemail', 'Buzón de voz'], ['queue', 'Otra cola'], ['ivr', 'IVR / número extensión']];
 
 export default function QueueEditor({ queue, opened, onClose, onSaved, voices = [] }) {
   const creating = !queue;
@@ -95,7 +95,7 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
             <Divider label="Al vencer la espera máxima" labelPosition="left" />
             <Group grow>
               {sel('Destino', 'timeout_dest', DEST)}
-              <TextInput label="Valor del destino" description="Interno, buzón, nombre de cola o número de IVR" disabled={f.timeout_dest === 'hangup'} value={f.timeout_value || ''} onChange={e => up('timeout_value', e.target.value)} />
+              <TextInput label="Valor del destino" description="Extensión, buzón, nombre de cola o número de IVR" disabled={f.timeout_dest === 'hangup'} value={f.timeout_value || ''} onChange={e => up('timeout_value', e.target.value)} />
             </Group>
           </Stack>
         </Tabs.Panel>

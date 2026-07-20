@@ -28,7 +28,7 @@ export default function AsteriskConsole() {
     <Tabs defaultValue="core" variant="pills" radius="md" keepMounted={false}>
       <Tabs.List mb="md">
         <Tabs.Tab value="core" leftSection={<IconActivity size={16} />}>Núcleo</Tabs.Tab>
-        <Tabs.Tab value="ext" leftSection={<IconUsers size={16} />}>Internos</Tabs.Tab>
+        <Tabs.Tab value="ext" leftSection={<IconUsers size={16} />}>Extensiones</Tabs.Tab>
         <Tabs.Tab value="trunk" leftSection={<IconDeviceLandlinePhone size={16} />}>Troncal SBC</Tabs.Tab>
         <Tabs.Tab value="net" leftSection={<IconNetwork size={16} />}>Red</Tabs.Tab>
         <Tabs.Tab value="dialplan" leftSection={<IconTerminal2 size={16} />}>Dialplan</Tabs.Tab>
@@ -57,8 +57,8 @@ export default function AsteriskConsole() {
 
       <Tabs.Panel value="ext">
         <Card withBorder radius="md" padding="md" mb="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
-          <Group gap="xs" mb={4}><IconUsers size={16} /><Text fw={700} size="sm">Verificación de internos</Text></Group>
-          <Text size="sm" c="dimmed">Cruza los internos definidos en la base contra su estado real en Asterisk (registrado / offline, contacto, IP, RTT, vía). Gestión completa en Telefonía → Internos.</Text>
+          <Group gap="xs" mb={4}><IconUsers size={16} /><Text fw={700} size="sm">Verificación de extensiones</Text></Group>
+          <Text size="sm" c="dimmed">Cruza las extensiones definidos en la base contra su estado real en Asterisk (registrado / offline, contacto, IP, RTT, vía). Gestión completa en Telefonía → Extensiones.</Text>
         </Card>
         {(() => {
           const isReg = (e) => !!e.ip || (e.status && !/offline|unavail/i.test(e.status));
@@ -72,10 +72,10 @@ export default function AsteriskConsole() {
               <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">WebRTC</Text><Text fw={800} size="xl" c="grape">{web.length}</Text></Card>
             </SimpleGrid>
             <Card withBorder radius="md" padding="md">
-              <Group justify="space-between" mb="sm"><Text fw={700}>Internos definidos ({exts.length})</Text></Group>
-              {exts.length === 0 ? <Text c="dimmed" size="sm">Sin internos definidos.</Text> :
+              <Group justify="space-between" mb="sm"><Text fw={700}>Extensiones definidos ({exts.length})</Text></Group>
+              {exts.length === 0 ? <Text c="dimmed" size="sm">Sin extensiones definidos.</Text> :
               <Table striped highlightOnHover withTableBorder verticalSpacing={6}>
-                <Table.Thead><Table.Tr><Table.Th>Interno</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Vía</Table.Th><Table.Th>IP</Table.Th><Table.Th>RTT</Table.Th><Table.Th>Tipo</Table.Th></Table.Tr></Table.Thead>
+                <Table.Thead><Table.Tr><Table.Th>Extensión</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Vía</Table.Th><Table.Th>IP</Table.Th><Table.Th>RTT</Table.Th><Table.Th>Tipo</Table.Th></Table.Tr></Table.Thead>
                 <Table.Tbody>{exts.map((e) => { const r = isReg(e); return (
                   <Table.Tr key={e.id}>
                     <Table.Td><Text fw={700} ff="monospace">{e.id}</Text></Table.Td>

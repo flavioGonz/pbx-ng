@@ -82,7 +82,7 @@ export default function QueuePanel() {
                 ))}
             </Group>
             <Group gap="xs">
-              <TextInput placeholder="Interno (ej 1002)" size="xs" value={newAgent[q.name] || ''}
+              <TextInput placeholder="Extensión (ej 1002)" size="xs" value={newAgent[q.name] || ''}
                 onChange={e => setNewAgent(s => ({ ...s, [q.name]: e.target.value }))}
                 onKeyDown={e => { if (e.key === 'Enter') addAgent(q.name); }} />
               <Button size="xs" variant="light" onClick={() => addAgent(q.name)}>Agregar agente</Button>

@@ -24,7 +24,7 @@ export default function SupervisorPanel() {
 
   useEffect(() => {
     if (connectedRef.current) return; connectedRef.current = true;
-    fetch('/backend/api/me/sipcreds').then(r => r.json()).then(d => { if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {}); else toast('Tu usuario no tiene interno asignado', 'bad'); }).catch(() => {});
+    fetch('/backend/api/me/sipcreds').then(r => r.json()).then(d => { if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {}); else toast('Tu usuario no tiene extensión asignado', 'bad'); }).catch(() => {});
   }, []);
 
   const load = useCallback(() => {
@@ -40,7 +40,7 @@ export default function SupervisorPanel() {
   useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, [load]);
 
   async function spy(target, mode) {
-    if (!ext) { toast('Tu usuario no tiene interno para escuchar', 'bad'); return; }
+    if (!ext) { toast('Tu usuario no tiene extensión para escuchar', 'bad'); return; }
     if (!registered) { toast('Tu softphone aún no está en línea', 'bad'); return; }
     const r = await fetch('/backend/api/calls/spy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sup: ext, target: String(target), mode }) }).then(x => x.json()).catch(() => ({ error: 1 }));
     if (r && r.error) { toast('No se pudo iniciar (' + (r.error === 1 ? 'red' : r.error) + ')', 'bad'); return; }
@@ -54,7 +54,7 @@ export default function SupervisorPanel() {
       <Group justify="space-between" mb="lg" wrap="nowrap">
         <Group gap="sm">
           <ThemeIcon size={44} radius="md" variant="gradient" gradient={{ from: 'blue.6', to: 'indigo.8' }}><IconUsersGroup size={24} /></ThemeIcon>
-          <div><Text fw={800} fz="lg" lh={1.1}>Panel de Supervisor</Text><Text fz="xs" c="dimmed">{user?.name || user?.username} · interno {ext || '—'}</Text></div>
+          <div><Text fw={800} fz="lg" lh={1.1}>Panel de Supervisor</Text><Text fz="xs" c="dimmed">{user?.name || user?.username} · extensión {ext || '—'}</Text></div>
         </Group>
         <Group gap="xs">
           <Button size="sm" variant="light" color="grape" leftSection={<IconAddressBook size={16} />} onClick={() => setLibreta(true)}>Libreta de clientes</Button>
@@ -74,7 +74,7 @@ export default function SupervisorPanel() {
           <Group justify="space-between" mb="xs"><Text fw={700}>Agentes · escucha / susurro / irrupción</Text><ActionIcon variant="subtle" color="gray" onClick={load}><IconRefresh size={16} /></ActionIcon></Group>
           <ScrollArea h={420}>
             <Table verticalSpacing={7} fz="sm">
-              <Table.Thead><Table.Tr><Table.Th>Interno</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Acciones</Table.Th></Table.Tr></Table.Thead>
+              <Table.Thead><Table.Tr><Table.Th>Extensión</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Estado</Table.Th><Table.Th ta="right">Acciones</Table.Th></Table.Tr></Table.Thead>
               <Table.Tbody>{dir.filter((e) => String(e.ext) !== String(ext)).map((e) => { const s = st(e.ext); return (
                 <Table.Tr key={e.ext}>
                   <Table.Td ff="monospace" fw={700}>{e.ext}</Table.Td>

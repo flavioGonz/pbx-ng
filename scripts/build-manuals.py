@@ -26,7 +26,10 @@ def inline(t):
     t = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', t)
     return t
 
+FIG = [0]
+
 def md(text):
+    FIG[0] = 0                    # la numeracion de figuras arranca de 1 en cada manual
     out, i = [], 0
     lines = text.split('\n')
     toc = []
@@ -38,9 +41,11 @@ def md(text):
         if m:
             alt, src = m.group(1), m.group(2)
             fname = src.split('/')[-1]
-            out.append(f'<figure class="shot"><img src="{src}" alt="{inline(alt)}" '
-                       f'onerror="this.parentNode.classList.add(\'ph\');this.remove();" />'
-                       f'<figcaption>{inline(alt)}<span class="fn">{fname}</span></figcaption></figure>')
+            FIG[0] += 1
+            out.append(f'<figure class="shot"><div class="frame"><img src="{src}" alt="{inline(alt)}" '
+                       f'onerror="this.parentNode.parentNode.classList.add(\'ph\');this.remove();" /></div>'
+                       f'<figcaption><span class="fig">Figura {FIG[0]}</span>{inline(alt)}'
+                       f'<span class="fn">{fname}</span></figcaption></figure>')
             i += 1; continue
 
         # bloque de código
@@ -180,14 +185,16 @@ hr{border:none;border-top:1px solid #e8edf4;margin:38px 0}
 .nav .navk{font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--accent);padding-right:4px}
 .nav b{font-weight:700;color:#0f172a}
 .nav .sep{color:#94a3b8;font-weight:400}
-figure.shot{margin:26px 0;text-align:center}
-figure.shot img{max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 22px rgba(15,23,42,.09)}
-figure.shot figcaption{font-size:12.5px;color:#94a3b8;margin-top:9px}
-figure.shot .fn{display:block;font:11.5px ui-monospace,Consolas,monospace;color:#cbd5e1;margin-top:3px}
+/* Lamina: la imagen es lo primero y ocupa la hoja; el titulo va DEBAJO, como pie de figura. */
+figure.shot{margin:34px 0 30px;text-align:center;break-inside:avoid}
+figure.shot .frame{background:linear-gradient(160deg,#f8fafc,#eef2f7);border:1px solid #e2e8f0;border-radius:14px;padding:14px}
+figure.shot img{display:block;max-width:100%;margin:0 auto;border-radius:9px;border:1px solid #e2e8f0;box-shadow:0 10px 30px rgba(15,23,42,.13)}
+figure.shot figcaption{margin-top:14px;font-size:14px;color:#334155;font-weight:600;line-height:1.4}
+figure.shot .fig{display:block;font-size:10px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+figure.shot .fn{display:block;font:11px ui-monospace,Consolas,monospace;color:#cbd5e1;margin-top:5px;font-weight:400}
+figure.shot.ph .frame{border:2px dashed #cbd5e1;background:#f8fafc;padding:56px 20px}
+figure.shot.ph .frame::before{content:'Imagen pendiente';display:block;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8}
 figure.shot.ph .fn{color:var(--accent);font-weight:700;margin-top:6px}
-figure.shot.ph{border:2px dashed #cbd5e1;border-radius:12px;background:#f8fafc;padding:38px 20px}
-figure.shot.ph::before{content:'Imagen pendiente';display:block;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8}
-figure.shot.ph figcaption{margin-top:8px;color:#64748b;font-size:13.5px}
 footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px solid #eef1f7}
 .top{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;border:0;border-radius:11px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(15,23,42,.2)}
 @media print{
@@ -200,8 +207,15 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
   .chapter{page-break-before:always;page-break-after:avoid;border-top:3px solid var(--accent)}
   .chapter:first-of-type{page-break-before:avoid}
   h2,h3{page-break-after:avoid}
-  @page{size:A4;margin:16mm 14mm}
-  figure.shot,table,pre,blockquote{page-break-inside:avoid}
+  @page{size:A4;margin:18mm 16mm 20mm}
+  @page:first{margin:0}
+  /* La imagen siempre empieza arriba de la hoja: se lleva su titulo consigo y nada la parte. */
+  figure.shot{break-before:page;break-inside:avoid;margin:0 0 26px}
+  figure.shot .frame{padding:10px}
+  figure.shot img{max-height:210mm}
+  table,pre,blockquote{page-break-inside:avoid}
+  p,li{orphans:3;widows:3}
+  h4{page-break-after:avoid}
   a{color:inherit;text-decoration:none}
 }
 """

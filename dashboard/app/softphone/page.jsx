@@ -23,7 +23,7 @@ export default function Softphone() {
               {sp.reg === 'registered' ? 'Registrado' : sp.reg === 'connecting' ? 'Conectando…' : 'Desconectado'}</Badge></Group>
           {sp.reg !== 'registered' ? (
             <Stack>
-              <TextInput label="Interno WebRTC" placeholder="9100" value={ext} onChange={e => setExt(e.target.value)} />
+              <TextInput label="Extensión WebRTC" placeholder="9100" value={ext} onChange={e => setExt(e.target.value)} />
               <PasswordInput label="Contraseña SIP" value={pass} onChange={e => setPass(e.target.value)} />
               <Switch label="Habilitar video" checked={video} onChange={e => setVideo(e.currentTarget.checked)} />
               <Button onClick={doConnect} loading={sp.reg === 'connecting'}>Conectar</Button>
@@ -31,7 +31,7 @@ export default function Softphone() {
             </Stack>
           ) : (
             <Stack>
-              <Group><Text size="sm" c="dimmed">Interno</Text><Badge size="lg">{sp.creds?.ext}</Badge>
+              <Group><Text size="sm" c="dimmed">Extensión</Text><Badge size="lg">{sp.creds?.ext}</Badge>
                 <Button size="xs" variant="subtle" color="red" onClick={sp.disconnect} ml="auto">Desconectar</Button></Group>
               <Group gap="xs"><TextInput style={{ flex: 1 }} placeholder="Número a marcar" value={dial} onChange={e => setDial(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') sp.placeCall(dial); }} size="md" />
                 <ActionIcon variant="subtle" size="lg" onClick={() => setDial(d => d.slice(0, -1))}><IconBackspace size={20} /></ActionIcon></Group>

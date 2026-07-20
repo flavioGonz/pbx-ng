@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Stack, Group, Text, Badge, Card, Button, TextInput, Switch, ScrollArea, ActionIcon, Tooltip, Code, SegmentedControl, Box, Table, Drawer, Divider, Anchor } from '@mantine/core';
+import { Stack, Group, Text, Badge, Card, Button, TextInput, Switch, ScrollArea, ActionIcon, Tooltip, Code, SegmentedControl, Box, Table, Drawer, Divider, Anchor, HoverCard, ThemeIcon } from '@mantine/core';
 import { IconInfoCircle, IconRefresh, IconPlayerPlay, IconPlayerPause, IconX, IconPhoneCall, IconPhoneOff, IconPhonePlus, IconCircleCheck, IconCircleX, IconArrowsExchange, IconClock, IconBell, IconUserCheck, IconHeartbeat, IconCheck, IconArrowRight, IconDownload, IconTrash, IconSearch, IconWaveSine } from '@tabler/icons-react';
 import { toast } from './notify';
 import PcapCapture from './PcapCapture';
@@ -14,7 +14,7 @@ const METHOD_DESC = {
   ACK: 'Confirma la recepcion de la respuesta final (200 OK) a un INVITE.',
   BYE: 'Finaliza una llamada ya establecida.',
   CANCEL: 'Cancela un INVITE que aun no recibio respuesta final (cuelgan antes de atender).',
-  REGISTER: 'El interno publica su ubicacion (registro) en el servidor.',
+  REGISTER: 'La extensión publica su ubicacion (registro) en el servidor.',
   OPTIONS: 'Sondeo de disponibilidad / keepalive (qualify de PJSIP).',
   SUBSCRIBE: 'Se suscribe a eventos (BLF, presencia, buzon de voz).',
   NOTIFY: 'Notifica un evento a quien esta suscripto.',
@@ -187,7 +187,42 @@ export default function SipLadder() {
         title={dialog && <Group gap="sm"><MsgIcon m={dialog.ms[0]} size={20} /><div><Text fw={800} lh={1.1}>{dialog.from} {'->'} {dialog.to}</Text><Text size="xs" c="dimmed" style={MONO} truncate maw={360}>{dialog.callid}</Text></div><Badge variant="light" color={ST[dialog.status].c}>{ST[dialog.status].t}</Badge>{hasAudio(dialog.ms) && <Badge variant="light" color="teal" leftSection={<IconWaveSine size={12} />}>Audio</Badge>}</Group>}>
         {dialog && <Stack gap="md">
           <Card withBorder radius="md" padding="xs">
-            <Text fw={700} size="sm" mb={6}>Flujo de la llamada</Text>
+            <Group justify="space-between" mb={6} wrap="nowrap">
+              <Text fw={700} size="sm">Flujo de la llamada</Text>
+              <HoverCard width={430} shadow="lg" radius="md" position="left-start" withArrow openDelay={100}
+                transitionProps={{ transition: 'pop', duration: 180 }}>
+                <HoverCard.Target>
+                  <ActionIcon variant="subtle" color="gray" size="sm" style={{ cursor: 'help' }}><IconInfoCircle size={17} /></ActionIcon>
+                </HoverCard.Target>
+                <HoverCard.Dropdown>
+                  <Stack gap={8}>
+                    <Group gap={7}><ThemeIcon size={26} radius="md" variant="light"><IconInfoCircle size={15} /></ThemeIcon>
+                      <div><Text fw={700} size="sm">Qué es este diagrama</Text><Text size="xs" c="dimmed">Diálogo SIP, mensaje por mensaje</Text></div></Group>
+                    <Text size="xs">
+                      Cada <b>columna vertical</b> es un equipo (el teléfono, el SBC, Asterisk, el operador) y cada
+                      <b> flecha</b> es un mensaje SIP que viajó entre ellos, en orden de tiempo. Leyéndolo de arriba
+                      hacia abajo ves exactamente qué pasó en la llamada y <b>dónde se rompió</b>.
+                    </Text>
+                    <Divider label="Los mensajes que vas a ver" labelPosition="center" />
+                    <Stack gap={4}>
+                      <Text size="xs"><Code>INVITE</Code> — "quiero hablar con vos". Abre la llamada.</Text>
+                      <Text size="xs"><Code>100 Trying</Code> / <Code>180 Ringing</Code> — lo recibí; está sonando.</Text>
+                      <Text size="xs"><Code>200 OK</Code> — atendieron. Acá empieza el audio.</Text>
+                      <Text size="xs"><Code>ACK</Code> — confirmación: la llamada quedó establecida.</Text>
+                      <Text size="xs"><Code>BYE</Code> — alguien colgó. <Code>CANCEL</Code> — cortaron antes de que atiendan.</Text>
+                      <Text size="xs"><Code>401 / 407</Code> — pide autenticación (es normal: siempre hay dos INVITE).</Text>
+                      <Text size="xs" c="red.7"><Code>403</Code> prohibido · <Code>404</Code> no existe el número · <Code>408</Code> nadie contestó · <Code>486</Code> ocupado · <Code>488</Code> no se pusieron de acuerdo con el códec.</Text>
+                    </Stack>
+                    <Divider />
+                    <Text size="xs" c="dimmed">
+                      Si ves el <b>INVITE</b> pero nunca un <b>200 OK</b>, la llamada nunca se estableció: el problema está
+                      del lado del destino. Si ves <b>200 OK</b> pero no hay audio, la señalización anduvo y el problema es
+                      de <b>medios</b> (RTP, NAT o TURN) — mirá rtpengine y el SBC, no el dialplan.
+                    </Text>
+                  </Stack>
+                </HoverCard.Dropdown>
+              </HoverCard>
+            </Group>
             <ScrollArea.Autosize mah={300}>
               <svg viewBox={'0 0 ' + W + ' ' + H} style={{ width: '100%', minWidth: W, height: H, display: 'block' }}>
                 {lanes.map((ip) => { const x = laneX(ip); return (

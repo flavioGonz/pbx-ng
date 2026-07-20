@@ -5,6 +5,7 @@ const http = require('http');
 const os = require('os');
 const fsx = require('fs');
 const express = require('express');
+const acme = require('./acme');  // ACME/Let's Encrypt (certificados TLS sin proxy)
 const { Server } = require('socket.io');
 const { Pool } = require('pg');
 const AriClient = require('ari-client');
@@ -17,7 +18,23 @@ const pushProviders = require('./push-providers');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const alerts = require('./alerts');
+const recstore = require('./recstore');
 const emails = require('./emails');
+const report = require('./report');
+const sysmon = require('./sysmon');
+const astconf = require('./astconf');   // aparcado, captura y música en espera (config generada)
+
+/* ── Imágenes de los manuales (editor en vivo) ────────────────────────────────
+ *  Los manuales traen recuadros con el nombre del archivo que va ahí. El panel
+ *  deja pegar la captura del portapapeles y la guardamos con ESE nombre exacto:
+ *  el manual la toma sola, sin recompilar nada. Van a un volumen persistente,
+ *  no dentro de la imagen, así sobreviven a un despliegue. */
+const _fsm = require('fs'); const _pathm = require('path');
+const MAN_IMG_DIR = _pathm.join(process.env.CONF_DIR || '/etc/pbxng', 'manuales-img');
+// svg incluido: los diagramas que vienen con el producto son SVG.
+const IMG_OK = /^[a-z0-9][a-z0-9._-]{1,80}\.(png|jpe?g|webp|gif|svg)$/i;
+const IMG_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml' };
+const numbering = require('./numbering');
 const QRCode = require('qrcode');
 const SECRET = process.env.JWT_SECRET || '__SET_JWT_SECRET__';
 
@@ -90,6 +107,7 @@ const NODES = {
 };
 // (VM_AGENT retirado: los buzones se leen del volumen compartido /voicemail, sin agente HTTP)
 const pool = new Pool(CFG.db);
+const diagtrunk = require('./diagtrunk');
 const app = express();
 const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
 app.use(express.json());
@@ -237,7 +255,7 @@ async function syncRecFlags() { try { const { rows } = await pool.query("SELECT 
 setTimeout(() => { syncRecFlags().catch(() => {}); }, 9000);
 
 async function getExtensions() {
-  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' ORDER BY id");
+  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record, dtmf_mode FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' ORDER BY id");
   const st = await endpointStates();
   const names = {};
   try { const { rows: nr } = await pool.query('SELECT ext,name FROM pbxng_directory'); nr.forEach(n => names[n.ext] = n.name); } catch (_) {}
@@ -269,7 +287,7 @@ async function getExtensions() {
       viaMap[c.endpoint] = { via, origin, proto };
     }
   } catch (_) {}
-  return rows.map(r => ({ id: r.id, name: names[r.id] || null, context: r.context, allow: r.allow, tenant_id: r.tenant_id, status: st[r.id] ? st[r.id].state : 'offline', channels: st[r.id] ? st[r.id].channels : 0, ip: contacts[r.id] ? contacts[r.id].ip : null, rtt: contacts[r.id] ? contacts[r.id].rtt : null, via: (viaMap[r.id]||{}).via || null, origin: (viaMap[r.id]||{}).origin || null, vproto: (viaMap[r.id]||{}).proto || null, video: /vp8|h264/i.test(r.allow || ''), webrtc: r.transport === 'transport-ws', record: r.pbxng_record === true || r.pbxng_record === 'yes' || r.pbxng_record === 't' }));
+  return rows.map(r => ({ id: r.id, name: names[r.id] || null, context: r.context, allow: r.allow, tenant_id: r.tenant_id, status: st[r.id] ? st[r.id].state : 'offline', channels: st[r.id] ? st[r.id].channels : 0, ip: contacts[r.id] ? contacts[r.id].ip : null, rtt: contacts[r.id] ? contacts[r.id].rtt : null, via: (viaMap[r.id]||{}).via || null, origin: (viaMap[r.id]||{}).origin || null, vproto: (viaMap[r.id]||{}).proto || null, video: /vp8|h264/i.test(r.allow || ''), dtmf_mode: r.dtmf_mode || 'rfc4733', webrtc: r.transport === 'transport-ws', record: r.pbxng_record === true || r.pbxng_record === 'yes' || r.pbxng_record === 't' }));
 }
 async function getChannels() {
   if (!ari) return [];
@@ -323,6 +341,9 @@ const PUBLIC_API = [
   ['GET',  /^\/api\/vm\/audio$/],
   ['POST', /^\/api\/vm\/(del|read)$/],
   ['GET',  /^\/api\/sbc\/rtpengine\/effective$/],
+  // Las capturas de los manuales se piden con <img src>, que NO manda el token.
+  // Sólo la LECTURA es pública (subir y borrar siguen pidiendo sesión).
+  ['GET',  /^\/api\/manuales\/img\/[A-Za-z0-9._-]+$/],
 ];
 function isPublicApi(req) { const full = (req.baseUrl || '') + req.path; return PUBLIC_API.some(([m, re]) => m === req.method && re.test(full)); }
 app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, next));
@@ -466,6 +487,23 @@ pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
   }
 }).catch(e => console.error('[BOOTSTRAP] tenant', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_enroll (token text PRIMARY KEY, ext text, password text, label text, created_at timestamptz DEFAULT now(), expires_at timestamptz, used_at timestamptz)").catch(e => console.error('[ENROLL] table', e.message));
+// Bitacora de activacion: cuando canjearon el QR/enlace y con que aparato. Sirve para saber
+// si la persona ya configuro su telefono, y para detectar un canje desde un equipo raro.
+(async () => {
+  for (const col of ['activated_at timestamptz', 'device text', 'platform text', 'user_agent text', 'ip text', 'uses int DEFAULT 0'])
+    await pool.query('ALTER TABLE pbxng_enroll ADD COLUMN IF NOT EXISTS ' + col).catch(() => {});
+})();
+
+// Del User-Agent sacamos algo legible para el panel ("iPhone · Safari", "Windows · Escritorio PBX-NG").
+function parseDevice(ua) {
+  const u = String(ua || '');
+  if (/PBXNG-Desktop|Electron/i.test(u)) return { device: 'App de escritorio', platform: /Windows/i.test(u) ? 'Windows' : /Mac/i.test(u) ? 'macOS' : 'Escritorio' };
+  let platform = /iPhone|iPad/i.test(u) ? 'iOS' : /Android/i.test(u) ? 'Android' : /Windows/i.test(u) ? 'Windows' : /Mac OS X|Macintosh/i.test(u) ? 'macOS' : /Linux/i.test(u) ? 'Linux' : 'Desconocida';
+  let device = /iPhone/i.test(u) ? 'iPhone' : /iPad/i.test(u) ? 'iPad' : /Android/i.test(u) ? 'Celular Android' : 'Navegador';
+  const nav = /Edg\//i.test(u) ? 'Edge' : /Chrome\//i.test(u) ? 'Chrome' : /Firefox\//i.test(u) ? 'Firefox' : /Safari\//i.test(u) ? 'Safari' : '';
+  if (device === 'Navegador' && nav) device = nav;
+  return { device, platform };
+}
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban (jail text PRIMARY KEY, banned jsonb DEFAULT '[]', total_failed int DEFAULT 0, total_banned int DEFAULT 0, updated_at timestamptz DEFAULT now())").catch(e => console.error('[F2B] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban_cmd (id serial PRIMARY KEY, cmd text, ip text, jail text, created_at timestamptz DEFAULT now(), done_at timestamptz)").catch(e => console.error('[F2B] cmd', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_recordings (id serial PRIMARY KEY, filename text UNIQUE NOT NULL, ext text, src text, dst text, started_at timestamptz, bytes bigint DEFAULT 0, duration int DEFAULT 0, storage text DEFAULT 'local', remote_url text, linkedid text, deleted boolean DEFAULT false, created_at timestamptz DEFAULT now())").catch(e => console.error('[REC] table', e.message));
@@ -481,10 +519,16 @@ pool.query("CREATE TABLE IF NOT EXISTS pbxng_integrations (type text PRIMARY KEY
 pool.query("ALTER TABLE pbxng_trunks ADD COLUMN IF NOT EXISTS kind text DEFAULT 'asterisk'").catch(e => console.error('[TRK] kind', e.message));
   pool.query("ALTER TABLE pbxng_trunks ADD COLUMN IF NOT EXISTS kam_config jsonb").catch(e => console.error('[TRK] kamcfg', e.message));
   pool.query("CREATE TABLE IF NOT EXISTS pbxng_outbound_routes (id serial PRIMARY KEY, name text, pattern text, trunk text, strip int DEFAULT 0, prepend text, callerid text, created_at timestamptz DEFAULT now())").catch(e => console.error('[ROUT] out', e.message));
+  pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,do_register,tenant_id,kind,adv_config) " +
+    "SELECT 'to-sbc', COALESCE((SELECT match FROM ps_endpoint_id_ips WHERE id='to-sbc'),''), 5060, false, 1, 'sbc', " +
+    "'{\"sbc\":true,\"label\":\"SBC\",\"mode\":\"ip\",\"transport\":\"udp\"}'::jsonb " +
+    "WHERE EXISTS (SELECT 1 FROM ps_endpoints WHERE id='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_trunks WHERE name='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='sbc_link_removed')").catch(e => console.error('[TRK] sbc-seed', e.message));
+  pool.query("ALTER TABLE pbxng_sbc ADD COLUMN IF NOT EXISTS trunks jsonb").catch(e => console.error('[SBC] trunks-col', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_ivr_audios (id serial PRIMARY KEY, name text UNIQUE, text text, voice text, ref text, created_at timestamptz DEFAULT now())").catch(e => console.error('[IVRA] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_inbound_routes (id serial PRIMARY KEY, did text, name text, dest_type text, dest_value text, created_at timestamptz DEFAULT now())").catch(e => console.error('[ROUT] in', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_directory (ext text PRIMARY KEY, name text, updated_at timestamptz DEFAULT now())").catch(e => console.error('[DIR] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_rec_config (id int PRIMARY KEY DEFAULT 1, backend text DEFAULT 'local', nas_path text, s3_endpoint text, s3_region text, s3_bucket text, s3_key text, s3_secret text, s3_prefix text DEFAULT 'recordings/', auto_upload boolean DEFAULT false, retain_local boolean DEFAULT true, updated_at timestamptz DEFAULT now())").then(() => pool.query("INSERT INTO pbxng_rec_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING")).catch(e => console.error('[REC] cfg', e.message));
+pool.query("ALTER TABLE pbxng_rec_config ADD COLUMN IF NOT EXISTS nas_type text DEFAULT 'mount', ADD COLUMN IF NOT EXISTS nas_server text, ADD COLUMN IF NOT EXISTS nas_share text, ADD COLUMN IF NOT EXISTS nas_user text, ADD COLUMN IF NOT EXISTS nas_pass text").catch(()=>{});
 
 // Enrollment: canje publico del token (la PWA lo usa sin JWT)
 app.get('/api/enroll/:token', async (req, res) => {
@@ -493,7 +537,14 @@ app.get('/api/enroll/:token', async (req, res) => {
     const e = rows[0];
     if (!e) return res.status(404).json({ error: 'token invalido' });
     if (e.expires_at && new Date(e.expires_at) < new Date()) return res.status(410).json({ error: 'token expirado' });
-    await pool.query('UPDATE pbxng_enroll SET used_at=COALESCE(used_at, now()) WHERE token=$1', [req.params.token]);
+    const ua = req.headers['user-agent'] || '';
+    const dv = parseDevice(ua);
+    await pool.query(
+      `UPDATE pbxng_enroll SET used_at = COALESCE(used_at, now()), activated_at = COALESCE(activated_at, now()),
+              device = COALESCE(device, $2), platform = COALESCE(platform, $3), user_agent = COALESCE(user_agent, $4),
+              ip = COALESCE(ip, $5), uses = COALESCE(uses, 0) + 1
+         WHERE token = $1`,
+      [req.params.token, dv.device, dv.platform, ua.slice(0, 400), clientIp(req)]);
     // Config completa de aprovisionamiento. El MISMO link/QR sirve para la PWA, el softphone de
     // escritorio y el celular; y el transporte se deduce del ENDPOINT REAL (no se asume WebRTC):
     // un interno con transport-ws/wss es WebRTC; uno con udp/tcp/tls es SIP nativo. Mezclarlos
@@ -792,7 +843,10 @@ app.post('/api/c2c/public/:token/session', async (req, res) => {
     const [ctx, dst] = c2cDestRoute(link.dest_type, link.dest_value);
     await c.query('BEGIN');
     await createWebrtcEndpoint(c, guestExt, password, 'c2c', link.tenant_id || 1, !!link.video, 1);
-    const dp = [['c2c', dialExten, 1, 'NoOp', 'C2C ' + link.name], ['c2c', dialExten, 2, 'Set', 'CALLERID(name)=' + vname], ['c2c', dialExten, 3, 'Set', '__C2C_LINK=' + link.name], ['c2c', dialExten, 4, 'Goto', ctx + ',' + dst + ',1']];
+    // El interno ve "Llamada Web" como identificador (CDR/historial), pero NO se pierde el
+    // ID de la sesión web: queda como CALLERID(num) (el guestExt c2cXXXX) para referencia, y
+    // el nombre real del visitante viaja en __C2C_VISITOR.
+    const dp = [['c2c', dialExten, 1, 'NoOp', 'C2C ' + link.name], ['c2c', dialExten, 2, 'Set', 'CALLERID(name)=Llamada Web'], ['c2c', dialExten, 3, 'Set', '__C2C_LINK=' + link.name], ['c2c', dialExten, 4, 'Set', '__C2C_VISITOR=' + vname], ['c2c', dialExten, 5, 'Goto', ctx + ',' + dst + ',1']];
     await c.query("DELETE FROM extensions WHERE context='c2c' AND exten=$1", [dialExten]);
     for (const r of dp) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
     await c.query("INSERT INTO pbxng_c2c_sessions (id,link_id,guest_ext,dial_exten,visitor_name,geo,meta,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7, now() + interval '40 minutes')", [sid, link.id, guestExt, dialExten, vname, (b.geo ? JSON.stringify(b.geo).slice(0, 400) : null), (b.meta ? JSON.stringify(b.meta).slice(0, 400) : null)]);
@@ -1099,6 +1153,49 @@ alerts.init(pool, {
   state,
 });
 
+recstore.init(pool);
+report.init(pool);
+sysmon.init(pool, { nodes: NODES, state, token: AGENT_TOKEN });
+numbering.init(pool);
+
+// Plan de numeracion: que rangos se usan, que esta ocupado y por quien, y cual es el proximo libre
+app.get('/api/numbering/plan', async (req, res) => {
+  try { res.json(await numbering.plan()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Validar un numero antes de crear la extension (el panel lo llama mientras escribis)
+app.get('/api/numbering/check', async (req, res) => {
+  try { res.json(await numbering.check(req.query.ext, { ignorar: req.query.ignorar })); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Resumen: CPU, RAM, disco, interfaces y servicios de TODOS los nodos (no solo el core)
+app.get('/api/system/overview', async (req, res) => {
+  try { res.json(await sysmon.overview()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Informe ejecutivo del historial de llamadas (HTML A4 -> imprimir / guardar como PDF)
+app.get('/api/cdr/report', async (req, res) => {
+  try {
+    const html = await report.build({
+      from: req.query.from, to: req.query.to,
+      tipo: req.query.tipo, q: req.query.q,
+      usuario: (req.user && (req.user.name || req.user.username)) || '',
+    });
+    res.type('html').send(html);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Probar el destino de almacenamiento ANTES de confiarle las grabaciones
+app.post('/api/recordings/storage/test', async (req, res) => {
+  try { res.json(await recstore.test()); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Forzar la subida de lo pendiente (sin esperar la ronda automática)
+app.post('/api/recordings/storage/sync', async (req, res) => {
+  try { await recstore.sweep(); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/recordings/storage/usage', async (req, res) => { try { res.json(await recstore.usage()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/recordings/storage/nastest', async (req, res) => { try { res.json(await recstore.nastest(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+
 app.get('/api/alerts/rules', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM pbxng_alert_rules ORDER BY event');
@@ -1149,6 +1246,20 @@ app.get('/api/metrics', async (req, res) => {
 });
 
 // Enrollment: generar acceso (crea interno WebRTC + token) -> QR
+// Estado del acceso enviado a cada extension: si lo activaron, cuando y con que aparato.
+app.get('/api/enrollments', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT DISTINCT ON (ext) ext, created_at, expires_at, activated_at, device, platform, ip, uses
+        FROM pbxng_enroll ORDER BY ext, created_at DESC`);
+    res.json(rows.map(r => ({
+      ...r,
+      estado: r.activated_at ? 'activado'
+            : (r.expires_at && new Date(r.expires_at) < new Date()) ? 'vencido' : 'pendiente',
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/enroll', async (req, res) => {
   const { ext, label, video = false } = req.body || {};
   if (!ext) return res.status(400).json({ error: 'ext requerido' });
@@ -1474,6 +1585,114 @@ app.delete('/api/capture/:id', async (req, res) => {
 app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd('GET', '/core'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/asterisk/diag', async (req, res) => { try { const r = await astFwd('POST', '/diag', req.body || {}, 46000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/asterisk/iface', async (req, res) => { try { const r = await astFwd('POST', '/iface', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+
+/* ═══════════════ Modo de red del núcleo: ROUTER o SWITCH ════════════════════
+ *
+ * Mismo concepto que en SBC-NG. La diferencia: acá el control-plane sólo ARMA el
+ * plan (netmode.js) y quien lo ejecuta es el agente del contenedor de Asterisk,
+ * que es el que tiene las placas del host y NET_ADMIN.
+ *
+ * Aplicar un cambio de red puede cortar la gestión (si te comés la placa por la
+ * que entrás al panel). Por eso va con **commit-confirm**: se aplica, y si nadie
+ * confirma antes de que venza el plazo, se vuelve solo al modo anterior.
+ * ==========================================================================*/
+const netmode = require('./netmode');
+
+pool.query("CREATE TABLE IF NOT EXISTS pbxng_net (id int PRIMARY KEY DEFAULT 1, modo text DEFAULT 'router', wan_if text, lan_if text, nat boolean DEFAULT true, forward boolean DEFAULT true, bridge text DEFAULT 'br0', updated_at timestamptz DEFAULT now())")
+  .then(() => pool.query("INSERT INTO pbxng_net (id) VALUES (1) ON CONFLICT (id) DO NOTHING"))
+  .catch(e => console.error('[NET] table', e.message));
+
+const netCfg = async () => { const { rows } = await pool.query('SELECT * FROM pbxng_net WHERE id=1'); return rows[0] || { modo: 'router', bridge: 'br0', nat: true, forward: true }; };
+// Las placas se las preguntamos al agente (son las del host, no las del contenedor de la API).
+async function netIfaces() {
+  try { const r = await astFwd('GET', '/net'); const j = await r.json(); return (j && j.ifaces) || []; } catch (_) { return []; }
+}
+
+app.get('/api/net/mode', async (req, res) => {
+  try { res.json({ cfg: await netCfg(), interfaces: await netIfaces(), pendiente: netPend ? { vence: netPend.vence } : null }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/net/mode', async (req, res) => {
+  const b = req.body || {};
+  if (b.modo && !['router', 'switch'].includes(b.modo)) return res.status(400).json({ error: 'el modo es router o switch' });
+  try {
+    await pool.query('UPDATE pbxng_net SET modo=COALESCE($1,modo), wan_if=$2, lan_if=$3, nat=COALESCE($4,nat), forward=COALESCE($5,forward), bridge=COALESCE($6,bridge), updated_at=now() WHERE id=1',
+      [b.modo || null, b.wan_if || null, b.lan_if || null,
+       b.nat === undefined ? null : !!b.nat, b.forward === undefined ? null : !!b.forward, b.bridge || null]);
+    res.json({ ok: true, pendiente: 'aplicar para que tome efecto' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ver el plan ANTES de ejecutarlo (que se pueda leer es media función).
+app.post('/api/net/mode/plan', async (req, res) => {
+  try {
+    const cfg = { ...(await netCfg()), ...(req.body || {}) };
+    res.json({ modo: cfg.modo, pasos: netmode.plan(cfg, await netIfaces(), []) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+let netPend = null;   // { anterior, timer, vence }
+
+app.post('/api/net/mode/apply', async (req, res) => {
+  if (!req.body || req.body.confirmar !== true) {
+    return res.status(400).json({ error: 'hay que confirmar: cambiar el modo de red puede cortar la conexión con el panel' });
+  }
+  const segundos = Math.min(600, Math.max(30, parseInt((req.body || {}).rollback_seg, 10) || 120));
+  try {
+    const anterior = await netCfg();
+    const cfg = { ...anterior, ...(req.body.cfg || {}) };
+    const ifaces = await netIfaces();
+    const pasos = netmode.plan(cfg, ifaces, []);           // valida y arma (tira si la config no cierra)
+
+    const r = await astFwd('POST', '/netmode', { pasos }, 60000);
+    const out = await r.json();
+    if (!out || out.ok !== true) return res.status(500).json({ error: 'falló al aplicar: ' + ((out && out.fallo) || 'sin detalle'), pasos: (out && out.pasos) || [] });
+
+    await pool.query('UPDATE pbxng_net SET modo=$1, wan_if=$2, lan_if=$3, nat=$4, forward=$5, bridge=$6, updated_at=now() WHERE id=1',
+      [cfg.modo, cfg.wan_if || null, cfg.lan_if || null, !!cfg.nat, !!cfg.forward, cfg.bridge || 'br0']);
+
+    // Commit-confirm: si nadie confirma, volvemos solos al modo anterior.
+    if (netPend && netPend.timer) clearTimeout(netPend.timer);
+    const vence = Date.now() + segundos * 1000;
+    netPend = {
+      anterior, vence,
+      timer: setTimeout(async () => {
+        try {
+          const pasosVuelta = netmode.plan(anterior, await netIfaces(), []);
+          await astFwd('POST', '/netmode', { pasos: pasosVuelta }, 60000);
+          await pool.query('UPDATE pbxng_net SET modo=$1, wan_if=$2, lan_if=$3, nat=$4, forward=$5, bridge=$6, updated_at=now() WHERE id=1',
+            [anterior.modo, anterior.wan_if, anterior.lan_if, anterior.nat, anterior.forward, anterior.bridge]);
+          console.warn('[NET] nadie confirmó el cambio de modo: se volvió a', anterior.modo);
+        } catch (e) { console.error('[NET] rollback falló:', e.message); }
+        netPend = null;
+      }, segundos * 1000),
+    };
+    res.json({ ok: true, modo: cfg.modo, pasos: out.pasos, confirmar_antes_de: vence, rollback_seg: segundos });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/net/mode/confirm', (req, res) => {
+  if (!netPend) return res.json({ ok: true, nota: 'no había nada pendiente de confirmar' });
+  clearTimeout(netPend.timer); netPend = null;
+  res.json({ ok: true, confirmado: true });
+});
+
+app.post('/api/net/mode/revert', async (req, res) => {
+  if (!netPend) return res.status(400).json({ error: 'no hay ningún cambio pendiente para revertir' });
+  const anterior = netPend.anterior;
+  clearTimeout(netPend.timer); netPend = null;
+  try {
+    const pasos = netmode.plan(anterior, await netIfaces(), []);
+    const r = await astFwd('POST', '/netmode', { pasos }, 60000);
+    const out = await r.json();
+    await pool.query('UPDATE pbxng_net SET modo=$1, wan_if=$2, lan_if=$3, nat=$4, forward=$5, bridge=$6, updated_at=now() WHERE id=1',
+      [anterior.modo, anterior.wan_if, anterior.lan_if, anterior.nat, anterior.forward, anterior.bridge]);
+    res.json({ ok: !!(out && out.ok), modo: anterior.modo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 const CLI_ALLOW = /^(pjsip (show|list)|core show|dialplan show|queue show|confbridge (list|show)|module show|database (show|get)|rtp show|http show|manager show|stir_shaken show|version|uptime)\b/i;
 app.post('/api/asterisk/cli', async (req, res) => {
   const cmd = String((req.body && req.body.cmd) || '').trim();
@@ -1508,7 +1727,7 @@ app.post('/api/asterisk/sbc-trunk', async (req, res) => {
     const contact = 'sip:' + ip + ':' + port;
     await pool.query("INSERT INTO ps_aors(id,contact,qualify_frequency) VALUES('to-sbc',$1,30) ON CONFLICT(id) DO UPDATE SET contact=$1,qualify_frequency=30", [contact]);
     await pool.query("INSERT INTO ps_endpoints(id,transport,aors,context,disallow,allow,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) VALUES('to-sbc','transport-udp','to-sbc',$1,'all',$2,'no','yes','yes','yes','ip',1,'trunk') ON CONFLICT(id) DO UPDATE SET context=$1,allow=$2,transport='transport-udp',aors='to-sbc',identify_by='ip',direct_media='no'", [ctx, codecs]);
-    await pool.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES('to-sbc','to-sbc',$1) ON CONFLICT(id) DO UPDATE SET match=$1,endpoint='to-sbc'", [ip]);
+    await pool.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES('to-sbc','to-sbc',$1) ON CONFLICT(id) DO UPDATE SET match=$1,endpoint='to-sbc'", [ip]); await pool.query("DELETE FROM pbxng_settings WHERE key='sbc_link_removed'");
     try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1758,14 +1977,14 @@ app.delete('/api/recordings/:id', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/recordings/config', async (req, res) => {
-  try { const { rows } = await pool.query("SELECT id, backend, nas_path, s3_endpoint, s3_region, s3_bucket, s3_key, COALESCE(NULLIF(s3_secret,''),'') <> '' AS has_secret, s3_prefix, auto_upload, retain_local FROM pbxng_rec_config WHERE id=1"); res.json(rows[0] || {}); }
+  try { const { rows } = await pool.query("SELECT id, backend, nas_path, s3_endpoint, s3_region, s3_bucket, s3_key, COALESCE(NULLIF(s3_secret,''),'') <> '' AS has_secret, s3_prefix, auto_upload, retain_local, nas_type, nas_server, nas_share, nas_user, COALESCE(NULLIF(nas_pass,''),'') <> '' AS has_nas_pass FROM pbxng_rec_config WHERE id=1"); res.json(rows[0] || {}); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/recordings/config', async (req, res) => {
   const b = req.body || {};
   try {
-    await pool.query(`UPDATE pbxng_rec_config SET backend=COALESCE($1,backend), nas_path=$2, s3_endpoint=$3, s3_region=$4, s3_bucket=$5, s3_key=$6, s3_secret=COALESCE(NULLIF($7,''), s3_secret), s3_prefix=COALESCE($8,s3_prefix), auto_upload=COALESCE($9,auto_upload), retain_local=COALESCE($10,retain_local), updated_at=now() WHERE id=1`,
-      [b.backend || null, b.nas_path || null, b.s3_endpoint || null, b.s3_region || null, b.s3_bucket || null, b.s3_key || null, b.s3_secret || '', b.s3_prefix || null, b.auto_upload, b.retain_local]);
+    await pool.query(`UPDATE pbxng_rec_config SET backend=COALESCE($1,backend), nas_path=$2, s3_endpoint=$3, s3_region=$4, s3_bucket=$5, s3_key=$6, s3_secret=COALESCE(NULLIF($7,''), s3_secret), s3_prefix=COALESCE($8,s3_prefix), auto_upload=COALESCE($9,auto_upload), retain_local=COALESCE($10,retain_local), nas_type=COALESCE($11,nas_type), nas_server=$12, nas_share=$13, nas_user=$14, nas_pass=COALESCE(NULLIF($15,''),nas_pass), updated_at=now() WHERE id=1`,
+      [b.backend || null, b.nas_path || null, b.s3_endpoint || null, b.s3_region || null, b.s3_bucket || null, b.s3_key || null, b.s3_secret || '', b.s3_prefix || null, b.auto_upload, b.retain_local, b.nas_type || null, b.nas_server || null, b.nas_share || null, b.nas_user || null, b.nas_pass || '']);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1796,6 +2015,38 @@ app.delete('/api/users/:id', async (req, res) => {
     await pool.query('DELETE FROM pbxng_users WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+/* ─────────────── ACME / Let's Encrypt ───────────────
+ * Certificado TLS propio del appliance SIN proxy adelante. Sólo admin.
+ * HTTP-01 (puerto 80 standalone) o DNS-01 (API del DNS). */
+function soloAdminAcme(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'requiere rol administrador' });
+  next();
+}
+app.get('/api/acme', soloAdminAcme, async (req, res) => {
+  try { res.json({ config: acme.configPublica(), cert: await acme.estadoCert() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/acme/config', soloAdminAcme, async (req, res) => {
+  const { domain, email, method, dns_provider, dns_creds } = req.body || {};
+  const cfg = {};
+  if (domain !== undefined) cfg.domain = String(domain || '').trim();
+  if (email !== undefined) cfg.email = String(email || '').trim();
+  if (method !== undefined) cfg.method = (method === 'dns' ? 'dns' : 'http');
+  if (dns_provider !== undefined) cfg.dns_provider = String(dns_provider || '');
+  if (dns_creds && typeof dns_creds === 'object') cfg.dns_creds = dns_creds;
+  try { acme.guardarCfg(cfg); res.json({ ok: true, config: acme.configPublica() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/acme/issue', soloAdminAcme, async (req, res) => {
+  try { const r = await acme.emitir(); res.status(r.ok ? 200 : 400).json(r); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/acme/renew', soloAdminAcme, async (req, res) => {
+  try { res.json(await acme.renovar()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Auto-renovación diaria (acme.sh no renueva si aún falta mucho).
+setInterval(() => { acme.estadoCert().then((st) => { if (st.emitido) acme.renovar().catch(() => {}); }).catch(() => {}); }, 24 * 3600 * 1000);
 
 app.get('/api/system', async (req, res) => {
   let dbver = null, db = false;
@@ -1847,22 +2098,41 @@ app.get('/api/extensions', async (req, res) => { try { res.json(await getExtensi
 app.get('/api/extensions/record-all', async (req, res) => { try { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); res.json({ enabled: !!(rows[0] && rows[0].value === '1') }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/extensions/record-all', async (req, res) => { try { const on = !!(req.body && req.body.enabled); await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('record_all',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [on ? '1' : '0']); await setRecAll(on); res.json({ ok: true, enabled: on }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/endpoints', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { res.status(500).json({ error: e.message }); } });
+/* Modos de DTMF válidos (Asterisk chan_pjsip). Importa de verdad en porteros/frentes de
+ * calle: muchos (Dahua, Hikvision) mandan el dígito de apertura por SIP INFO (RFC 2976)
+ * en vez de RTP (RFC 4733). Si el modo no coincide, la puerta NO abre.
+ *   rfc4733   → DTMF por RTP (estándar, el default)
+ *   info      → DTMF por SIP INFO
+ *   auto_info → RFC 4733 si el otro lo ofrece; si no, INFO  ← el más compatible
+ *   auto      → RFC 4733 si lo ofrece; si no, inband
+ *   inband    → tonos dentro del audio (último recurso) */
+const DTMF_MODES = ['rfc4733', 'info', 'auto', 'auto_info', 'inband'];
+const dtmfOk = (v) => (DTMF_MODES.includes(String(v)) ? String(v) : null);
+
 app.post('/api/endpoints', async (req, res) => {
   const { id, password, context = 'internal', tenant_id = 1, video = false, webrtc = false, max_contacts = 2 } = req.body || {};
+  const dtmf = dtmfOk((req.body || {}).dtmf_mode) || 'rfc4733';
   const allow = (video || webrtc) ? 'ulaw,alaw,g722,vp8,h264' : 'ulaw,alaw,g722';
   const transport = webrtc ? 'transport-ws' : 'transport-udp';
   if (!id || !password) return res.status(400).json({ error: 'id y password son obligatorios' });
+  // No alcanza con validar en el panel: cualquiera puede pegarle a la API. El numero se
+  // valida contra TODO el plan (colas, IVR, conferencias, grupos, voceo, agentes IA, codigos
+  // de funcion y prefijos de rutas salientes) antes de tocar la base.
+  const vn = await numbering.check(id).catch(() => ({ ok: true }));
+  if (!vn.ok && !(req.body && req.body.force)) {
+    return res.status(409).json({ error: vn.mensaje, motivo: vn.motivo, conflicto: vn.conflicto || null });
+  }
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
     await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,$2,'yes',60,$3)", [id, max_contacts, tenant_id]);
     await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3)", [id, password, tenant_id]);
     if (webrtc) {
-      await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes')", [id, transport, context, allow, tenant_id]);
+      await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact,dtmf_mode) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes',$6)", [id, transport, context, allow, tenant_id, dtmf]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
   await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
     } else {
-      await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','no','yes','yes','yes')", [id, transport, context, allow, tenant_id]);
+      await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact,dtmf_mode) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','no','yes','yes','yes',$6)", [id, transport, context, allow, tenant_id, dtmf]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
   await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
     }
@@ -1875,15 +2145,17 @@ app.put('/api/endpoints/:id', async (req, res) => {
   const { password, context, video = false, webrtc = false, max_contacts } = req.body || {};
   const allow = (video || webrtc) ? 'ulaw,alaw,g722,vp8,h264' : 'ulaw,alaw,g722';
   const transport = webrtc ? 'transport-ws' : 'transport-udp';
+  // null = el body no lo trae -> COALESCE deja el valor que ya tenia el endpoint.
+  const dtmf = dtmfOk((req.body || {}).dtmf_mode);
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
     if (password) await c.query('UPDATE ps_auths SET password=$2 WHERE id=$1', [id, password]);
     if (max_contacts) await c.query('UPDATE ps_aors SET max_contacts=$2 WHERE id=$1', [id, max_contacts]);
     if (webrtc) {
-      await c.query("UPDATE ps_endpoints SET transport=$2, context=COALESCE($3,context), disallow='all', allow=$4, webrtc='yes', dtls_auto_generate_cert='yes', ice_support='yes', use_avpf='yes', media_encryption='dtls', media_use_received_transport='yes', rtcp_mux='yes', direct_media='no', rtp_symmetric='yes', force_rport='yes', rewrite_contact='yes' WHERE id=$1", [id, transport, context, allow]);
+      await c.query("UPDATE ps_endpoints SET transport=$2, context=COALESCE($3,context), disallow='all', allow=$4, webrtc='yes', dtls_auto_generate_cert='yes', ice_support='yes', use_avpf='yes', media_encryption='dtls', media_use_received_transport='yes', rtcp_mux='yes', direct_media='no', rtp_symmetric='yes', force_rport='yes', rewrite_contact='yes', dtmf_mode=COALESCE($5,dtmf_mode) WHERE id=$1", [id, transport, context, allow, dtmf]);
     } else {
-      await c.query("UPDATE ps_endpoints SET transport=$2, context=COALESCE($3,context), disallow='all', allow=$4, webrtc='no', media_encryption='no', direct_media='no', rtp_symmetric='yes', force_rport='yes', rewrite_contact='yes' WHERE id=$1", [id, transport, context, allow]);
+      await c.query("UPDATE ps_endpoints SET transport=$2, context=COALESCE($3,context), disallow='all', allow=$4, webrtc='no', media_encryption='no', direct_media='no', rtp_symmetric='yes', force_rport='yes', rewrite_contact='yes', dtmf_mode=COALESCE($5,dtmf_mode) WHERE id=$1", [id, transport, context, allow, dtmf]);
     }
     if (req.body && req.body.name !== undefined) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
     await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.json({ updated: id, webrtc, video });
@@ -1901,19 +2173,31 @@ app.get('/api/routes/outbound', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,name,pattern,trunk,strip,prepend,callerid FROM pbxng_outbound_routes ORDER BY id'); res.json(rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Troncal de salida por defecto: SBC-opcional. Si hay una troncal 'sbc' (to-sbc) el saliente
+// va por el SBC; si NO hay SBC, sale directo por la primera troncal de operador (asterisk/
+// register). Asi la PBX funciona con o sin SBC adelante.
+async function defaultOutTrunk(q) {
+  try {
+    let r = await q.query("SELECT name FROM pbxng_trunks WHERE kind='sbc' LIMIT 1");
+    if (r.rows[0]) return r.rows[0].name;
+    r = await q.query("SELECT name FROM pbxng_trunks WHERE COALESCE(kind,'asterisk') NOT IN ('webrtc','webrtc-client') ORDER BY id LIMIT 1");
+    return r.rows[0] ? r.rows[0].name : null;
+  } catch (_) { return null; }
+}
 app.post('/api/routes/outbound', async (req, res) => {
   const { name, pattern, trunk, strip = 0, prepend = '', callerid = '' } = req.body || {};
   if (!pattern) return res.status(400).json({ error: 'patrón requerido' });
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    await c.query('INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ($1,$2,$3,$4,$5,$6)', [name || pattern, pattern, 'to-sbc', +strip || 0, prepend || null, callerid || null]);
+    const tk = (trunk && String(trunk).trim()) || (await defaultOutTrunk(c)) || 'to-sbc';
+    await c.query('INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ($1,$2,$3,$4,$5,$6)', [name || pattern, pattern, tk, +strip || 0, prepend || null, callerid || null]);
     const rows = []; let p = 1;
     if (callerid) rows.push([p++, 'Set', 'CALLERID(num)=' + callerid]);
-    rows.push([p++, 'Dial', 'PJSIP/' + (prepend || '') + '${EXTEN:' + (+strip || 0) + '}@to-sbc,60']);
+    rows.push([p++, 'Dial', 'PJSIP/' + (prepend || '') + '${EXTEN:' + (+strip || 0) + '}@' + tk + ',60']);
     rows.push([p++, 'Hangup', '']);
     await setDialplan(c, 'internal', outExten(pattern), rows);
-    await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: pattern });
+    await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: pattern, trunk: tk });
   } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 app.delete('/api/routes/outbound/:id', async (req, res) => {
@@ -2058,6 +2342,36 @@ app.post('/api/trunks', async (req, res) => {
       return res.status(201).json({ created: name, kind: 'webrtc-client' });
     } catch (e) { return res.status(500).json({ error: e.message }); }
   }
+  if (kind === 'sbc') {
+    if (!b.provider_host) return res.status(400).json({ error: 'la IP del SBC es obligatoria' });
+    const ip = b.provider_host; const port = +b.provider_port || 5060;
+    const ctx = b.context || 'from-trunk';
+    const codecs = (Array.isArray(b.codecs) && b.codecs.length) ? b.codecs.join(',') : 'ulaw,alaw,g722';
+    const contact = 'sip:' + ip + ':' + port;
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      // El endpoint hacia el SBC SIEMPRE se llama 'to-sbc' (las rutas de salida dialan @to-sbc).
+      await c.query("INSERT INTO ps_aors(id,contact,qualify_frequency) VALUES('to-sbc',$1,30) ON CONFLICT(id) DO UPDATE SET contact=$1,qualify_frequency=30", [contact]);
+      await c.query("INSERT INTO ps_endpoints(id,transport,aors,context,disallow,allow,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) VALUES('to-sbc','transport-udp','to-sbc',$1,'all',$2,'no','yes','yes','yes','ip',$3,'trunk') ON CONFLICT(id) DO UPDATE SET context=$1,allow=$2,transport='transport-udp',aors='to-sbc',identify_by='ip',direct_media='no'", [ctx, codecs, tenant_id]);
+      await c.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES('to-sbc','to-sbc',$1) ON CONFLICT(id) DO UPDATE SET match=$1,endpoint='to-sbc'", [ip]);
+      const adv = { sbc: true, label: 'SBC', provider_host: ip, provider_port: port, context: ctx, codecs: codecs.split(','), mode: 'ip', transport: 'udp' };
+      await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ('to-sbc',$1,$2,NULL,false,$3,'sbc',$4) ON CONFLICT (name) DO UPDATE SET kind='sbc',provider_host=$1,provider_port=$2,adv_config=$4", [ip, port, tenant_id, JSON.stringify(adv)]); await c.query("DELETE FROM pbxng_settings WHERE key='sbc_link_removed'");
+      // Ruta de salida por defecto (si no hay ninguna): marcar 0 + numero -> sale por el SBC.
+      const rc = await c.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes');
+      let ruta = null;
+      if (!rc.rows[0] || rc.rows[0].n === 0) {
+        const pat = '0X.'; const strip = 1;
+        await c.query("INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ('Salida al SBC (marca 0)',$1,'to-sbc',$2,NULL,NULL)", [pat, strip]);
+        await setDialplan(c, 'internal', outExten(pat), [[1, 'Dial', 'PJSIP/${EXTEN:' + strip + '}@to-sbc,60'], [2, 'Hangup', '']]);
+        ruta = pat;
+      }
+      await c.query('COMMIT');
+      try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
+      broadcastSoon();
+      return res.status(201).json({ created: 'to-sbc', kind: 'sbc', ruta_creada: ruta });
+    } catch (e) { await c.query('ROLLBACK'); return res.status(500).json({ error: e.message }); } finally { c.release(); }
+  }
   if (!name || !b.provider_host) return res.status(400).json({ error: 'name y provider_host son obligatorios' });
   if (kind === 'kamailio') {
     try {
@@ -2140,10 +2454,11 @@ app.put('/api/trunks/:name', async (req, res) => {
 
 app.delete('/api/trunks/:name', async (req, res) => {
   const { name } = req.params; const c = await pool.connect();
-  try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); }
+  try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); if (name === 'to-sbc') await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'"); await c.query('COMMIT'); res.json({ deleted: name }); }
   catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 
+app.post('/api/trunks/diagnose', async (req, res) => { try { res.json(await diagtrunk.diagnosticar(req.body || {})); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/registrations', async (req, res) => { try { res.json({ output: await amiCommand('pjsip show registrations') }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // ---------------- Integraciones (Telegram / WhatsApp) ----------------
@@ -2558,6 +2873,210 @@ app.post('/api/featurecodes/uninstall', async (req, res) => {
   try { await pool.query("DELETE FROM extensions WHERE context='internal' AND exten = ANY($1)", [FEATURE_CODES.map(f => f.code)]); broadcastSoon(); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+/* ═══════════════ Aparcado, captura y música en espera ═══════════════════════
+ *
+ * Estas tres NO viven en la base (Asterisk las lee de archivos), así que el panel
+ * genera su config en el volumen compartido y recarga por AMI. Ver astconf.js.
+ * ==========================================================================*/
+pool.query("CREATE TABLE IF NOT EXISTS pbxng_moh_classes (nombre text PRIMARY KEY, descripcion text, sort text DEFAULT 'alpha', announcement text, created_at timestamptz DEFAULT now())")
+  .catch(e => console.error('[MOH] table', e.message));
+
+const setGet = async (k, def) => { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value != null ? rows[0].value : def; } catch (_) { return def; } };
+const setPut = (k, v) => pool.query("INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2", [k, String(v)]);
+
+// --- Aparcado de llamadas ---
+app.get('/api/parking', async (req, res) => {
+  try {
+    res.json({
+      parkext: await setGet('park_ext', '700'),
+      desde: parseInt(await setGet('park_desde', '701'), 10),
+      hasta: parseInt(await setGet('park_hasta', '720'), 10),
+      parkingtime: parseInt(await setGet('park_time', '300'), 10),
+      comebacktoorigin: (await setGet('park_comeback', '1')) === '1',
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/parking', async (req, res) => {
+  const b = req.body || {};
+  try {
+    if (b.parkext) await setPut('park_ext', String(b.parkext).replace(/\D/g, '') || '700');
+    if (b.desde) await setPut('park_desde', parseInt(b.desde, 10) || 701);
+    if (b.hasta) await setPut('park_hasta', parseInt(b.hasta, 10) || 720);
+    if (b.parkingtime) await setPut('park_time', Math.max(10, parseInt(b.parkingtime, 10) || 300));
+    if (b.comebacktoorigin !== undefined) await setPut('park_comeback', b.comebacktoorigin ? '1' : '0');
+    res.json({ ok: true, pendiente: 'aplicar para que Asterisk lo tome' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/parking/apply', async (req, res) => {
+  try {
+    const cfg = {
+      parkext: await setGet('park_ext', '700'),
+      desde: parseInt(await setGet('park_desde', '701'), 10),
+      hasta: parseInt(await setGet('park_hasta', '720'), 10),
+      parkingtime: parseInt(await setGet('park_time', '300'), 10),
+      comebacktoorigin: (await setGet('park_comeback', '1')) === '1',
+    };
+    astconf.parking(cfg);
+    const out = await amiCommand('module reload res_parking.so');
+    res.json({ ok: true, cfg, salida: String(out || '').slice(0, 400) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+/* Plazas del aparcado, ESTRUCTURADAS: devolvemos el rango completo y cuáles están
+ * ocupadas, para que el panel dibuje una tabla de verdad y no un volcado de texto.
+ * Los datos salen de la acción AMI ParkedCalls (eventos), no de parsear el CLI. */
+app.get('/api/parking/lots', async (req, res) => {
+  try {
+    const desde = parseInt(await setGet('park_desde', '701'), 10);
+    const hasta = parseInt(await setGet('park_hasta', '720'), 10);
+    const tiempo = parseInt(await setGet('park_time', '300'), 10);
+
+    // ParkedCalls devuelve un evento por llamada aparcada.
+    let evs = [];
+    try {
+      const r = await amiAction({ Action: 'ParkedCalls' });
+      evs = (r && (r.events || r.eventlist || [])) || [];
+      if (!Array.isArray(evs)) evs = [];
+    } catch (_) {}
+
+    const ocupadas = evs
+      .filter((e) => String(e.event || e.Event || '').toLowerCase() === 'parkedcall')
+      .map((e) => ({
+        plaza: parseInt(e.parkingspace || e.ParkingSpace, 10),
+        canal: e.parkeechannel || e.ParkeeChannel || '',
+        numero: e.parkeecalleridnum || e.ParkeeCallerIDNum || '',
+        nombre: e.parkeecalleridname || e.ParkeeCallerIDName || '',
+        aparcada_por: e.parkerdialstring || e.ParkerDialString || '',
+        restante: parseInt(e.parkingtimeout || e.ParkingTimeout, 10) || null,
+      }))
+      .filter((p) => p.plaza);
+
+    const mapa = Object.fromEntries(ocupadas.map((o) => [o.plaza, o]));
+    const plazas = [];
+    for (let n = Math.min(desde, hasta); n <= Math.max(desde, hasta); n++) {
+      plazas.push(mapa[n] ? { plaza: n, libre: false, ...mapa[n] } : { plaza: n, libre: true });
+    }
+    res.json({ plazas, ocupadas: ocupadas.length, total: plazas.length, parkingtime: tiempo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- Captura de llamada: grupo por interno (ps_endpoints) ---
+app.get('/api/pickup-groups', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT id AS ext, named_pickup_group, named_call_group FROM ps_endpoints ORDER BY id");
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/pickup-groups/:ext', async (req, res) => {
+  const g = String((req.body || {}).grupo || '').replace(/[^\w.\-]/g, '').slice(0, 40) || null;
+  try {
+    // En Asterisk, para poder capturar el teléfono de alguien tenés que estar en su
+    // mismo grupo: por eso se setean los dos (a quién puedo capturar / quién me captura).
+    await pool.query('UPDATE ps_endpoints SET named_call_group=$1, named_pickup_group=$1 WHERE id=$2', [g, req.params.ext]);
+    await amiCommand('module reload res_pjsip.so');
+    res.json({ ok: true, ext: req.params.ext, grupo: g });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- Música en espera ---
+app.get('/api/moh', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM pbxng_moh_classes ORDER BY nombre');
+    res.json(rows.map((c) => ({ ...c, archivos: astconf.mohArchivos(c.nombre) })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/moh', async (req, res) => {
+  const b = req.body || {};
+  const nombre = String(b.nombre || '').replace(/[^\w.\-]/g, '').slice(0, 40);
+  if (!nombre) return res.status(400).json({ error: 'nombre inválido' });
+  if (nombre === 'default') return res.status(400).json({ error: '"default" es la clase de fábrica' });
+  try {
+    await pool.query("INSERT INTO pbxng_moh_classes (nombre, descripcion, sort, announcement) VALUES ($1,$2,$3,$4) ON CONFLICT (nombre) DO UPDATE SET descripcion=EXCLUDED.descripcion, sort=EXCLUDED.sort, announcement=EXCLUDED.announcement",
+      [nombre, b.descripcion || null, ['alpha', 'random', 'randstart'].includes(b.sort) ? b.sort : 'alpha', b.announcement || null]);
+    astconf.mohCarpeta(nombre);
+    res.json({ ok: true, nombre });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/moh/:nombre', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM pbxng_moh_classes WHERE nombre=$1', [req.params.nombre]);
+    astconf.mohBorrarCarpeta(req.params.nombre);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Subir un audio a una clase (base64, como el resto de las subidas del panel)
+app.post('/api/moh/:nombre/audio', async (req, res) => {
+  const b = req.body || {};
+  const nombre = String(req.params.nombre).replace(/[^\w.\-]/g, '');
+  const file = String(b.filename || '').replace(/[^\w.\-]/g, '').slice(0, 80);
+  if (!nombre || !file) return res.status(400).json({ error: 'falta clase o nombre de archivo' });
+  if (!/\.(wav|gsm|ulaw|alaw|sln|g722|mp3)$/i.test(file)) return res.status(400).json({ error: 'formato no soportado (wav, gsm, ulaw, alaw, sln, g722, mp3)' });
+  try {
+    const datos = String(b.data || '').replace(/^data:[^,]+,/, '');
+    const buf = Buffer.from(datos, 'base64');
+    if (!buf.length) return res.status(400).json({ error: 'archivo vacío' });
+    const dir = astconf.mohCarpeta(nombre);
+    require('fs').writeFileSync(require('path').join(dir, file), buf);
+    res.json({ ok: true, archivo: file, bytes: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/moh/:nombre/audio/:file', async (req, res) => {
+  try {
+    const dir = astconf.mohCarpeta(String(req.params.nombre).replace(/[^\w.\-]/g, ''));
+    require('fs').rmSync(require('path').join(dir, String(req.params.file).replace(/[^\w.\-]/g, '')), { force: true });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/moh/apply', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM pbxng_moh_classes ORDER BY nombre');
+    astconf.moh(rows);
+    const out = await amiCommand('moh reload');
+    res.json({ ok: true, clases: rows.length, salida: String(out || '').slice(0, 400) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── Manuales: subir/ver/borrar las capturas desde el propio panel ─────────── */
+app.get('/api/manuales/img/:name', (req, res) => {
+  const name = req.params.name;
+  if (!IMG_OK.test(name)) return res.status(400).end();
+  const f = _pathm.join(MAN_IMG_DIR, name);
+  // Precedencia: lo que el operador subió por el panel gana. Si no subió nada, caemos
+  // a la imagen que viene con el producto (los diagramas del repo, servidos por el
+  // dashboard). Así el editor puede REEMPLAZAR un diagrama sin perder los originales.
+  if (!f.startsWith(MAN_IMG_DIR) || !_fsm.existsSync(f)) {
+    return res.redirect(302, '/manuales/img/' + encodeURIComponent(name));
+  }
+  res.set('Content-Type', IMG_MIME[_pathm.extname(name).toLowerCase()] || 'application/octet-stream');
+  res.set('Cache-Control', 'no-store');   // recién subida -> se ve al recargar
+  _fsm.createReadStream(f).pipe(res);
+});
+app.post('/api/manuales/img/:name', (req, res) => {
+  const name = req.params.name;
+  if (!IMG_OK.test(name)) return res.status(400).json({ error: 'nombre inválido' });
+  const data = (req.body && req.body.data) || '';
+  const m = /^data:image\/(png|jpe?g|webp|gif);base64,(.+)$/i.exec(data);
+  if (!m) return res.status(400).json({ error: 'se espera un data URL de imagen' });
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 15 * 1024 * 1024) return res.status(413).json({ error: 'imagen demasiado grande (máx 15MB)' });
+  try {
+    _fsm.mkdirSync(MAN_IMG_DIR, { recursive: true });
+    _fsm.writeFileSync(_pathm.join(MAN_IMG_DIR, name), buf);
+    res.json({ ok: true, name, bytes: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/manuales/img/:name', (req, res) => {
+  const name = req.params.name;
+  if (!IMG_OK.test(name)) return res.status(400).json({ error: 'nombre inválido' });
+  try { _fsm.rmSync(_pathm.join(MAN_IMG_DIR, name), { force: true }); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/manuales/img-list', (req, res) => {
+  try {
+    const files = _fsm.existsSync(MAN_IMG_DIR) ? _fsm.readdirSync(MAN_IMG_DIR).filter((f) => IMG_OK.test(f)) : [];
+    res.json({ cargadas: files });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/dialplan', async (req, res) => { const ctx = req.query.context; try { res.json({ output: await amiCommand('dialplan show' + (ctx ? ' ' + ctx : '')) }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/channels', async (req, res) => { try { res.json(await getChannels()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/tenants', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,slug,context_prefix,active FROM tenants ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -2567,6 +3086,14 @@ app.get('/api/sbc', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT version, uptime, dispatcher, banned, rtpengine, stats, extract(epoch from (now()-updated_at))::int AS age_s FROM pbxng_sbc WHERE id=1");
     res.json(rows[0] || { error: 'sin datos' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/sbc/trunks', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT trunks, extract(epoch from (now()-updated_at))::int AS age_s FROM pbxng_sbc WHERE id=1");
+    const r = rows[0] || {};
+    const tr = Array.isArray(r.trunks) ? r.trunks : [];
+    res.json({ trunks: tr, age_s: r.age_s != null ? r.age_s : null, live: r.age_s != null && r.age_s < 120 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/sbc/cfg', async (req, res) => {
@@ -2788,6 +3315,9 @@ ami.on('managerevent', (e) => {
     await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_clients (
       id serial PRIMARY KEY, name text NOT NULL, doc text, address text, notes text,
       phones text[] DEFAULT '{}', created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())`);
+    // Ubicacion del cliente en el mapa (se geocodifica desde la direccion, una sola vez)
+    await pool.query("ALTER TABLE pbxng_clients ADD COLUMN IF NOT EXISTS lat double precision").catch(()=>{});
+    await pool.query("ALTER TABLE pbxng_clients ADD COLUMN IF NOT EXISTS lon double precision").catch(()=>{});
     await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_client_persons (
       id serial PRIMARY KEY, client_id int REFERENCES pbxng_clients(id) ON DELETE CASCADE,
       name text NOT NULL, doc text, relation text, valid_until date, notes text, created_at timestamptz DEFAULT now())`);
@@ -2870,6 +3400,47 @@ app.get('/api/clients/:id', async (req,res)=>{ try{
   c.devices = (await pool.query('SELECT * FROM pbxng_client_devices WHERE client_id=$1 ORDER BY label',[c.id])).rows;
   res.json(c);
 }catch(e){res.status(500).json({error:e.message});} });
+
+// --- Ficha del cliente: llamadas, intervenciones y ubicacion -------------------
+
+// Todas las llamadas del cliente: se cruzan sus telefonos contra el CDR (origen o destino).
+app.get('/api/clients/:id/calls', async (req,res)=>{ try{
+  const { rows:cr } = await pool.query('SELECT phones FROM pbxng_clients WHERE id=$1',[req.params.id]);
+  if(!cr[0]) return res.status(404).json({error:'no existe'});
+  const phones = (cr[0].phones||[]).map(p=>String(p).replace(/[^0-9]/g,'')).filter(Boolean);
+  if(!phones.length) return res.json([]);
+  const { rows } = await pool.query(
+    `SELECT start, clid, src, dst, duration, billsec, disposition
+       FROM cdr
+      WHERE regexp_replace(src,'[^0-9]','','g') = ANY($1)
+         OR regexp_replace(dst,'[^0-9]','','g') = ANY($1)
+      ORDER BY start DESC LIMIT 200`, [phones]);
+  res.json(rows);
+}catch(e){ res.status(500).json({error:e.message}); } });
+
+// Intervenciones: la encuesta que completa el agente al cortar (motivo, resultado, notas).
+app.get('/api/clients/:id/interventions', async (req,res)=>{ try{
+  const { rows } = await pool.query(
+    'SELECT id, ext, caller, uniqueid, answers, created_at FROM pbxng_call_surveys WHERE client_id=$1 ORDER BY created_at DESC LIMIT 100',
+    [req.params.id]);
+  const { rows: fields } = await pool.query('SELECT id,label,ftype,ord FROM pbxng_survey_fields WHERE active ORDER BY ord, id');
+  res.json({ items: rows, fields });
+}catch(e){ res.status(500).json({error:e.message}); } });
+
+// Ubicacion: geocodifica la direccion con Nominatim (OSM) y la deja guardada.
+app.post('/api/clients/:id/geocode', crmWrite, async (req,res)=>{ try{
+  const { rows } = await pool.query('SELECT address FROM pbxng_clients WHERE id=$1',[req.params.id]);
+  const addr = rows[0] && rows[0].address;
+  if(!addr) return res.status(400).json({error:'el cliente no tiene direccion cargada'});
+  const q = encodeURIComponent(addr + (/uruguay/i.test(addr) ? '' : ', Uruguay'));
+  const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + q,
+    { headers:{ 'User-Agent':'PBX-NG/1.0 (panel)' }, signal: AbortSignal.timeout(8000) });
+  const d = await r.json();
+  if(!Array.isArray(d) || !d.length) return res.status(404).json({error:'no se encontro la direccion'});
+  const lat = parseFloat(d[0].lat), lon = parseFloat(d[0].lon);
+  await pool.query('UPDATE pbxng_clients SET lat=$2, lon=$3 WHERE id=$1',[req.params.id, lat, lon]);
+  res.json({ lat, lon, display: d[0].display_name });
+}catch(e){ res.status(500).json({error:e.message}); } });
 
 app.post('/api/clients', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const phones = Array.isArray(b.phones)? b.phones : (b.phones? String(b.phones).split(',').map(x=>x.trim()).filter(Boolean):[]);

@@ -7,7 +7,7 @@ import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, Icon
 import { toast } from './notify';
 
 const DEST = {
-  extension: { label: 'Interno', color: '#0ea5e9', icon: IconPhoneCall },
+  extension: { label: 'Extensión', color: '#0ea5e9', icon: IconPhoneCall },
   ringgroup: { label: 'Ring Group', color: '#8b5cf6', icon: IconUsersGroup },
   queue: { label: 'Cola', color: '#f59e0b', icon: IconList },
   voicemail: { label: 'Buzon', color: '#6366f1', icon: IconMail },
@@ -164,7 +164,7 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
                 <TextInput label="Digito" value={selNode.data.digit} onChange={e => updSel('digit', e.target.value)} placeholder="1" ff="monospace" />
                 <Select label="Destino" value={selNode.data.dest_type} onChange={v => updSel('dest_type', v)} data={Object.entries(DEST).map(([v, d]) => ({ value: v, label: d.label }))} />
                 {selNode.data.dest_type !== 'hangup' &&
-                  <TextInput label={selNode.data.dest_type === 'extension' ? 'Interno' : selNode.data.dest_type === 'queue' ? 'Cola' : selNode.data.dest_type === 'voicemail' ? 'Buzon' : selNode.data.dest_type === 'ivr' ? 'Acceso del IVR' : selNode.data.dest_type === 'ai' ? 'Acceso del agente IA' : 'Numero de acceso'}
+                  <TextInput label={selNode.data.dest_type === 'extension' ? 'Extensión' : selNode.data.dest_type === 'queue' ? 'Cola' : selNode.data.dest_type === 'voicemail' ? 'Buzon' : selNode.data.dest_type === 'ivr' ? 'Acceso del IVR' : selNode.data.dest_type === 'ai' ? 'Acceso del agente IA' : 'Numero de acceso'}
                     value={selNode.data.dest_value} onChange={e => updSel('dest_value', e.target.value)} placeholder="1001" ff="monospace" />}
               </Stack>
             </>

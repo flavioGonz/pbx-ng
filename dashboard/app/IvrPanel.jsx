@@ -5,7 +5,7 @@ import { Card, Group, Text, Button, Table, Badge, ActionIcon } from '@mantine/co
 import { IconArrowsSplit, IconHash, IconVolume, IconList, IconPlus, IconEdit, IconTrash } from '@tabler/icons-react';
 import { toast } from './notify';
 
-const DLABEL = { extension: 'Interno', ringgroup: 'Ring Group', queue: 'Cola', voicemail: 'Buzon', ivr: 'Otro IVR', ai: 'Agente IA', hangup: 'Colgar' };
+const DLABEL = { extension: 'Extensión', ringgroup: 'Ring Group', queue: 'Cola', voicemail: 'Buzon', ivr: 'Otro IVR', ai: 'Agente IA', hangup: 'Colgar' };
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 
 export default function IvrPanel() {

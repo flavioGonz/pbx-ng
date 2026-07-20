@@ -1,10 +1,10 @@
 'use client';
 import { usePathname } from 'next/navigation';
-import Toaster from './Toaster';
+import { Toaster } from 'sileo';
 
-// Toaster top-center en el panel de escritorio. En la PWA (/phone) usamos avisos nativos.
+// Un unico Toaster (sileo) para todo el panel. En la PWA (/phone) usamos avisos nativos.
 export default function DesktopToaster() {
   const p = usePathname() || '';
   if (p.startsWith('/phone')) return null;
-  return <Toaster />;
+  return <Toaster position="top-center" theme="system" offset={{ top: 18 }} />;
 }

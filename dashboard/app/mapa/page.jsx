@@ -34,7 +34,7 @@ export default function Mapa() {
   }
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [hours]);
 
-  // último punto por interno
+  // último punto por extensión
   const byExt = useMemo(() => {
     const m = {};
     for (const p of pts) { if (!p.ext || p.lat == null) continue; if (!m[p.ext] || p.ts > m[p.ext].ts) m[p.ext] = p; }
@@ -63,7 +63,7 @@ export default function Mapa() {
     tileRef.current = L.current.tileLayer(tl.url, { maxZoom: 19, attribution: tl.attr }).addTo(map.current);
   }, [scheme, ready]);
 
-  // marcadores: solo el interno
+  // marcadores: solo la extensión
   useEffect(() => {
     if (!ready || !L.current || !layer.current) return;
     const lf = L.current; layer.current.clearLayers();
@@ -77,7 +77,7 @@ export default function Mapa() {
     if (bounds.length) { try { map.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 }); } catch (_) {} }
   }, [byExt, ready]);
 
-  // historial de llamadas del interno seleccionado
+  // historial de llamadas dla extensión seleccionado
   const hist = useMemo(() => {
     if (!sel) return [];
     return cdr.filter(r => String(r.src) === String(sel) || String(r.dst) === String(sel)).slice(0, 40).map(r => {
@@ -96,9 +96,9 @@ export default function Mapa() {
       <Paper withBorder shadow="md" style={{ position: 'absolute', top: 14, left: 14, padding: '10px 14px', borderRadius: 14, zIndex: 1000, ...ov }}>
         <Group gap={10} wrap="nowrap">
           <ThemeIcon size={34} radius="md" variant="light" color="teal"><IconMapPin size={19} /></ThemeIcon>
-          <div><Text fw={800} fz="sm" lh={1.1}>Mapa de llamadas</Text><Text fz={11} c="dimmed">Ubicación GPS de internos WebRTC</Text></div>
+          <div><Text fw={800} fz="sm" lh={1.1}>Mapa de llamadas</Text><Text fz={11} c="dimmed">Ubicación GPS de extensiones WebRTC</Text></div>
           <Divider orientation="vertical" />
-          <div style={{ textAlign: 'center' }}><Text fw={800} fz="lg" lh={1}>{inN}</Text><Text fz={10} c="dimmed">internos</Text></div>
+          <div style={{ textAlign: 'center' }}><Text fw={800} fz="lg" lh={1}>{inN}</Text><Text fz={10} c="dimmed">extensiones</Text></div>
         </Group>
       </Paper>
 
@@ -113,7 +113,7 @@ export default function Mapa() {
         <Paper withBorder shadow="xl" style={{ position: 'absolute', top: 70, right: 14, width: 320, maxHeight: 'calc(100% - 90px)', borderRadius: 16, overflow: 'hidden', zIndex: 1000, display: 'flex', flexDirection: 'column', ...ov }}>
           <Group justify="space-between" px="md" py="sm" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
             <Group gap={10}><ThemeIcon size={36} radius="xl" variant="light" color="blue"><IconUser size={18} /></ThemeIcon>
-              <div><Text fw={800} lh={1.1}>Interno {sel}</Text><Text fz={11} c="dimmed">{selPt ? 'Últ. ubicación ' + new Date(selPt.ts * 1000).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</Text></div></Group>
+              <div><Text fw={800} lh={1.1}>Extensión {sel}</Text><Text fz={11} c="dimmed">{selPt ? 'Últ. ubicación ' + new Date(selPt.ts * 1000).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</Text></div></Group>
             <CloseButton onClick={() => setSel(null)} />
           </Group>
           <Text fz="xs" fw={700} tt="uppercase" c="dimmed" px="md" pt="sm">Historial de llamadas</Text>

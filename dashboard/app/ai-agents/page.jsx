@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
 import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, PasswordInput, Alert, Tooltip, Progress, Slider } from '@mantine/core';
-import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh, IconPlayerPlay } from '@tabler/icons-react';
+import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh, IconPlayerPlay, IconCircleCheck } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
 
@@ -18,7 +18,15 @@ export default function AiAgents() {
   const [vozList, setVozList] = useState([]); const [edgeList, setEdgeList] = useState([]); const previewRef = useRef(null);
   async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (_) {} }
   async function preview(voice) { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }) }); if (!r.ok) { toast('No se pudo generar el audio', 'bad'); return; } const b = await r.blob(); if (previewRef.current) { previewRef.current.src = URL.createObjectURL(b); previewRef.current.play().catch(() => {}); } } catch (_) {} }
-  async function loadVoz() { try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) { setVoz({ ok: false }); } }
+  const [vozAuto, setVozAuto] = useState(false);
+  async function loadVoz() {
+    try {
+      const d = await fetch('/backend/api/voz').then(r => r.json());
+      setVoz(d);
+      // Si no hay URL guardada a mano, mostramos la que esta usando la central (viene de VOZ_HOST).
+      setVozUrl(u => { if (u) return u; if (d && d.url) { setVozAuto(true); return d.url; } return u; });
+    } catch (_) { setVoz({ ok: false }); }
+  }
   async function saveVoz() { setVozSaving(true); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: vozUrl, voz_length_scale: vozSpeed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setVozSaving(false); toast(r.error ? 'Error' : 'Servicio de voz guardado', r.error ? 'bad' : 'ok'); loadVoz(); }
   async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) {} }
   async function loadKey() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setKeySet(s.openai_api_key === '__SET__'); if (s.voz_url) setVozUrl(s.voz_url); if (s.voz_length_scale) setVozSpeed(s.voz_length_scale); } catch (_) {} }
@@ -75,7 +83,12 @@ export default function AiAgents() {
         </> : <Alert variant="light" color="red">No se pudo contactar el servicio de voz en {vozUrl}.{voz?.error ? ' (' + voz.error + ')' : ''}</Alert>}
         <Divider my="sm" label="Parametros" labelPosition="center" />
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
-          <TextInput label="URL del servicio (contenedor pbxng-voz)" value={vozUrl} onChange={e => setVozUrl(e.currentTarget.value)} leftSection={<IconServer2 size={15} />} />
+          <TextInput label="URL del servicio (contenedor pbxng-voz)"
+            description={vozAuto ? 'Detectada automáticamente desde la configuración del despliegue. Guardala si querés fijarla.' : 'Dirección del motor de voz (TTS y transcripción)'}
+            placeholder="http://ip-del-motor-de-voz:8080"
+            value={vozUrl} onChange={e => { setVozAuto(false); setVozUrl(e.currentTarget.value); }}
+            leftSection={<IconServer2 size={15} />}
+            rightSection={voz && voz.ok ? <Tooltip label="El servicio responde"><IconCircleCheck size={16} color="var(--mantine-color-teal-6)" /></Tooltip> : null} />
           <div><Text size="sm" fw={500}>Velocidad de habla</Text><Text size="xs" c="dimmed" mb={10}>Menor = mas rapido · 1.0 = normal</Text>
             <Slider min={0.7} max={1.4} step={0.05} value={parseFloat(vozSpeed) || 1.0} onChange={v => setVozSpeed(String(v))} marks={[{ value: 0.8, label: 'rapido' }, { value: 1.0, label: 'normal' }, { value: 1.3, label: 'lento' }]} /></div>
         </SimpleGrid>
@@ -106,7 +119,7 @@ export default function AiAgents() {
         <Stack gap="md">
           <SimpleGrid cols={2}>
             <TextInput label="Nombre" description="Identifica al agente. Ej: Recepción" value={form.name} onChange={e => up('name', e.currentTarget.value)} required />
-            <TextInput label="Número de acceso" description="Interno que dispara el bot. Ej: 7700" value={form.exten} onChange={e => up('exten', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
+            <TextInput label="Número de acceso" description="Extensión que dispara el bot. Ej: 7700" value={form.exten} onChange={e => up('exten', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
           </SimpleGrid>
           <SimpleGrid cols={3}>
             <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={v => up('provider', v)} />
@@ -120,9 +133,9 @@ export default function AiAgents() {
           <Textarea label="Instrucciones (system prompt)" description="Personalidad y reglas del agente. Ej: Sos el asistente de IES, amable y conciso; ofrecé ventas o soporte." value={form.system_prompt} onChange={e => up('system_prompt', e.currentTarget.value)} autosize minRows={3} />
           <Divider label="Transferencias (function-calling)" labelPosition="center" />
           <SimpleGrid cols={3}>
-            <TextInput label="Interno Ventas" value={form.sales_exten} onChange={e => up('sales_exten', e.currentTarget.value)} ff="monospace" placeholder="1001" leftSection={<IconPhoneCall size={14} />} />
-            <TextInput label="Interno Soporte" value={form.support_exten} onChange={e => up('support_exten', e.currentTarget.value)} ff="monospace" placeholder="1002" leftSection={<IconHeadset size={14} />} />
-            <TextInput label="Interno por defecto" value={form.default_exten} onChange={e => up('default_exten', e.currentTarget.value)} ff="monospace" placeholder="1001" leftSection={<IconUsers size={14} />} />
+            <TextInput label="Extensión Ventas" value={form.sales_exten} onChange={e => up('sales_exten', e.currentTarget.value)} ff="monospace" placeholder="1001" leftSection={<IconPhoneCall size={14} />} />
+            <TextInput label="Extensión Soporte" value={form.support_exten} onChange={e => up('support_exten', e.currentTarget.value)} ff="monospace" placeholder="1002" leftSection={<IconHeadset size={14} />} />
+            <TextInput label="Extensión por defecto" value={form.default_exten} onChange={e => up('default_exten', e.currentTarget.value)} ff="monospace" placeholder="1001" leftSection={<IconUsers size={14} />} />
           </SimpleGrid>
           <TextInput label="Webhook CRM (opcional)" description="URL que recibe {query, caller} y devuelve {result}. El bot la usa para consultar datos del cliente." value={form.crm_webhook} onChange={e => up('crm_webhook', e.currentTarget.value)} placeholder="https://tu-crm/api/lookup" />
           <Switch label="Agente activo" checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />

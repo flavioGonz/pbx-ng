@@ -2,7 +2,7 @@
 
 > **Para quién es este manual**
 > Para el administrador de la central: la persona que la pone en marcha, conecta las troncales,
-> crea los internos y decide cómo entran y salen las llamadas. Se lee en orden la primera vez, y
+> crea las extensiones y decide cómo entran y salen las llamadas. Se lee en orden la primera vez, y
 > después se usa como referencia por sección.
 
 ---
@@ -38,7 +38,7 @@ diagrama:
    interna, y la manda al Asterisk que corresponde (*dispatcher*).
 3. **El audio no lo toca Asterisk**: queda anclado en **rtpengine**, en el borde. Por eso el núcleo
    nunca queda expuesto.
-4. **Asterisk** hace lo suyo: mira el dialplan, decide si va a un interno, una cola o un IVR, graba
+4. **Asterisk** hace lo suyo: mira el dialplan, decide si va a una extensión, una cola o un IVR, graba
    si corresponde, deja el mensaje en el buzón si nadie atiende.
 5. Si el que atiende es un **softphone WebRTC**, el navegador negocia el audio con **coturn**, que le
    da un camino aunque esté detrás del NAT de su casa.
@@ -62,26 +62,59 @@ diagrama:
 
 ## 2. Orden de puesta en marcha
 
-Este es el recorrido completo. Si lo seguís en este orden, cada paso se apoya en el anterior y no
-vas a tener que volver atrás.
+### 2.1 Qué vas a tener cuando termines
+
+Antes de tocar un solo botón, conviene saber a dónde vamos. Al final de este capítulo la central no
+va a estar "instalada": va a estar **en producción**, y eso significa cinco cosas concretas.
+
+| Al terminar vas a tener | Qué quiere decir en la práctica |
+|---|---|
+| **Una central que atiende** | Entra una llamada del operador, la contesta un menú o una persona, y sale por donde vos decidiste. |
+| **Personas con teléfono** | Cada uno con su extensión: en el navegador, en el celular, en la app de escritorio o en un teléfono de escritorio. Sin instalar nada a mano. |
+| **Un borde que se defiende** | El SBC filtrando escaneos, bloqueando IPs y cortando el fraude antes de que llegue a Asterisk. |
+| **Una central que te avisa** | Si se cae la troncal, si te atacan, si una cola quedó sin agentes: te llega un correo. No te enterás por un cliente enojado. |
+| **Números para mostrar** | Historial, grabaciones, wallboard e informe ejecutivo. Se puede medir, y lo que se mide se puede mejorar. |
+
+### 2.2 Antes de enchufar nada
+
+Hay seis cosas que no dependen de PBX-NG y que, si faltan, frenan la puesta en marcha a la mitad
+esperando a un tercero (el operador, el proveedor de internet, el que administra el dominio).
+Conseguilas primero.
+
+![Lo que hay que tener resuelto antes de empezar](img/cfg-00-antes-de-empezar.svg)
+
+### 2.3 El recorrido, en cuatro fases
+
+El orden no es caprichoso: **cada fase se apoya en la anterior**. Si respetás la secuencia, nunca
+tenés que volver atrás a rehacer algo que ya habías configurado.
+
+![El recorrido de puesta en marcha en cuatro fases](img/cfg-00-recorrido.svg)
+
+### 2.4 El checklist paso a paso
 
 | # | Paso | Dónde | Por qué va acá |
 |---|---|---|---|
-| 0 | **Entrar al panel** | `https://tu-dominio` · usuario `admin` | La contraseña la imprimió el instalador; el sistema te obliga a cambiarla |
-| 1 | Módulos activos | Configuración → Módulos | Define qué contenedores existen |
-| 2 | Dominio y certificado | Configuración → Proxy / TLS | Sin TLS no hay softphone web |
-| 3 | Componentes (IPs) | Configuración → Componentes | El panel necesita saber dónde vive cada pieza |
-| 4 | Marca | Configuración → Branding | Aparece en el panel y en los correos |
-| 5 | **SBC** | SBC-NG | El borde: seguridad, operadores, medios |
-| 6 | Troncal | Troncales | La línea con el mundo |
-| 7 | Rutas salientes | Rutas → Salientes | Qué se marca y por dónde sale |
-| 8 | Rutas entrantes | Rutas → Entrantes | Qué pasa cuando te llaman |
-| 9 | Internos | Internos | Las personas |
-| 10 | Correo | Configuración → Email | Sin esto no hay QR, ni buzón por mail, ni alertas |
-| 11 | Entrega de teléfonos | Internos → Enviar acceso | El QR y el enlace |
-| 12 | Aplicaciones | Aplicaciones | Colas, IVR, buzones, conferencias |
-| 13 | Alertas | Configuración → Alertas | Que la central te avise a vos |
+| **0** | **Entrar por la IP** | `http://<IP-del-servidor>:3001` | **Primero comprobá que la aplicación está viva.** Antes de meterse con dominios, DNS o certificados, entrá directo por la IP: si el panel carga, el problema (si después aparece) es de red o de proxy, no del sistema. Es el paso que ahorra horas de diagnóstico. |
+| 1 | Cambiar la contraseña | Panel → primer ingreso | El instalador imprimió una clave inicial y el sistema te obliga a cambiarla. |
+| 2 | Módulos activos | Configuración → Módulos | Define qué contenedores existen (SBC, TURN, IA, Intercom). Encender un módulo lo crea; apagarlo lo destruye. |
+| 3 | **Dominio y certificado** | Configuración → Proxy / TLS | **Recién ahora** el dominio: apuntás el DNS, emitís el certificado y pasás a entrar por `https://tu-dominio`. Sin TLS, las extensiones WebRTC no funcionan (el navegador no da micrófono sin HTTPS). |
+| 4 | Componentes (IPs) | Configuración → Componentes | El panel necesita saber dónde vive cada pieza. |
+| 5 | Marca | Configuración → Branding | Aparece en el panel, en los correos y en los informes. |
+| 6 | **SBC** | SBC-NG | El borde: seguridad, anti-flood, operadores y medios. |
+| 7 | TURN | SBC-NG → TURN | El que hace que WebRTC funcione detrás de cualquier NAT. |
+| 8 | Troncal | Troncales | La línea con el mundo. |
+| 9 | Rutas salientes | Rutas → Salientes | Qué se marca y por dónde sale. |
+| 10 | Rutas entrantes | Rutas → Entrantes | Qué pasa cuando te llaman. |
+| 11 | Extensiones | Extensiones | Las personas. |
+| 12 | Correo | Configuración → Email | Sin esto no hay QR, ni buzón por mail, ni alertas. |
+| 13 | Entrega de teléfonos | Extensiones → Enviar acceso | El QR y el enlace de acceso. |
+| 14 | Aplicaciones | Aplicaciones | Colas, IVR, buzones, conferencias. |
+| 15 | Alertas | Configuración → Alertas | Que la central te avise a vos. |
 
+> **La regla de los dos pasos**: primero **IP** (¿está viva la aplicación?), después **dominio**
+> (¿está bien publicada?). Nunca al revés. Si entrás directo por el dominio y algo falla, no sabés si
+> el problema es el sistema, el DNS, el proxy o el certificado — tenés cuatro sospechosos en vez de
+> uno.
 
 ---
 
@@ -114,31 +147,36 @@ softphones y la que hay que respaldar en tu documentación del cliente.
 
 ### 3.2 El dominio con certificado SSL no es opcional
 
-> **Esta es la advertencia más importante de todo el despliegue.**
->
-> **Sin un dominio con certificado SSL válido, los internos WebRTC no funcionan.** Ninguno. Ni el
-> softphone del navegador, ni el del celular, ni el de escritorio en modo WebRTC.
->
-> No es un capricho nuestro: los navegadores **prohíben** el acceso al micrófono y el WebSocket
-> seguro (`wss://`) fuera de un origen seguro (HTTPS con certificado válido). Un certificado
-> autofirmado tampoco alcanza.
+Esta es la advertencia más importante de todo el despliegue, así que va sola y en negrita:
 
-**Qué pasa si instalás sin dominio:** la central funciona, pero **solo con teléfonos SIP** — los de
-escritorio, los ATA, las bocinas IP y el softphone en modo SIP nativo dentro de la red. Perdés todo
-lo que hace atractiva a la central: el softphone web, el celular, el teletrabajo, el QR de acceso, el
-click-to-call.
+> **Sin un dominio con certificado SSL válido, las extensiones WebRTC no funcionan. Ninguna.**
+> Ni el softphone del navegador, ni el del celular, ni el de escritorio en modo WebRTC.
 
-| Con dominio + SSL | Sin dominio |
-|---|---|
-| Internos WebRTC (navegador, celular, escritorio) | ❌ |
-| Teletrabajo sin VPN | ❌ |
-| Acceso por QR / enlace | ❌ (el enlace apunta a la nada) |
-| Click-to-Call | ❌ |
-| Teléfonos SIP en la LAN | ✅ |
-| Troncales SIP | ✅ |
+**No es un capricho nuestro.** Los navegadores prohíben el acceso al micrófono (`getUserMedia`) y el
+WebSocket seguro (`wss://`) cuando la página no viene de un **origen seguro** — es decir, HTTPS con
+un certificado emitido por una autoridad reconocida. Un certificado **autofirmado tampoco alcanza**:
+el navegador lo rechaza igual, y el softphone se queda registrando para siempre.
 
-**Por eso, en un despliegue nuevo, el orden correcto es**: dominio → certificado → resto. No dejes el
-dominio "para después": vas a tener que rehacer la configuración de los teléfonos.
+Sin dominio la central igual funciona, pero **sólo con teléfonos SIP**: los de escritorio, los ATA,
+las bocinas IP y el softphone en modo SIP nativo dentro de la red. Perdés justamente lo que la hace
+atractiva.
+
+![Qué se puede hacer con dominio y certificado, y qué no sin ellos](img/cfg-01-ssl-webrtc.svg)
+
+| Función | Con dominio + SSL | Sólo por IP |
+|---|:---:|:---:|
+| Softphone en el navegador | ✅ | ❌ |
+| Softphone en el celular (PWA) | ✅ | ❌ |
+| App de escritorio en modo WebRTC | ✅ | ❌ |
+| Teletrabajo sin VPN | ✅ | ❌ |
+| QR y enlace de acceso | ✅ | ❌ (el enlace apunta a la nada) |
+| Click-to-Call desde la web | ✅ | ❌ |
+| Teléfonos SIP en la LAN | ✅ | ✅ |
+| Troncales SIP con el operador | ✅ | ✅ |
+
+**Por eso el orden correcto es**: entrás por IP para verificar que la aplicación está viva (paso 0),
+y enseguida **dominio → certificado → todo lo demás**. No dejes el dominio "para después": vas a
+tener que rehacer la configuración de todos los teléfonos y volver a mandar los enlaces de acceso.
 
 ### 3.3 Credenciales por defecto
 
@@ -174,7 +212,7 @@ cuestión de permisos sobre la misma pantalla: son tres aplicaciones con propós
 
 | Panel | Quién entra | Para qué sirve |
 |---|---|---|
-| **Administración** | Administrador | Configurar la central: internos, troncales, rutas, colas, seguridad. Es este manual. |
+| **Administración** | Administrador | Configurar la central: extensiones, troncales, rutas, colas, seguridad. Es este manual. |
 | **Supervisor** | Jefe de call center | Ver las colas en vivo, monitorear agentes, escuchar/susurrar/irrumpir, gestionar clientes |
 | **Agente** | Quien atiende llamadas | Su softphone, la ficha del cliente que llama, su historial y su buzón |
 
@@ -362,7 +400,7 @@ entera **antes** de conectar la primera troncal.
 
 Un **SBC** (Session Border Controller) es un guardián que se para entre Internet y tu central.
 Asterisk sabe manejar llamadas, pero no está pensado para estar desnudo frente a Internet: en
-cuestión de horas empieza a recibir miles de intentos de registro de robots buscando internos con
+cuestión de horas empieza a recibir miles de intentos de registro de robots buscando extensiones con
 contraseñas débiles.
 
 El SBC hace cinco cosas que Asterisk no debería hacer solo:
@@ -462,7 +500,7 @@ propósito — una regla de más rompe llamadas que funcionaban. Se agrega solo 
 | **Quitar header** | Elimina una cabecera de la llamada saliente | El operador rechaza una cabecera que no entiende |
 | **Agregar header** | Inserta una cabecera con un valor fijo | El operador exige una cabecera propietaria |
 | **Modificar (regex)** | Busca un patrón dentro de una cabecera y lo reemplaza | Arreglar un formato de número |
-| **Forzar From-user** | Reemplaza el usuario del `From` por un valor fijo | El operador exige que el `From` sea **tu número de cuenta**, no el del interno |
+| **Forzar From-user** | Reemplaza el usuario del `From` por un valor fijo | El operador exige que el `From` sea **tu número de cuenta**, no el de la extensión |
 | **P-Asserted-Identity** | Agrega `P-Asserted-Identity` con el número de origen | El operador toma de ahí el identificador del llamante |
 | **P-Preferred-Identity** | Igual, pero con `P-Preferred-Identity` | Algunos operadores usan esta y no la anterior |
 | **Diversion** | Agrega la cabecera `Diversion` | Desvíos: el operador necesita saber que la llamada fue redirigida |
@@ -485,13 +523,13 @@ propósito — una regla de más rompe llamadas que funcionaban. Se agrega solo 
 
 | Variable | Qué contiene |
 |---|---|
-| `$fU` | El **usuario del From**: el número del interno que llama |
+| `$fU` | El **usuario del From**: el número de la extensión que llama |
 | `$rU` | El usuario del destino (a quién se llama) |
 | `$si` | La IP de origen |
 | texto fijo | Lo que escribas tal cual (por ejemplo, tu número de cuenta) |
 
 **Ejemplo real.** El operador te da la cuenta `59824001234` y exige que **todas** las llamadas salgan
-identificadas con ella, sin importar qué interno llame:
+identificadas con ella, sin importar qué extensión llame:
 
 | Acción | Valor |
 |---|---|
@@ -527,34 +565,39 @@ El SBC mide la latencia de cada destino con OPTIONS automáticamente.
 
 ![SBC · Dispatcher](img/cfg-24-sbc-dispatcher.png)
 
-### 5.7 Ruteo → Remotos
+### 5.7 Extensiones SIP registradas en el SBC
 
-» SBC-NG → Ruteo → Remotos
+» SBC-NG → **Extensiones SIP**
 
-**Qué es.** La lista, en vivo, de los internos que **no están en la oficina**: el que trabaja desde
-su casa, el vendedor con el softphone en el celular, la sucursal chica sin central propia. Todos
-esos no se registran directo contra el Asterisk — se registran **a través del SBC**, que es el único
-que da la cara a Internet.
+**No es ruteo, son extensiones.** Antes esta pantalla se llamaba "Remotos" y colgaba de Ruteo, lo que
+confundía: acá no se configura nada de ruteo. Lo que se ve es, **en vivo, qué extensiones están
+registradas contra Kamailio** (el SBC) en lugar de registrarse directo contra Asterisk.
 
-**Por qué existe esta pantalla.** Porque un interno remoto es el punto más frágil de la central, y
+**Quiénes caen acá.** Todo el que no está en la oficina: el que trabaja desde su casa, el vendedor
+con el softphone en el celular, la sucursal chica sin central propia. Su REGISTER entra por el SBC
+—que es el único que da la cara a internet—, el SBC lo filtra y recién ahí se lo pasa a Asterisk.
+
+**Por qué existe esta pantalla.** Porque una extensión remota es el punto más frágil de la central, y
 el que más preguntas genera:
 
-- *"¿Está conectado o no?"* Acá lo ves, con la hora del último registro.
-- *"¿Desde dónde se conecta?"* Muestra la **IP de origen**. Si el teleworker de Montevideo aparece
-  conectándose desde otro país, tenés un problema de seguridad — y esta es la pantalla donde se ve.
-- *"¿Por qué no le entran las llamadas?"* Si el interno no figura acá, no está registrado: no es un
-  problema de rutas ni del operador, es que el teléfono no llegó a la central.
+| Pregunta | Dónde se responde acá |
+|---|---|
+| *"¿Está conectada o no?"* | Columna **Estado**: registrada, en llamada o desconectada. |
+| *"¿Desde dónde se conecta?"* | Columna **Origen real**: la IP pública desde la que registró. Si el que trabaja en Montevideo aparece conectándose desde otro país, tenés un problema de seguridad — y esta es la pantalla donde se ve. |
+| *"¿Por qué no le entran las llamadas?"* | Si la extensión **no figura acá**, no está registrada: no es un problema de rutas ni del operador, es que el teléfono nunca llegó a la central. |
+| *"¿Está lejos o cerca?"* | Columna **RTT**: el tiempo de ida y vuelta hasta el equipo. |
+| *"¿Por qué protocolo?"* | Columna **Proto**: UDP, TCP o TLS. |
 
 **Ejemplo de uso real.** Un vendedor dice que "el teléfono no le suena". Antes de revisar colas,
-rutas y troncales, mirás Remotos: si su interno no está en la lista, el diagnóstico terminó ahí —
-su softphone no está registrado (se quedó sin internet, cerró la app, o se le venció el acceso). Si
-**sí** está en la lista, entonces el problema es aguas abajo y seguís buscando.
+rutas y troncales, mirás esta pantalla: si su extensión no está en la lista, el diagnóstico terminó
+ahí — su softphone no está registrado (se quedó sin internet, cerró la app, o se le venció el
+acceso). Si **sí** está, el problema es aguas abajo y seguís buscando.
 
-> **La diferencia con "Internos" del menú principal:** aquella pantalla lista **todos** los internos
-> que existen (la configuración). Esta lista solo los que están **registrados desde afuera, ahora**
-> (la realidad). Una es el padrón; la otra, quién vino a votar.
+> **La diferencia con "Telefonía → Extensiones":** aquella pantalla lista **todas** las extensiones que
+> existen (la configuración, el padrón). Esta lista sólo las que están **registradas desde afuera,
+> ahora mismo** (la realidad, quién vino a votar).
 
-![SBC · Extensiones remotas](img/cfg-25-sbc-remotos.png)
+![SBC · Extensiones SIP registradas](img/cfg-25-sbc-remotos.png)
 
 ### 5.8 Red y Media → Red
 
@@ -608,9 +651,42 @@ verde no es decorativo: significa que funciona de verdad.
 
 » SBC-NG → Sistema → Módulos  /  SBC-NG → Sistema → Configuración
 
-**Módulos**: qué módulos de Kamailio están cargados.
-**Configuración**: el archivo de configuración del SBC, para verlo o editarlo cuando hace falta algo
-que la interfaz no cubre. Es la puerta de escape; usala con cuidado.
+Esta es la sala de máquinas del SBC. Todo lo que configuraste en las secciones anteriores
+(seguridad, LCR, manipulación SIP, dispatcher) termina siendo **configuración de Kamailio**, y
+Kamailio es modular: cada capacidad la aporta un módulo que se carga al arrancar. Acá se ve y se
+toca eso, sin entrar por SSH.
+
+**Módulos** — la lista de módulos de Kamailio con su estado. Sirve para responder la pregunta que
+aparece cuando algo no anda: *"¿el SBC tiene siquiera cargado lo que necesito?"*. Si `pike` no está
+cargado, el anti-flood no existe por más que la pantalla de Seguridad se vea linda; si `rtpengine`
+no está, no hay relay de medios.
+
+| Módulo | Qué aporta | Se usa en |
+|---|---|---|
+| `pike` | Cuenta paquetes por IP y detecta ráfagas. | Seguridad → anti-flood |
+| `htable` | Las tablas en memoria donde vive la lista negra. | Seguridad → IP ban |
+| `secfilter` | Filtra User-Agents y patrones de escaneo conocidos. | Seguridad |
+| `dispatcher` | Balanceo y failover entre destinos. | Ruteo → Dispatcher |
+| `rtpengine` | Manda el audio por el relay de medios. | Red y Media → rtpengine |
+| `uac` | Registra al SBC contra el operador. | Troncales con registro |
+| `dialog`, `tm`, `sl` | El motor de transacciones y diálogos SIP. | Todo |
+
+**Configuración** — el archivo de configuración del SBC, tal cual, para verlo o editarlo cuando
+hace falta algo que la interfaz todavía no cubre: una regla exótica del operador, una cabecera rara,
+una prueba puntual. **Es la puerta de escape.**
+
+| Acción | Qué hace |
+|---|---|
+| **Ver** | Muestra el archivo con resaltado de sintaxis. Leerlo no rompe nada; es la mejor forma de entender qué generó el panel a partir de lo que cargaste. |
+| **Editar y guardar** | Escribe el archivo y recarga Kamailio. Si el archivo tiene un error de sintaxis, el SBC **no arranca** y te quedás sin señalización. |
+| **Recargar** | Aplica los cambios sin reiniciar el proceso. |
+
+> **Regla de oro**: lo que se puede hacer desde las pantallas del SBC, hacelo desde las pantallas. El
+> panel regenera esta configuración cuando cambiás algo en Seguridad, LCR o Dispatcher, y **puede
+> pisar tus ediciones a mano**. Editá el archivo sólo para lo que la interfaz no cubre, y anotá qué
+> tocaste.
+
+![SBC · Sistema, módulos y configuración](img/cfg-45-sbc-sistema.png)
 
 ---
 
@@ -623,7 +699,7 @@ La consola de Asterisk (**Asterisk** en el menú) es la ventana al motor de llam
 | Pestaña | Qué muestra |
 |---|---|
 | **Núcleo** | Versión, uptime, llamadas activas, canales |
-| **Internos** | Estado real de cada endpoint (registrado, en llamada, no alcanzable) |
+| **Extensiones** | Estado real de cada endpoint (registrado, en llamada, no alcanzable) |
 | **Troncal SBC** | El enlace entre el núcleo y el borde |
 | **Red** | Interfaces y conectividad |
 | **Dialplan** | El plan de marcación generado, tal cual lo ve Asterisk |
@@ -702,7 +778,7 @@ un destino.
 |---|---|
 | **DID** | El número que te asignó el operador |
 | **Nombre** | Para identificarla en la lista |
-| **Destino** | Interno, cola, IVR, buzón o conferencia |
+| **Destino** | Extensión, cola, IVR, buzón o conferencia |
 
 **Ejemplo:** el `24001234` (línea principal) va al **IVR** de bienvenida; el `24001299` (ventas
 directo) va a la **cola de Ventas**.
@@ -715,16 +791,16 @@ directo) va a la **cola de Ventas**.
 
 ---
 
-## 10. Internos
+## 10. Extensiones
 
-» Menú lateral → Telefonía → Internos
+» Menú lateral → Telefonía → Extensiones
 
-### 10.1 Crear un interno
+### 10.1 Crear una extensión
 
-En **Internos → Nuevo**. Lo mínimo es el número y el nombre. Cada interno nace con su contraseña
+En **Extensiones → Nuevo**. Lo mínimo es el número y el nombre. Cada extensión nace con su contraseña
 SIP generada y su **buzón de voz activado** (PIN inicial = su número).
 
-![Alta de un interno](img/cfg-02-nuevo-interno.png)
+![Alta de una extensión](img/cfg-02-nuevo-interno.png)
 
 ### 10.2 ¿WebRTC o SIP?
 
@@ -737,16 +813,18 @@ Es la decisión más importante del alta y define qué recibe el usuario en su e
 | Detrás de NAT | Anda sin abrir nada (usa TURN) | Requiere red preparada |
 | Cuándo | **Por defecto**, para personas | Para **hardware** |
 
-> **No los mezcles.** Un interno WebRTC registrado en modo SIP **autentica pero se queda sin
+> **No los mezcles.** Una extensión WebRTC registrado en modo SIP **autentica pero se queda sin
 > audio**: el endpoint exige cifrado. Es una confusión clásica y difícil de diagnosticar. El enlace
-> de acceso ya viene con el modo correcto según el interno.
+> de acceso ya viene con el modo correcto según la extensión.
 
-![Tipo de interno](img/cfg-15-tipo-interno.png)
+![Tipo de extensión](img/cfg-15-tipo-extensión.png)
 
 ### 10.3 Teléfonos físicos
 
-En **Teléfonos** se aprovisionan por MAC (Yealink, Grandstream): el teléfono baja su configuración
-solo al arrancar.
+Si en vez de un softphone la persona va a usar un teléfono de escritorio, **no lo configures a mano**:
+cargá su MAC en **Telefonía → Teléfonos** y el aparato se configura solo al enchufarlo. El capítulo 24
+lo explica completo, incluida la **opción 66 del DHCP**, que es lo que hace que 20 teléfonos nuevos se
+configuren sin que toques ninguno.
 
 ---
 
@@ -784,13 +862,13 @@ rechazada, no conecta, remitente inválido).
 
 ## 12. Entrega del teléfono: QR y enlace de acceso
 
-» Menú lateral → Telefonía → Internos → (elegir el interno) → Enviar acceso por correo
+» Menú lateral → Telefonía → Extensiones → (elegir la extensión) → Enviar acceso por correo
 
 Este es el proceso que reemplaza al "te paso la contraseña por WhatsApp".
 
 ### 12.1 Cómo se manda
 
-En **Internos**, sobre el interno, botón **Enviar acceso por correo**. Escribís la dirección de la
+En **Extensiones**, sobre la extensión, botón **Enviar acceso por correo**. Escribís la dirección de la
 persona y listo.
 
 ### 12.2 Qué recibe la persona
@@ -805,11 +883,11 @@ configurado solo.
 Es importante que sepas qué estás mandando, porque explica por qué funciona sin que el usuario
 configure nada:
 
-- El **transporte correcto según el interno**: si es WebRTC, va con el servidor WebSocket y las
+- El **transporte correcto según la extensión**: si es WebRTC, va con el servidor WebSocket y las
   credenciales del TURN; si es SIP, va con el servidor SIP, el puerto y el transporte. **El sistema
   lo deduce del endpoint real**, no lo asume.
-- El **interno y su contraseña**.
-- La **sesión en la plataforma** (si el interno tiene un usuario asociado): así la persona ve el
+- El **extensión y su contraseña**.
+- La **sesión en la plataforma** (si la extensión tiene un usuario asociado): así la persona ve el
   directorio, la ficha de los clientes y el intercom sin volver a loguearse.
 
 ### 12.4 Reglas del enlace
@@ -819,7 +897,7 @@ configure nada:
   escritorio (botón QR → "Pegar código").
 - Se puede reenviar las veces que haga falta.
 
-> **Para que el usuario vea clientes e intercom**, el interno tiene que tener un **usuario asociado**
+> **Para que el usuario vea clientes e intercom**, la extensión tiene que tener un **usuario asociado**
 > en **Usuarios** (con su rol). Si no lo tiene, el enlace configura el teléfono igual, pero sin
 > sesión en la plataforma.
 
@@ -833,26 +911,99 @@ configure nada:
 
 ### 13.1 Colas
 
-En **Aplicaciones → Colas → Nueva cola**. Tres pestañas.
+» Menú lateral → Aplicaciones → Colas → **Nueva cola**
 
-**Básico:**
+Una cola es una sala de espera con reglas: las llamadas entran, se ordenan, y se van repartiendo
+entre los agentes según la estrategia que elijas. El editor tiene tres pestañas y **todos** sus
+campos se explican acá.
 
-| Campo | Recomendación |
+#### Pestaña *Básico* — quién atiende y cómo
+
+| Campo | Qué hace | Recomendación |
+|---|---|---|
+| **Nombre** | Identificador interno de la cola (sin espacios). No se puede cambiar después. | `ventas`, `soporte` |
+| **Etiqueta** | El nombre lindo que ve el supervisor en los tableros. | "Ventas · Montevideo" |
+| **Extensión de acceso** | El número que hay que marcar (o al que rutea una ruta entrante) para caer en la cola. | 3001, 3002… |
+| **Estrategia** | Cómo se elige el agente al que suena. Ver el cuadro de abajo. | *Round-robin con memoria* |
+| **Timbrado del agente** | Segundos que suena en un agente antes de pasar al siguiente. | 20-25 s |
+| **Descanso del agente** (*wrap-up*) | Segundos de respiro entre una llamada y la siguiente, para cargar la ficha y respirar. | **Al menos 10 s.** En 0 el agente se quema y baja la calidad |
+| **Capacidad máxima** | Cuántas llamadas aguanta la cola. Las que llegan de más van al destino de desborde. | 0 = sin límite |
+| **Espera máxima** | Cuánto tolera esperar una llamada antes de rendirse. | 120-180 s |
+| **Destino al vencer la espera** | A dónde va la llamada que esperó demasiado: buzón, otra extensión, otra cola. | Buzón o extensión de respaldo |
+| **Grabar llamadas** | Graba todo lo que se atiende por esta cola. | Encendido en atención al cliente |
+| **Agentes** | Las extensiones que atienden. Se agregan y se sacan en caliente, sin cortar llamadas. | — |
+
+**Las estrategias, en criollo**
+
+| Estrategia | Qué hace | Cuándo usarla |
+|---|---|---|
+| Timbrar todos | Suena en todos los agentes libres a la vez. | Equipos chicos donde gana el más rápido. |
+| **Round-robin con memoria** | Va rotando y **se acuerda** en quién quedó. | El reparto más justo. Es la que recomendamos. |
+| Menos reciente | Al que hace más tiempo que no atiende. | Equilibrar carga. |
+| Menos llamadas | Al que menos llamadas atendió. | Equilibrar por volumen. |
+| Aleatoria / ponderada | Al azar (la ponderada respeta el peso del agente). | Cuando querés que los seniors reciban más. |
+| Lineal | Siempre en el mismo orden, de arriba abajo. | Escalado: primero el junior, después el senior. |
+
+#### Pestaña *Anuncios* — lo que escucha quien espera
+
+Acá está la diferencia con otras centrales: **no se suben archivos de audio**. Escribís el texto,
+elegís la voz, lo escuchás, y el sistema lo sintetiza y lo publica solo.
+
+| Campo | Qué hace |
 |---|---|
-| Estrategia | *Round-robin con memoria* reparte parejo |
-| Timbrado del agente | 20-25 segundos |
-| **Descanso del agente** | **Al menos 10 s**; en 0 el agente se quema |
-| Capacidad máxima | 0 = sin límite |
-| Espera máxima + destino | Buzón o interno de respaldo |
+| **Bienvenida** | Lo primero que se escucha al entrar a la cola. |
+| **Voz** | Qué voz lo dice (uruguaya masculina o femenina, entre otras). |
+| **Anuncio periódico** | Un mensaje que se repite mientras espera ("seguimos con vos, en breve te atendemos"). |
+| **Cada cuántos segundos** | Frecuencia del anuncio periódico. 30-45 s está bien; menos, molesta. |
+| **Anunciar posición** | Le dice al que espera qué lugar ocupa en la fila. |
+| **Anunciar espera estimada** | Le dice cuánto le falta, calculado con la espera real de los últimos minutos. |
+| **Escuchar** | Reproduce el audio generado antes de guardarlo. |
+
+#### Pestaña *Avanzado* — SLA y comportamiento fino
+
+| Campo | Qué hace |
+|---|---|
+| **SLA objetivo (segundos)** | El **compromiso de atención**: cuántos segundos como máximo debería esperar una llamada antes de que la atienda una persona. |
+| **Peso de la cola** | Prioridad entre colas cuando un agente está en varias. Más peso = esa cola le entra primero. |
+| **Entrar sin agentes** | Si una llamada puede entrar a la cola cuando no hay ni un agente conectado. |
+| **Salir si se quedan sin agentes** | Si las llamadas que ya están esperando se van cuando el último agente se desconecta. |
+| **Timbrar a agentes ocupados** | Si suena en un agente que ya está hablando. Normalmente, no. |
+| **Autofill** | Reparte varias llamadas en paralelo a varios agentes libres, en vez de una por vez. |
+| **Pausa automática** | Pone en pausa al agente que dejó sonar sin atender, para que no siga rebotando llamadas. |
+
+**El SLA objetivo, en detalle** (porque es el que más se malinterpreta)
+
+- **Qué es**: el umbral en segundos de tu promesa de servicio. Con **SLA = 30**, tu promesa es
+  "atendemos en menos de 30 segundos".
+- **Qué hace el sistema con él**: no corta ni desvía nada. Lo usa para **medir**. Cada llamada
+  atendida dentro del umbral cuenta como "dentro de SLA"; las que tardaron más, fuera. Ese
+  porcentaje es el que ves en el **Wallboard** y en el panel de **Supervisor**, y es el número que
+  se le muestra al cliente en una reunión de servicio.
+- **Cómo se configura**: Aplicaciones → Colas → editar la cola → pestaña *Avanzado* → **SLA objetivo
+  (s)**. Se guarda al presionar *Guardar* y aplica a las llamadas siguientes.
+- **Qué valor poner**: 20 s en atención comercial (el que llama a comprar no espera), 30 s es el
+  estándar de la industria (el famoso *80/30*: atender el 80 % de las llamadas en 30 segundos), 60 s
+  en soporte técnico donde la gente tolera más.
+- **Cómo se lee**: si tu cumplimiento de SLA está en 55 %, no te faltan minutos de agente: **te
+  faltan agentes en la franja pico**. Cruzalo con la *Distribución horaria* del informe ejecutivo del
+  historial y vas a ver exactamente en qué hora se rompe.
+
+> **El proceso completo de armar una cola de agentes**, de punta a punta:
+> 1. **Creá los usuarios agentes** (capítulo 17): usuario, rol *agente* e **extensión asignado**. Sin
+>    extensión asignado, el agente entra al panel pero no puede atender.
+> 2. **Creá la cola** con su extensión de acceso, la estrategia y el descanso.
+> 3. **Agregá los agentes** a la cola (las extensiones del paso 1).
+> 4. **Grabá los anuncios** por texto en la pestaña *Anuncios*.
+> 5. **Fijá el SLA** en *Avanzado* y encendé la alerta **Cola sin agentes** (capítulo 14).
+> 6. **Apuntá una ruta entrante** (capítulo 9) a la extensión de acceso de la cola: eso hace que las
+>    llamadas del DID caigan directo en la fila.
+> 7. **Mirá el Wallboard** el primer día: en espera, atendidas, abandonadas y cumplimiento de SLA.
 
 ![Editor de colas · Básico](img/cfg-06-cola-basico.png)
 
-**Anuncios:** acá está la diferencia con otras centrales — **no se suben archivos de audio**.
-Escribís el texto, elegís la voz, lo escuchás, y el sistema lo sintetiza y lo publica solo.
-
 ![Editor de colas · Anuncios](img/cfg-07-cola-anuncios.png)
 
-**Avanzado:** qué hacer si no hay agentes, SLA objetivo, pausa automática al que no atiende.
+![Editor de colas · Avanzado y SLA](img/cfg-08-cola-avanzado.png)
 
 ### 13.2 IVR
 
@@ -863,7 +1014,7 @@ texto, igual que en las colas.
 
 ### 13.3 Buzones de voz
 
-Cada interno ya tiene el suyo (`*97` para escucharlo). En **Aplicaciones → Buzones**, panel
+Cada extensión ya tiene el suyo (`*97` para escucharlo). En **Aplicaciones → Buzones**, panel
 *"Mensaje de voz al correo"*: cargás la dirección y cada mensaje nuevo llega por mail con **el audio
 adjunto y la transcripción automática**.
 
@@ -880,24 +1031,85 @@ función (`*97`, `*98`, etc.).
 
 » Menú lateral → Sistema → Configuración → Alertas
 
-En **Configuración → Alertas**. Cargá el destinatario y encendé lo que quieras. Cada alerta tiene un
-botón de **prueba** que manda el correo sin necesidad de activarla.
+### 14.1 Para qué existe este módulo
 
-| Alerta | Cuándo llega |
-|---|---|
-| **Estamos bajo ataque** | Ráfaga de registros fallidos. Llega **una** alerta agrupada, no una por IP |
-| IP bloqueada | El firewall bloqueó una IP (con país e ISP) |
-| Inicio de sesión al panel | Por defecto, **solo desde una IP nueva** |
-| Intentos fallidos al panel | Posible fuerza bruta |
-| **Troncal caída / recuperada** | Se cortó (o volvió) la línea |
-| Servicio caído | Base de datos o Asterisk sin conexión |
-| Cola sin agentes | En horario laboral no hay quien atienda |
-| Llamada muy larga | Primer síntoma de fraude telefónico |
-| Salientes fuera de horario | El patrón clásico: ráfaga de madrugada |
-| Llamada internacional | Destinos que no deberían marcarse |
-| Resumen diario | Un correo a la mañana con lo de ayer |
+Una central telefónica falla en silencio. La troncal se cae un domingo y te enterás el lunes cuando
+un cliente se queja; alguien encuentra la contraseña de una extensión y te factura ocho mil pesos de
+llamadas a Cuba antes de que abras el panel; la cola de ventas queda sin un solo agente en horario
+pico y nadie lo nota. **El módulo de Alertas convierte esos silencios en un correo.**
+
+No es un log ni un tablero que hay que mirar: es el sistema el que te busca a vos. Cada alerta tiene
+un motivo de negocio detrás —seguridad, continuidad del servicio, antifraude o calidad de atención—
+y llega redactada en castellano, con los datos que necesitás para decidir si tenés que hacer algo
+ahora o puede esperar.
+
+### 14.2 Cómo funciona por dentro
+
+1. **Un motor que mira cada minuto.** La API revisa el estado de las troncales, los servicios, los
+   registros SIP fallidos, las llamadas en curso y las colas. No consulta nada de afuera: usa lo que
+   ya sabe de tu propia central.
+2. **Agrupa en vez de inundar.** Si te están atacando desde cuarenta IPs, no recibís cuarenta
+   correos: recibís **uno solo** con las cuarenta IPs adentro. Cada tipo de alerta tiene un tiempo
+   mínimo entre avisos, así una troncal que parpadea no te llena la casilla.
+3. **Avisa también cuando se arregla.** Las alertas de continuidad (troncales, servicios) mandan un
+   correo verde de *recuperado* cuando la cosa vuelve a la normalidad. No te quedás con la duda.
+4. **Cada correo tiene su estilo.** El color y el ícono cambian según el tipo: rojo para ataque,
+   ámbar para antifraude, azul para acceso, verde para recuperación. Se reconoce de un vistazo desde
+   el celular, sin abrirlo.
+5. **Historial.** Todo lo que se disparó queda registrado en el panel, aunque el correo no haya
+   salido.
+
+> **Requisito**: las alertas viajan por correo, así que primero tiene que estar configurado el
+> **Correo saliente** (capítulo 11). Sin eso, el motor detecta pero no puede avisar.
 
 ![Panel de alertas](img/cfg-11-alertas.png)
+
+### 14.3 Los campos del panel
+
+| Campo | Qué hace |
+|---|---|
+| **Destinatarios** | Una o más direcciones separadas por coma. Es a quién le llega todo. Poné una casilla que alguien mire de verdad, no `info@`. |
+| **Interruptor de cada alerta** | Enciende o apaga ese tipo de aviso. Se guarda solo al tocarlo. |
+| **Probar** | Manda ese correo con datos de ejemplo, **aunque la alerta esté apagada**. Sirve para validar el correo saliente y para ver cómo se va a ver. |
+| **Resumen diario · hora** | A qué hora sale el correo de resumen (por defecto a la mañana). |
+| **Historial** | Lista de las alertas disparadas, con fecha, tipo y detalle. |
+
+### 14.4 Cada tipo de alerta, en detalle
+
+**Seguridad**
+
+| Alerta | Qué la dispara | Qué trae el correo | Qué hacer |
+|---|---|---|---|
+| **Estamos bajo ataque** | Ráfaga de registros SIP fallidos en poco tiempo (típico de un escaneo automatizado). | Cantidad de intentos, las IPs implicadas con país e ISP, y los usuarios que probaron. | Normalmente nada: el SBC y Fail2ban ya los están bloqueando. Si el ataque insiste desde un país donde no tenés clientes, bloqueá el país en el SBC. |
+| **IP bloqueada** | El firewall metió una IP en la lista negra. | IP, país, ISP y motivo del bloqueo. | Nada, salvo que sea una IP tuya: entonces desbloqueala desde **Seguridad**. |
+| **Inicio de sesión al panel** | Alguien entró al panel. Por defecto **solo avisa desde una IP nueva**, para no molestar con los ingresos de todos los días. | Usuario, rol, IP, país y navegador. | Si no reconocés el ingreso, cambiá esa contraseña ya. |
+| **Intentos fallidos al panel** | Varias contraseñas erradas seguidas contra el panel. | Usuario probado, IP y cantidad. | Fuerza bruta contra el administrador: revisá que la contraseña sea fuerte. |
+
+**Continuidad del servicio**
+
+| Alerta | Qué la dispara | Qué trae el correo | Qué hacer |
+|---|---|---|---|
+| **Troncal caída / recuperada** | El registro contra el operador se perdió (o volvió). | Nombre de la troncal, operador, hace cuánto está caída. | Es la alerta que evita el "no entran llamadas y nadie sabe desde cuándo". Llamá al operador o revisá internet. |
+| **Servicio caído** | Un componente del núcleo no responde (base de datos, Asterisk). | Qué servicio y desde cuándo. | Es grave: la central está degradada o muda. |
+
+**Antifraude**
+
+| Alerta | Qué la dispara | Qué trae el correo | Qué hacer |
+|---|---|---|---|
+| **Llamada muy larga** | Una llamada saliente supera el umbral configurado. | Extensión, destino, duración y hora. | Primer síntoma de fraude: una llamada abierta a un número premium que factura por minuto. |
+| **Salientes fuera de horario** | Ráfaga de llamadas salientes de madrugada o fin de semana. | Cantidad, extensiones y destinos. | El patrón clásico de la extensión comprometido: nadie llama a las 4 de la mañana. |
+| **Llamada internacional** | Se marcó un destino internacional. | Extensión, número y país. | Si tu empresa no llama al exterior, esta alerta sola paga el sistema. Cortá la ruta saliente internacional. |
+
+**Operación y calidad**
+
+| Alerta | Qué la dispara | Qué trae el correo | Qué hacer |
+|---|---|---|---|
+| **Cola sin agentes** | Una cola quedó sin ningún agente conectado en horario laboral. | Nombre de la cola y hace cuánto. | Las llamadas entran y nadie las atiende. Es la alerta que más plata salva en un call center chico. |
+| **Resumen diario** | Todos los días a la hora que elijas. | Llamadas de ayer, atendidas y perdidas, minutos hablados, alertas del día, estado de troncales. | Leerlo con el café: si algo viene torcido, se ve en la tendencia antes de que sea un problema. |
+
+> **Recomendación de arranque**: encendé todo lo de seguridad y continuidad, las tres de antifraude y
+> el resumen diario. Es el conjunto que cubre lo que realmente duele. Ajustá los umbrales después de
+> una semana, cuando sepas cómo es tu tráfico normal.
 
 ---
 
@@ -905,12 +1117,99 @@ botón de **prueba** que manda el correo sin necesidad de activarla.
 
 » Menú lateral → Telefonía → Grabaciones
 
-Se graba por interno, por cola o todo. Se escuchan desde **Grabaciones**, con reproductor y
-**transcripción por IA** a pedido.
+### 15.1 Cómo se graba
 
-> El disco crece rápido: alrededor de **0,5 MB por minuto** grabado. Hacé la cuenta antes.
+La grabación la hace Asterisk con **MixMonitor**: mezcla en un solo archivo lo que dicen las dos
+partes de la llamada. Se puede activar de tres maneras, y no se pisan entre sí:
+
+| Forma | Dónde se activa | Cuándo conviene |
+|---|---|---|
+| **Por extensión** | Telefonía → Extensiones → editar la extensión → *Grabar llamadas* | Un puesto puntual: recepción, la extensión del gerente, un agente en capacitación. |
+| **Por cola** | Aplicaciones → Colas → pestaña *Básico* → *Grabar llamadas* | Lo habitual en un call center: se graba todo lo que entra por la cola, sin importar qué agente atienda. |
+| **A demanda** | Botón de grabar en la llamada en vivo (panel y softphone) | Cuando el cliente empieza a decir algo que conviene tener guardado. Se puede arrancar y frenar en el medio de la llamada. |
+
+Terminada la llamada, un indexador escribe la ficha en la base (extensión, origen, destino, fecha,
+tamaño, duración) y la grabación aparece en el listado. **La ficha vive en PostgreSQL; el audio, en
+el almacenamiento que elijas.**
+
+### 15.2 Formato y cuánto pesa
+
+Se graba en **WAV PCM 16 bits, 8 kHz, mono**, sin comprimir. Es el formato que produce Asterisk sin
+transcodificar y el que abre cualquier reproductor, sin códecs raros ni licencias.
+
+Ese formato pesa **16 kB por segundo**, independientemente del códec que usen los teléfonos:
+
+| Duración | Tamaño del archivo |
+|---|---|
+| 1 minuto | ≈ 0,94 MB |
+| 1 hora | ≈ 56 MB |
+| 100 llamadas de 3 min | ≈ 280 MB |
+| 8 h/día de una cola, 22 días | ≈ 10 GB por mes |
+
+> **Ojo con el códec.** El códec (G.711, Opus, G.729) afecta el **ancho de banda de la llamada**, no
+> el tamaño de la grabación: MixMonitor decodifica y guarda siempre en WAV. Una llamada por Opus a
+> 24 kbps se graba igual de pesada que una por G.711. Si te importa el disco, lo que hay que decidir
+> es **a quién grabás y cuánto tiempo lo guardás**, no qué códec usás.
+
+### 15.3 ¿Se pueden descargar?
+
+Sí. En el listado, cada grabación tiene:
+
+- **Reproducir**: reproductor con forma de onda, dentro del panel, sin descargar nada.
+- **Descargar**: baja el `.wav` original.
+- **Transcribir**: pasa el audio por el motor de IA y te devuelve el texto de la conversación
+  (requiere el módulo AI encendido).
+- **Eliminar**: borra la grabación.
+
+Las grabaciones también aparecen en **Historial de llamadas**, pegadas a su llamada: desde ahí se
+escuchan sin salir del CDR.
 
 ![Grabaciones](img/cfg-12-grabaciones.png)
+
+### 15.4 Dónde se guardan: local, NAS o S3
+
+» Grabaciones → pestaña **Almacenamiento**
+
+El audio siempre nace en el disco del servidor. Lo que se configura acá es **a dónde se lo lleva
+después**.
+
+| Destino | Cómo funciona | Cuándo usarlo |
+|---|---|---|
+| **Local** | Se queda en el volumen `recordings` del servidor. | Instalaciones chicas, o cuando el servidor ya tiene disco de sobra y respaldo. |
+| **NAS** | Cada grabación se **copia** a una carpeta que vos montaste en el servidor (NFS, CIFS/Samba, un disco USB, lo que sea). Para el sistema es una carpeta más: no habla NFS, habla filesystem. | Ya tenés un NAS con respaldo y querés que las grabaciones vivan ahí. |
+| **S3 / compatible** | Cada grabación se **sube por HTTPS** con firma AWS SigV4 al bucket. Funciona con AWS S3 y con cualquier compatible: MinIO, Wasabi, Backblaze B2. | Querés retención larga fuera del servidor, o el cliente exige que el audio no quede en la central. |
+
+**Cómo lee el sistema una ruta remota**
+
+- **NAS**: el sistema **no monta nada por vos**. Vos montás el recurso en el host (por ejemplo
+  `/mnt/nas/grabaciones` vía `/etc/fstab`), lo exponés al contenedor, y en el panel ponés esa ruta.
+  Si la ruta no existe o no tiene permiso de escritura, *Probar destino* te lo dice y no se sube
+  nada: **nunca se borra el original si la copia falló**.
+- **S3**: el sistema arma la URL del objeto según lo que cargues. Sin endpoint, va contra AWS
+  (`https://<bucket>.s3.<región>.amazonaws.com/<prefijo><archivo>`). Con endpoint (MinIO, Wasabi),
+  usa el formato *path-style* (`https://<endpoint>/<bucket>/<prefijo><archivo>`). La ficha en la
+  base guarda la URL final, así el panel sabe de dónde traer el audio aunque ya no esté en el
+  servidor.
+
+**Los campos de la pestaña Almacenamiento**
+
+| Campo | Qué hace |
+|---|---|
+| **Destino** | Local, NAS o S3. Cambia los campos de abajo. |
+| **Ruta del NAS** | Carpeta ya montada en el servidor, por ejemplo `/mnt/nas/grabaciones`. Sólo con destino NAS. |
+| **Endpoint** | Vacío = AWS. Para MinIO o Wasabi, la URL del servicio (`https://minio.tu-red:9000`). |
+| **Región** | La región del bucket (`us-east-1` si no sabés). |
+| **Bucket** | El bucket donde van los audios. Tiene que existir. |
+| **Prefijo** | Carpeta virtual dentro del bucket (`recordings/`). Ayuda a ordenar y a aplicar reglas de retención del lado del proveedor. |
+| **Access Key / Secret Key** | Las credenciales del bucket. La clave secreta se guarda cifrada y **nunca se vuelve a mostrar**: si el campo aparece con puntos, ya está cargada. |
+| **Subir automáticamente** | Encendido, un barrido cada 2 minutos sube todo lo que quedó pendiente. Apagado, se sube sólo cuando tocás *Sincronizar ahora*. |
+| **Conservar copia local** | Encendido, la grabación queda también en el servidor (más seguro, gasta disco). Apagado, se borra del servidor **después** de confirmar que la copia remota quedó bien. |
+| **Probar destino** | Escribe un archivo de prueba en el NAS o el bucket y te dice si funcionó. Hacelo siempre antes de apagar *Conservar copia local*. |
+| **Sincronizar ahora** | Fuerza la subida de todo lo pendiente. |
+
+> **Cómo lo configuraría yo**: destino S3 con *Subir automáticamente* encendido y *Conservar copia
+> local* encendido las primeras semanas. Cuando veas que el bucket se está llenando solo y sin
+> errores, apagás la copia local y el disco del servidor deja de ser un problema.
 
 ---
 
@@ -930,7 +1229,7 @@ permite desbloquear o bloquear a mano.
 
 » Menú lateral → Sistema → Usuarios
 
-En **Usuarios**. Cada persona puede tener un **interno asociado** — y eso es lo que habilita que su
+En **Usuarios**. Cada persona puede tener un **extensión asociado** — y eso es lo que habilita que su
 softphone vea clientes e intercom.
 
 | Rol | Qué puede hacer |
@@ -1001,21 +1300,21 @@ qué información sale de la central hacia la computadora de cada persona.
 
 El teléfono y la plataforma son **dos accesos distintos**:
 
-- **Registro SIP** (interno + contraseña): le permite llamar y recibir llamadas. Nada más.
+- **Registro SIP** (extensión + contraseña): le permite llamar y recibir llamadas. Nada más.
 - **Sesión de plataforma** (usuario del panel): le permite ver directorio, clientes e intercom.
 
 El enlace de acceso que mandás por correo trae **las dos cosas** — pero la segunda **solo si el
-interno tiene un usuario asociado** en *Usuarios*. Si no lo tiene, el teléfono funciona igual, pero
+extensión tiene un usuario asociado** en *Usuarios*. Si no lo tiene, el teléfono funciona igual, pero
 el softphone no muestra clientes ni intercom.
 
 > **Consecuencia práctica:** si querés que un agente vea la ficha del cliente que lo llama, no
-> alcanza con crearle el interno. Hay que crearle **también el usuario** y asignarle ese interno.
+> alcanza con crearle la extensión. Hay que crearle **también el usuario** y asignarle esa extensión.
 
 ### 19.2 Qué puede hacer cada rol
 
 | Acción | Agente | Supervisor | Administrador |
 |---|---|---|---|
-| Ver el directorio de internos | ✅ | ✅ | ✅ |
+| Ver el directorio de extensiones | ✅ | ✅ | ✅ |
 | Ver la ficha del cliente que lo llama | ✅ | ✅ | ✅ |
 | Ver toda la libreta de clientes | ✅ | ✅ | ✅ |
 | **Crear, editar o borrar clientes** | ❌ | ✅ | ✅ |
@@ -1031,7 +1330,7 @@ editar la libreta desde su softphone, la central le responde que no está autori
 ### 19.3 Lo que el softphone nunca ve
 
 Las grabaciones de llamadas ajenas, la configuración de la central, las troncales, la seguridad y
-los datos de otros internos. El softphone es un teléfono con contexto, no una consola de
+los datos de otros extensiones. El softphone es un teléfono con contexto, no una consola de
 administración.
 
 ---
@@ -1042,7 +1341,7 @@ administración.
 
 ### 20.1 Para qué existe
 
-Un **portero** que llama al interno de recepción es una llamada como cualquier otra: se escucha,
+Un **portero** que llama a la extensión de recepción es una llamada como cualquier otra: se escucha,
 pero no se ve. El módulo de Intercom agrega **el video**: cuando el portero del cliente llama, el
 que atiende ve la cámara asociada, en vivo, dentro del mismo panel.
 
@@ -1168,17 +1467,88 @@ Es la pantalla que conviene abrir primero cuando algo "no anda" y no sabés por 
 
 ### 24.1 Para qué existe
 
-Configurar un teléfono de escritorio a mano —entrar a su web, cargar servidor, usuario, contraseña—
-lleva diez minutos por aparato y se presta a errores. El **aprovisionamiento** lo hace solo: cargás
-la **dirección MAC** (viene en una etiqueta abajo del teléfono) y le asignás un interno. Cuando el
-teléfono arranca, pide su configuración a la central y se configura solo.
+Configurar un teléfono de escritorio a mano —entrar a su web, buscar la IP, cargar servidor, usuario
+y contraseña— lleva diez minutos por aparato y se presta a errores de tipeo. El **aprovisionamiento**
+lo hace solo: vos cargás la **dirección MAC** (viene en la etiqueta de abajo del teléfono) y le
+asignás una extensión. Cuando el teléfono arranca, **pide su configuración a la central y se configura
+solo**. Sirve para Yealink y Grandstream, que son los que respetan este mecanismo.
 
-Sirve para Yealink y Grandstream, que son los que respetan este mecanismo.
+**Ejemplo real:** llegan 20 teléfonos nuevos. Cargás las 20 MAC con su extensión, los enchufás, y en
+dos minutos están todos registrados. Sin tocar ninguno.
 
-**Ejemplo:** llegan 20 teléfonos nuevos. Cargás las 20 MAC con su interno, los enchufás, y en dos
-minutos están todos registrados. Sin tocar ninguno.
+### 24.2 Cómo lo hace, por dentro
+
+1. Vos das de alta el teléfono en el panel: **MAC + fabricante + extensión**.
+2. La central genera, para esa MAC, un archivo de configuración con **el servidor SIP, la extensión y
+   su contraseña**, ya armado con la sintaxis de ese fabricante.
+3. El teléfono, al arrancar, **pide ese archivo por HTTP** a una URL que contiene su propia MAC.
+4. La central lo reconoce por la MAC, le entrega su archivo, y anota la fecha de contacto
+   (*Último contacto* en la tabla).
+5. El teléfono se reinicia, se registra contra Asterisk, y queda operativo.
+
+El nombre del archivo depende del fabricante — es el que cada teléfono pide por su cuenta:
+
+| Fabricante | Archivo que pide | URL que hay que darle |
+|---|---|---|
+| **Yealink** | `<mac>.cfg` (12 dígitos, sin separadores) | `http://<central>/prov/` |
+| **Grandstream** | `cfg<mac>.xml` | `http://<central>/prov/` |
+
+> Cada fila de la tabla tiene un botón para **copiar la URL exacta** del archivo de ese teléfono. Si
+> querés verificar que la central lo está sirviendo bien, pegala en el navegador: tenés que ver la
+> configuración. Si dice `not provisioned`, la MAC no está cargada (o está mal escrita).
+
+### 24.3 Cómo llega el teléfono hasta la central: **DHCP opción 66**
+
+Falta responder una pregunta: **¿cómo sabe el teléfono a qué servidor pedirle su configuración?**
+Hay dos caminos.
+
+**A) A mano (uno por uno).** Entrás a la web del teléfono y cargás la URL del servidor de
+aprovisionamiento. Funciona, pero volvimos a los diez minutos por aparato.
+
+**B) Por DHCP — la opción 66.** Este es el camino bueno, y es la razón por la que 20 teléfonos se
+configuran solos. Cuando un teléfono se enchufa, lo primero que hace es pedir IP por DHCP. En esa
+misma respuesta, el servidor DHCP le puede mandar la **opción 66** (*TFTP server name* / *provisioning
+server*), que es literalmente **la dirección del servidor de configuración**. El teléfono la toma y
+va a buscar su archivo ahí. **Nunca tocás el teléfono: lo enchufás y listo.**
+
+Se configura **una sola vez, en tu servidor DHCP** (el router, el MikroTik, el Windows Server):
+
+| Servidor DHCP | Dónde se pone | Valor |
+|---|---|---|
+| **MikroTik** | IP → DHCP Server → Network → *Next Server* o una *DHCP Option* nueva (código 66, tipo texto) | `http://<IP-de-la-central>/prov/` |
+| **Windows Server** | Ámbito DHCP → Opciones de ámbito → **066 Nombre de host del servidor de arranque** | `http://<IP-de-la-central>/prov/` |
+| **pfSense / OPNsense** | Services → DHCP Server → *TFTP server* / opciones avanzadas | `http://<IP-de-la-central>/prov/` |
+| **isc-dhcp / dnsmasq** | `option tftp-server-name "http://<IP>/prov/";` | ídem |
+
+> **Dos advertencias que ahorran una tarde:**
+> 1. La opción 66 vale **para toda la red**: si tenés otros equipos que la usan (teléfonos de otra
+>    marca, decodificadores), coordiná. Algunos fabricantes prefieren la **opción 160** (Grandstream)
+>    o la **66 con URL http**; los dos formatos conviven.
+> 2. Los teléfonos **sólo leen la opción 66 al arrancar**. Si cambiás el DHCP, hay que **reiniciar los
+>    teléfonos** (o hacerles un *factory reset* si ya venían configurados contra otro servidor).
+
+### 24.4 Los campos del alta
+
+| Campo | Qué hace | Ejemplo |
+|---|---|---|
+| **Dirección MAC** | Identifica al teléfono. Es lo que la central usa para saber qué configuración entregarle. Se acepta con o sin separadores. **No se puede cambiar después**: si te equivocaste, borrá y cargá de nuevo. | `805ec0aabbcc` |
+| **Fabricante** | Yealink o Grandstream. Define la sintaxis del archivo y el nombre que el teléfono va a pedir. | Yealink |
+| **Modelo** (opcional) | Sólo informativo, para que sepas qué hay en cada escritorio. | `T31P`, `GRP2601` |
+| **Extensión** | La extensión SIP que va a usar ese teléfono. Tiene que existir en **Extensiones**. La contraseña la toma sola: no la tipeás. | `1004` |
+| **Nombre a mostrar** | Lo que aparece en la pantalla del teléfono y en el CallerID interno. | `Recepción` |
+| **Etiqueta de línea** | El texto al lado de la tecla de línea. | `Recepción IES` |
+| **Último contacto** | Cuándo fue la última vez que ese teléfono pidió su configuración. **Es el mejor diagnóstico**: si está vacío, el teléfono nunca llegó a la central (revisá la opción 66 o la red). | hace 2 min |
+
+**Arriba de la tabla** hay dos campos globales que aplican a todos los teléfonos:
+
+| Campo | Qué hace |
+|---|---|
+| **Servidor SIP para los teléfonos** | La IP o el host que se inyecta en la configuración de cada teléfono para que se registren (UDP 5060, contra Asterisk). Normalmente es la IP interna de la central: los teléfonos de escritorio están en la LAN y no necesitan salir a internet. |
+| **Puerto SIP** | 5060, salvo que lo hayas cambiado. |
 
 ![Aprovisionamiento por MAC](img/cfg-44-telefonos.png)
+
+![Opción 66 en el servidor DHCP](img/cfg-46-dhcp-66.png)
 
 ---
 
@@ -1193,7 +1563,7 @@ marque la persona.
 
 ### 25.2 Cómo se arma
 
-Se diseña visualmente: un audio de bienvenida y, por cada dígito, un destino (interno, cola, otro
+Se diseña visualmente: un audio de bienvenida y, por cada dígito, un destino (extensión, cola, otro
 IVR, buzón). **El audio se escribe como texto** y lo sintetiza la central con su propia voz — no hay
 que grabar nada ni subir archivos.
 
@@ -1201,7 +1571,7 @@ que grabar nada ni subir archivos.
 |---|---|
 | 1 | Cola de Ventas |
 | 2 | Cola de Soporte |
-| 0 | Recepción (un interno) |
+| 0 | Recepción (una extensión) |
 | (nada) | Después de N segundos, repite o va a recepción |
 
 > Dejá **siempre** una salida para el que no marca nada (una persona mayor, alguien desde un teléfono
@@ -1281,7 +1651,7 @@ el lugar donde se ve *exactamente* qué reglas se aplicaron y en qué orden.
 » Menú lateral → Sistema → Empresas
 
 Solo tiene sentido si instalaste la central en **modo multi-tenant**: varias empresas conviviendo en
-la misma central, cada una con sus internos, sus troncales y su marca, sin verse entre sí.
+la misma central, cada una con sus extensiones, sus troncales y su marca, sin verse entre sí.
 
 En modo **PBX simple** (el habitual, una sola empresa) esta sección existe pero no la vas a usar: hay
 una única empresa por defecto.
@@ -1294,7 +1664,7 @@ una única empresa por defecto.
 
 » Menú lateral → Sistema → Base de datos
 
-PostgreSQL guarda **todo**: la configuración de la central (los internos, las colas y las rutas no
+PostgreSQL guarda **todo**: la configuración de la central (las extensiones, las colas y las rutas no
 viven en archivos, viven acá), el historial de llamadas, las grabaciones indexadas y el CRM.
 
 Esta pantalla muestra el estado y permite consultar. Es una herramienta de diagnóstico, no de
@@ -1359,7 +1729,7 @@ Qué tiene:
 ![Panel del supervisor](img/cfg-54-panel-supervisor.png)
 
 > **Recordá:** para que una persona entre a estos paneles, hay que crearle el **usuario** con su rol
-> en *Usuarios* y asignarle un **interno**. El rol decide a qué panel cae; el interno es su teléfono.
+> en *Usuarios* y asignarle un **extensión**. El rol decide a qué panel cae; la extensión es su teléfono.
 
 
 ---

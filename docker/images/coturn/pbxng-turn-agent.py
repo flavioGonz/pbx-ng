@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # PBX-NG TURN agent (Coturn) - stdlib only. HTTP en :8091.
-import json, os, re, socket, subprocess, time
+import json
+import os, re, socket, subprocess, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CONF = "/etc/turnserver.conf"
@@ -127,6 +128,66 @@ def save_config(b):
     time.sleep(1.5)
     return {"ok": sh("systemctl is-active coturn") == "active", "applied": list(setk.keys())}
 
+
+# ---------------------------------------------------------------------------
+# Metricas del nodo de borde (el mismo host donde viven kamailio, rtpengine y
+# coturn). El Resumen del panel las consume para mostrar CPU, RAM, disco e
+# interfaces de red de cada componente, no solo del core.
+# ---------------------------------------------------------------------------
+def _metrics():
+    m = {}
+    try:
+        m["load"] = float(open("/proc/loadavg").read().split()[0])
+        m["uptime_s"] = int(float(open("/proc/uptime").read().split()[0]))
+        mem = {}
+        for ln in open("/proc/meminfo"):
+            p = ln.split(":")
+            if len(p) == 2: mem[p[0]] = int(p[1].strip().split()[0])
+        tot = mem.get("MemTotal", 0); av = mem.get("MemAvailable", 0)
+        m["mem_total_mb"] = round(tot / 1024); m["mem_used_mb"] = round((tot - av) / 1024)
+        m["mem_pct"] = round((tot - av) * 100.0 / tot, 1) if tot else 0
+        m["ncpu"] = os.cpu_count() or 1
+        m["cpu_pct"] = round(min(100.0, m["load"] * 100.0 / max(1, m["ncpu"])), 1)
+    except Exception: pass
+    try:
+        st = os.statvfs("/")
+        tot = st.f_blocks * st.f_frsize; free = st.f_bavail * st.f_frsize
+        m["disk_total"] = tot; m["disk_free"] = free; m["disk_used"] = tot - free
+        m["disk_pct"] = round((tot - free) * 100.0 / tot, 1) if tot else 0
+    except Exception: pass
+    return m
+
+def _ifaces():
+    """Interfaces del host. El contenedor de coturn no trae `ip`, asi que leemos /sys
+    y sacamos la IPv4 con un ioctl (SIOCGIFADDR): stdlib pura, sin dependencias."""
+    import fcntl, struct
+    res = []
+    try: names = sorted(os.listdir("/sys/class/net"))
+    except Exception: names = []
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    SKIP = ("veth", "br-", "docker", "virbr", "lxcbr", "bonding_masters", "tap")
+    for name in names:
+        # solo placas reales: nada de bridges de docker, veths ni pseudo-dispositivos
+        if name == "lo" or name.startswith(SKIP): continue
+        def rd(p, d=""):
+            try: return open("/sys/class/net/%s/%s" % (name, p)).read().strip()
+            except Exception: return d
+        addr = None
+        try:
+            addr = socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915,
+                   struct.pack("256s", name[:15].encode()))[20:24])
+        except Exception: pass
+        rx = tx = None
+        try:
+            rx = int(rd("statistics/rx_bytes", "0")); tx = int(rd("statistics/tx_bytes", "0"))
+        except Exception: pass
+        res.append({"name": name, "state": (rd("operstate") or "unknown").upper(),
+                    "addrs": [addr] if addr else [], "mac": rd("address"),
+                    "rx_bytes": rx, "tx_bytes": tx})
+    try: s.close()
+    except Exception: pass
+    return res
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _send(self, code, obj):
@@ -135,6 +196,8 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
     def do_GET(self):
         if self.path.startswith("/health"): return self._send(200, health())
+        if self.path.startswith("/core"): return self._send(200, {"ok": True, "metrics": _metrics()})
+        if self.path.startswith("/net"): return self._send(200, {"ifaces": _ifaces()})
         if self.path.startswith("/config"):
             d, raw = parse_conf(); return self._send(200, {"raw": raw, "parsed": {k: (v if v is not True else True) for k, v in d.items()}})
         if self.path.startswith("/logs"):

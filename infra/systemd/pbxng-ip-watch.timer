@@ -1,10 +1,16 @@
 [Unit]
-Description=PBX-NG DDNS IP watcher cada 5 min
+Description=PBX-NG DDNS IP watcher cada 1 min
+
+# La IP publica de esta instalacion es dinamica (cambia cada ~12 h). coturn y rtpengine
+# resuelven el nombre DDNS UNA sola vez, al arrancar, y escriben la IP literal en su
+# configuracion (external-ip / --interface LAN!PUB). Si la IP cambia y no se los reinicia,
+# el TURN sigue entregando candidatos relay con la IP vieja -> WebRTC sin audio.
+# Por eso el watcher corre cada minuto: cuanto mas corto el intervalo, mas chica la ventana.
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-AccuracySec=30s
+OnBootSec=1min
+OnUnitActiveSec=60s
+AccuracySec=5s
 Persistent=true
 
 [Install]

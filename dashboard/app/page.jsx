@@ -4,6 +4,7 @@ import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProg
 import Slot from './Slot';
 import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
+import SystemOverview from './SystemOverview';
 import { useLive } from './useLive';
 
 const fmtB = (n) => { if (n == null) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; n = +n; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i]; };
@@ -97,6 +98,9 @@ export default function Resumen() {
       <PageHeader icon={<IconLayoutDashboard size={24} />} title="Resumen" subtitle="Estado de la plataforma en tiempo real" color="pbx"
         right={<Badge size="lg" radius="sm" variant="light" color={connected ? 'teal' : 'gray'} leftSection={<IconCircleFilled size={9} className="pbx-pulse" />}>{connected ? 'En vivo' : 'Conectando…'}</Badge>} />
 
+      {/* Infraestructura completa: cada nodo con sus recursos, interfaces y servicios */}
+      <SystemOverview />
+
       {/* Fila 1: espacio · recursos · servicios */}
       <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
         <Card withBorder radius="lg" padding="lg" shadow="sm">
@@ -144,7 +148,7 @@ export default function Resumen() {
           <StatRow icon={<IconUsers size={15} />} label="Usuarios WebRTC" value={webrtc} color="grape" />
           <StatRow icon={<IconActivity size={15} />} label="Uptime servidor" value={fmtUp(m?.uptime)} color="orange" />
           <Box mt="md">
-            <Bar label="Internos registrados" value={online} total={eps.length} color="teal" />
+            <Bar label="Extensiones registrados" value={online} total={eps.length} color="teal" />
             <Bar label="Colas / ACD" value={qs.length} total={qs.length || 1} color="violet" />
           </Box>
         </Card>

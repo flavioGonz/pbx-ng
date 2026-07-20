@@ -24,11 +24,15 @@ function Logo({ logo, name }) {
   );
 }
 const groups = [
+  // El Resumen es la puerta de entrada: primero de todo y sin grupo, para llegar en un click.
+  { label: 'Panel', icon: IconLayoutDashboard, items: [
+    { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
+  ] },
   { label: 'Telefonía', icon: IconPhoneCall, items: [
     { href: '/topologia', label: 'Topología', icon: IconSitemap },
     { href: '/sbc', label: 'SBC-NG', icon: IconShieldLock },
     { href: '/asterisk', label: 'Asterisk', icon: IconServer2 },
-    { href: '/internos', label: 'Internos', icon: IconUsers },
+    { href: '/internos', label: 'Extensiones', icon: IconUsers },
     { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
     { href: '/ivr', label: 'IVR', icon: IconArrowsSplit },
     { href: '/ia-voz', label: 'IA & Voz', icon: IconRobot },
@@ -39,7 +43,6 @@ const groups = [
     { href: '/intercom', label: 'Intercom', icon: IconDeviceCctv },
   ] },
   { label: 'Operación', icon: IconDeviceAnalytics, items: [
-    { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
     { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
     { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
     { href: '/mapa', label: 'Mapa', icon: IconMap2 },

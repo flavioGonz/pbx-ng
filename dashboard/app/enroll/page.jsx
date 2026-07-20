@@ -18,10 +18,10 @@ export default function Enroll() {
       <div style={S.card}>
         <svg width="60" height="60" viewBox="0 0 48 48"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5b8fd6" /><stop offset="1" stopColor="#1e40af" /></linearGradient></defs><path d="M24 2 L42 9 V25 C42 36 34 43 24 46 C14 43 6 36 6 25 V9 Z" fill="url(#lg)" /><text x="24" y="30" textAnchor="middle" fontWeight="800" fontSize="15" fill="#fff">IES</text></svg>
         <div style={{ fontSize: 23, fontWeight: 700, marginTop: 16 }}>PBX-NG Phone</div>
-        {state === 'loading' && <><div style={{ color: '#8e8e93', marginTop: 8 }}>Configurando tu interno…</div><div style={S.spinner} /></>}
+        {state === 'loading' && <><div style={{ color: '#8e8e93', marginTop: 8 }}>Configurando tu extensión…</div><div style={S.spinner} /></>}
         {state === 'ok' && <>
           <div style={{ ...S.spinner, borderTopColor: '#34c759' }} />
-          <div style={{ fontSize: 17, fontWeight: 600, marginTop: 16 }}>Interno {ext} listo</div>
+          <div style={{ fontSize: 17, fontWeight: 600, marginTop: 16 }}>Extensión {ext} listo</div>
           <div style={{ color: '#8e8e93', marginTop: 6, textAlign: 'center' }}>Abriendo tu teléfono… Para instalarlo, usá “Agregar a inicio” en el menú del navegador.</div>
         </>}
         {state === 'error' && <>

@@ -5,7 +5,7 @@ import { IconX, IconTrash, IconPencil, IconEraser } from '@tabler/icons-react';
 
 const COLORS = ['#ff3b30', '#34c759', '#0a84ff', '#ffd60a', '#ffffff', '#1c1c1e'];
 
-// Pizarra compartida durante la videollamada. room = par de internos ordenado.
+// Pizarra compartida durante la videollamada. room = par de extensiones ordenado.
 export default function Scratchpad({ room, onClose }) {
   const cvs = useRef(null); const ctx = useRef(null); const sock = useRef(null);
   const drawing = useRef(false); const last = useRef(null);

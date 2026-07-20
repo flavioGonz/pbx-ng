@@ -57,7 +57,7 @@ que entiendas qué estás viendo, y para el caso en que tengas que cargarlo a ma
 1. Abrí la app y tocá el **botón de QR**, a la derecha del título *"Conectar a tu central"*.
 2. Si tenés cámara, escaneá el código del correo. Si no (una PC de escritorio, por ejemplo), la app
    te ofrece directamente **"Pegar código"**: pegá el enlace del correo.
-3. La app detecta sola si tu interno es **WebRTC** o **SIP**, se configura y queda en línea.
+3. La app detecta sola si tu extensión es **WebRTC** o **SIP**, se configura y queda en línea.
 
 ![Pantalla de acceso con el botón de QR](img/usr-03-login.png)
 
@@ -71,8 +71,8 @@ router.
 |---|---|---|
 | **Servidor WebSocket (WSS)** | La dirección que te dio el administrador | `wss://pbx.tu-empresa.com/ws` |
 | **Dominio SIP** | Suele ser el mismo dominio, sin el `wss://` | `pbx.tu-empresa.com` |
-| **Interno / usuario** | Tu número | `2001` |
-| **Contraseña** | La de tu interno | — |
+| **Extensión / usuario** | Tu número | `2001` |
+| **Contraseña** | La de tu extensión | — |
 
 ![Acceso en modo WebRTC](img/usr-11-login-webrtc.png)
 
@@ -86,19 +86,19 @@ WebRTC**, o cuando estás dentro de la red de la empresa.
 | **Servidor SIP** | Host o IP de la central | `192.168.1.10` |
 | **Puerto** | 5060 para UDP/TCP, 5061 para TLS | `5060` |
 | **Dominio SIP** | El dominio de la central | `pbx.tu-empresa.com` |
-| **Interno y contraseña** | Los tuyos | `2001` |
+| **Extensión y contraseña** | Los tuyos | `2001` |
 
 ![Acceso en modo SIP nativo](img/usr-12-login-sip.png)
 
 > **¿Cuál te toca?** No adivines: si el administrador te mandó el enlace, la app lo resuelve sola.
-> Un interno WebRTC **no** funciona bien en modo SIP nativo (el audio no levanta, porque la central
-> le exige cifrado), y un interno SIP clásico no tiene WebSocket al que conectarse.
+> Una extensión WebRTC **no** funciona bien en modo SIP nativo (el audio no levanta, porque la central
+> le exige cifrado), y una extensión SIP clásico no tiene WebSocket al que conectarse.
 
 ### 4.4 Qué pasa después de conectar
 
 La app hace una verificación en varios pasos y te la muestra: alcanza el servidor, negocia el
 cifrado, se registra. Si algo falla, **te dice el motivo real** (por ejemplo *"Registro rechazado
-(401) — revisá interno/contraseña"*), no un error genérico.
+(401) — revisá extensión/contraseña"*), no un error genérico.
 
 Cuando el punto de tu nombre está **verde**, estás en línea.
 
@@ -147,7 +147,7 @@ Atendés con el botón verde, rechazás con el rojo.
 | **Silenciar** | El otro deja de escucharte. Vos lo seguís escuchando. |
 | **Teclado** | Para marcar opciones ("marque 1 para…"). |
 | **Retener** | La persona queda en espera con música. |
-| **Transferir** | Le pasás la llamada a otro interno. |
+| **Transferir** | Le pasás la llamada a otra extensión. |
 | **Video** | Encendés la cámara. |
 | **Invitar** | Sumás a otra persona a la conversación. |
 | **Grabar** | Empieza a grabar la llamada. |
@@ -175,7 +175,7 @@ controlás el volumen.
 
 Si no atendés, la persona puede dejarte un mensaje.
 
-- **Desde el teléfono**: marcá `*97`. La primera vez, el PIN es tu número de interno.
+- **Desde el teléfono**: marcá `*97`. La primera vez, el PIN es tu número de extensión.
 - **Desde la app**: en la sección **Voz** los escuchás, los leés transcritos y los borrás.
 - **Por correo**: si el administrador lo activó, cada mensaje te llega al mail con el audio adjunto
   y **la transcripción escrita**. Te enterás de qué se trata sin escuchar nada.
@@ -221,4 +221,4 @@ Tu panel muestra las llamadas en espera, tus estadísticas del día y tu histori
 | Código | Para qué |
 |---|---|
 | `*97` | Escuchar tu buzón de voz |
-| `*98` | Entrar al buzón de otro interno |
+| `*98` | Entrar al buzón de otra extensión |

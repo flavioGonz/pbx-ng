@@ -5,6 +5,7 @@ import { IconRefresh, IconSearch, IconTrash, IconDownload, IconDeviceFloppy, Ico
 import { TableSkeleton } from '../Skeletons';
 import { toast } from '../notify';
 import RecordingPlayer from '../RecordingPlayer';
+import Slot from '../Slot';
 import MiniWave from '../MiniWave';
 
 const fmtSize = (b) => !b ? '—' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB';
@@ -49,7 +50,7 @@ export default function Grabaciones() {
         <SimpleGrid cols={{ base: 2, sm: 4 }}>
           {kpis.map(x => (
             <Card key={x.k} withBorder radius="lg" padding="lg" shadow="sm"><Group><ThemeIcon size={44} radius="md" variant="light" color={x.c}><x.icon size={22} /></ThemeIcon>
-              <div><Text fw={800} fz={22} lh={1.1}>{x.v}</Text><Text size="sm" c="dimmed">{x.k}</Text></div></Group></Card>
+              <div><Text fw={800} fz={22} lh={1.1}>{typeof x.v === 'number' ? <Slot value={x.v} /> : x.v}</Text><Text size="sm" c="dimmed">{x.k}</Text></div></Group></Card>
           ))}
         </SimpleGrid>}
 
@@ -63,13 +64,13 @@ export default function Grabaciones() {
           <Card withBorder radius="lg" padding="lg" shadow="sm">
             <Group justify="space-between" mb="md">
               <Text fw={600}>{fl.length} grabaciones</Text>
-              <TextInput placeholder="Buscar interno / archivo" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={250} />
+              <TextInput placeholder="Buscar extensión / archivo" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={250} />
             </Group>
             {loading ? <TableSkeleton rows={6} cols={6} /> :
               fl.length === 0 ? <Text c="dimmed" ta="center" py="xl">{list.length ? 'Sin resultados.' : 'Aún no hay grabaciones. Iniciá una desde el softphone (botón Grabar).'}</Text> :
                 <Table.ScrollContainer minWidth={740}>
                   <Table striped highlightOnHover verticalSpacing="sm">
-                    <Table.Thead><Table.Tr><Th icon={<IconClock size={13} />}>Fecha</Th><Th icon={<IconUser size={13} />}>Interno</Th><Th icon={<IconClock size={13} />}>Duración</Th><Th icon={<IconDatabase size={13} />}>Tamaño</Th><Th icon={<IconServer size={13} />}>Almac.</Th><Th icon={<IconWaveSine size={13} />}>Audio</Th><Th icon={<IconWaveSine size={13} />}>Reproducir</Th><Table.Th /></Table.Tr></Table.Thead>
+                    <Table.Thead><Table.Tr><Th icon={<IconClock size={13} />}>Fecha</Th><Th icon={<IconUser size={13} />}>Extensión</Th><Th icon={<IconClock size={13} />}>Duración</Th><Th icon={<IconDatabase size={13} />}>Tamaño</Th><Th icon={<IconServer size={13} />}>Almac.</Th><Th icon={<IconWaveSine size={13} />}>Audio</Th><Th icon={<IconWaveSine size={13} />}>Reproducir</Th><Table.Th /></Table.Tr></Table.Thead>
                     <Table.Tbody>{fl.map(r => {
                       const [col, lbl, Ic] = STG[r.storage] || STG.local;
                       return (
@@ -86,7 +87,7 @@ export default function Grabaciones() {
                             <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>
                           </Group></Table.Td>
                         </Table.Tr>
-                        {playId === r.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
+                        {playId === r.id && <Table.Tr><Table.Td colSpan={8} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Extensión ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
                         </Fragment>
                       );
                     })}</Table.Tbody>

@@ -84,12 +84,12 @@ export default function Notificaciones() {
       <Card withBorder radius="lg" padding="lg">
         <Group justify="space-between" mb="md">
           <Group gap="sm"><ThemeIcon variant="light" color="grape"><IconDeviceMobile size={18} /></ThemeIcon><Text fw={600}>Dispositivos registrados</Text></Group>
-          <Group gap="xs"><TextInput size="xs" placeholder="Interno a probar" value={testExt} onChange={e => setTestExt(e.currentTarget.value)} w={150} /><Button size="xs" variant="light" leftSection={<IconSend size={14} />} disabled={!testExt} onClick={sendTest}>Probar envío</Button></Group>
+          <Group gap="xs"><TextInput size="xs" placeholder="Extensión a probar" value={testExt} onChange={e => setTestExt(e.currentTarget.value)} w={150} /><Button size="xs" variant="light" leftSection={<IconSend size={14} />} disabled={!testExt} onClick={sendTest}>Probar envío</Button></Group>
         </Group>
         {devices.length === 0 ? <Text c="dimmed" ta="center" py="lg">Aún no hay dispositivos nativos (FCM/APNs) registrados. La PWA usa Web Push.</Text> :
           <Table.ScrollContainer minWidth={620}>
             <Table striped highlightOnHover verticalSpacing="sm">
-              <Table.Thead><Table.Tr><Th icon={<IconDeviceMobile size={13} />}>Interno</Th><Th icon={<IconBell size={13} />}>Proveedor</Th><Th>Token</Th><Th>Dispositivo</Th><Th icon={<IconRefresh size={13} />}>Actualizado</Th></Table.Tr></Table.Thead>
+              <Table.Thead><Table.Tr><Th icon={<IconDeviceMobile size={13} />}>Extensión</Th><Th icon={<IconBell size={13} />}>Proveedor</Th><Th>Token</Th><Th>Dispositivo</Th><Th icon={<IconRefresh size={13} />}>Actualizado</Th></Table.Tr></Table.Thead>
               <Table.Tbody>{devices.map(d => (
                 <Table.Tr key={d.id}><Table.Td ff="monospace" fw={600}>{d.ext}</Table.Td><Table.Td>{provBadge(d.provider)}</Table.Td><Table.Td ff="monospace" fz="xs" c="dimmed">{d.prid_head}…</Table.Td><Table.Td fz="xs">{d.ua || '—'}</Table.Td><Table.Td fz="xs" c="dimmed">{d.updated_at ? new Date(d.updated_at).toLocaleString('es-UY') : '—'}</Table.Td></Table.Tr>
               ))}</Table.Tbody>

@@ -56,8 +56,8 @@ milisegundo de más, eso se escucha como audio entrecortado. Esta sección es pa
 
 | Escenario | vCPU | RAM | Disco |
 |---|---|---|---|
-| Hasta 20 internos, sin grabación | 2 | 4 GB | 40 GB |
-| Hasta 50 internos con grabación | 4 | 8 GB | 200 GB+ |
+| Hasta 20 extensiones, sin grabación | 2 | 4 GB | 40 GB |
+| Hasta 50 extensiones con grabación | 4 | 8 GB | 200 GB+ |
 | Con módulo de IA (transcripción) | +2 | +4 GB | +10 GB (modelos) |
 
 > El disco crece con las **grabaciones**. Una llamada grabada ocupa aproximadamente 0,5 MB por

@@ -1,83 +1,197 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" width="900" height="520" font-family="Segoe UI,Inter,Arial,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 720" width="980" height="720" font-family="Segoe UI,Inter,Arial,sans-serif">
+  <title>Arquitectura de PBX-NG: zona de borde, núcleo y módulos opcionales</title>
   <defs>
-    <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#94a3b8"/></marker>
+    <linearGradient id="gInternet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#132a52"/><stop offset="1" stop-color="#0a1730"/>
+    </linearGradient>
+    <linearGradient id="gEdge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#fbfdff"/>
+    </linearGradient>
+    <linearGradient id="gCore" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#fcfbff"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity=".10"/>
+    </filter>
+    <filter id="shHead" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0b1f3f" flood-opacity=".30"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#94a3b8"/></marker>
+    <marker id="arrowB" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#2f80ff"/></marker>
+    <marker id="arrowR" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#e05252"/></marker>
+    <marker id="arrowT" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#0d9488"/></marker>
     <style>
-      .t{font-size:13px;font-weight:700;fill:#0f172a}.s{font-size:11px;fill:#64748b}
-      .mod{font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase}
-      .ln{stroke:#94a3b8;stroke-width:1.6;fill:none;marker-end:url(#a)}
+      .t   { font-size:13.5px; font-weight:700; fill:#0f172a; }
+      .s   { font-size:10.5px; fill:#64748b; }
+      .mod { font-size:9px; font-weight:800; letter-spacing:.9px; }
+      .zone{ font-size:10px; font-weight:800; letter-spacing:1.3px; fill:#94a3b8; }
+      .zsub{ font-size:9.5px; fill:#b6c2d2; }
+      .lbl { font-size:9.5px; font-weight:700; fill:#64748b; }
+      .ln  { stroke:#cbd5e1; stroke-width:1.7; fill:none; marker-end:url(#arrow); }
+      .lnB { stroke:#2f80ff; stroke-width:1.9; fill:none; marker-end:url(#arrowB); }
+      .lnR { stroke:#e05252; stroke-width:1.9; fill:none; marker-end:url(#arrowR); }
+      .lnT { stroke:#0d9488; stroke-width:1.9; fill:none; marker-end:url(#arrowT); }
+      .lnD { stroke:#cbd5e1; stroke-width:1.5; fill:none; stroke-dasharray:5 4; marker-end:url(#arrow); }
     </style>
   </defs>
-  <rect width="900" height="520" fill="#f8fafc"/>
 
-  <!-- internet -->
-  <rect x="360" y="16" width="180" height="42" rx="10" fill="#0f1a30"/>
-  <text x="450" y="42" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">Internet</text>
+  <rect width="980" height="720" fill="#f6f8fb"/>
 
-  <!-- zona borde -->
-  <rect x="40" y="86" width="820" height="132" rx="14" fill="#fff" stroke="#e2e8f0"/>
-  <text x="58" y="108" class="mod" fill="#94a3b8">Borde · expuesto a Internet</text>
+  <!-- INTERNET -->
+  <g filter="url(#shHead)"><rect x="352" y="18" width="276" height="60" rx="14" fill="url(#gInternet)"/></g>
+  <g transform="translate(374,32)" stroke="#7fb0ff" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.5 20a5.5 5.5 0 0 1 .8-10.94A7.5 7.5 0 0 1 21.4 7.6 4.7 4.7 0 1 1 22 20z"/>
+  </g>
+  <text x="410" y="45" fill="#ffffff" font-size="15" font-weight="700">Internet</text>
+  <text x="410" y="62" fill="#8fa8c9" font-size="10">clientes remotos · troncales SIP · softphones</text>
 
-  <rect x="62" y="120" width="180" height="80" rx="11" fill="#eff6ff" stroke="#bfdbfe"/>
-  <text x="152" y="146" text-anchor="middle" class="t">Reverse proxy</text>
-  <text x="152" y="164" text-anchor="middle" class="s">TLS · panel · WSS</text>
-  <text x="152" y="184" text-anchor="middle" class="mod" fill="#2563eb">módulo proxy</text>
+  <path class="lnB" d="M420 82 C 420 100, 175 96, 160 142"/>
+  <text class="lbl" x="196" y="112" fill="#2f80ff">HTTPS 443</text>
+  <path class="lnR" d="M470 82 C 470 104, 388 104, 380 142"/>
+  <text class="lbl" x="400" y="112" fill="#e05252">SIP 5060/5061</text>
+  <path class="lnT" d="M520 82 C 530 104, 600 104, 610 142"/>
+  <text class="lbl" x="548" y="112" fill="#0d9488">STUN/TURN 3478</text>
+  <path class="ln"  d="M570 82 C 600 100, 810 96, 830 142"/>
+  <text class="lbl" x="770" y="112">RTSP</text>
 
-  <rect x="262" y="120" width="200" height="80" rx="11" fill="#fef2f2" stroke="#fecaca"/>
-  <text x="362" y="146" text-anchor="middle" class="t">SBC (Kamailio + rtpengine)</text>
-  <text x="362" y="164" text-anchor="middle" class="s">seguridad SIP · troncales · medios</text>
-  <text x="362" y="184" text-anchor="middle" class="mod" fill="#dc2626">módulo sbc</text>
+  <!-- ZONA BORDE -->
+  <rect x="34" y="122" width="912" height="176" rx="18" fill="url(#gEdge)" stroke="#dbe3ec"/>
+  <rect x="34" y="122" width="6" height="176" rx="3" fill="#ef8f8f"/>
+  <text x="56" y="146" class="zone">BORDE · EXPUESTO A INTERNET</text>
+  <text x="296" y="146" class="zsub">única superficie pública: todo lo demás queda detrás</text>
 
-  <rect x="482" y="120" width="170" height="80" rx="11" fill="#f0fdfa" stroke="#99f6e4"/>
-  <text x="567" y="146" text-anchor="middle" class="t">TURN (coturn)</text>
-  <text x="567" y="164" text-anchor="middle" class="s">NAT para WebRTC</text>
-  <text x="567" y="184" text-anchor="middle" class="mod" fill="#0d9488">módulo turn</text>
+  <g filter="url(#sh)"><rect x="58" y="160" width="204" height="118" rx="13" fill="#eff6ff" stroke="#bfdbfe"/></g>
+  <g transform="translate(76,174)" stroke="#2f80ff" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="10" width="18" height="12" rx="2.5"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/>
+  </g>
+  <text x="106" y="188" class="t">Reverse proxy</text>
+  <text x="106" y="204" class="s">termina TLS · publica el panel</text>
+  <text x="106" y="218" class="s">y el WebSocket (WSS) del softphone</text>
+  <rect x="106" y="230" width="92" height="17" rx="8.5" fill="#dbeafe"/>
+  <text x="152" y="242" class="mod" fill="#1d4ed8" text-anchor="middle">MÓDULO PROXY</text>
+  <text x="106" y="264" class="s" fill="#94a3b8">443/tcp</text>
 
-  <rect x="672" y="120" width="166" height="80" rx="11" fill="#fff7ed" stroke="#fed7aa"/>
-  <text x="755" y="146" text-anchor="middle" class="t">go2rtc</text>
-  <text x="755" y="164" text-anchor="middle" class="s">video de porteros</text>
-  <text x="755" y="184" text-anchor="middle" class="mod" fill="#ea580c">módulo intercom</text>
+  <g filter="url(#sh)"><rect x="278" y="160" width="204" height="118" rx="13" fill="#fef2f2" stroke="#fecaca"/></g>
+  <g transform="translate(296,174)" stroke="#e05252" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2 L21 6v6c0 5.2-3.7 9.4-9 10.5C6.7 21.4 3 17.2 3 12V6z"/><path d="M9 12l2 2 4-4"/>
+  </g>
+  <text x="326" y="188" class="t">SBC · Kamailio + rtpengine</text>
+  <text x="326" y="204" class="s">antifraude · anti-flood · bloqueo de IP</text>
+  <text x="326" y="218" class="s">troncales · relay de medios (RTP)</text>
+  <rect x="326" y="230" width="82" height="17" rx="8.5" fill="#fee2e2"/>
+  <text x="367" y="242" class="mod" fill="#b91c1c" text-anchor="middle">MÓDULO SBC</text>
+  <text x="326" y="264" class="s" fill="#94a3b8">5060/5061 · RTP 10000-20000/udp</text>
 
-  <!-- zona nucleo -->
-  <rect x="40" y="248" width="820" height="150" rx="14" fill="#fff" stroke="#e2e8f0"/>
-  <text x="58" y="270" class="mod" fill="#94a3b8">Núcleo · nunca se publica a Internet</text>
+  <g filter="url(#sh)"><rect x="498" y="160" width="204" height="118" rx="13" fill="#f0fdfa" stroke="#99f6e4"/></g>
+  <g transform="translate(516,174)" stroke="#0d9488" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/><path d="M6.5 6.5a8 8 0 0 0 0 11M17.5 6.5a8 8 0 0 1 0 11M3 3a12 12 0 0 0 0 18M21 3a12 12 0 0 1 0 18"/>
+  </g>
+  <text x="546" y="188" class="t">TURN · coturn</text>
+  <text x="546" y="204" class="s">atraviesa NAT y firewalls cerrados</text>
+  <text x="546" y="218" class="s">entrega el candidato relay de WebRTC</text>
+  <rect x="546" y="230" width="90" height="17" rx="8.5" fill="#ccfbf1"/>
+  <text x="591" y="242" class="mod" fill="#0f766e" text-anchor="middle">MÓDULO TURN</text>
+  <text x="546" y="264" class="s" fill="#94a3b8">3478 · 49152-65535/udp</text>
 
-  <rect x="62" y="284" width="190" height="94" rx="11" fill="#f5f3ff" stroke="#ddd6fe"/>
-  <text x="157" y="312" text-anchor="middle" class="t">Asterisk 22</text>
-  <text x="157" y="330" text-anchor="middle" class="s">llamadas · dialplan</text>
-  <text x="157" y="346" text-anchor="middle" class="s">buzón · grabación</text>
-  <text x="157" y="366" text-anchor="middle" class="mod" fill="#7c3aed">módulo core</text>
+  <g filter="url(#sh)"><rect x="718" y="160" width="204" height="118" rx="13" fill="#fffbeb" stroke="#fde68a"/></g>
+  <g transform="translate(736,174)" stroke="#d97706" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.5" y="7" width="14" height="11" rx="2"/><path d="M17.5 11l5-3v8l-5-3z"/>
+  </g>
+  <text x="766" y="188" class="t">go2rtc</text>
+  <text x="766" y="204" class="s">convierte el RTSP de porteros y</text>
+  <text x="766" y="218" class="s">cámaras en video WebRTC</text>
+  <rect x="766" y="230" width="106" height="17" rx="8.5" fill="#fef3c7"/>
+  <text x="819" y="242" class="mod" fill="#b45309" text-anchor="middle">MÓDULO INTERCOM</text>
+  <text x="766" y="264" class="s" fill="#94a3b8">opcional</text>
 
-  <rect x="272" y="284" width="190" height="94" rx="11" fill="#f5f3ff" stroke="#ddd6fe"/>
-  <text x="367" y="312" text-anchor="middle" class="t">API (control-plane)</text>
-  <text x="367" y="330" text-anchor="middle" class="s">ARI · AMI · alertas</text>
-  <text x="367" y="346" text-anchor="middle" class="s">correo · CRM</text>
-  <text x="367" y="366" text-anchor="middle" class="mod" fill="#7c3aed">módulo core</text>
+  <path class="lnB" d="M160 282 C 160 326, 468 312, 470 352"/>
+  <text class="lbl" x="186" y="322" fill="#2f80ff">panel + API</text>
+  <path class="lnR" d="M380 282 C 380 318, 262 314, 258 352"/>
+  <text class="lbl" x="284" y="328" fill="#e05252">SIP hacia Asterisk</text>
+  <path class="lnT" d="M600 282 C 600 324, 300 324, 268 352"/>
+  <text class="lbl" x="614" y="310" fill="#0d9488">medios WebRTC</text>
+  <path class="lnD" d="M820 282 C 820 324, 700 324, 690 352"/>
 
-  <rect x="482" y="284" width="170" height="94" rx="11" fill="#f5f3ff" stroke="#ddd6fe"/>
-  <text x="567" y="312" text-anchor="middle" class="t">Panel web</text>
-  <text x="567" y="330" text-anchor="middle" class="s">administración</text>
-  <text x="567" y="346" text-anchor="middle" class="s">agente · supervisor</text>
-  <text x="567" y="366" text-anchor="middle" class="mod" fill="#7c3aed">módulo core</text>
+  <!-- ZONA NUCLEO -->
+  <rect x="34" y="344" width="912" height="196" rx="18" fill="url(#gCore)" stroke="#dbe3ec"/>
+  <rect x="34" y="344" width="6" height="196" rx="3" fill="#8b5cf6"/>
+  <text x="56" y="368" class="zone">NÚCLEO · RED PRIVADA, NUNCA SE PUBLICA</text>
+  <text x="404" y="368" class="zsub">sólo alcanzable desde la zona de borde</text>
 
-  <rect x="672" y="284" width="166" height="94" rx="11" fill="#f8fafc" stroke="#e2e8f0"/>
-  <text x="755" y="312" text-anchor="middle" class="t">PostgreSQL</text>
-  <text x="755" y="330" text-anchor="middle" class="s">config · CDR</text>
-  <text x="755" y="346" text-anchor="middle" class="s">grabaciones · CRM</text>
-  <text x="755" y="366" text-anchor="middle" class="mod" fill="#64748b">módulo core</text>
+  <g filter="url(#sh)"><rect x="58" y="382" width="204" height="136" rx="13" fill="#faf5ff" stroke="#e9d5ff"/></g>
+  <g transform="translate(76,396)" stroke="#7c3aed" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5.5 3h4l2 5-2.5 1.5a12 12 0 0 0 5.5 5.5L16 12.5l5 2v4a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 3.5 5.2 2 2 0 0 1 5.5 3z"/>
+  </g>
+  <text x="106" y="410" class="t">Asterisk 22</text>
+  <text x="106" y="426" class="s">motor de llamadas · dialplan</text>
+  <text x="106" y="440" class="s">colas · IVR · buzón · grabación</text>
+  <rect x="106" y="452" width="82" height="17" rx="8.5" fill="#ede9fe"/>
+  <text x="147" y="464" class="mod" fill="#6d28d9" text-anchor="middle">MÓDULO CORE</text>
+  <text x="106" y="486" class="s" fill="#94a3b8">lee su configuración de la base</text>
+  <text x="106" y="500" class="s" fill="#94a3b8">y expone AMI/ARI a la API</text>
 
-  <!-- IA -->
-  <rect x="272" y="428" width="356" height="66" rx="11" fill="#ecfdf5" stroke="#a7f3d0"/>
-  <text x="450" y="454" text-anchor="middle" class="t">Motor de voz · TTS y transcripción (Whisper)</text>
-  <text x="450" y="478" text-anchor="middle" class="mod" fill="#059669">módulo ai · opcional</text>
+  <g filter="url(#sh)"><rect x="278" y="382" width="204" height="136" rx="13" fill="#faf5ff" stroke="#e9d5ff"/></g>
+  <g transform="translate(296,396)" stroke="#7c3aed" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="3" width="19" height="7" rx="2"/><rect x="2.5" y="14" width="19" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/>
+  </g>
+  <text x="326" y="410" class="t">API · control-plane</text>
+  <text x="326" y="426" class="s">el cerebro: crea internos, rutas y colas,</text>
+  <text x="326" y="440" class="s">manda alertas y correo, sirve el CRM</text>
+  <rect x="326" y="452" width="82" height="17" rx="8.5" fill="#ede9fe"/>
+  <text x="367" y="464" class="mod" fill="#6d28d9" text-anchor="middle">MÓDULO CORE</text>
+  <text x="326" y="486" class="s" fill="#94a3b8">el panel nunca habla directo</text>
+  <text x="326" y="500" class="s" fill="#94a3b8">con Asterisk: siempre pasa por acá</text>
 
-  <!-- flechas -->
-  <path class="ln" d="M430,60 L160,116"/>
-  <path class="ln" d="M450,60 L362,116"/>
-  <path class="ln" d="M470,60 L560,116"/>
-  <path class="ln" d="M362,204 L200,280"/>
-  <path class="ln" d="M152,204 L360,280"/>
-  <path class="ln" d="M567,204 L567,280"/>
-  <path class="ln" d="M367,382 L400,424"/>
-  <path class="ln" d="M660,332 L668,332"/>
-  <path class="ln" d="M462,330 L478,330"/>
+  <g filter="url(#sh)"><rect x="498" y="382" width="204" height="136" rx="13" fill="#faf5ff" stroke="#e9d5ff"/></g>
+  <g transform="translate(516,396)" stroke="#7c3aed" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="3" width="19" height="13" rx="2"/><path d="M8 20h8M12 16v4"/>
+  </g>
+  <text x="546" y="410" class="t">Panel web</text>
+  <text x="546" y="426" class="s">tres vistas según el rol:</text>
+  <text x="546" y="440" class="s">administrador · supervisor · agente</text>
+  <rect x="546" y="452" width="82" height="17" rx="8.5" fill="#ede9fe"/>
+  <text x="587" y="464" class="mod" fill="#6d28d9" text-anchor="middle">MÓDULO CORE</text>
+  <text x="546" y="486" class="s" fill="#94a3b8">softphone WebRTC embebido</text>
+
+  <g filter="url(#sh)"><rect x="718" y="382" width="204" height="136" rx="13" fill="#faf5ff" stroke="#e9d5ff"/></g>
+  <g transform="translate(736,396)" stroke="#7c3aed" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="12" cy="5.5" rx="9" ry="3.2"/><path d="M3 5.5v13c0 1.8 4 3.2 9 3.2s9-1.4 9-3.2v-13"/><path d="M3 12c0 1.8 4 3.2 9 3.2s9-1.4 9-3.2"/>
+  </g>
+  <text x="766" y="410" class="t">PostgreSQL</text>
+  <text x="766" y="426" class="s">única fuente de verdad:</text>
+  <text x="766" y="440" class="s">configuración · CDR · grabaciones · CRM</text>
+  <rect x="766" y="452" width="82" height="17" rx="8.5" fill="#ede9fe"/>
+  <text x="807" y="464" class="mod" fill="#6d28d9" text-anchor="middle">MÓDULO CORE</text>
+  <text x="766" y="486" class="s" fill="#94a3b8">respaldar esta base es respaldar</text>
+  <text x="766" y="500" class="s" fill="#94a3b8">toda la central</text>
+
+  <path class="ln" d="M266 448 L 274 448"/>
+  <path class="ln" d="M486 448 L 494 448"/>
+  <path class="ln" d="M706 448 L 714 448"/>
+  <path class="lnD" d="M160 522 C 160 556, 700 556, 812 522"/>
+  <text class="lbl" x="336" y="556" fill="#94a3b8">Asterisk lee internos, colas y buzón —y escribe el CDR— en PostgreSQL (realtime)</text>
+
+  <!-- MODULO IA -->
+  <g filter="url(#sh)"><rect x="278" y="596" width="424" height="86" rx="13" fill="#ecfdf5" stroke="#a7f3d0"/></g>
+  <g transform="translate(300,614)" stroke="#059669" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 12h2.5l2-6 3 12 3-9 2 3h7.5"/>
+  </g>
+  <text x="332" y="622" class="t">Motor de voz · TTS y transcripción (Whisper)</text>
+  <text x="332" y="639" class="s">locuciones en español rioplatense para IVR, colas y buzón · transcribe grabaciones y mensajes</text>
+  <rect x="332" y="650" width="126" height="17" rx="8.5" fill="#d1fae5"/>
+  <text x="395" y="662" class="mod" fill="#047857" text-anchor="middle">MÓDULO AI · OPCIONAL</text>
+  <path class="lnD" d="M400 542 L 400 592"/>
+  <path class="lnD" d="M470 592 L 470 542"/>
+
+  <!-- LEYENDA -->
+  <g transform="translate(724,596)">
+    <rect x="0" y="0" width="198" height="86" rx="11" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="14" y="19" class="mod" fill="#94a3b8">REFERENCIAS</text>
+    <line x1="14" y1="32" x2="40" y2="32" stroke="#2f80ff" stroke-width="2"/><text x="46" y="35" class="s">tráfico web / API</text>
+    <line x1="14" y1="48" x2="40" y2="48" stroke="#e05252" stroke-width="2"/><text x="46" y="51" class="s">señalización SIP</text>
+    <line x1="14" y1="64" x2="40" y2="64" stroke="#0d9488" stroke-width="2"/><text x="46" y="67" class="s">medios (RTP / WebRTC)</text>
+    <line x1="14" y1="79" x2="40" y2="79" stroke="#cbd5e1" stroke-width="1.6" stroke-dasharray="5 4"/><text x="46" y="82" class="s">opcional según módulo</text>
+  </g>
+
+  <text x="34" y="706" class="s" fill="#94a3b8">PBX-NG orquesta Asterisk, Kamailio y coturn: el borde es lo único expuesto y el núcleo vive en una red privada.</text>
 </svg>
