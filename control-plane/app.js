@@ -109,6 +109,7 @@ const NODES = {
 const pool = new Pool(CFG.db);
 const diagtrunk = require('./diagtrunk');
 const backup = require('./backup');     // respaldo y restauracion del appliance
+const salud = require('./salud');       // estado REAL de los nodos (medido, no configurado)
 const app = express();
 const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
 /* Las capturas de los manuales viajan como data URL dentro del JSON: una captura de
@@ -2187,14 +2188,39 @@ app.get('/api/system', async (req, res) => {
   res.json({ asterisk: astVer, components: comps });
 });
 
-app.get('/api/topology', (req, res) => {
-  res.json({
+/* Topología CON estado medido.
+ *
+ * Antes esto devolvía sólo las IPs del archivo de configuración, y las pantallas
+ * las pintaban siempre en verde: el borde estuvo caído medio día y Topología y
+ * Resumen lo mostraron sano. Ahora cada nodo se prueba de verdad.
+ *
+ * Distingue dos cosas que estaban mezcladas y son distintas:
+ *   borde propio    parte de ESTE appliance (lo que configura SBC_HOST)
+ *   borde externo   otro producto (SBC-NG u otro) conectado por troncal, con su
+ *                   propio panel. Antes los dos se dibujaban como una sola caja
+ *                   rotulada "SBC-NG", asi que la caja podia estar verde por el
+ *                   borde propio mientras el SBC-NG externo estaba apagado.
+ *
+ * `nodes` se mantiene con el formato viejo a proposito: hay pantallas que lo leen
+ * como texto plano y no tienen por que romperse por esto. */
+app.get('/api/topology', async (req, res) => {
+  const base = {
     domain: NODES.domain, public_ip: NODES.public_ip,
     nodes: {
       asterisk: NODES.asterisk, db: NODES.db, sbc: NODES.sbc,
       npm: NODES.npm, turn: NODES.turn, voz: NODES.voz,
     },
-  });
+  };
+  try {
+    const { rows } = await pool.query('SELECT name, provider_host, provider_port, kind FROM pbxng_trunks').catch(() => ({ rows: [] }));
+    const [propios, externos] = await Promise.all([salud.nodos(NODES), salud.bordesExternos(rows)]);
+    const todos = propios.concat(externos);
+    res.json({ ...base, componentes: propios, bordes_externos: externos, salud: salud.resumir(todos), medido: new Date().toISOString() });
+  } catch (e) {
+    // Si la medición falla, se devuelve igual la topología: es mejor un diagrama
+    // sin colores que una pantalla en blanco.
+    res.json({ ...base, componentes: [], bordes_externos: [], salud: null, error_medicion: e.message });
+  }
 });
 
 app.get('/api/extensions', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { res.status(500).json({ error: e.message }); } });
