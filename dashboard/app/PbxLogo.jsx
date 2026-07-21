@@ -24,25 +24,28 @@ export default function PbxLogo({ size = 40, animado = true, color = '#7c3aed', 
           </linearGradient>
         </defs>
 
-        {/* escudo */}
+        {/* Escudo RELLENO. Antes era solo contorno, y la burbuja de arriba usaba
+            currentColor con el contenedor forzando color:#fff — o sea blanco sobre el
+            sidebar blanco. Por eso se veia a medio dibujar. Ahora el logo trae sus
+            propios colores y se lee igual en claro y en oscuro. */}
         <path
           className="pbx-escudo"
           d="M32 4.5 L56 13.5 V31 c0 14.4 -9.9 25.5 -24 28.5 C17.9 56.5 8 45.4 8 31 V13.5 Z"
-          fill="none" stroke="url(#pbxEsc)" strokeWidth="3.4" strokeLinejoin="round"
+          fill="url(#pbxEsc)"
         />
 
         {/* burbuja de arriba (blanca): la conversación con el interno */}
         <path
           className="pbx-burbuja pbx-burbuja-a"
           d="M20 20 h13 a3.5 3.5 0 0 1 3.5 3.5 v9 a3.5 3.5 0 0 1 -3.5 3.5 h-6 l-5 5 v-5 h-2 a3.5 3.5 0 0 1 -3.5 -3.5 v-9 A3.5 3.5 0 0 1 20 20 Z"
-          fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round"
+          fill="#ffffff"
         />
 
         {/* burbuja de abajo (violeta): la conversación con el mundo */}
         <path
           className="pbx-burbuja pbx-burbuja-b"
           d="M31 27.5 h13 a3.5 3.5 0 0 1 3.5 3.5 v9 A3.5 3.5 0 0 1 44 43.5 h-2 v5 l-5 -5 h-6 a3.5 3.5 0 0 1 -3.5 -3.5 v-9 a3.5 3.5 0 0 1 3.5 -3.5 Z"
-          fill="none" stroke={color} strokeWidth="3" strokeLinejoin="round"
+          fill="#ede9fe"
         />
       </svg>
 
