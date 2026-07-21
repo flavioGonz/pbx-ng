@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
-import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider } from '@mantine/core';
+import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider, Alert } from '@mantine/core';
 import Slot from './Slot';
-import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard, IconBolt, IconPlugConnected } from '@tabler/icons-react';
+import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard, IconBolt, IconPlugConnected, IconAlertTriangle } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import SystemOverview from './SystemOverview';
 import { useLive } from './useLive';
@@ -88,18 +88,48 @@ export default function Resumen() {
   const trOther = trunks.length - trAvail - trSbc - trDown;
 
   const comps = sys?.components || [];
+
+  /* Estado MEDIDO por el backend. Antes esta lista tenia la fila del borde escrita
+   * a mano como `ok: true`: literalmente no podia detectar una caida. El 2026-07-21
+   * el borde estuvo apagado medio dia y esta pantalla lo mostro verde todo el rato. */
+  const medidos = Array.isArray(topo?.componentes) ? topo.componentes : [];
+  const bordesExt = Array.isArray(topo?.bordes_externos) ? topo.bordes_externos : [];
+  const med = (id) => medidos.find((c) => c.id === id) || null;
+  const okMed = (id, fallback) => { const c = med(id); return c ? c.estado === 'ok' : fallback; };
+
   const svcList = [
-    { n: 'Asterisk (AMI/ARI)', ok: h.ari && h.ami, ip: topo?.nodes?.asterisk || '-' },
-    { n: 'Base de datos', ok: h.db, ip: topo?.nodes?.db || '-' },
-    { n: 'SBC-NG', ok: true, ip: topo?.nodes?.sbc || '-' },
-    { n: 'Turn-NG Server', ok: (comps.find(c => /TURN/i.test(c.name)) || {}).status !== 'down', ip: topo?.nodes?.turn || '-' },
-    { n: 'Proxy NPM (TLS/WSS)', ok: (comps.find(c => /Proxy/i.test(c.name)) || {}).status !== 'down', ip: topo?.nodes?.npm || '-' },
+    { n: 'Asterisk (AMI/ARI)', ok: (h.ari && h.ami) && okMed('asterisk', true), ip: topo?.nodes?.asterisk || '-' },
+    { n: 'Base de datos', ok: h.db && okMed('db', true), ip: topo?.nodes?.db || '-' },
+    // El borde PROPIO de esta central. Distinto del producto SBC-NG, que es aparte.
+    ...(med('borde') ? [{ n: 'Borde propio', ok: okMed('borde', false), ip: med('borde').host, detalle: med('borde').motivo }] : []),
+    { n: 'Turn-NG Server', ok: okMed('turn', (comps.find(c => /TURN/i.test(c.name)) || {}).status !== 'down'), ip: topo?.nodes?.turn || '-' },
+    { n: 'Proxy NPM (TLS/WSS)', ok: okMed('proxy', (comps.find(c => /Proxy/i.test(c.name)) || {}).status !== 'down'), ip: topo?.nodes?.npm || '-' },
+    // Bordes EXTERNOS: otro producto, con su propio panel. Se listan aparte para que
+    // se vea que su caida no es una falla de esta central, pero si le corta la salida.
+    ...bordesExt.map((b) => ({ n: 'Borde externo · ' + b.nombre, ok: b.estado === 'ok', ip: b.host, detalle: b.motivo, externo: true })),
   ];
+  const caidos = svcList.filter((s) => !s.ok);
 
   return (
     <Stack gap="lg">
       <PageHeader icon={<IconLayoutDashboard size={24} />} title="Resumen" subtitle="Estado de la plataforma en tiempo real" color="pbx"
         right={<Badge size="lg" radius="sm" variant="light" color={connected ? 'teal' : 'gray'} leftSection={<IconCircleFilled size={9} className="pbx-pulse" />}>{connected ? 'En vivo' : 'Conectando…'}</Badge>} />
+
+      {/* Lo primero que tiene que ver el operador si algo se cayo. Antes no habia
+          nada de esto: el borde podia estar muerto y la pantalla se veia normal. */}
+      {caidos.length > 0 && (
+        <Alert color="red" variant="light" radius="md" icon={<IconAlertTriangle size={20} />}
+          title={caidos.length === 1 ? 'Hay un componente caído' : `Hay ${caidos.length} componentes caídos`}>
+          <Stack gap={4}>
+            {caidos.map((c) => (
+              <Text key={c.n} size="sm">
+                <b>{c.n}</b> ({c.ip}){c.detalle ? ' — ' + c.detalle : ' — no responde'}
+                {c.externo && <Text span c="dimmed" size="xs"> · es otro producto, se administra en su propio panel</Text>}
+              </Text>
+            ))}
+          </Stack>
+        </Alert>
+      )}
 
       {/* Núcleo de Asterisk: el estado vivo del motor (versión, canales, endpoints,
           transportes y módulos) — antes vivía en la pestaña "PBX" del menú. */}

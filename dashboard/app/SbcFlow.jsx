@@ -141,23 +141,54 @@ export default function SbcFlow({ fullBleed }) {
   const comp = (g, n) => (sys?.components || []).find(c => c.group === g && c.name.includes(n))?.status;
 
   const hasSbc = trunks.some((t) => t.kind === 'sbc');
+
+  /* Estado MEDIDO por el backend (salud.js), no configurado. Antes cada nodo se
+   * pintaba con lo que devolviera su propio endpoint, y el borde se dibujaba
+   * siempre verde: estuvo caido medio dia y la topologia no se entero.
+   *   comp('borde')   -> el borde PROPIO de este appliance
+   *   externos        -> bordes de OTRO producto (SBC-NG), conectados por troncal */
+  const comps = Array.isArray(topo?.componentes) ? topo.componentes : [];
+  const externos = Array.isArray(topo?.bordes_externos) ? topo.bordes_externos : [];
+  const comp2 = (id) => comps.find((c) => c.id === id) || null;
+  const medido = (id, fallback) => { const c = comp2(id); return c ? (c.estado === 'ok' ? 'ok' : 'down') : fallback; };
+  const borde = comp2('borde');
+  const extPrincipal = externos[0] || null;
   const computedNodes = useMemo(() => {
     const base = [
-      { id: 'kamailio', type: 'pbx', position: { x: 200, y: 320 }, data: { title: 'SBC-NG', ip: topo?.nodes?.sbc || '-', badge: trunks.some((t) => t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'WebRTC · WSS' : undefined, logo: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0IiBmaWxsPSJub25lIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM0YWRlODAiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMyMmM1NWUiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cGF0aCBkPSJNMzIgNC41IEw1NiAxMy41IFYzMSBjMCAxNC40IC05LjkgMjUuNSAtMjQgMjguNSBDMTcuOSA1Ni41IDggNDUuNCA4IDMxIFYxMy41IFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnKSIgc3Ryb2tlLXdpZHRoPSIzLjQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMjAgMjAgaDEzIGEzLjUgMy41IDAgMCAxIDMuNSAzLjUgdjkgYTMuNSAzLjUgMCAwIDEgLTMuNSAzLjUgaC02IGwtNSA1IHYtNSBoLTIgYTMuNSAzLjUgMCAwIDEgLTMuNSAtMy41IHYtOSBBMy41IDMuNSAwIDAgMSAyMCAyMCBaIiBmaWxsPSJub25lIiBzdHJva2U9IiMyMmM1NWUiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik0zMSAyNy41IGgxMyBhMy41IDMuNSAwIDAgMSAzLjUgMy41IHY5IEEzLjUgMy41IDAgMCAxIDQ0IDQzLjUgaC0yIHY1IGwtNSAtNSBoLTYgYTMuNSAzLjUgMCAwIDEgLTMuNSAtMy41IHYtOSBhMy41IDMuNSAwIDAgMSAzLjUgLTMuNSBaIiBmaWxsPSJub25lIiBzdHJva2U9IiMzMzQxNTUiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjwvc3ZnPg==", animate: true, icon: <IconRouteAltLeft size={18} />, status: sbc && !sbc.error ? 'ok' : 'pending', edge: true, live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
-      { id: 'asterisk', type: 'pbx', position: { x: 520, y: 320 }, data: { title: 'Asterisk PBX', ip: topo?.nodes?.asterisk || '-', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : 'down', live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'Canales', value: ch.length, hot: ch.length > 0 }] } },
+      { id: 'kamailio', type: 'pbx', position: { x: 200, y: 320 }, data: { title: extPrincipal ? ('Borde externo · ' + extPrincipal.nombre) : 'Borde externo', ip: extPrincipal?.host || '-', sub: 'Producto aparte · panel propio', badge: trunks.some((t) => t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'WebRTC · WSS' : undefined, logo: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0IiBmaWxsPSJub25lIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM0YWRlODAiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMyMmM1NWUiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cGF0aCBkPSJNMzIgNC41IEw1NiAxMy41IFYzMSBjMCAxNC40IC05LjkgMjUuNSAtMjQgMjguNSBDMTcuOSA1Ni41IDggNDUuNCA4IDMxIFYxMy41IFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnKSIgc3Ryb2tlLXdpZHRoPSIzLjQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMjAgMjAgaDEzIGEzLjUgMy41IDAgMCAxIDMuNSAzLjUgdjkgYTMuNSAzLjUgMCAwIDEgLTMuNSAzLjUgaC02IGwtNSA1IHYtNSBoLTIgYTMuNSAzLjUgMCAwIDEgLTMuNSAtMy41IHYtOSBBMy41IDMuNSAwIDAgMSAyMCAyMCBaIiBmaWxsPSJub25lIiBzdHJva2U9IiMyMmM1NWUiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik0zMSAyNy41IGgxMyBhMy41IDMuNSAwIDAgMSAzLjUgMy41IHY5IEEzLjUgMy41IDAgMCAxIDQ0IDQzLjUgaC0yIHY1IGwtNSAtNSBoLTYgYTMuNSAzLjUgMCAwIDEgLTMuNSAtMy41IHYtOSBhMy41IDMuNSAwIDAgMSAzLjUgLTMuNSBaIiBmaWxsPSJub25lIiBzdHJva2U9IiMzMzQxNTUiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjwvc3ZnPg==", animate: true, icon: <IconRouteAltLeft size={18} />, status: extPrincipal ? (extPrincipal.estado === 'ok' ? 'ok' : 'down') : 'pending', pulse: extPrincipal && extPrincipal.estado !== 'ok' ? 'down' : null, edge: true, live: ch.length > 0, metrics: [{ label: 'Req/s', value: sbc?.stats?.rates?.rcv_requests != null ? sbc.stats.rates.rcv_requests : '-' }, { label: 'Bloqueadas', value: (sbc?.banned || []).length }, { label: 'Media', value: sbc?.rtpengine?.up ? (sbc.rtpengine.sessions || 0) + ' ses.' : '-' }] } },
+      { id: 'asterisk', type: 'pbx', position: { x: 520, y: 320 }, data: { title: 'Asterisk PBX', ip: topo?.nodes?.asterisk || '-', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : medido('asterisk', 'down'), live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'Canales', value: ch.length, hot: ch.length > 0 }] } },
       { id: 'internos', type: 'pbx', position: { x: 840, y: 150 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
       { id: 'apps', type: 'pbx', position: { x: 840, y: 510 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
       { id: 'voz', type: 'pbx', position: { x: 840, y: 690 }, data: { title: 'Voz IA (TTS/STT)', ip: topo?.nodes?.voz || '-', icon: <IconWaveSine size={17} />, status: voz && (voz.whisper || voz.ok || voz.default_voice) ? 'ok' : (voz && voz.error ? 'down' : 'pending'), metrics: [{ label: 'Motor', value: 'Piper + Whisper' }, { label: 'Whisper', value: (voz && voz.whisper) || '-' }] } },
-      { id: 'db', type: 'pbx', position: { x: 840, y: 330 }, data: { title: 'PostgreSQL', ip: topo?.nodes?.db || '-', icon: <IconDatabase size={17} />, status: db && !db.error ? 'ok' : (db && db.error ? 'down' : 'pending'), metrics: [{ label: 'Realtime', value: 'ARA' }, { label: 'Tamaño', value: (db && db.size) || '-' }] } },
+      { id: 'db', type: 'pbx', position: { x: 840, y: 330 }, data: { title: 'PostgreSQL', ip: topo?.nodes?.db || '-', icon: <IconDatabase size={17} />, status: medido('db', db && !db.error ? 'ok' : (db && db.error ? 'down' : 'pending')), metrics: [{ label: 'Realtime', value: 'ARA' }, { label: 'Tamaño', value: (db && db.size) || '-' }] } },
     ];
+    /* El borde PROPIO del appliance. Antes no tenia nodo: su IP se dibujaba en la
+     * caja rotulada 'SBC-NG', que en realidad representa un producto distinto. */
+    if (borde) {
+      base.splice(1, 0, { id: 'borde', type: 'pbx', position: { x: 200, y: 130 },
+        data: { title: 'Borde propio', ip: borde.host, sub: 'Parte de esta central',
+          icon: <IconRouteAltLeft size={18} />,
+          status: borde.estado === 'ok' ? 'ok' : 'down',
+          pulse: borde.estado === 'ok' ? null : 'down',
+          metrics: [{ label: 'Estado', value: borde.estado === 'ok' ? 'Activo' : 'CAÍDO' },
+                    ...(borde.ms != null ? [{ label: 'Respuesta', value: borde.ms + ' ms' }] : []),
+                    ...(borde.motivo ? [{ label: 'Motivo', value: borde.motivo }] : [])] } });
+    }
     const tr = trunks.length ? trunks : [{ name: 'Sin troncales', provider_host: 'agregá una en Troncales', status: 'pending', _empty: true }];
     const step = 150, startY = 470;
     const tnodes = tr.map((t, i) => { const ts = trunkStatus(t); return ({
       id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 100, y: startY + i * step },
-      data: { title: t.name, ip: t.provider_host, circle: true, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (ts === 'offline' ? 'down' : ts === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (ts === 'online' ? 'ok' : ts === 'offline' ? 'down' : 'pending'), pulse: t._empty ? null : (ts === 'offline' ? 'down' : ts === 'online' ? 'ok' : null), metrics: t._empty ? undefined : [ (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? { label: 'WebRTC → ' + (t.target || t.provider_host || ''), value: 'WSS' } : { label: t.kind === 'kamailio' ? 'vía SBC' : 'directa', value: (t.transport || 'udp').toUpperCase() }, ...(ts === 'offline' ? [{ label: 'Estado', value: 'CAÍDO' }] : ts === 'online' ? [{ label: 'Estado', value: 'Activo' }] : [])] },
+      data: { title: t.name, ip: t.provider_host, circle: true, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (ts === 'offline' ? 'down' : ts === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (ts === 'online' ? 'ok' : ts === 'offline' ? 'down' : 'pending'), pulse: t._empty ? null : (ts === 'offline' ? 'down' : ts === 'online' ? 'ok' : null), metrics: t._empty ? undefined : [ (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? { label: 'WebRTC → ' + (t.target || t.provider_host || ''), value: 'WSS' } : { label: t.kind === 'kamailio' ? 'vía el borde' : 'directa a la central', value: (t.transport || 'udp').toUpperCase() }, ...(ts === 'offline' ? [{ label: 'Estado', value: 'CAÍDO' }] : ts === 'online' ? [{ label: 'Estado', value: 'Activo' }] : [])] },
     }); });
     const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
-    const hidden = new Set(); if (mods.sbc === false) hidden.add('kamailio'); if (mods.turn === false) hidden.add('coturn'); if (mods.voz === false) hidden.add('voz');
+    /* Ojo con que oculta cada cosa: 'borde' es el borde PROPIO (lo gobierna el
+     * modulo sbc del appliance) y 'kamailio' pasó a ser el borde EXTERNO, que
+     * existe solo si hay una troncal de tipo sbc. Antes los dos eran el mismo id
+     * y apagar el modulo propio escondia el producto externo, o al reves. */
+    const hidden = new Set();
+    if (mods.sbc === false) hidden.add('borde');
+    if (mods.turn === false) hidden.add('coturn');
+    if (mods.voz === false) hidden.add('voz');
     if (!hasSbc) hidden.add('kamailio');
     const opTrunks = hasSbc ? [] : trunks.filter((t) => t.kind !== 'webrtc' && t.kind !== 'webrtc-client' && t.kind !== 'kamailio' && t.kind !== 'sbc');
     const opNodes = opTrunks.map((t, i) => { const ts = trunkStatus(t); return ({
@@ -165,7 +196,7 @@ export default function SbcFlow({ fullBleed }) {
       data: { title: t.name, ip: t.provider_host, circle: true, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: ts === 'offline' ? 'down' : ts === 'online' ? 'up' : undefined, status: ts === 'online' ? 'ok' : ts === 'offline' ? 'down' : 'pending', pulse: ts === 'offline' ? 'down' : ts === 'online' ? 'ok' : null, metrics: [{ label: 'directa', value: (t.transport || 'udp').toUpperCase() }, ...(ts === 'offline' ? [{ label: 'Estado', value: 'CAÍDO' }] : ts === 'online' ? [{ label: 'Estado', value: 'Activo' }] : [])] },
     }); });
     return [...base, ...opNodes].filter((n) => !hidden.has(n.id));
-  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert, voz, mods, db, topo, hasSbc]);
+  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert, voz, mods, db, topo, hasSbc, comps, externos]);
 
   useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_sbc_nodepos_v4') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
 
@@ -250,14 +281,14 @@ export default function SbcFlow({ fullBleed }) {
               <Badge variant="light" color={stColor(node.data.status)} leftSection={<IconBolt size={12} />}>{stLabel(node.data.status)}</Badge>
               {tk?.provider_host && <Badge variant="light" color="gray" ff="monospace">{tk.provider_host}</Badge>}
               <Badge variant="dot" color="blue">{(tk?.transport || 'udp').toUpperCase()}</Badge>
-              <Badge variant="dot" color="grape">{tk?.kind === 'kamailio' ? 'vía SBC-NG' : 'directa'}</Badge>
+              <Badge variant="dot" color="grape">{tk?.kind === 'kamailio' ? 'vía el borde' : 'directa a la central'}</Badge>
             </Group>
             <Box><Text fw={600} size="sm" mb={4}>¿Qué es?</Text><Text size="sm" c="dimmed">Troncal SIP que enlaza la PBX con el operador. Por aquí entran y salen las llamadas hacia la red telefónica pública (PSTN). Estado «registrada» = enlace activo con el proveedor.</Text></Box>
             <SimpleGrid cols={2}>
               <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Estado</Text><Text fw={700}>{stLabel(node.data.status)}</Text></Card>
               <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Host del proveedor</Text><Text fw={700} ff="monospace" size="sm">{tk?.provider_host || '-'}</Text></Card>
               <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Transporte</Text><Text fw={700}>{(tk?.transport || 'udp').toUpperCase()}</Text></Card>
-              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Ruteo</Text><Text fw={700}>{tk?.kind === 'kamailio' ? 'vía SBC-NG' : 'directa'}</Text></Card>
+              <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Ruteo</Text><Text fw={700}>{tk?.kind === 'kamailio' ? 'vía el borde' : 'directa a la central'}</Text></Card>
             </SimpleGrid>
             <Group grow><Button variant="light" leftSection={<IconEdit size={16} />} onClick={() => { setTeName(tk?.name); setTeOpen(true); setSel(null); }}>Editar troncal</Button><Button variant="light" color="red" leftSection={<IconTrash size={16} />} onClick={() => { delTrunk(tk?.name); setSel(null); }}>Eliminar</Button></Group>
           </Stack>}
