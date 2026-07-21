@@ -1255,6 +1255,14 @@ alerts.init(pool, {
   },
   getQueues,
   state,
+  /* Estado medido de los nodos, para que las alertas vean lo mismo que el panel.
+     Antes checkServices() solo miraba la base y AMI/ARI —el estado interno del
+     proceso— asi que un borde caido no generaba ninguna alerta. */
+  saludNodos: async () => {
+    const { rows } = await pool.query('SELECT name, provider_host, provider_port, kind FROM pbxng_trunks').catch(() => ({ rows: [] }));
+    const [propios, externos] = await Promise.all([salud.nodos(NODES), salud.bordesExternos(rows)]);
+    return propios.concat(externos);
+  },
 });
 
 recstore.init(pool);

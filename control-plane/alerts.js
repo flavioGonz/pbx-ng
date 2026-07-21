@@ -250,6 +250,42 @@ async function checkServices() {
     st[k] = cur[k];
   }
   await setState('svc', st);
+
+  /* Nodos de red (borde propio, borde externo, TURN, proxy, IA de voz).
+   *
+   * Esto es lo que faltaba: el 2026-07-21 el borde estuvo caido medio dia y no
+   * salio ni una alerta, porque aca arriba solo se miraba la base y AMI/ARI. Se
+   * avisa en los dos sentidos —cuando cae y cuando vuelve— para no dejar a nadie
+   * pendiente de un correo que nunca llega. */
+  if (!deps.saludNodos) return;
+  let nodos = [];
+  try { nodos = await deps.saludNodos(); } catch (_) { return; }
+  const stn = await getState('nodos', {});
+  for (const n of nodos) {
+    const vivo = n.estado === 'ok';
+    const antes = stn[n.id];
+    if (antes === undefined) { stn[n.id] = vivo; continue; }   // primera vuelta: solo aprender
+    if (antes && !vivo) {
+      await raise('service.down', {
+        severity: n.rol === 'borde-externo' ? 'warn' : 'crit',
+        title: `Componente caido: ${n.nombre}`,
+        lines: [['Componente', n.nombre], ['Direccion', `${n.host}:${n.puerto}`],
+                ['Motivo', n.motivo || 'no responde'],
+                ...(n.rol === 'borde-externo' ? [['Aviso', 'Es otro producto: se administra en su propio panel']] : [])],
+        foot: n.papel || '',
+        key: 'nodo:' + n.id,
+      });
+    } else if (!antes && vivo) {
+      await raise('service.down', {
+        severity: 'info',
+        title: `Componente recuperado: ${n.nombre}`,
+        lines: [['Componente', n.nombre], ['Direccion', `${n.host}:${n.puerto}`], ['Estado', 'responde de nuevo']],
+        key: 'nodo:' + n.id + ':up',
+      });
+    }
+    stn[n.id] = vivo;
+  }
+  await setState('nodos', stn);
 }
 
 /** Antifraude: llamada larga, pico fuera de hora, internacionales. */
