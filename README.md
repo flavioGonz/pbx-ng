@@ -5,6 +5,13 @@
 **Plataforma de comunicaciones unificadas (UCaaS) de nueva generación**
 Asterisk 22 · WebRTC · SBC Kamailio · IVR con IA · PWA softphone · Multi-WAN
 
+[![Versión](https://img.shields.io/github/v/tag/flavioGonz/pbx-ng?label=versi%C3%B3n&sort=semver)](https://github.com/flavioGonz/pbx-ng/tags)
+[![Release (GHCR)](https://github.com/flavioGonz/pbx-ng/actions/workflows/release.yml/badge.svg)](https://github.com/flavioGonz/pbx-ng/actions/workflows/release.yml)
+[![Softphone](https://github.com/flavioGonz/pbx-ng/actions/workflows/softphone.yml/badge.svg)](https://github.com/flavioGonz/pbx-ng/actions/workflows/softphone.yml)
+![Asterisk 22](https://img.shields.io/badge/Asterisk-22_LTS-orange)
+![Next.js 14](https://img.shields.io/badge/Next.js-14-black)
+![Node 20+](https://img.shields.io/badge/Node-20%2B-339933)
+
 </div>
 
 ---
@@ -12,6 +19,10 @@ Asterisk 22 · WebRTC · SBC Kamailio · IVR con IA · PWA softphone · Multi-WA
 PBX-NG es una central telefónica IP profesional, "todo-terreno" y lista para la nube: une la telefonía VoIP clásica (chan_pjsip) con tecnologías web modernas (WebRTC) para llamar desde el navegador, el móvil o un teléfono físico, con un **SBC** (Session Border Controller) propio al frente que aporta seguridad perimetral, enrutamiento por operador (LCR) con failover, manipulación SIP avanzada y ocultamiento de topología.
 
 Todo se administra desde un **dashboard web** en tiempo real.
+
+> **PBX-NG es la central.** El borde SIP (seguridad perimetral, LCR, manipulación SIP, anclaje de medios)
+> es **[SBC-NG](https://github.com/flavioGonz/SBC-NG)**, un producto aparte: PBX-NG funciona **con o sin** SBC-NG
+> adelante (sin él, las troncales del operador van directo a Asterisk). Ver [`docs/SBC-NG-SPLIT.md`](docs/SBC-NG-SPLIT.md).
 
 ## Índice
 
@@ -22,9 +33,12 @@ Todo se administra desde un **dashboard web** en tiempo real.
 - [Softphone de escritorio (Windows)](#softphone-de-escritorio-windows)
 - [Configuración](#configuración)
 - [Estructura del repositorio](#estructura-del-repositorio)
+- [Desarrollo](#desarrollo)
+- [Versionado y releases](#versionado-y-releases)
 - [Operación y mantenimiento](#operación-y-mantenimiento)
 - [Seguridad](#seguridad)
-- [Roadmap](#roadmap)
+- [Productos relacionados](#productos-relacionados)
+- [Roadmap y changelog](#roadmap-y-changelog)
 
 ## Arquitectura
 
@@ -273,8 +287,46 @@ voice-service/     Microservicio de voz IA (Piper TTS + faster-whisper STT)
 docker/            docker-compose, install.sh multi-rol, release.sh/deploy.sh, pbxng-ctl
 deploy/            orquestador de despliegue en Proxmox (pbxng-proxmox.sh)
 docs/              FIREWALL.md · TOPOLOGY.md · PACKAGING.md · schema de referencia
-scripts/           check-turn.py (sonda TURN real), verify-pbxng.sh, sync-and-push.sh
+scripts/           check-turn.py (sonda TURN real), verify-pbxng.sh, gen-sounds.py (audios es-UY)
+.github/workflows/ release.yml (imágenes a GHCR por tag v*) · softphone.yml (instalador Windows)
+VERSION · CHANGELOG.md · RELEASE.md · ROADMAP.md
 ```
+
+Los videos de fondo del login (`*.mp4`) **no se versionan** (viven en disco / en la imagen de branding), igual que `.env`, backups y modelos de voz.
+
+## Desarrollo
+
+Requisitos: **Node 20+** (las imágenes usan `node:20-slim`), Docker para el stack completo, Python 3 para `voice-service/` y los scripts.
+
+```bash
+# API (control plane) — necesita un Postgres y un Asterisk alcanzables (ver .env.example)
+cd control-plane && npm ci && npm start                 # :3000
+
+# Dashboard — proxya /backend/* a la API (API_URL, por defecto http://127.0.0.1:3000)
+cd dashboard && npm ci && npm run dev                   # :3001
+npm run build                                           # verifica que compila antes de commitear
+
+# Softphone de escritorio
+cd softphone-app && npm ci && npm run dev
+```
+
+Reglas de la casa:
+
+- **El repo es la única fuente de verdad.** Nada se parchea en producción a mano ni con `docker cp`: el cambio va al repo → imagen versionada → `deploy.sh`.
+- **Cambios de esquema** = una migración nueva `control-plane/migrations/000N_*.sql` (el runner es `migrate.js`, transaccional por archivo). `docker/config/initdb/01-schema.sql` es el esquema canónico para bases *nuevas* y se regenera en cada release mayor.
+- **Config de Asterisk generada por el panel** va al patrón `pbxng.d/` (volumen `asterisk_conf` + `#include`), nunca editando los `.conf` base.
+- **Todo configurable desde el panel** (producto final): sin valores hardcodeados ni ediciones de `.env` para operar.
+- Commits en español, imperativo, con el área adelante (`topologia: ...`, `seguridad: ...`, `docs(manual): ...`). Toda entrada relevante va a `CHANGELOG.md`.
+- Dependencias: se actualizan **dentro de la misma mayor** con lockfile regenerado y `npm run build` verde; los saltos de mayor (Next 15+, React 19, Mantine 8+, Express 5) se planifican aparte porque tienen cambios incompatibles.
+
+## Versionado y releases
+
+- `VERSION` + [`CHANGELOG.md`](CHANGELOG.md) siguen **SemVer** / *Keep a Changelog*.
+- Un tag `vX.Y.Z` dispara [`release.yml`](.github/workflows/release.yml), que construye y publica las 7 imágenes
+  `ghcr.io/flaviogonz/pbx-ng/<api|dashboard|asterisk|kamailio|coturn|wsbridge|voz>:X.Y.Z` (Asterisk compila desde fuente: ~15–50 min).
+- `docker/release.sh --bundle` genera el paquete *air-gapped* (`dist/pbxng-<ver>-images.tar.gz`) para clientes sin acceso a Internet.
+- En el host destino, `docker/deploy.sh` hace `pull`/`load` → migraciones → `up -d`. Rollback = desplegar la versión anterior. Detalle en [`RELEASE.md`](RELEASE.md).
+- El tag `softphone-vX.Y.Z` publica el instalador Windows del softphone ([`softphone.yml`](.github/workflows/softphone.yml)).
 
 ## Operación y mantenimiento
 
@@ -294,13 +346,17 @@ Defensa en capas:
 - **Agentes internos** protegidos por token compartido; comandos de sistema con validación (sin `shell=True`).
 - **Recomendado en producción**: rotar todos los secretos, activar TLS en teléfonos, y RBAC multi-tenant.
 
-## Roadmap
+## Productos relacionados
 
-- TURN TLS (5349/TURNS) por defecto + credenciales efímeras (REST API de coturn).
-- Alta disponibilidad (estado en Redis, multi-instancia de la API).
-- Multi-tenant + RBAC (modo elegible en la instalación; RBAC en curso).
-- Observabilidad (Prometheus/Grafana, métricas de calidad de llamada).
-- STIR/SHAKEN, T.38 fax, SIP TLS para teléfonos.
+| Producto | Qué es | Repo |
+|---|---|---|
+| **SBC-NG** | Session Border Controller (Kamailio + rtpengine) con panel propio; opcional delante de PBX-NG | [flavioGonz/SBC-NG](https://github.com/flavioGonz/SBC-NG) |
+| **Softphone PBX-NG** | Cliente de escritorio Windows / PWA, registra contra cualquier PBX | [`softphone-app/`](softphone-app/) |
+
+## Roadmap y changelog
+
+- Estado real del producto y brechas priorizadas: [`ROADMAP.md`](ROADMAP.md).
+- Historial de cambios por versión: [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

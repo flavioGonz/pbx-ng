@@ -2,6 +2,21 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.2.0] - 2026-09-04
+### Fixed
+- **/topologia moria al abrirse** (React #185 *Maximum update depth exceeded*): en `SbcFlow.jsx` los arreglos `comps`/`externos` se creaban nuevos en cada render mientras `/api/topology` no respondia, entraban como dependencias del `useMemo` de nodos y el efecto que sincroniza React Flow se disparaba sin fin. Ahora se memoizan por `topo` y el efecto conserva lo que React Flow ya midio (menos rondas de `onNodesChange`).
+- `SbcFlow.jsx`: eliminado codigo muerto (`tnodes`/`gwNodes`, que no se renderizaban) y la consulta a `/api/npm/cert` que no se usaba (una peticion menos cada 8 s).
+### Changed
+- **Imagen del dashboard ~7x mas chica**: Next.js con `output: 'standalone'` y Dockerfile multi-stage que copia solo `server.js` + `.next/static` + `public` (antes viajaba `node_modules` completo, ~1.4 GB). Arranca con `node server.js` (`PORT=3001`).
+- Dependencias al dia dentro de la misma mayor (sin cambios de API): Next 14.2.5 → **14.2.35** (incluye los parches de seguridad de la rama 14.2), `@xyflow/react` 12.11.6, `@tabler/icons-react` 3.46, `slot-text` 0.3.4; control-plane: Express 4.22, `pg` 8.23, Nodemailer 9.1; wsbridge: `ws` 8.21; softphone-app: Vite 5.4.21, Electron 33.4, `electron-updater` 6.8, GSAP 3.15. Lockfiles regenerados.
+- control-plane: `overrides` para `form-data`, `qs` y `cookiejar` (transitivas de `ari-client` → `request`, que esta abandonado) — se van las 2 criticas del `npm audit`; quedan 4 moderadas que solo se resuelven reemplazando `ari-client`.
+- Repo: los videos de fondo (`*.mp4`, ~30 MB) dejan de versionarse (siguen en disco; `.gitignore`). README reorganizado (badges, requisitos de desarrollo, releases, contribucion).
+### Added (acumulado desde 1.1.0, ya en `main`)
+- Topologia y resumen muestran el **estado medido** por `salud.js` (borde propio vs borde externo SBC-NG), alertas que vigilan tambien los nodos de red.
+- **Respaldo y restauracion desde el panel**; modo **DTMF por extension** (RFC 4733 / SIP INFO); manuales in-panel (instalacion, configuracion, usuario) con capturas; motor de **alertas por correo** y sistema de diseno de correos.
+### Security
+- Grabaciones, buzones, directorio y presencia dejan de ser publicos; `/api` con `Cache-Control: no-store`.
+
 ## [1.1.0] - 2026-07-11
 ### Added
 - **`docs/FIREWALL.md`**: firewall/NAT como **requisito de instalacion** — matriz de puertos por rol, reglas dst-nat, `external-ip=<publica>/<privada>` del coturn, **NAT hairpin** (la trampa del `in-interface=WAN/all-ppp` que rompe el loopback), verificacion y lectura de errores ICE (701 vs 401).
