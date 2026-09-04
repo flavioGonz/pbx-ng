@@ -3,7 +3,7 @@
 # PBX-NG
 
 **Plataforma de comunicaciones unificadas (UCaaS) de nueva generación**
-Asterisk 22 · WebRTC · SBC Kamailio · IVR con IA · PWA softphone · Multi-WAN
+Asterisk 22 · WebRTC · IVR con IA · PWA softphone · Multi-WAN · Borde opcional con SBC-NG
 
 [![Versión](https://img.shields.io/github/v/tag/flavioGonz/pbx-ng?label=versi%C3%B3n&sort=semver)](https://github.com/flavioGonz/pbx-ng/tags)
 [![Release (GHCR)](https://github.com/flavioGonz/pbx-ng/actions/workflows/release.yml/badge.svg)](https://github.com/flavioGonz/pbx-ng/actions/workflows/release.yml)
@@ -16,13 +16,14 @@ Asterisk 22 · WebRTC · SBC Kamailio · IVR con IA · PWA softphone · Multi-WA
 
 ---
 
-PBX-NG es una central telefónica IP profesional, "todo-terreno" y lista para la nube: une la telefonía VoIP clásica (chan_pjsip) con tecnologías web modernas (WebRTC) para llamar desde el navegador, el móvil o un teléfono físico, con un **SBC** (Session Border Controller) propio al frente que aporta seguridad perimetral, enrutamiento por operador (LCR) con failover, manipulación SIP avanzada y ocultamiento de topología.
+PBX-NG es una central telefónica IP profesional, "todo-terreno" y lista para la nube: une la telefonía VoIP clásica (chan_pjsip) con tecnologías web modernas (WebRTC) para llamar desde el navegador, el móvil o un teléfono físico. Internos, WebRTC y troncales del operador van directo a Asterisk; no necesita ningún componente adicional para operar.
 
 Todo se administra desde un **dashboard web** en tiempo real.
 
-> **PBX-NG es la central.** El borde SIP (seguridad perimetral, LCR, manipulación SIP, anclaje de medios)
-> es **[SBC-NG](https://github.com/flavioGonz/SBC-NG)**, un producto aparte: PBX-NG funciona **con o sin** SBC-NG
-> adelante (sin él, las troncales del operador van directo a Asterisk). Ver [`docs/SBC-NG-SPLIT.md`](docs/SBC-NG-SPLIT.md).
+> **PBX-NG es la central.** El borde SIP (seguridad perimetral, LCR, troncales del operador, manipulación SIP,
+> anclaje de medios, bridge WebRTC de cliente) es **[SBC-NG](https://github.com/flavioGonz/SBC-NG)**, un producto aparte
+> que se licencia por separado. PBX-NG funciona **con o sin** SBC-NG adelante; cuando lo hay, se conecta desde el módulo
+> «Conexión a SBC-NG» del panel. Ver [`docs/SBC-NG-SPLIT.md`](docs/SBC-NG-SPLIT.md).
 
 ## Índice
 
@@ -42,32 +43,35 @@ Todo se administra desde un **dashboard web** en tiempo real.
 
 ## Arquitectura
 
-Diseño modular; cada servicio es independiente y puede correr en su propio contenedor/host.
+Diseño modular; cada servicio es independiente y puede correr en su propio contenedor/host. El borde SIP no forma parte de PBX-NG: si hace falta, va **SBC-NG** (otro producto) delante de Asterisk.
 
 ```
                  Internet
                     │
-        ┌───────────┴───────────┐
-        │  Nginx Proxy Manager  │  TLS/WSS (Let's Encrypt)
-        └───────────┬───────────┘
-                    │
-   ┌────────────┬───┴────┬─────────────┐
-   │            │        │             │
-┌──▼──┐   ┌─────▼────┐ ┌─▼────┐   ┌────▼─────┐
-│ SBC │   │ Dashboard│ │ API  │   │  TURN    │
-│Kamai│   │ Next.js  │ │Node  │   │ Coturn   │
-│lio +│   └──────────┘ │ARI/  │   └──────────┘
-│rtpe │◄───────────────┤AMI   │
-│ngine│                └──┬───┘
-└──┬──┘                   │
-   │      ┌───────────────┼───────────────┐
-   ▼      ▼               ▼               ▼
-┌──────────────┐   ┌────────────┐   ┌──────────┐
-│  Asterisk 22 │   │ PostgreSQL │   │  Voz IA  │
-│  chan_pjsip  │◄──┤ Realtime   │   │ TTS/STT  │
-│  (Realtime)  │   │ + CDR      │   └──────────┘
-└──────────────┘   │ + Redis    │
-                   └────────────┘
+        ┌───────────┴───────────┐        ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
+        │  Nginx Proxy Manager  │          SBC-NG (otro producto,
+        │  TLS/WSS (LE), /ws    │        │ opcional): Kamailio +     │
+        └───────────┬───────────┘          rtpengine, LCR, troncales
+                    │                    │ del operador, wsbridge    │
+        ┌───────────┼───────────┐        └ ─ ─ ─ ─ ─ ┬ ─ ─ ─ ─ ─ ─ ─ ┘
+        │           │           │                    │ SIP 5060 + RTP
+  ┌─────▼────┐ ┌────▼─────┐ ┌───▼──────┐             │ (troncal to-sbc)
+  │ Dashboard│ │   API    │ │  TURN    │             │
+  │ Next.js  │ │ Node     │ │ Coturn   │             │
+  └──────────┘ │ ARI/AMI  │ └──────────┘             │
+               └────┬─────┘                          │
+                    │                                │
+   ┌────────────────┼───────────────┐                │
+   ▼                ▼               ▼                │
+┌──────────────┐ ┌────────────┐ ┌──────────┐         │
+│  Asterisk 22 │ │ PostgreSQL │ │  Voz IA  │         │
+│  chan_pjsip  │◄┤ Realtime   │ │ TTS/STT  │         │
+│  (Realtime)  │ │ + CDR      │ └──────────┘         │
+│  WSS :8088   │ │ + Redis    │                      │
+└──────▲───────┘ └────────────┘                      │
+       └─────────────────────────────────────────────┘
+       Sin SBC-NG: internos, WebRTC y troncales del operador
+       van directo a Asterisk (5060/5061 + RTP 10000-20000)
 ```
 
 ### Componentes y puertos
@@ -79,11 +83,13 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 | **Redis** | Caché / sesiones | 6379 |
 | **Control Plane (API)** | Node/Express, ARI+AMI, Socket.io, JWT | 3000 |
 | **Dashboard** | Next.js (admin + softphone WebRTC + PWA) | 3001 |
-| **SBC (Kamailio 5.6)** | Borde SIP: seguridad, LCR, manipulación SIP | 5060, 8088 WS |
-| **rtpengine** | Relay/anclaje de medios, aislamiento de RTP | 30000-40000 |
 | **Coturn (TURN/STUN)** | Traversía NAT para WebRTC | 3478 **UDP y TCP**, 5349 (TLS), 49152-65535 UDP (relay) |
 | **Voz IA** | TTS (Piper/Edge) + STT (faster-whisper) | 8080 |
 | **Nginx Proxy Manager** | Terminación TLS/WSS + certificados | 80, 443, 81 |
+
+> **SBC-NG (opcional, producto aparte)**: Kamailio + rtpengine con panel propio. No corre dentro de PBX-NG; se conecta
+> por la troncal `to-sbc` (SIP hacia Asterisk 5060 + RTP 10000-20000) y sus puertos públicos se documentan en
+> [su repo](https://github.com/flavioGonz/SBC-NG).
 
 ## Características
 
@@ -93,12 +99,9 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 - Códecs: Opus, G.711 (ulaw/alaw), G.722; video VP8/H264; SRTP/DTLS en WebRTC.
 - Click-to-Call público por link/QR (sin registro), con geolocalización.
 
-**SBC (estilo AudioCodes)**
-- LCR / enrutamiento por operador con **failover** automático.
-- **Salud de operadores** por OPTIONS keepalive (UP/DOWN en vivo).
-- **Manipulación SIP** avanzada por operador (reescribe From/PPI/PAI/Diversion/headers) con presets compatibles.
-- Topology hiding, Session Timers (anti-zombi), accounting en el borde.
-- Anti-flood (pike), lista de bloqueo (secfilter), auto-ban.
+**Borde opcional con SBC-NG**
+
+La seguridad perimetral, el LCR con failover, la salud de operadores, la manipulación SIP y el ocultamiento de topología viven en **[SBC-NG](https://github.com/flavioGonz/SBC-NG)**, un producto aparte. PBX-NG lo integra con el módulo «Conexión a SBC-NG» (Sistema → SBC-NG (conexión)): se carga IP/host, puerto, transporte (UDP/TCP/TLS), contexto, códecs y la URL del panel del SBC, y la central crea sola la troncal `to-sbc` y la ruta saliente «0 + número → SBC-NG». Con el módulo encendido, el SBC-NG aparece en la topología como nodo externo con estado medido; apagado, la central no menciona ningún borde.
 
 **Aplicaciones**
 - IVR visual (React Flow) + **IVR conversacional con IA** (STT→LLM→TTS).
@@ -111,7 +114,7 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 
 **Operación**
 - Dashboard en tiempo real (Socket.io + AMI), topología animada con salud.
-- **Diagnóstico ICE/TURN en vivo**: el panel (SBC → TURN) y el softphone levantan una `RTCPeerConnection` real y muestran los candidatos que juntan — verde solo si el TURN está *alcanzable y autenticado*, y si el RTP de la llamada va **por TURN** o **directo**.
+- **Diagnóstico ICE/TURN en vivo**: el panel (Configuración → WebRTC / TURN) y el softphone levantan una `RTCPeerConnection` real y muestran los candidatos que juntan — verde solo si el TURN está *alcanzable y autenticado*, y si el RTP de la llamada va **por TURN** o **directo**.
 - Fail2Ban con geolocalización de ataques, gestión de bloqueos.
 - Watchdog de agentes (auto-recuperación de cuelgues).
 
@@ -153,31 +156,26 @@ El instalador es **interactivo**: te pregunta la topología, qué **módulos** l
 | Módulo | Perfil | Contenedor(es) | Función |
 |---|---|---|---|
 | core | `core` | postgres, redis, asterisk, api, dashboard | Núcleo (siempre) |
-| sbc | `sbc` | kamailio, rtpengine, wsbridge | SBC / troncales WebRTC |
 | turn | `turn` | coturn | TURN/STUN para WebRTC |
 | ai | `ai` | voz | IVR con IA (TTS/STT) |
 | intercom | `intercom` | go2rtc | Video RTSP (intercom/cámaras) |
 | proxy | `proxy` | npm | Reverse proxy TLS/WSS (opcional) |
 
-Las **grabaciones** son función del `core` (volumen compartido `recordings`), no un contenedor aparte. Detalle completo en [`docs/PACKAGING.md`](docs/PACKAGING.md).
+Las **grabaciones** son función del `core` (volumen compartido `recordings`), no un contenedor aparte. El módulo `sbc` («Conexión a SBC-NG») es **lógico**: no levanta ningún contenedor, solo administra la troncal `to-sbc` y las rutas hacia un SBC-NG externo; viene apagado por defecto. Detalle completo en [`docs/PACKAGING.md`](docs/PACKAGING.md).
 
-### Instalación por rol (1 VM o 2 VMs)
+### Instalación por rol
 
-El instalador es **multi-rol**. En una sola máquina o repartido en dos VMs (núcleo en la LAN, borde SBC en la DMZ):
+El instalador tiene dos **roles**: `all` (todo en un host: `core,turn,ai,intercom`, es el default) y `core` (solo el núcleo, para cuando TURN, voz o intercom viven en otro host):
 
 ```bash
 # SOHO / demo — todo en una VM
 ./install.sh --role=all
 
-# 2 VMs — primero el CORE (LAN); genera edge-join.env con los secretos compartidos
-./install.sh --role=core --public-ip=<IP_WAN> --domain=pbx.cliente.com --edge-ip=<IP_LAN_EDGE>
-
-# copiar el join al edge:  scp docker/edge-join.env root@<IP_EDGE>:/opt/pbx-ng/docker/
-# luego, en el EDGE (DMZ):
-./install.sh --role=edge --join=edge-join.env --public-ip=<IP_WAN>
+# Solo el núcleo; el coturn corre en otro host (por ejemplo, en la DMZ)
+./install.sh --role=core --turn-ip=<IP_DEL_TURN> --public-ip=<IP_WAN> --domain=pbx.cliente.com
 ```
 
-`core` genera y comparte credenciales; `edge` las consume vía `edge-join.env`, valida la conectividad al core (Postgres/AMI/ARI) y levanta solo `sbc,turn`. Arquitectura, firewall y pasos completos en [`docs/TOPOLOGY.md`](docs/TOPOLOGY.md).
+Flags disponibles: `--role=`, `--profiles=`, `--turn-ip=`, `--public-ip=`, `--domain=`, `--tenant=`, `--release`, `--yes` y `--print-firewall`. Sin flags, el instalador pregunta todo. Cada host tiene su propia base y sus propios secretos; no se comparte nada entre el núcleo y un SBC-NG. Topologías y pasos completos en [`docs/TOPOLOGY.md`](docs/TOPOLOGY.md).
 
 ### Actualización por imagen (sin `docker cp`)
 
@@ -206,7 +204,7 @@ Instalación nativa sobre Debian/Ubuntu (o contenedores LXC en Proxmox), un serv
 
 Para un cluster **Proxmox VE**: un script que corre en cualquier nodo y **crea
 por sí mismo** todos los LXC del stack, preguntando la forma de despliegue
-(compacto / standalone / híbrido / separado / personalizado), el modo de la app (PBX simple o multi-tenant) y
+(compacto / núcleo + acceso / núcleo + voz / separado / personalizado), el modo de la app (PBX simple o multi-tenant) y
 **dónde ubicar cada componente** (recomienda el nodo con más RAM libre). Cada
 contenedor corre Docker y levanta sus perfiles.
 
@@ -227,12 +225,15 @@ Hacia Internet se publica **solo** esto:
 
 | Puerto | Proto | Para qué |
 |---|---|---|
-| `443` (y `80` para ACME) | TCP | HTTPS + **WSS** del softphone WebRTC (vía reverse proxy) |
-| `5060` / `5061` | UDP+TCP / TCP | SIP hacia Kamailio (troncales y teléfonos físicos) |
-| `30000-40000` | UDP | RTP de rtpengine (medios de troncales SIP) |
+| `443` (y `80` para ACME) | TCP | HTTPS + **WSS** del softphone WebRTC (vía reverse proxy, que reenvía `/ws` a Asterisk :8088) |
 | `3478` | **UDP y TCP** | STUN/TURN (coturn) — los dos, muchas redes bloquean UDP saliente |
 | `49152-65535` | UDP | **Rango relay del TURN** — sin esto el candidato relay se obtiene pero **no hay audio** |
 | `5349` | TCP | TURNS (TURN sobre TLS), recomendado para redes corporativas |
+| `5060` / `5061` | UDP+TCP / TCP | SIP de Asterisk — **solo** si hay troncales del operador o teléfonos remotos hablando directo con la central |
+| `10000-20000` | UDP | RTP de Asterisk — va junto con 5060/5061, en el mismo caso |
+
+Si hay un **SBC-NG** adelante, el SIP/RTP público se expone en el SBC-NG (ver su documentación) y la central solo
+necesita LAN hacia él: no se publican 5060/5061 ni 10000-20000.
 
 Nunca se publican: `5432` (Postgres), `6379` (Redis), `3000`/`3001` (API/panel), `5038` (AMI),
 `8088` (ARI), `8091`/`8092` (agentes), `81` (admin del proxy).
@@ -241,7 +242,7 @@ El instalador **imprime la lista exacta** según los módulos activos y al termi
 TURN de verdad** (STUN Binding → Allocate 401 → Allocate firmado → candidato relay):
 
 ```bash
-./install.sh --print-firewall --profiles=core,sbc,turn   # solo mostrar qué abrir
+./install.sh --print-firewall --profiles=core,turn       # solo mostrar qué abrir
 scripts/check-turn.py --env docker/.env --tcp            # verificar el TURN a mano
 ```
 
@@ -322,8 +323,9 @@ Reglas de la casa:
 ## Versionado y releases
 
 - `VERSION` + [`CHANGELOG.md`](CHANGELOG.md) siguen **SemVer** / *Keep a Changelog*.
-- Un tag `vX.Y.Z` dispara [`release.yml`](.github/workflows/release.yml), que construye y publica las 7 imágenes
-  `ghcr.io/flaviogonz/pbx-ng/<api|dashboard|asterisk|kamailio|coturn|wsbridge|voz>:X.Y.Z` (Asterisk compila desde fuente: ~15–50 min).
+- Un tag `vX.Y.Z` dispara [`release.yml`](.github/workflows/release.yml), que construye y publica las 5 imágenes
+  `ghcr.io/flaviogonz/pbx-ng/<asterisk|api|dashboard|coturn|voz>:X.Y.Z` (Asterisk compila desde fuente: ~15–50 min).
+  Las de terceros (postgres, redis, go2rtc, npm) se usan pinneadas. Kamailio/rtpengine/wsbridge ya no se construyen acá: son de SBC-NG.
 - `docker/release.sh --bundle` genera el paquete *air-gapped* (`dist/pbxng-<ver>-images.tar.gz`) para clientes sin acceso a Internet.
 - En el host destino, `docker/deploy.sh` hace `pull`/`load` → migraciones → `up -d`. Rollback = desplegar la versión anterior. Detalle en [`RELEASE.md`](RELEASE.md).
 - El tag `softphone-vX.Y.Z` publica el instalador Windows del softphone ([`softphone.yml`](.github/workflows/softphone.yml)).
@@ -333,15 +335,15 @@ Reglas de la casa:
 - **Servicios**: cada componente corre bajo systemd (bare-metal) o como contenedor (Docker), con `Restart=always`.
 - **Watchdog**: un timer detecta agentes colgados (por heartbeat) y los reinicia solos.
 - **Backups**: se recomienda `pg_dump` periódico de la base `pbxng` (config + CDR).
-- **Logs**: dashboard `journalctl`, SBC en `/var/log`, watchdog en `/var/log/pbxng-watchdog.log`.
-- **Verificación**: `scripts/verify-pbxng.sh` (estado del stack) y `scripts/check-turn.py` (TURN real: STUN + Allocate + candidato relay). El panel expone el mismo diagnóstico en SBC → TURN.
+- **Logs**: dashboard `journalctl`, watchdog en `/var/log/pbxng-watchdog.log`.
+- **Verificación**: `scripts/verify-pbxng.sh` (estado del stack) y `scripts/check-turn.py` (TURN real: STUN + Allocate + candidato relay). El panel expone el mismo diagnóstico en Configuración → WebRTC / TURN.
 
 ## Seguridad
 
 Defensa en capas:
 
 - **API**: autenticación **deny-by-default** (todo `/api` requiere JWT salvo una allowlist pública explícita).
-- **SBC**: anti-flood (pike), lista de bloqueo gestionable (secfilter), auto-ban, ocultamiento de topología, cifrado TLS/SRTP.
+- **Borde**: TLS (5061) y DTLS-SRTP los termina Asterisk. Anti-flood, listas de bloqueo, auto-ban y ocultamiento de topología en el perímetro los aporta SBC-NG, si se lo pone adelante.
 - **Fail2Ban** sobre logs PJSIP con geolocalización y gestión de bloqueos/lista blanca.
 - **Agentes internos** protegidos por token compartido; comandos de sistema con validación (sin `shell=True`).
 - **Recomendado en producción**: rotar todos los secretos, activar TLS en teléfonos, y RBAC multi-tenant.

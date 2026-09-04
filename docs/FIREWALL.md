@@ -17,15 +17,18 @@ Solo estos. Nada más.
 
 | Puerto | Proto | Servicio | Rol/VM | ¿Obligatorio? |
 |---|---|---|---|---|
-| `443` | TCP | HTTPS + **WSS** (softphone WebRTC) vía reverse proxy | proxy / core | **Sí** |
+| `443` | TCP | HTTPS + **WSS** (softphone WebRTC) vía reverse proxy; el proxy reenvía `/ws` a Asterisk `:8088` | proxy / core | **Sí** |
 | `80` | TCP | HTTP (solo para el reto ACME de Let's Encrypt) | proxy | Sí si usás LE |
-| `5060` | UDP/TCP | SIP hacia Kamailio (troncales SIP y teléfonos físicos remotos) | edge (`sbc`) | Sí si hay SIP clásico |
-| `5061` | TCP | SIP TLS | edge (`sbc`) | Opcional |
-| `3478` | **UDP y TCP** | STUN/TURN (coturn) | edge (`turn`) | **Sí para WebRTC tras NAT** |
-| `5349` | TCP | TURNS (TURN sobre TLS) — redes corporativas que solo dejan salir 443/TLS | edge (`turn`) | Recomendado |
-| `49152-65535` | UDP | **Rango relay del TURN** (el RTP que pasa por coturn) | edge (`turn`) | **Sí, junto con 3478** |
-| `30000-40000` | UDP | RTP de rtpengine (medios de troncales SIP) | edge (`sbc`) | Sí si hay troncales SIP |
-| `10000-20000` | UDP | RTP de Asterisk — **solo** si Asterisk habla directo al WAN (topología de 1 VM sin SBC) | core | Depende |
+| `3478` | **UDP y TCP** | STUN/TURN (coturn) | `turn` | **Sí para WebRTC tras NAT** |
+| `5349` | TCP | TURNS (TURN sobre TLS) — redes corporativas que solo dejan salir 443/TLS | `turn` | Recomendado |
+| `49152-65535` | UDP | **Rango relay del TURN** (el RTP que pasa por coturn) | `turn` | **Sí, junto con 3478** |
+| `5060` | UDP/TCP | SIP de Asterisk — **solo** si hay troncales del operador o teléfonos remotos hablando directo con la central | core | Sí si hay SIP directo |
+| `5061` | TCP | SIP TLS de Asterisk (mismo caso) | core | Opcional |
+| `10000-20000` | UDP | RTP de Asterisk — va junto con 5060/5061, mismo caso | core | Sí si hay SIP directo |
+
+> **Con SBC-NG adelante** (otro producto), el SIP/RTP público se expone en el SBC-NG
+> (ver su documentación) y la central **no publica** 5060/5061 ni 10000-20000: solo
+> necesita LAN hacia él. WebRTC (443 + TURN) sigue siendo cosa de PBX-NG en los dos casos.
 
 > **El error más común**: abrir `3478` y olvidar el rango `49152-65535/UDP`. El
 > cliente obtiene el candidato relay (el Allocate funciona por 3478) pero después
@@ -39,26 +42,30 @@ Solo estos. Nada más.
 
 | Puerto | Servicio | Quién debe alcanzarlo |
 |---|---|---|
-| `5432` | PostgreSQL | solo el core y (en 2 VMs) **la IP del edge** |
+| `5432` | PostgreSQL | solo el core (no se comparte con nadie, tampoco con SBC-NG) |
 | `6379` | Redis | solo el core (no publica al host) |
 | `3000` | API control-plane | solo el proxy |
 | `3001` | Dashboard | solo el proxy |
-| `5038` | Asterisk AMI | solo el core/edge |
-| `8088` | Asterisk ARI/WS | solo el core/edge |
+| `5038` | Asterisk AMI | solo el core |
+| `8088` | Asterisk ARI/WS | solo el core y el proxy (para `/ws`) |
 | `8091` / `8092` | Agentes internos (turn-agent, ast-agent) | solo la API, con token |
 | `81` | Nginx Proxy Manager (admin) | solo LAN / VPN |
 
-### Interno (LAN): core ↔ edge
+### Interno (LAN): core ↔ SBC-NG
 
-En topología de 2 VMs, el edge (DMZ) necesita llegar al core:
+Si hay un SBC-NG adelante, necesita llegar al core (y nada más que eso):
 
 | Desde | Hacia | Puerto |
 |---|---|---|
-| edge | core | `5432/TCP` (Postgres realtime) |
-| edge | core | `5038/TCP` (AMI) |
-| edge | core | `8088/TCP` (ARI/WS) |
+| SBC-NG | core | `5060/UDP+TCP` (SIP de Asterisk, troncal `to-sbc`) |
+| SBC-NG | core | `10000-20000/UDP` (RTP de Asterisk) |
 
-El `install.sh --role=edge` valida esos tres antes de desplegar.
+Postgres, AMI y ARI **no** se comparten con el SBC-NG: cada producto tiene su propia
+base y sus secretos. El módulo «Conexión a SBC-NG» mide el puerto SIP del SBC-NG desde
+el core, así que el core también tiene que poder salir hacia el SIP del SBC-NG.
+
+Si el TURN y el proxy viven en otro host (rol `core` + `--turn-ip=`), el proxy necesita
+llegar al core por `3000`, `3001` y `8088` (WSS `/ws`); el coturn no necesita nada del core.
 
 ---
 
@@ -69,8 +76,8 @@ Todo lo que se publica al WAN debe apuntar al contenedor correcto:
 | Tráfico | → destino |
 |---|---|
 | `80,443/TCP` | IP del **reverse proxy** (NPM) |
-| `5060,5061` + `30000-40000/UDP` | IP del **edge** (Kamailio + rtpengine) |
-| `3478/UDP`, `3478/TCP`, `49152-65535/UDP` | IP del **edge** (coturn) |
+| `3478/UDP`, `3478/TCP`, `5349/TCP`, `49152-65535/UDP` | IP del **coturn** (`turn`) |
+| `5060,5061` + `10000-20000/UDP` | IP de **Asterisk** (core) — solo sin SBC-NG; con SBC-NG, a la IP del SBC-NG según su doc |
 
 Además el coturn necesita conocer su IP pública. En `.env`:
 
@@ -81,7 +88,7 @@ PUBLIC_IP=<IP_WAN>        # o el FQDN publicado
 que se materializa en `turnserver.conf` como:
 
 ```
-external-ip=<IP_WAN>/<IP_LAN_DEL_EDGE>
+external-ip=<IP_WAN>/<IP_LAN_DEL_TURN>
 ```
 
 Ese formato `publica/privada` es **imprescindible** detrás de NAT: le dice al coturn
@@ -135,13 +142,13 @@ Alternativa si no querés tocar las reglas existentes — agregar las espejo par
 ```
 /ip firewall nat add chain=dstnat action=dst-nat protocol=udp dst-port=3478 \
   dst-address-type=local src-address=<LAN/24> dst-address=!<IP_ROUTER> \
-  to-addresses=<IP_EDGE> comment="Coturn hairpin UDP"
+  to-addresses=<IP_TURN> comment="Coturn hairpin UDP"
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=3478 \
   dst-address-type=local src-address=<LAN/24> dst-address=!<IP_ROUTER> \
-  to-addresses=<IP_EDGE> comment="Coturn hairpin TCP"
+  to-addresses=<IP_TURN> comment="Coturn hairpin TCP"
 /ip firewall nat add chain=dstnat action=dst-nat protocol=udp dst-port=49152-65535 \
   dst-address-type=local src-address=<LAN/24> dst-address=!<IP_ROUTER> \
-  to-addresses=<IP_EDGE> comment="TURN relay hairpin"
+  to-addresses=<IP_TURN> comment="TURN relay hairpin"
 ```
 
 > Ojo con el rango `49152-65535/UDP`: es amplio. Si el router escucha algo en un
@@ -178,7 +185,7 @@ Salida esperada:
 Si aparece un **candidato relay**, el TURN está alcanzable **y** autenticado — es
 exactamente la condición que necesita un cliente WebRTC.
 
-Lo mismo, gráfico y desde el navegador del usuario: **Panel → SBC → TURN →
+Lo mismo, gráfico y desde el navegador del usuario: **Panel → Configuración → WebRTC / TURN →
 "Diagnóstico ICE en vivo"**, y en el softphone de escritorio **Ajustes → Red**.
 Ambos levantan una `RTCPeerConnection` real y muestran los candidatos que juntan.
 
@@ -203,12 +210,13 @@ internas andando es lo normal, no un síntoma.
 
 ## 6. Checklist de instalación
 
-- [ ] `443/TCP` publicado al reverse proxy (WSS del softphone).
-- [ ] `5060` (+`5061`) y `30000-40000/UDP` al edge, si hay troncales/teléfonos SIP.
-- [ ] `3478/UDP` **y** `3478/TCP` al edge.
-- [ ] `49152-65535/UDP` al edge (rango relay). **Sin esto no hay audio por TURN.**
+- [ ] `443/TCP` publicado al reverse proxy (WSS del softphone, `/ws` → Asterisk `:8088`).
+- [ ] `3478/UDP` **y** `3478/TCP` al coturn.
+- [ ] `49152-65535/UDP` al coturn (rango relay). **Sin esto no hay audio por TURN.**
+- [ ] `5060` (+`5061`) y `10000-20000/UDP` a Asterisk, **solo** si hay troncales del operador o teléfonos remotos directos a la central. Con SBC-NG adelante, eso se publica en el SBC-NG.
 - [ ] `PUBLIC_IP` correcta en `.env` → `external-ip=<publica>/<privada>` en coturn.
-- [ ] `TURN_PASS` rotada (no `pbxng-turn-changeme`) y **la misma** en el `.env` del core y del edge.
-- [ ] Postgres `5432` accesible **solo** desde la IP del edge.
+- [ ] `TURN_PASS` rotada (no `pbxng-turn-changeme`) y, si el coturn corre en otro host, **la misma** en los dos `.env`.
+- [ ] Postgres `5432`, AMI `5038` y ARI `8088` sin publicar (ni al SBC-NG).
+- [ ] Con SBC-NG: desde su IP, permitido `5060` y `10000-20000/UDP` hacia el core.
 - [ ] `scripts/check-turn.py` da **ALLOCATE 200 · relay = …** desde fuera de la LAN.
 - [ ] (Opcional) Hairpin resuelto, para que el diagnóstico también dé verde desde adentro.

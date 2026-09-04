@@ -19,24 +19,25 @@ la unica fuente de verdad.
    - `pbxng-X.Y.Z.tar.gz` — compose de release + scripts + config + migraciones.
 
 ## Imagenes que se construyen
-`asterisk, api, dashboard, kamailio, wsbridge, coturn, voz` (las de terceros —postgres, redis,
-rtpengine, go2rtc, npm— se usan pinneadas, no se construyen).
+`asterisk, api, dashboard, coturn, voz` (las de terceros —postgres, redis, go2rtc, npm— se usan
+pinneadas, no se construyen). Kamailio, rtpengine y wsbridge ya no forman parte de PBX-NG: son
+imagenes de **SBC-NG**, que se releasea y licencia aparte.
 
 ## Instalar / actualizar en un cliente
 Copiar `docker/` (o el bundle) al host. Tener `docker/.env` con secretos (ver `.env.example`) y
-`COMPOSE_PROFILES` con los modulos contratados (ej. `core,sbc,turn,intercom`).
+`COMPOSE_PROFILES` con los modulos contratados (ej. `core,turn,intercom`).
 
 **Con registry (online):**
 ```
 cd docker
 export PBXNG_REGISTRY=ghcr.io/<org>/pbx-ng PBXNG_VERSION=X.Y.Z
-export COMPOSE_PROFILES=core,sbc,turn,intercom
+export COMPOSE_PROFILES=core,turn,intercom
 ./deploy.sh
 ```
 **Air-gapped (offline):**
 ```
 cd docker
-export PBXNG_VERSION=X.Y.Z COMPOSE_PROFILES=core,sbc,turn,intercom
+export PBXNG_VERSION=X.Y.Z COMPOSE_PROFILES=core,turn,intercom
 ./deploy.sh --images=/ruta/pbxng-X.Y.Z-images.tar.gz
 ```
 `deploy.sh` carga/pull las imagenes, corre **migraciones** de DB y hace `up -d` (sin build).
@@ -54,8 +55,8 @@ cd docker && ./install.sh --print-firewall --profiles=$COMPOSE_PROFILES   # que 
 ```
 `check-turn.py` hace STUN Binding + TURN Allocate firmado: si devuelve **ALLOCATE 200 · relay**,
 los clientes WebRTC detras de NAT simetrico van a tener audio. Si no, ver `docs/FIREWALL.md`.
-El mismo diagnostico esta en el panel (SBC -> TURN -> "Diagnostico ICE en vivo") y en el
-softphone de escritorio (Ajustes -> Red).
+El mismo diagnostico esta en el panel (Configuracion -> WebRTC / TURN -> "Diagnostico ICE en vivo")
+y en el softphone de escritorio (Ajustes -> Red).
 
 ## Softphone de escritorio (release aparte)
 `softphone-app/` versiona por su cuenta (`softphone-app/package.json`) y se publica con
@@ -68,6 +69,8 @@ Volver a desplegar la version anterior: `export PBXNG_VERSION=X.Y.(Z-1); ./deplo
 
 ## Ediciones (licenciamiento) — mapea a perfiles
 - **Core**: `core` (PBX + WebRTC basico).
-- **Pro**: `core,sbc,turn` (SBC/anti-fraude + TURN + troncales WebRTC).
-- **Enterprise**: `core,sbc,turn,ai,intercom` (IVR IA + video intercom + multi-tenant).
+- **Pro**: `core,turn` (TURN propio para WebRTC tras NAT).
+- **Enterprise**: `core,turn,ai,intercom` (IVR IA + video intercom + multi-tenant).
 El cliente solo levanta los perfiles contratados; el resto de contenedores ni existen.
+**SBC-NG** (borde SIP, LCR, troncales del operador) se licencia aparte: en cualquier edicion se
+conecta desde el modulo «Conexion a SBC-NG» del panel, que no levanta contenedores.

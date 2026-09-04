@@ -9,7 +9,6 @@ existe **solo si su módulo está activo**. El estado activo vive en
 | Módulo | Perfil | Contenedor(es) | Función |
 |---|---|---|---|
 | core | `core` | postgres, redis, asterisk, api, dashboard | Núcleo (siempre) |
-| sbc | `sbc` | kamailio, rtpengine, wsbridge | SBC / troncales WebRTC |
 | turn | `turn` | coturn | TURN/STUN para WebRTC |
 | ai | `ai` | voz | IVR con IA (TTS/STT) |
 | intercom | `intercom` | go2rtc | Video RTSP (intercom/cámaras) |
@@ -19,13 +18,23 @@ Las **grabaciones** son una función del `core` (no un contenedor): Asterisk
 graba con MixMonitor en el volumen compartido `recordings`, y la API las lee/
 reproduce/indexa directo (sin proceso extra).
 
+El módulo **`sbc` («Conexión a SBC-NG»)** es lógico, sin perfil ni contenedor:
+solo administra la troncal `to-sbc` y las rutas hacia un
+[SBC-NG](https://github.com/flavioGonz/SBC-NG) externo (otro producto, con su
+propio empaquetado). Viene apagado por defecto; la migración 0007 lo enciende en
+instalaciones que ya tenían `to-sbc`. Kamailio, rtpengine y wsbridge ya no se
+empaquetan acá.
+
 ## Formas de desplegar
 
 1. **Single-VM** (todo en un host) → `docker/install.sh`
-   - Elegís módulos → escribe `COMPOSE_PROFILES` en `.env` → `docker compose up -d`.
+   - Roles `all` (core+turn+ai+intercom, default) o `core` (solo núcleo; `--turn-ip=`
+     si coturn vive en otro host). Escribe `COMPOSE_PROFILES` en `.env` →
+     `docker compose up -d`.
    - Instala `pbxng-ctl` + el reconciliador.
 2. **Proxmox multi-LXC** → `deploy/pbxng-proxmox.sh`
-   - Formas: compacto (1 CT) / standalone (2) / híbrido (3) / separado (1 por módulo) / custom.
+   - Formas: compacto (1 CT) / núcleo + acceso (2 CTs: LAN + TURN/proxy en DMZ,
+     recomendado) / núcleo + voz / separado (core, turn, ai, intercom, proxy) / custom.
    - Crea los LXC, instala Docker, clona el repo, escribe `.env` con `COMPOSE_PROFILES`
      por rol e instala `pbxng-ctl` + reconciliador en cada CT.
 3. **All-in-one** (1 contenedor, demo) → `install.sh` opción 2.
@@ -45,11 +54,13 @@ pbxng-ctl reconcile              # sincroniza contenedores <-> COMPOSE_PROFILES
 El dashboard (Módulos) escribe `pbxng_settings.mod_<id>` (1/0). El
 **reconciliador** (`pbxng-reconciler.timer`, cada 20 s) lee esas claves y llama
 a `pbxng-ctl enable/disable` para que el contenedor exista solo si el módulo
-está activo. Módulos con contenedor: `sbc`, `turn`, `ai`, `intercom`.
+está activo. Módulos con contenedor: `turn`, `ai`, `intercom`. El toggle de
+`sbc` (Conexión a SBC-NG) no pasa por el reconciliador: solo habilita la página
+Sistema → SBC-NG (conexión) y la API `/api/sbc-link`.
 
 > Requisito para el toggle de intercom en el panel: agregar `'intercom'` a
 > `MODULE_IDS` en `control-plane/app.js` (hoy: sbc, turn, voz, clicktocall,
-> push, autoprov, ai, wsbridge). El reconciliador ya mapea `mod_intercom`.
+> push, autoprov, ai). El reconciliador ya mapea `mod_intercom`.
 
 ## Notas
 - go2rtc se publica al navegador vía el reverse proxy en `/go2rtc/` (WS/MSE).
