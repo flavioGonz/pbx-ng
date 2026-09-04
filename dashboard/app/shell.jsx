@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider } from '@mantine/core';
 import {
-  IconSitemap, IconServer2, IconDatabase, IconDatabaseExport, IconNetwork,
+  IconSitemap, IconServer2, IconDatabase, IconRouteAltLeft, IconDatabaseExport, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk,
   IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook} from '@tabler/icons-react';
@@ -55,6 +55,7 @@ const groups = [
     { href: '/certificados', label: 'Certificados TLS', icon: IconCertificate },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
     { href: '/configuracion', label: 'Configuración', icon: IconSettings },
+    { href: '/sbc', label: 'SBC-NG (conexión)', icon: IconRouteAltLeft },
     { href: '/manuales', label: 'Manuales', icon: IconBook },
   ] },
 ];
@@ -65,7 +66,7 @@ export default function Shell({ children }) {
   const [abiertos, setAbiertos] = useState([]);  // acordeón: máximo 2 grupos abiertos a la vez (como el SBC)
   const [mods, setMods] = useState({});
   useEffect(() => { fetch('/backend/api/modules').then((r) => r.json()).then(setMods).catch(() => {}); }, []);
-  const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai' };
+  const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/sbc': 'sbc' };
   const visibleItem = (it) => !MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false;
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
   useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then((bb) => { setBrand(bb); if (bb && bb.name && typeof document !== 'undefined') document.title = bb.name; }).catch(() => {}); }, []);

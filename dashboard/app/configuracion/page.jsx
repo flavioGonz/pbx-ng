@@ -7,6 +7,7 @@ import ModulesPanel from '../ModulesPanel';
 import BrandingPanel from '../BrandingPanel';
 import ProxyPanel from '../ProxyPanel';
 import AlertsPanel from '../AlertsPanel';
+import TurnConsole from '../TurnConsole';
 const STMAP = { ok: ['teal', 'Activo'], pending: ['yellow', 'Pendiente'], optional: ['gray', 'Opcional'], down: ['red', 'Caído'], off: ['gray', 'Inactivo'] };
 
 export default function Configuracion() {
@@ -53,6 +54,7 @@ export default function Configuracion() {
           <Tabs.Tab value="modulos" leftSection={<IconAdjustments size={16} />}>Módulos</Tabs.Tab>
           <Tabs.Tab value="branding" leftSection={<IconAdjustments size={16} />}>Branding</Tabs.Tab>
           <Tabs.Tab value="proxy" leftSection={<IconShieldLock size={16} />}>Proxy / TLS</Tabs.Tab>
+          <Tabs.Tab value="webrtc" leftSection={<IconPlugConnected size={16} />}>WebRTC / TURN</Tabs.Tab>
           <Tabs.Tab value="componentes" leftSection={<IconServer2 size={16} />}>Componentes</Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={16} />}>Email por empresa</Tabs.Tab>
           <Tabs.Tab value="alertas" leftSection={<IconBell size={16} />}>Alertas</Tabs.Tab>
@@ -65,6 +67,11 @@ export default function Configuracion() {
         <Tabs.Panel value="branding"><BrandingPanel /></Tabs.Panel>
 
         <Tabs.Panel value="proxy"><ProxyPanel /></Tabs.Panel>
+
+        {/* WebRTC funciona sin SBC: el softphone entra por WSS (/ws -> Asterisk :8088, via el
+            proxy) y el audio va con ICE/STUN/TURN. Aca se administra el TURN propio y se
+            prueba el ICE real desde el navegador. */}
+        <Tabs.Panel value="webrtc"><TurnConsole /></Tabs.Panel>
 
         <Tabs.Panel value="componentes">
           {loading ?

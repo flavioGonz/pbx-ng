@@ -1,4 +1,4 @@
-/* PcapCapture.jsx - navaja de diagnóstico: captura de paquetes (pcap) en SBC o Asterisk */
+/* PcapCapture.jsx - navaja de diagnóstico: captura de paquetes (pcap) en Asterisk. (El borde se captura desde el panel de SBC-NG.) */
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { Button, Modal, Group, Stack, Text, SegmentedControl, NumberInput, Badge, ActionIcon, Tooltip, Table, ThemeIcon, Card } from '@mantine/core';
@@ -11,7 +11,7 @@ const fmtSize = (b) => (b > 1e6 ? (b / 1048576).toFixed(1) + ' MB' : b > 1e3 ? (
 
 export default function PcapCapture() {
   const [open, setOpen] = useState(false);
-  const [node, setNode] = useState('sbc');
+  const [node] = useState('asterisk');
   const [preset, setPreset] = useState('sip');
   const [dur, setDur] = useState(30);
   const [starting, setStarting] = useState(false);
@@ -43,7 +43,7 @@ export default function PcapCapture() {
           <Card withBorder radius="md" padding="md">
             <Text size="sm" fw={600} mb={8}>Nueva captura</Text>
             <Group align="flex-end" gap="md" wrap="wrap">
-              <div><Text size="xs" c="dimmed" mb={4}>Dónde capturar</Text><SegmentedControl value={node} onChange={setNode} data={[{ label: 'SBC (Kamailio)', value: 'sbc' }, { label: 'Asterisk', value: 'asterisk' }]} /></div>
+              <div><Text size="xs" c="dimmed" mb={4}>Dónde capturar</Text><SegmentedControl value={node} data={[{ label: 'Asterisk (núcleo)', value: 'asterisk' }]} /></div>
               <div><Text size="xs" c="dimmed" mb={4}>Qué</Text><SegmentedControl value={preset} onChange={setPreset} data={PRESETS} /></div>
               <NumberInput label="Duración (s)" value={dur} onChange={(v) => setDur(v || 30)} min={3} max={300} w={110} />
               <Button loading={starting} onClick={start} leftSection={<IconPlayerPlay size={16} />} color="grape">Iniciar</Button>

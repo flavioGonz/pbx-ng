@@ -1,7 +1,7 @@
 /* TrunkEditor.jsx - editor de troncal SIP: tipo por pilares + wizard por pasos + diagnóstico animado */
 'use client';
 import { useEffect, useState } from 'react';
-import { Modal, Stepper, Group, Button, Stack, Text, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, FileButton, Box, CopyButton, ActionIcon, Tooltip, Card, SimpleGrid, Loader, Collapse } from '@mantine/core';
+import { Modal, Stepper, Group, Button, Stack, Text, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, FileButton, Box, CopyButton, ActionIcon, Tooltip, Card, SimpleGrid, Loader, Collapse, Alert } from '@mantine/core';
 import { IconDeviceLandlinePhone, IconTag, IconUser, IconWorld, IconHash, IconLock, IconKey, IconPlugConnected, IconWaveSine, IconBroadcast, IconRouteAltLeft, IconPhoto, IconCloud, IconServer2, IconCheck, IconCopy, IconStethoscope, IconCircleCheck, IconCircleX, IconInfoCircle, IconChevronRight } from '@tabler/icons-react';
 const CopyField = ({ label, value }) => (
   <TextInput label={label} value={value} readOnly styles={{ input: { fontFamily: 'monospace' } }} rightSection={<CopyButton value={value}>{({ copied, copy }) => <Tooltip label={copied ? 'Copiado' : 'Copiar'}><ActionIcon variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copy}>{copied ? <IconCheck size={16} /> : <IconCopy size={16} />}</ActionIcon></Tooltip>}</CopyButton>} />
@@ -11,7 +11,6 @@ import { toast } from './notify';
 const CODECS = ['ulaw', 'alaw', 'g722', 'g729', 'opus', 'gsm'];
 const TYPES = [
   { value: 'asterisk', label: 'SIP · Directa', desc: 'Se registra directo en Asterisk', icon: IconServer2, color: '#1d4ed8' },
-  { value: 'kamailio', label: 'SIP · vía SBC', desc: 'La seguridad vive en el SBC-NG', icon: IconRouteAltLeft, color: '#7c3aed' },
   { value: 'webrtc', label: 'WebRTC (WSS)', desc: 'SIP sobre WebSocket + DTLS-SRTP', icon: IconWaveSine, color: '#0e9488' },
 ];
 export const trunkBlank = {
@@ -71,7 +70,6 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
   const [f, setF] = useState(trunkBlank);
   const [active, setActive] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [gwOpts, setGwOpts] = useState([]);
   const [wr, setWr] = useState(null);
   const [wmode, setWmode] = useState('server');
   const editing = !!initialName;
@@ -80,7 +78,6 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
   useEffect(() => {
     if (!opened) return;
     setActive(0); setWr(null); setWmode('server');
-    fetch('/backend/api/sbc/routes').then((r) => r.json()).then((d) => Array.isArray(d) && setGwOpts(d.map((r) => ({ value: String(r.id), label: (r.note || r.dest) + ' (via ' + (r.gw || r.dev) + ')' })))).catch(() => {});
     if (initialName) {
       (async () => {
         let adv = {}, kind = defaultKind || 'asterisk';
@@ -142,11 +139,6 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
     onClose(); if (onSaved) onSaved();
   }
 
-  const gwData = [
-    { value: '', label: 'Directa (ruta por defecto del SBC)' },
-    { value: 'internet', label: 'Internet (WAN) — el proveedor se alcanza por la nube' },
-    ...gwOpts,
-  ];
   const STEPS = 5;
   const next = () => setActive((a) => Math.min(STEPS - 1, a + 1));
   const prev = () => setActive((a) => Math.max(0, a - 1));
@@ -176,11 +168,10 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
 
       {f.kind === 'webrtc' ? (
         <Stack gap="md">
-          <SegmentedControl fullWidth value={wmode} onChange={setWmode} disabled={editing} color="grape"
-            data={[{ value: 'server', label: 'Exponer (servidor WSS)' }, { value: 'client', label: 'Conectar (cliente WSS)' }]} />
+          {wmode === 'client' && <Alert color="orange" variant="light">Troncal WebRTC <b>cliente</b> heredada: el bridge cliente-WSS vivía en el SBC embebido y hoy se administra en SBC-NG. Esta troncal ya no registra desde la central.</Alert>}
           {wmode === 'client' ? (
             <>
-              <Text size="sm" c="dimmed">PBX-NG se <b>conecta</b> a una troncal WebRTC remota (ej. el enlace WSS que genera la UCM u otra PBX-NG). Lo maneja el servicio <b>Bridge WebRTC</b> (módulo <i>wsbridge</i>, debe estar activo).</Text>
+              <Text size="sm" c="dimmed">PBX-NG se <b>conecta</b> a una troncal WebRTC remota (ej. el enlace WSS que genera la UCM u otra PBX-NG). Hoy ese bridge cliente-WSS es parte de SBC-NG.</Text>
               <Group grow>
                 <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="webrtc-out-ies" value={f.name} onChange={(e) => set('name', e.target.value)} disabled={editing} required />
                 <TextInput label="Usuario (remoto)" leftSection={<IconUser size={15} />} value={f.username} onChange={(e) => set('username', e.target.value)} required />
@@ -191,7 +182,7 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
             </>
           ) : (!wr ? (
             <>
-              <Text size="sm" c="dimmed">Troncal <b>WebRTC estándar</b> (SIP sobre WSS + DTLS-SRTP). El extremo remoto (otra PBX-NG, Grandstream, navegador o gateway) se conecta a tu enlace WSS y se registra con estas credenciales; el SBC/rtpengine normaliza el audio hacia Asterisk.</Text>
+              <Text size="sm" c="dimmed">Troncal <b>WebRTC estándar</b> (SIP sobre WSS + DTLS-SRTP). El extremo remoto (otra PBX-NG, Grandstream, navegador o gateway) se conecta a tu enlace WSS y se registra con estas credenciales; Asterisk termina el DTLS-SRTP y hace el puente al resto de la central.</Text>
               <Group grow>
                 <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="webrtc-ies" value={f.name} onChange={(e) => set('name', e.target.value)} disabled={editing} required />
                 <TextInput label="Usuario" leftSection={<IconUser size={15} />} placeholder="(por defecto = nombre)" value={f.username} onChange={(e) => set('username', e.target.value)} />
@@ -217,7 +208,7 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
       <Stepper active={active} onStepClick={setActive} size="sm" iconSize={30} mb="lg">
         <Stepper.Step label="General" description="Nombre y logo" icon={<IconTag size={15} />}>
           <Stack gap="md" mt="md">
-            <Text size="xs" c="dimmed">{f.kind === 'kamailio' ? 'El registro y la seguridad de la troncal viven en el SBC (Kamailio).' : 'La troncal se registra directo en Asterisk.'}</Text>
+            <Text size="xs" c="dimmed">{f.kind === 'kamailio' ? 'Troncal heredada vía SBC: hoy las troncales del operador se administran en el panel de SBC-NG.' : 'La troncal se registra directo en Asterisk.'}</Text>
             <Group grow>
               <TextInput label="Nombre" leftSection={<IconTag size={15} />} placeholder="proveedor-1" value={f.name} onChange={(e) => set('name', e.target.value)} required disabled={editing} description={editing ? 'No se puede cambiar' : 'Identificador único'} />
               <TextInput label="Caller ID saliente" leftSection={<IconUser size={15} />} placeholder='"Empresa" <099...>' value={f.callerid} onChange={(e) => set('callerid', e.target.value)} description="Lo que verá el destino" />
@@ -248,7 +239,6 @@ export default function TrunkEditor({ opened, onClose, initialName, defaultKind,
               <TextInput label="Puerto" leftSection={<IconHash size={15} />} value={f.provider_port} onChange={(e) => set('provider_port', e.target.value)} w={110} />
               <Select label="Transporte" value={f.transport} onChange={(v) => set('transport', v)} data={[{ value: 'udp', label: 'UDP' }, { value: 'tcp', label: 'TCP' }, { value: 'tls', label: 'TLS (cifrado)' }]} w={150} leftSection={<IconPlugConnected size={15} />} />
             </Group>
-            <Select label="¿Por dónde se llega a esta troncal?" value={f.gateway || ''} onChange={(v) => set('gateway', v || '')} data={gwData} leftSection={f.gateway === 'internet' ? <IconCloud size={15} /> : <IconRouteAltLeft size={15} />} description="Define cómo se dibuja en la topología: directa, por Internet (nube) o por una ruta estática del SBC." />
             <DiagBlock f={f} wmode={wmode} />
           </Stack>
         </Stepper.Step>

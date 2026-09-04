@@ -11,14 +11,11 @@ export default function AsteriskConsole() {
   const { snap } = useLive();
   const [health, setHealth] = useState(null);
   const [core, setCore] = useState(null); const [net, setNet] = useState(null); const [f2b, setF2b] = useState(null);
-  const [exts, setExts] = useState([]); const [trunk, setTrunk] = useState(null); const [tf, setTf] = useState({ sbc_ip: '', sbc_port: 5060, context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'] }); const [tbusy, setTbusy] = useState('');
-  async function load() { try { setHealth(await fetch('/backend/health').then((r) => r.json())); } catch (_) {} try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {}
-    try { const tk = await fetch('/backend/api/asterisk/sbc-trunk').then((r) => r.json()); setTrunk(tk); if (tk && tk.exists) setTf((f) => ({ ...f, sbc_ip: (tk.identify && tk.identify.match) || f.sbc_ip, context: (tk.endpoint && tk.endpoint.context) || f.context, codecs: (tk.endpoint && tk.endpoint.allow) ? tk.endpoint.allow.split(',') : f.codecs })); } catch (_) {} }
+  const [exts, setExts] = useState([]);
+  async function load() { try { setHealth(await fetch('/backend/health').then((r) => r.json())); } catch (_) {} try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, []);
   useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
   useEffect(() => { const lf = () => fetch('/backend/api/extensions').then((r) => r.json()).then((d) => Array.isArray(d) && setExts(d)).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
-  async function saveTrunk() { setTbusy('save'); const r = await fetch('/backend/api/asterisk/sbc-trunk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tf) }).then((x) => x.json()).catch(() => ({ error: 1 })); setTbusy(''); toast(r.error ? 'Error al guardar' : 'Troncal hacia el SBC guardada (pjsip recargado)', r.error ? 'bad' : 'ok'); setTimeout(load, 700); }
-  async function delTrunk() { if (!confirm('¿Eliminar la troncal interna hacia el SBC?')) return; setTbusy('del'); await fetch('/backend/api/asterisk/sbc-trunk', { method: 'DELETE' }).catch(() => {}); setTbusy(''); toast('Troncal eliminada', 'info'); setTimeout(load, 700); }
   const ch = (snap && snap.channels) || []; const m = (core && core.metrics) || {};
   const amiUp = health ? !!health.ami : !!(snap && snap.health && snap.health.ami); const ariUp = health ? !!health.ari : !!(snap && snap.health && snap.health.ari);
   const flag = (on, l) => <Badge variant="light" color={on ? 'teal' : 'gray'} size="sm">{l}</Badge>;

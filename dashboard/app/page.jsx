@@ -100,13 +100,12 @@ export default function Resumen() {
   const svcList = [
     { n: 'Asterisk (AMI/ARI)', ok: (h.ari && h.ami) && okMed('asterisk', true), ip: topo?.nodes?.asterisk || '-' },
     { n: 'Base de datos', ok: h.db && okMed('db', true), ip: topo?.nodes?.db || '-' },
-    // El borde PROPIO de esta central. Distinto del producto SBC-NG, que es aparte.
-    ...(med('borde') ? [{ n: 'Borde propio', ok: okMed('borde', false), ip: med('borde').host, detalle: med('borde').motivo }] : []),
     { n: 'Turn-NG Server', ok: okMed('turn', (comps.find(c => /TURN/i.test(c.name)) || {}).status !== 'down'), ip: topo?.nodes?.turn || '-' },
     { n: 'Proxy NPM (TLS/WSS)', ok: okMed('proxy', (comps.find(c => /Proxy/i.test(c.name)) || {}).status !== 'down'), ip: topo?.nodes?.npm || '-' },
     // Bordes EXTERNOS: otro producto, con su propio panel. Se listan aparte para que
     // se vea que su caida no es una falla de esta central, pero si le corta la salida.
-    ...bordesExt.map((b) => ({ n: 'Borde externo · ' + b.nombre, ok: b.estado === 'ok', ip: b.host, detalle: b.motivo, externo: true })),
+    // Solo aparecen con el modulo "Conexion a SBC-NG" activo (el backend no los manda si no).
+    ...bordesExt.map((b) => ({ n: 'SBC-NG (' + b.nombre + ')', ok: b.estado === 'ok', ip: b.host, detalle: b.motivo, externo: true })),
   ];
   const caidos = svcList.filter((s) => !s.ok);
 
@@ -229,7 +228,7 @@ export default function Resumen() {
               label={<div style={{ textAlign: 'center' }}><Text fw={800} fz="xl" lh={1}>{trunks.length}</Text><Text fz={10} c="dimmed">troncales</Text></div>} />
             <Stack gap={6} style={{ flex: 1 }}>
               <Group justify="space-between"><Group gap={6}><IconCircleFilled size={9} color="var(--mantine-color-teal-6)" /><Text size="sm" c="dimmed">Disponibles</Text></Group><Text fw={700} size="sm">{trAvail}</Text></Group>
-              <Group justify="space-between"><Group gap={6}><IconCircleFilled size={9} color="var(--mantine-color-grape-6)" /><Text size="sm" c="dimmed">En el SBC</Text></Group><Text fw={700} size="sm">{trSbc}</Text></Group>
+              {trSbc > 0 && <Group justify="space-between"><Group gap={6}><IconCircleFilled size={9} color="var(--mantine-color-grape-6)" /><Text size="sm" c="dimmed">Vía SBC-NG</Text></Group><Text fw={700} size="sm">{trSbc}</Text></Group>}
               <Group justify="space-between"><Group gap={6}><IconCircleFilled size={9} color="var(--mantine-color-red-6)" /><Text size="sm" c="dimmed">Caídas</Text></Group><Text fw={700} size="sm">{trDown}</Text></Group>
               <Group justify="space-between"><Group gap={6}><IconCircleFilled size={9} color="var(--mantine-color-gray-5)" /><Text size="sm" c="dimmed">Sin registrar</Text></Group><Text fw={700} size="sm">{trOther}</Text></Group>
             </Stack>

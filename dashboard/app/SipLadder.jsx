@@ -135,7 +135,7 @@ export default function SipLadder() {
       <style>{`.sip-eq{display:inline-flex;gap:1px;align-items:flex-end;height:12px} .sip-eq>span{width:2px;height:4px;background:var(--mantine-color-teal-6);border-radius:1px;animation:sipeq .8s ease-in-out infinite} @keyframes sipeq{0%,100%{height:3px}50%{height:11px}}`}</style>
       <Card withBorder radius="md" padding="sm" style={{ background: 'var(--mantine-color-grape-light)' }}>
         <Group gap="xs" mb={2}><IconInfoCircle size={15} /><Text fw={700} size="sm">Analizador SIP en vivo</Text></Group>
-        <Text size="xs" c="dimmed">Cada fila es un mensaje SIP capturado en Asterisk (incl. WebRTC) o el SBC (troncales). Filtra por errores, busca, y <b>hace click en una fila</b> para ver el dialogo completo de esa llamada y la explicacion de cada paso.</Text>
+        <Text size="xs" c="dimmed">Cada fila es un mensaje SIP capturado en Asterisk (incl. WebRTC). Filtra por errores, busca, y <b>hace click en una fila</b> para ver el dialogo completo de esa llamada y la explicacion de cada paso.</Text>
       </Card>
 
       <Group justify="space-between" wrap="wrap" gap="xs">
@@ -144,7 +144,7 @@ export default function SipLadder() {
           <Tooltip label={live ? 'Pausar' : 'Reanudar'}><ActionIcon variant="light" color={live ? 'teal' : 'gray'} onClick={() => setLive((v) => !v)}>{live ? <IconPlayerPause size={16} /> : <IconPlayerPlay size={16} />}</ActionIcon></Tooltip>
           <Tooltip label="Refrescar"><ActionIcon variant="light" color="blue" onClick={load}><IconRefresh size={16} /></ActionIcon></Tooltip>
           <SegmentedControl size="xs" value={filt} onChange={setFilt} data={[{ label: 'Todo', value: 'all' }, { label: 'Errores', value: 'err' }, { label: 'Senial.', value: 'sig' }, { label: 'Registro', value: 'reg' }]} />
-          <SegmentedControl size="xs" value={hostF} onChange={setHostF} data={[{ label: 'Ambos', value: 'all' }, { label: 'Asterisk', value: 'asterisk' }, { label: 'SBC', value: 'sbc' }]} />
+          <SegmentedControl size="xs" value={hostF} onChange={setHostF} data={[{ label: 'Ambos', value: 'all' }, { label: 'Asterisk', value: 'asterisk' }]} />
         </Group>
         <Group gap="xs">
           <TextInput size="xs" leftSection={<IconSearch size={14} />} placeholder="Filtrar..." value={q} onChange={(e) => setQ(e.target.value)} w={190} />

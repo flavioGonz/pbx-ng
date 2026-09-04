@@ -11,7 +11,9 @@ const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicaci
 
 export default function Rutas({ embedded } = {}) {
   const [trunkOpts, setTrunkOpts] = useState([]); const [trunksRaw, setTrunksRaw] = useState([]);
-  const hasSbc = trunksRaw.some((t) => t.kind === 'sbc');
+  const [sbcActive, setSbcActive] = useState(false);
+  useEffect(() => { fetch('/backend/api/sbc-link').then((r) => r.json()).then((d) => setSbcActive(!!(d && d.active))).catch(() => {}); }, []);
+  const hasSbc = sbcActive;
   const [gen, setGen] = useState(false); const [rk, setRk] = useState(0);
   async function generar() {
     setGen(true);

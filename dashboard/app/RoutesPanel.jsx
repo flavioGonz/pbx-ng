@@ -1,4 +1,4 @@
-/* RoutesPanel.jsx - rutas estaticas con dropdown de interfaz + modal de edicion (SBC o Asterisk) */
+/* RoutesPanel.jsx - rutas estaticas del nucleo (Asterisk) con dropdown de interfaz + modal de edicion */
 'use client';
 import { useEffect, useState } from 'react';
 import { Card, Group, Text, Table, Button, ActionIcon, Tooltip, Modal, TextInput, Select, Stack, Badge, Code } from '@mantine/core';
@@ -6,14 +6,13 @@ import { IconPlus, IconEdit, IconTrash, IconRoute, IconAlertTriangle, IconNetwor
 import { toast } from './notify';
 
 export default function RoutesPanel({ scope }) {
-  const isAst = scope === 'asterisk';
+  const isAst = true;   // el borde (SBC-NG) es otro producto: sus rutas viven en su panel
   const [routes, setRoutes] = useState([]); const [ifaces, setIfaces] = useState([]);
   const [open, setOpen] = useState(false); const [editId, setEditId] = useState(null);
   const [f, setF] = useState({ dest: '', gw: '', dev: '', note: '' }); const [busy, setBusy] = useState(false);
   async function load() {
     try {
-      if (isAst) { const d = await fetch('/backend/api/asterisk/net').then((r) => r.json()); setRoutes(d.managed || []); setIfaces(((d.ifaces) || []).map((x) => x.name)); }
-      else { const r = await fetch('/backend/api/sbc/routes').then((r) => r.json()); setRoutes(Array.isArray(r) ? r : []); const s = await fetch('/backend/api/sbc').then((r) => r.json()); setIfaces((((s.stats || {}).net || {}).ifaces || []).map((x) => x.name)); }
+      const d = await fetch('/backend/api/asterisk/net').then((r) => r.json()); setRoutes(d.managed || []); setIfaces(((d.ifaces) || []).map((x) => x.name));
     } catch (_) {}
   }
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
@@ -23,26 +22,20 @@ export default function RoutesPanel({ scope }) {
     if (!f.dest.trim() || (!f.gw.trim() && !f.dev.trim())) { toast('Indicá destino y gateway o interfaz', 'bad'); return; }
     setBusy(true);
     try {
-      if (isAst) {
-        if (editId) await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'del', id: editId }) });
-        await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add', ...f }) });
-      } else {
-        if (editId) await fetch('/backend/api/sbc/routes/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editId }) });
-        await fetch('/backend/api/sbc/routes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) });
-      }
+      if (editId) await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'del', id: editId }) });
+      await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add', ...f }) });
     } catch (_) {}
     setBusy(false); setOpen(false); toast(editId ? 'Ruta actualizada' : 'Ruta agregada (se aplica en segundos)', 'ok'); setTimeout(load, 800);
   }
   async function del(r) {
     if (!confirm('¿Quitar la ruta ' + r.dest + '?')) return;
     try {
-      if (isAst) await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'del', id: r.id }) });
-      else await fetch('/backend/api/sbc/routes/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: r.id }) });
+      await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'del', id: r.id }) });
     } catch (_) {}
     toast('Ruta quitada', 'info'); setTimeout(load, 600);
   }
-  const host = isAst ? 'Asterisk (CT103)' : 'SBC (CT107)';
-  const col = isAst ? 'blue' : 'grape';
+  const host = 'Asterisk (núcleo)';
+  const col = 'blue';
   return (
     <Card withBorder radius="md" padding="md">
       <Group justify="space-between" mb="sm"><Group gap="xs"><Text fw={700}>Rutas estáticas</Text><Badge variant="light" color={col}>{host}</Badge></Group><Button size="xs" leftSection={<IconPlus size={14} />} onClick={openNew}>Nueva ruta</Button></Group>
