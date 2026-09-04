@@ -487,6 +487,7 @@ const PUBLIC_API = [
   ['POST', /^\/api\/push\/(subscribe|register|unsubscribe)$/],
   ['GET',  /^\/api\/internal\/wake$/],
   ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
+  ['GET',  /^\/api\/softphone\/latest$/],       // el login muestra la version descargable sin sesion
   ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
   ['POST', /^\/api\/geo\/report$/],
   // Las capturas de los manuales se piden con <img src>, que NO manda el token.
@@ -504,6 +505,28 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, next));
+
+/* ============================================================
+ *  Softphone de escritorio: cada central sirve SU instalador y el feed OTA.
+ *  El directorio viaja dentro de la imagen api (docker/fetch-softphone.sh lo
+ *  llena en el release) o se monta como volumen. Formato = el de electron-builder
+ *  (latest.yml + Setup.exe + .blockmap), asi el softphone actualiza contra
+ *  https://<central>/descargas/softphone/ sin depender de Internet ni de GitHub.
+ * ============================================================ */
+const SOFTPHONE_DIR = process.env.SOFTPHONE_DIR || _pathm.join(__dirname, 'softphone');
+app.use('/softphone', (req, res, next) => { res.set('Cache-Control', 'no-cache'); next(); },
+  express.static(SOFTPHONE_DIR, { index: false, dotfiles: 'deny', setHeaders: (res, fp) => { if (/\.(exe|msi|blockmap)$/i.test(fp)) res.set('Content-Type', 'application/octet-stream'); if (/\.yml$/i.test(fp)) res.set('Content-Type', 'text/yaml'); } }));
+function softphoneLatest() {
+  try {
+    const y = _fsm.readFileSync(_pathm.join(SOFTPHONE_DIR, 'latest.yml'), 'utf8');
+    const g = (k) => { const m = new RegExp('^' + k + ':\\s*(.+)$', 'm').exec(y); return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : ''; };
+    const file = g('path'); const version = g('version');
+    if (!file || !version) return { available: false };
+    let size = null; try { size = _fsm.statSync(_pathm.join(SOFTPHONE_DIR, file)).size; } catch (_) { return { available: false, reason: 'falta ' + file }; }
+    return { available: true, version, file, url: '/descargas/softphone/' + encodeURIComponent(file), size, date: g('releaseDate') || null, platform: 'windows' };
+  } catch (_) { return { available: false }; }
+}
+app.get('/api/softphone/latest', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(softphoneLatest()); });
 function clientIp(req) {
   const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return xf || (req.socket && req.socket.remoteAddress) || '';
@@ -2287,10 +2310,16 @@ app.get('/api/system', async (req, res) => {
 
 /* Topología CON estado medido.
  *
- * Los componentes propios (Asterisk, base, TURN, voz, proxy) se miden abriendo el
- * puerto real de cada servicio. El SBC-NG, si el modulo "Conexion a SBC-NG" esta
- * activo, aparece como borde EXTERNO: es otro producto con su propio panel, y su
- * caida no es una falla de esta central aunque le corte la salida.
+ * Antes esto devolvía sólo las IPs del archivo de configuración, y las pantallas
+ * las pintaban siempre en verde: el borde estuvo caído medio día y Topología y
+ * Resumen lo mostraron sano. Ahora cada nodo se prueba de verdad.
+ *
+ * Distingue dos cosas que estaban mezcladas y son distintas:
+ *   borde propio    parte de ESTE appliance (lo que configura SBC_HOST)
+ *   borde externo   otro producto (SBC-NG u otro) conectado por troncal, con su
+ *                   propio panel. Antes los dos se dibujaban como una sola caja
+ *                   rotulada "SBC-NG", asi que la caja podia estar verde por el
+ *                   borde propio mientras el SBC-NG externo estaba apagado.
  *
  * `nodes` se mantiene con el formato viejo a proposito: hay pantallas que lo leen
  * como texto plano y no tienen por que romperse por esto. */

@@ -14,7 +14,7 @@ import QrProvision from './QrProvision.jsx';
 
 function withVT(fn) { try { if (typeof document !== 'undefined' && document.startViewTransition) { document.startViewTransition(() => flushSync(fn)); return; } } catch {} fn(); }
 const initials = (n) => (String(n || '?')).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
-const APP_VERSION = 'v0.4.9';
+const APP_VERSION = 'v0.5.0';
 const getPhoto = () => { try { return localStorage.getItem('sp_photo') || ''; } catch { return ''; } };
 
 function Svg({ s = 22, c = 'currentColor', w = 2, children }) { return <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke={c} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round">{children}</svg>; }
@@ -426,8 +426,14 @@ export default function App() {
     window.addEventListener('online', onOnline);
     return () => { try { off && off(); } catch {} window.removeEventListener('online', onOnline); };
   }, []);
+  /* La central aprovisionada publica el instalador y el feed OTA del softphone en
+   * /descargas/softphone/. Se lo pasamos al proceso main (electron-updater). */
+  function setUpdateFeed(base) {
+    try { const b = String(base || api.getApiBase() || '').replace(/\/$/, ''); if (b && window.sphone && window.sphone.updateSetFeed) window.sphone.updateSetFeed(b + '/descargas/softphone/'); } catch {}
+  }
+  useEffect(() => { setUpdateFeed(); }, []);
   function applyProv(prov) {
-    if (prov.apiBase) { api.applySession({ base: prov.apiBase, token: prov.apiToken }); if (prov.apiToken) { setApiOn(true); setDir(null); setCls(null); setClsFull(null); } }
+    if (prov.apiBase) { api.applySession({ base: prov.apiBase, token: prov.apiToken }); if (prov.apiToken) { setApiOn(true); setDir(null); setCls(null); setClsFull(null); } setUpdateFeed(prov.apiBase); }
     const merged = { ...cfgLatest.current, ...prov };
     delete merged.apiBase; delete merged.apiToken;
     merged.transport = prov.transport || (prov.wss ? 'webrtc' : merged.transport || 'webrtc');

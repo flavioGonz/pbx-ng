@@ -21,6 +21,7 @@ const nextConfig = {
       { source: '/socket.io/:path*', destination: `${API}/socket.io/:path*` },
       { source: '/socket.io', destination: `${API}/socket.io/` },
       { source: '/prov/:path*', destination: `${API}/prov/:path*` },
+      { source: '/descargas/softphone/:path*', destination: `${API}/softphone/:path*` },   // instalador + feed OTA del softphone (lo sirve la API)
     ];
   },
 };

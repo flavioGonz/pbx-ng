@@ -1,6 +1,6 @@
 {
   "name": "pbxng-softphone",
-  "version": "0.4.9",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Softphone WebRTC generico (registra contra cualquier PBX con internos WebRTC) - PWA + Electron",

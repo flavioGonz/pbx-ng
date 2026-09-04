@@ -1,11 +1,17 @@
 name: softphone-win
 
-# Construye el instalador del softphone (.exe NSIS + .msi) en un runner Windows y lo
-# sube como artifact descargable (Actions -> run -> Artifacts). Sin firmar (ver README).
+# Construye el instalador del softphone (.exe NSIS + .msi) en un runner Windows, lo sube
+# como artifact y, si el disparo fue un tag softphone-vX.Y.Z, lo publica como GitHub
+# Release (exe + blockmap + latest.yml). Ese release es (a) el respaldo OTA de un softphone
+# todavia no aprovisionado y (b) lo que docker/fetch-softphone.sh mete en la imagen api
+# para que cada central sirva su propio instalador en /descargas/softphone/. Sin firmar.
 on:
   workflow_dispatch: {}
   push:
     tags: ['softphone-v*']
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -32,3 +38,16 @@ jobs:
           path: |
             softphone-app/release/*.exe
             softphone-app/release/*.msi
+            softphone-app/release/*.blockmap
+            softphone-app/release/latest.yml
+      - name: Publicar GitHub Release (solo con tag softphone-v*)
+        if: startsWith(github.ref, 'refs/tags/softphone-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Softphone ${{ github.ref_name }}
+          body: "Softphone de escritorio PBX-NG para Windows. `latest.yml` + `.blockmap` son el feed OTA (electron-updater)."
+          files: |
+            softphone-app/release/*.exe
+            softphone-app/release/*.msi
+            softphone-app/release/*.blockmap
+            softphone-app/release/latest.yml

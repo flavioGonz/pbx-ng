@@ -2,6 +2,13 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.3.1] - 2026-09-04
+### Added
+- **Softphone de escritorio descargable desde el login y OTA por central.** La API sirve el instalador de Windows y el feed de `electron-updater` en `/descargas/softphone/` (`GET /api/softphone/latest`, público; directorio `control-plane/softphone/` que `docker/fetch-softphone.sh` llena desde el GitHub Release `softphone-vX.Y.Z` en cada `release.sh`, o `SOFTPHONE_DIR`). El login muestra un botón discreto «Softphone para Windows · vX.Y.Z» sólo si hay instalador. El softphone (0.5.0) apunta su actualizador a `https://<central>/descargas/softphone/` en cuanto se aprovisiona (respaldo: GitHub Releases), chequea al arrancar y cada 6 h, descarga en silencio e instala al salir. `softphone.yml` publica el release en GitHub (exe + blockmap + latest.yml) al taguear `softphone-v*`.
+### Fixed
+- **Hidratación (React #418/#423) en modo claro**: el botón sol/luna del sidebar se dibujaba con el esquema leído de `localStorage` en el primer render, distinto del HTML del servidor; cada carga re-renderizaba todo del lado del cliente. Ahora hasta montar dibuja lo mismo que el servidor.
+- `favicon.ico` real (Chrome lo pide aunque se declare `icon-192.png`).
+
 ## [1.3.0] - 2026-09-04
 ### Changed — PBX-NG se vende y se configura 100% sin SBC (**breaking**)
 - **SBC-NG es otro producto.** Se retiró el SBC embebido de PBX-NG: desaparecen el perfil de compose `sbc` y los servicios `kamailio`, `rtpengine` y `wsbridge`; `docker/config/kamailio`, `docker/images/{kamailio,wsbridge}`, las variables `SBC_HOST`/`KAM_HOST`/`TRUSTED_NET`, los 27 endpoints `/api/sbc/*` (que escribían tablas de Kamailio en la base de la PBX), `/api/asterisk/sbc-trunk` y la consola `SbcConsole.jsx`. `release.sh` construye 5 imágenes (asterisk, api, dashboard, coturn, voz). Las troncales «vía SBC» y «WebRTC cliente» dejan de crearse desde PBX-NG (se administran en SBC-NG); las existentes se muestran como heredadas.

@@ -97,9 +97,30 @@ ipcMain.on('go2rtc-send', (_e, m) => { const ws = g2.get(m && m.id); if (ws && w
 ipcMain.on('go2rtc-close', (_e, id) => { const ws = g2.get(id); if (ws) { try { ws.close(); } catch (_) {} } g2.delete(id); });
 
 // ---- auto-update visible ----
+/* Feed OTA: la central a la que esta aprovisionado el softphone publica su propio
+ * instalador y latest.yml en https://<central>/descargas/softphone/ (lo sirve la API).
+ * Asi cada cliente actualiza contra SU central, sin Internet ni GitHub. Si todavia no
+ * hay central (app recien instalada), se usa GitHub Releases como respaldo.
+ * El feed elegido se recuerda en userData para que el chequeo del arranque ya lo use. */
+const FEED_FALLBACK = 'https://github.com/flavioGonz/pbx-ng/releases/latest/download/';
+const feedPath = () => path.join(app.getPath('userData'), 'sp-update-feed.json');
+function loadFeed() { try { return JSON.parse(fs.readFileSync(feedPath(), 'utf8')).url || ''; } catch (_) { return ''; } }
+function applyFeed(url) {
+  if (!autoUpdater) return false;
+  const u = String(url || '').trim() || FEED_FALLBACK;
+  try { autoUpdater.setFeedURL({ provider: 'generic', url: u, useMultipleRangeRequest: false }); autoUpdater.autoDownload = true; autoUpdater.autoInstallOnAppQuit = true; return true; } catch (e) { console.error('[updater] feed', e.message); return false; }
+}
+ipcMain.handle('update-set-feed', (_e, url) => {
+  const u = String(url || '').trim();
+  try { fs.writeFileSync(feedPath(), JSON.stringify({ url: u, at: Date.now() })); } catch (_) {}
+  const ok = applyFeed(u);
+  if (ok && !isDev) { try { autoUpdater.checkForUpdates(); } catch (_) {} }
+  return { ok, url: u || FEED_FALLBACK };
+});
 let updaterWired = false;
 function wireUpdater() {
   if (!autoUpdater || updaterWired) return; updaterWired = true;
+  applyFeed(loadFeed());
   const send = (m) => { try { win && win.webContents.send('update-status', m); } catch (_) {} };
   autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
   autoUpdater.on('update-available', (i) => send({ state: 'available', version: i && i.version }));
@@ -262,6 +283,11 @@ else {
       powerMonitor.on('unlock-screen', () => sys('resume'));
     } catch (_) {}
     dialFromArgs(process.argv);
-    wireUpdater(); if (autoUpdater && !isDev) { try { autoUpdater.checkForUpdates(); } catch (_) {} }
+    wireUpdater();
+    if (autoUpdater && !isDev) {
+      try { autoUpdater.checkForUpdates(); } catch (_) {}
+      // y cada 6 horas mientras la app viva (el softphone queda abierto dias)
+      setInterval(() => { try { autoUpdater.checkForUpdates(); } catch (_) {} }, 6 * 3600 * 1000);
+    }
   });
 }

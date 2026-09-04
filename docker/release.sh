@@ -26,6 +26,8 @@ THIRD=( postgres:16-alpine redis:7-alpine \
   alexxit/go2rtc:latest jc21/nginx-proxy-manager:latest )
 
 echo "== PBX-NG release v$VERSION  (registry=$REGISTRY) =="
+# el instalador del softphone de escritorio viaja dentro de la imagen api (login + OTA por central)
+"$(dirname "$0")/fetch-softphone.sh" || true
 # Placeholders SOLO para satisfacer la interpolación del compose durante el BUILD.
 # NO se hornean en las imágenes (son variables de runtime; los valores reales van en .env al desplegar).
 export DB_PASS="${DB_PASS:-build}" ARI_PASS="${ARI_PASS:-build}" AMI_PASS="${AMI_PASS:-build}" \

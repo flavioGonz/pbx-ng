@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('sphone', {
   onUpdate: (cb) => { const h = (_e, m) => cb(m); ipcRenderer.on('update-status', h); return () => ipcRenderer.removeListener('update-status', h); },
   updateCheck: () => ipcRenderer.invoke('update-check'),
   updateInstall: () => ipcRenderer.invoke('update-install'),
+  updateSetFeed: (url) => ipcRenderer.invoke('update-set-feed', url),   // OTA contra la central aprovisionada
   // controles de ventana (frameless)
   winMinimize: () => ipcRenderer.send('win-minimize'),
   winClose: () => ipcRenderer.send('win-close'),

@@ -28,6 +28,11 @@ export default function Login() {
   const [showPass, setShowPass] = useState(false);
   const [role, setRole] = useState('admin');
   const videoRef = useRef(null); const [muted, setMuted] = useState(true);
+  /* Softphone de escritorio: la central publica su ultima version en /api/softphone/latest
+   * (publico). Si no hay instalador cargado, el boton simplemente no aparece. */
+  const [sphone, setSphone] = useState(null);
+  useEffect(() => { fetch('/backend/api/softphone/latest').then((r) => r.json()).then((d) => setSphone(d && d.available ? d : null)).catch(() => {}); }, []);
+  const fmtMb = (b) => (b ? (b / 1048576).toFixed(0) + ' MB' : '');
   const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted; if (!v.muted) { try { v.play(); } catch (_) {} } setMuted(v.muted); };
 
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', tagline: 'Central telefónica unificada', logo: '' });
@@ -243,6 +248,13 @@ export default function Login() {
             </>
           )}
 
+          {sphone && (
+            <a className="hzn-sphone" href={sphone.url} download title={'Softphone de escritorio para Windows · v' + sphone.version + (sphone.size ? ' · ' + fmtMb(sphone.size) : '')}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.5v7H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+              <span>Softphone para Windows</span>
+              <span className="hzn-sphone-ver">v{sphone.version}</span>
+            </a>
+          )}
           <div className="hzn-login-footer">
             <span>PBX-NG</span>
             <span className="hzn-dot">·</span>
@@ -561,6 +573,18 @@ export default function Login() {
           font-size: 11px; color: #9ca3af;
         }
         .hzn-dot { opacity: 0.4; }
+        /* Descarga del softphone: discreto, estilo boton de Windows */
+        .hzn-sphone {
+          margin: 22px auto 0; width: fit-content;
+          display: inline-flex; align-items: center; gap: 8px;
+          padding: 7px 12px; border-radius: 8px;
+          border: 1px solid #e5e7eb; background: #fff; color: #374151;
+          font-size: 12px; font-weight: 600; text-decoration: none;
+          transition: border-color .15s, box-shadow .15s, color .15s;
+        }
+        .hzn-sphone:hover { border-color: #0078d4; color: #0b5cad; box-shadow: 0 2px 10px rgba(0,120,212,.12); }
+        .hzn-sphone svg { color: #0078d4; }
+        .hzn-sphone-ver { font-weight: 500; color: #9ca3af; font-size: 11px; }
       `}</style>
     </div>
   );

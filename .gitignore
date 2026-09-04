@@ -22,6 +22,8 @@ docker/edge-join.env
 *.bak.*
 *.v1.bak
 *.pre-*
+# instalador del softphone dentro de la imagen api (lo trae docker/fetch-softphone.sh, no se versiona)
+control-plane/softphone/
 # runtime
 *.log
 recordings/
