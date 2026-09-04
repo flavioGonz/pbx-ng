@@ -9,6 +9,7 @@ const SECURITY_HEADERS = [
 ];
 const nextConfig = {
   reactStrictMode: true,
+  output: 'standalone',               // imagen Docker chica: solo server.js + .next/static + public (antes ~1.4 GB)
   skipTrailingSlashRedirect: true,   // no redirigir /socket.io/ -> /socket.io (rompe el handshake socket.io)
   async headers() {
     return [{ source: '/:path*', headers: SECURITY_HEADERS }];
