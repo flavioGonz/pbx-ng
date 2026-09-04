@@ -13,7 +13,7 @@ export const metadata = {
   title: 'PBX-NG · Panel',
   description: 'Plataforma de comunicaciones unificadas',
   manifest: '/manifest.json',
-  icons: { icon: '/icon-192.png', apple: '/icon-192.png' },
+  icons: { icon: [{ url: '/favicon.ico', sizes: 'any' }, { url: '/icon-192.png', type: 'image/png' }], apple: '/icon-192.png' },
   appleWebApp: { capable: true, title: 'PBX-NG', statusBarStyle: 'black-translucent' },
 };
 export const viewport = { themeColor: '#0d1117', width: 'device-width', initialScale: 1, viewportFit: 'cover' };

@@ -89,8 +89,16 @@ export default function Shell({ children }) {
   const { connected } = useLive();
   const { user } = useAuth();
   const { setColorScheme } = useMantineColorScheme();
-  const scheme = useComputedColorScheme('dark');
-  const toggleScheme = () => setColorScheme(scheme === 'dark' ? 'light' : 'dark');
+  /* El esquema real (claro/oscuro) vive en localStorage y solo se conoce en el
+   * navegador: en el HTML del servidor siempre es 'dark'. Si el boton de tema se
+   * dibuja con el valor del cliente en el PRIMER render, el sol/luna no coincide
+   * con lo que mando el servidor -> React #418/#423 en cada carga con modo claro.
+   * Hasta que el componente monta se dibuja lo mismo que el servidor. */
+  const schemeReal = useComputedColorScheme('dark', { getInitialValueInEffect: true });
+  const [montado, setMontado] = useState(false);
+  useEffect(() => { setMontado(true); }, []);
+  const scheme = montado ? schemeReal : 'dark';
+  const toggleScheme = () => setColorScheme(schemeReal === 'dark' ? 'light' : 'dark');
 
   if (path && (path.startsWith('/phone') || path.startsWith('/enroll') || path.startsWith('/call') || path.startsWith('/agente') || path.startsWith('/supervisor') || path === '/login')) return children;
 
