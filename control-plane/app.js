@@ -142,6 +142,7 @@ async function connectAri() {
     const c = await AriClient.connect(CFG.ari.url, CFG.ari.user, CFG.ari.pass);
     c.on('StasisStart', async (event, channel) => {
       const args = event.args || [];
+      if (await callEngine.handleStasis(event, channel)) return;
       if (args[0] === 'ai') { handleAiAgent(channel, args[1]); return; }
       const bid = pendingConf[channel.id];
       if (!bid) return;
@@ -151,16 +152,17 @@ async function connectAri() {
     });
     const onDown = (why) => {
       if (ari !== c) return;                 // ya fue reemplazado por otra conexion
-      ari = null; state.ari = false;
+      ari = null; state.ari = false; callEngine.detach();
       console.error('[ARI] desconectado:', why);
       setTimeout(connectAri, ariBackoff); ariBackoff = Math.min(30000, ariBackoff * 2);
     };
     c.on('WebSocketClose', () => onDown('websocket cerrado'));
     c.on('WebSocketError', (e) => onDown(e && e.message));
     c.on('APILoadError', (e) => onDown(e && e.message));
-    await c.start(CFG.ari.app);
+    await c.start(CFG.ari.app, true);   // true = todos los eventos de Asterisk, no solo los de Stasis
     ari = c; state.ari = true; ariBackoff = 2000;
-    console.log('[ARI] ok');
+    console.log('[ARI] ok (eventos de toda la central)');
+    callEngine.attach(c);
     try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { console.error('[AI] init', e.message); }
   } catch (e) {
     console.error('[ARI] sin conexion (' + e.message + '); reintento en ' + Math.round(ariBackoff / 1000) + 's');
@@ -278,12 +280,10 @@ async function upsertSbcLink(b) {
   try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
   return { ruta };
 }
-async function endpointStates() {
-  const map = {};
-  if (!ari) return map;
-  try { const eps = await ari.endpoints.list(); for (const e of eps) map[e.resource] = { state: e.state, channels: (e.channel_ids || []).length }; } catch (_) {}
-  return map;
-}
+/* Motor de llamadas sobre ARI (callengine.js): cache por eventos, click-to-dial,
+ * colgar/retener/transferir/aparcar, supervision con snoop. */
+const callEngine = require('./callengine')({ app, auth, amiAction, amiCommand, broadcastSoon: (...a) => broadcastSoon(...a), appName: CFG.ari.app, log: (...a) => console.log('[calls]', ...a) });
+async function endpointStates() { return callEngine.endpointStates(); }
 // Sondeo SIP OPTIONS a una troncal (para troncales gestionadas por el SBC/kamailio)
 const _dgram = require('dgram');
 const _sipProbeCache = {};
@@ -399,10 +399,7 @@ async function getExtensions() {
   } catch (_) {}
   return rows.map(r => ({ id: r.id, name: names[r.id] || null, context: r.context, allow: r.allow, tenant_id: r.tenant_id, status: st[r.id] ? st[r.id].state : 'offline', channels: st[r.id] ? st[r.id].channels : 0, ip: contacts[r.id] ? contacts[r.id].ip : null, rtt: contacts[r.id] ? contacts[r.id].rtt : null, via: (viaMap[r.id]||{}).via || null, origin: (viaMap[r.id]||{}).origin || null, vproto: (viaMap[r.id]||{}).proto || null, video: /vp8|h264/i.test(r.allow || ''), dtmf_mode: r.dtmf_mode || 'rfc4733', webrtc: r.transport === 'transport-ws', record: r.pbxng_record === true || r.pbxng_record === 'yes' || r.pbxng_record === 't' }));
 }
-async function getChannels() {
-  if (!ari) return [];
-  try { const ch = await ari.channels.list(); return ch.map(c => ({ id: c.id, name: c.name, state: c.state, caller: c.caller && c.caller.number, connected: c.connected && c.connected.number, started: c.creationtime || null })); } catch (_) { return []; }
-}
+async function getChannels() { return callEngine.getChannels(); }
 async function getQueues() {
   const { rows: qs } = await pool.query("SELECT pq.name, pq.label, pq.access_exten, q.strategy, q.timeout, q.musiconhold FROM pbxng_queues pq LEFT JOIN queues q ON q.name=pq.name ORDER BY pq.name");
   const { rows: mems } = await pool.query('SELECT queue_name, interface, membername FROM queue_members ORDER BY membername');
@@ -958,17 +955,7 @@ app.post('/api/calls/record', async (req, res) => {
 });
 
 // Conferencia a 3: arma un bridge mixing con la llamada activa del interno + un tercero
-app.post('/api/calls/spy', auth, async (req, res) => {
-  const { sup, target, mode } = req.body || {};
-  if (!sup || !target) return res.status(400).json({ error: 'supervisor y destino requeridos' });
-  let opt = 'q';
-  if (mode === 'whisper') opt = 'qw';
-  else if (mode === 'barge') opt = 'qB';
-  try {
-    await amiAction({ Action: 'Originate', Channel: 'PJSIP/' + sup, Application: 'ChanSpy', Data: 'PJSIP/' + target + ',' + opt, CallerID: 'Monitor <' + sup + '>', Async: 'true', Timeout: 30000 });
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+/* /api/calls/spy vive en callengine.js (snoopChannel con sesion; AMI+ChanSpy solo sin ARI) */
 
 app.post('/api/calls/conference', async (req, res) => {
   const { ext, third } = req.body || {};
@@ -3399,7 +3386,7 @@ io.on('connection', async (s) => {
   s.on('scratch:op', (m) => { if (m && m.room) s.to('scratch:' + m.room).emit('scratch:op', m.op); });
   s.on('scratch:clear', (m) => { if (m && m.room) s.to('scratch:' + m.room).emit('scratch:clear'); });
 });
-setInterval(broadcast, 3000);
+setInterval(broadcast, 15000);   // reconciliado: el refresco real llega por eventos ARI/AMI (broadcastSoon)
 ami.on('managerevent', (e) => { const t = e && e.event; if (['Newchannel', 'Hangup', 'Newstate', 'DeviceStateChange', 'ContactStatus', 'QueueMemberStatus', 'QueueCallerJoin', 'QueueCallerLeave', 'PeerStatus'].includes(t)) broadcastSoon(); });
 // Push de llamada entrante con dedupe por interno (lo usan el wake del dialplan y AMI)
 const incomingPushDedup = new Map();

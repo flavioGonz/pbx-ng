@@ -60,14 +60,33 @@ Hay una sola aplicación Stasis, `pbxng`, con dos "sub-apps" por argumento:
 de las dos cae. La sonda de salud del núcleo (`salud.js`) abre el puerto **8088**, es decir
 prueba el HTTP de ARI, no AMI.
 
+## Motor de llamadas (1.3.1+, `control-plane/callengine.js`)
+
+Desde 1.3.1 el control de llamadas tiene un módulo propio sobre ARI:
+
+- **Estado por eventos, no por polling.** La API arranca la app Stasis con `subscribeAll`
+  (`ari.start('pbxng', true)`), así recibe `ChannelCreated`/`ChannelStateChange`/
+  `ChannelDestroyed`/`EndpointStateChange` de toda la central y mantiene una cache de
+  canales y endpoints. `getChannels()` y `endpointStates()` leen esa cache; el panel se
+  refresca al instante por `broadcastSoon()` y queda un reconciliado cada 15-20 s por si
+  se perdió algo (reconexión, arranque).
+- **Control por API** (`/api/calls/*`, con sesión): `POST /dial {from,to}` (click-to-dial:
+  suena el interno y al atender marca el destino por el dialplan), `POST /:id/hangup`,
+  `/:id/hold`, `/:id/unhold`, `POST /transfer {ext,to}` (a ciegas: redirige al *otro*
+  extremo de la llamada de `ext`), `POST /park {ext}` (al lote de aparcado), `GET /live`.
+- **Supervisión con estado real** (`POST /spy {sup,target,mode}` → `{id}`,
+  `DELETE /spy/:id`, `GET /spy`): `snoopChannel` sobre el canal del agente (spy both;
+  whisper `none`/`out`/`both` = escucha / susurro / irrupción) + bridge propio + el
+  supervisor originado a Stasis. La sesión se cierra sola si la llamada termina. Sin ARI
+  se cae al `Originate`+`ChanSpy` por AMI de siempre.
+
+Pendiente en esta línea: transferencia atendida, grabación por ARI (`snoop` + `record`),
+eventos de cola por ARI, y sobre esta base la IA en vivo (transcripción, coaching).
+
 ## Solapamientos que conviene saber
 
-- Presencia y llamadas activas se consultan por **polling** ARI cada 3 s aunque AMI ya entrega
-  esos cambios por evento. Es deuda técnica conocida: se podría derivar el estado de los
-  eventos AMI (o suscribirse a `ChannelStateChange`/`DeviceStateChanged` de ARI) y dejar de
-  encuestar.
-- La supervisión por `Originate`+`ChanSpy` devuelve `ok` sin saber si el supervisor llegó a
-  atender; con ARI (`channels.snoopChannel`) se tendría un canal con id y control real.
+- (Resuelto en 1.3.1) Presencia y llamadas activas ya no se encuestan cada 3 s: llegan por eventos ARI.
+- (Resuelto en 1.3.1) La supervisión ya no es `Originate`+`ChanSpy` a ciegas: es `snoopChannel` con sesión.
 - Hay tres mecanismos de mezcla conviviendo: bridges ARI (conferencia a 3 y IA), `confbridge`
   (salas de conferencia del dialplan) y `ChanSpy`. Funcionan; sólo es bueno tenerlo presente
   antes de agregar un cuarto.
