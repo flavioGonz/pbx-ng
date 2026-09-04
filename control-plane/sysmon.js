@@ -3,8 +3,8 @@
  *  PBX-NG · Estado del sistema (Resumen)
  *
  *  El panel mostraba solo los recursos del nodo donde corre la API. Pero una
- *  PBX-NG son varios nodos: el core (Asterisk + API + base), el borde (Kamailio,
- *  rtpengine, coturn) y —si esta encendido— el motor de voz. Esto los junta a
+ *  PBX-NG son varios nodos: el core (Asterisk + API + base), el nodo TURN (coturn,
+ *  si esta separado) y —si esta encendido— el motor de voz. Esto los junta a
  *  todos en una sola foto: CPU, RAM, disco, uptime e interfaces de red de cada
  *  uno, mas el estado de cada servicio.
  *
@@ -113,7 +113,7 @@ function fromAgent(core, net) {
 
 async function overview() {
   const astUrl = process.env.AST_AGENT || (NODES.asterisk ? 'http://' + NODES.asterisk + ':8092' : null);
-  const turnUrl = process.env.TURN_AGENT || (NODES.turn || NODES.sbc ? 'http://' + (NODES.turn || NODES.sbc) + ':8091' : null);
+  const turnUrl = process.env.TURN_AGENT || (NODES.turn ? 'http://' + NODES.turn + ':8091' : null);
   const vozUrl = NODES.voz ? 'http://' + NODES.voz + ':8080' : null;
 
   const [ast, astNet, edge, edgeNet, voz] = await Promise.all([
@@ -150,16 +150,13 @@ async function overview() {
       ...(ast ? fromAgent(ast, astNet) : { ok: false, ifaces: [] }),
     });
   }
-  // Nodo "borde" (SBC + rtpengine + coturn incrustados): SOLO se muestra si su
-  // agente responde. Desde que el SBC es un producto aparte (SBC-NG, nodo externo),
-  // el borde incrustado ya no existe en la mayoría de las instalaciones — y un host
-  // muerto no debe ensuciar el Resumen con un "sin respuesta" permanente. Si algún
-  // día vuelve a haber un borde local con su agente, reaparece solo.
+  // Nodo TURN (coturn con su agente :8091): SOLO se muestra si el agente responde.
+  // El SBC es un producto aparte (SBC-NG) y no forma parte de este resumen.
   if (turnUrl && edge) {
     nodes.push({
-      id: 'edge', name: 'Borde · SBC, rtpengine y TURN', role: 'edge',
-      host: NODES.turn || NODES.sbc,
-      services: ['kamailio', 'rtpengine', 'coturn'],
+      id: 'turn', name: 'TURN (coturn)', role: 'turn',
+      host: NODES.turn,
+      services: ['coturn'],
       ...fromAgent(edge, edgeNet),
     });
   }
@@ -185,12 +182,7 @@ async function overview() {
     { id: 'api', label: 'API (control-plane)', ok: true, node: 'core' },
     { id: 'postgres', label: 'PostgreSQL', ok: db.ok, node: 'core' },
     { id: 'asterisk', label: 'Asterisk', ok: !!(state.ami || state.ari) || !!ast, node: 'asterisk', detail: state.ami ? 'AMI y ARI conectados' : 'sin AMI' },
-    // Los servicios del borde solo se listan si hay un borde local respondiendo (SBC-NG es externo).
-    ...(edge ? [
-      { id: 'kamailio', label: 'SBC · Kamailio', ok: true, node: 'edge' },
-      { id: 'rtpengine', label: 'rtpengine', ok: true, node: 'edge' },
-      { id: 'coturn', label: 'TURN · coturn', ok: true, node: 'edge' },
-    ] : []),
+    ...(edge ? [{ id: 'coturn', label: 'TURN · coturn', ok: true, node: 'turn' }] : []),
     { id: 'voz', label: 'Motor de voz (IA)', ok: !!voz, node: 'voz', optional: true },
   ];
 

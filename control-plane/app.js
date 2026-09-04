@@ -97,11 +97,10 @@ const CFG = {
 const NODES = {
   asterisk: process.env.ASTERISK_HOST || process.env.AMI_HOST || '127.0.0.1',
   db:       process.env.DB_HOST || '127.0.0.1',
-  sbc:      process.env.SBC_HOST || '',
   npm:      process.env.NPM_HOST || '',
   turn:     process.env.TURN_HOST || process.env.PUBLIC_IP || '',
   voz:      process.env.VOZ_HOST || '',
-  media:    process.env.MEDIA_HOST || process.env.ASTERISK_HOST || '127.0.0.1',
+  media:    process.env.MEDIA_HOST || process.env.ASTERISK_HOST || '127.0.0.1',   // host que Asterisk usa para el AudioSocket de la IA (donde escucha esta API)
   domain:   process.env.DOMAIN || process.env.PUBLIC_IP || '',
   public_ip: process.env.PUBLIC_IP || process.env.DOMAIN || '',
 };
@@ -131,23 +130,44 @@ app.use((err, req, res, next) => {
 });
 const state = { ari: false, ami: false };
 let ari = null;
-(async () => { try { ari = await AriClient.connect(CFG.ari.url, CFG.ari.user, CFG.ari.pass); await ari.start(CFG.ari.app); state.ari = true; console.log('[ARI] ok'); try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { console.error('[AI] init', e.message); } } catch (e) { console.error('[ARI]', e.message); } })();
 const pendingConf = {};
-(function wireStasis() {
-  const tryWire = () => {
-    if (!ari) return setTimeout(tryWire, 1000);
-    ari.on('StasisStart', async (event, channel) => {
+/* ARI con reconexion. Antes se conectaba UNA vez al arrancar: si Asterisk todavia no
+ * habia levantado (orden de arranque de los contenedores) o se reiniciaba, `ari`
+ * quedaba en null para siempre -> presencia de internos en "offline", 0 llamadas
+ * activas, y el IVR con IA muerto hasta reiniciar la API. AMI ya reconectaba solo
+ * (keepConnected); ARI merece lo mismo. Backoff 2s -> 30s. */
+let ariBackoff = 2000;
+async function connectAri() {
+  try {
+    const c = await AriClient.connect(CFG.ari.url, CFG.ari.user, CFG.ari.pass);
+    c.on('StasisStart', async (event, channel) => {
       const args = event.args || [];
       if (args[0] === 'ai') { handleAiAgent(channel, args[1]); return; }
       const bid = pendingConf[channel.id];
       if (!bid) return;
       delete pendingConf[channel.id];
       try { await channel.answer(); } catch (_) {}
-      try { await ari.bridges.addChannel({ bridgeId: bid, channel: channel.id }); } catch (e) { console.error('[CONF] add', e.message); }
+      try { await c.bridges.addChannel({ bridgeId: bid, channel: channel.id }); } catch (e) { console.error('[CONF] add', e.message); }
     });
-  };
-  tryWire();
-})();
+    const onDown = (why) => {
+      if (ari !== c) return;                 // ya fue reemplazado por otra conexion
+      ari = null; state.ari = false;
+      console.error('[ARI] desconectado:', why);
+      setTimeout(connectAri, ariBackoff); ariBackoff = Math.min(30000, ariBackoff * 2);
+    };
+    c.on('WebSocketClose', () => onDown('websocket cerrado'));
+    c.on('WebSocketError', (e) => onDown(e && e.message));
+    c.on('APILoadError', (e) => onDown(e && e.message));
+    await c.start(CFG.ari.app);
+    ari = c; state.ari = true; ariBackoff = 2000;
+    console.log('[ARI] ok');
+    try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { console.error('[AI] init', e.message); }
+  } catch (e) {
+    console.error('[ARI] sin conexion (' + e.message + '); reintento en ' + Math.round(ariBackoff / 1000) + 's');
+    setTimeout(connectAri, ariBackoff); ariBackoff = Math.min(30000, ariBackoff * 2);
+  }
+}
+connectAri();
 // ============================================================
 //  AI IVR (scaffold) - punto de integracion con una IA externa
 //  El plan de marcado envia la llamada a Stasis(pbxng, ai, <agentId>).
@@ -184,6 +204,79 @@ function amiCommand(command) {
       resolve(Array.isArray(out) ? out.join('\n') : (out || ''));
     });
   });
+}
+/* ============================================================
+ *  Enlace con SBC-NG (modulo "Conexion a SBC-NG").
+ *  SBC-NG es OTRO producto. PBX-NG funciona completo sin el; cuando hay uno
+ *  adelante, se lo conecta como una troncal fija ('to-sbc') y el modulo `sbc`
+ *  decide si el panel lo muestra y si el ruteo saliente lo usa por defecto.
+ *  Nada mas de la PBX debe suponer que existe un SBC.
+ * ============================================================ */
+const SBC_TRUNK = 'to-sbc';
+const MODULE_DEFAULT_OFF = new Set(['sbc']);
+async function moduleEnabled(id) {
+  try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', ['mod_' + id]); return rows[0] ? rows[0].value !== '0' : !MODULE_DEFAULT_OFF.has(id); }
+  catch (_) { return !MODULE_DEFAULT_OFF.has(id); }
+}
+let _sbcLinkCache = { t: 0, v: null };
+async function sbcLink(fresh) {
+  if (!fresh && _sbcLinkCache.v && Date.now() - _sbcLinkCache.t < 5000) return _sbcLinkCache.v;
+  const out = { enabled: false, configured: false, name: SBC_TRUNK, host: '', port: 5060, transport: 'udp', context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'], panel_url: '' };
+  try {
+    out.enabled = await moduleEnabled('sbc');
+    const { rows } = await pool.query("SELECT name, provider_host, provider_port, adv_config FROM pbxng_trunks WHERE kind='sbc' ORDER BY (name=$1) DESC, id LIMIT 1", [SBC_TRUNK]);
+    if (rows[0]) {
+      const a = rows[0].adv_config || {};
+      out.configured = true; out.name = rows[0].name; out.host = rows[0].provider_host || ''; out.port = +rows[0].provider_port || 5060;
+      out.transport = a.transport || 'udp'; out.context = a.context || 'from-trunk'; if (Array.isArray(a.codecs) && a.codecs.length) out.codecs = a.codecs;
+    }
+    const { rows: pu } = await pool.query("SELECT value FROM pbxng_settings WHERE key='sbc_panel_url'"); out.panel_url = (pu[0] && pu[0].value) || '';
+  } catch (_) {}
+  /* activo = modulo encendido Y troncal configurada: es lo unico que el resto del
+   * codigo debe mirar para decidir "hay SBC adelante" */
+  out.active = out.enabled && out.configured;
+  _sbcLinkCache = { t: Date.now(), v: out };
+  return out;
+}
+/* Crea o actualiza la troncal fija hacia el SBC-NG (endpoint pjsip 'to-sbc' identificado
+ * por IP) y, si la central todavia no tiene rutas salientes, una ruta "marca 0" que
+ * sale por el SBC. Enciende el modulo. Usado por /api/sbc-link y por
+ * POST /api/trunks kind=sbc (compatibilidad). */
+async function upsertSbcLink(b) {
+  const ip = String(b.host || '').trim();
+  if (!ip) { const e = new Error('la dirección IP del SBC-NG es obligatoria'); e.status = 400; throw e; }
+  const port = +b.port || 5060;
+  const transport = ['udp', 'tcp', 'tls'].includes(b.transport) ? b.transport : 'udp';
+  const ctx = (b.context || 'from-trunk').trim();
+  const codecs = (Array.isArray(b.codecs) && b.codecs.length) ? b.codecs.join(',') : 'ulaw,alaw,g722';
+  const tenant_id = +b.tenant_id || 1;
+  const contact = 'sip:' + ip + ':' + port + (transport !== 'udp' ? ';transport=' + transport : '');
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query("INSERT INTO ps_aors(id,contact,qualify_frequency) VALUES($1,$2,30) ON CONFLICT(id) DO UPDATE SET contact=$2,qualify_frequency=30", [SBC_TRUNK, contact]);
+    await c.query("INSERT INTO ps_endpoints(id,transport,aors,context,disallow,allow,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) VALUES($1,$2,$1,$3,'all',$4,'no','yes','yes','yes','ip',$5,'trunk') ON CONFLICT(id) DO UPDATE SET context=$3,allow=$4,transport=$2,aors=$1,identify_by='ip',direct_media='no'", [SBC_TRUNK, 'transport-' + transport, ctx, codecs, tenant_id]);
+    await c.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES($1,$1,$2) ON CONFLICT(id) DO UPDATE SET match=$2,endpoint=$1", [SBC_TRUNK, ip]);
+    const adv = { sbc: true, label: 'SBC-NG', provider_host: ip, provider_port: port, context: ctx, codecs: codecs.split(','), mode: 'ip', transport };
+    await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ($1,$2,$3,NULL,false,$4,'sbc',$5) ON CONFLICT (name) DO UPDATE SET kind='sbc',provider_host=$2,provider_port=$3,adv_config=$5", [SBC_TRUNK, ip, port, tenant_id, JSON.stringify(adv)]);
+    await c.query("DELETE FROM pbxng_settings WHERE key='sbc_link_removed'");
+    await c.query("INSERT INTO pbxng_settings(key,value) VALUES('mod_sbc','1') ON CONFLICT(key) DO UPDATE SET value='1'");
+    if (b.panel_url !== undefined) await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_panel_url',$1) ON CONFLICT(key) DO UPDATE SET value=$1", [String(b.panel_url || '').trim()]);
+    let ruta = null;
+    if (b.create_route !== false) {
+      const rc = await c.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes');
+      if (!rc.rows[0] || rc.rows[0].n === 0) {
+        const pat = '0X.'; const strip = 1;
+        await c.query("INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ('Salida por el SBC-NG (marca 0)',$1,$2,$3,NULL,NULL)", [pat, SBC_TRUNK, strip]);
+        await setDialplan(c, 'internal', outExten(pat), [[1, 'Dial', 'PJSIP/${EXTEN:' + strip + '}@' + SBC_TRUNK + ',60'], [2, 'Hangup', '']]);
+        ruta = pat;
+      }
+    }
+    await c.query('COMMIT');
+  } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
+  _sbcLinkCache.v = null;
+  try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
+  return { ruta };
 }
 async function endpointStates() {
   const map = {};
@@ -234,11 +327,9 @@ async function trunkStatuses(trunks) {
   try { const co = await amiCommand('pjsip show contacts'); for (const line of String(co).split('\n')) { if (!line.includes('Contact:') || !line.includes('sip:')) continue; const aorM = /Contact:\s*([^/]+)\//.exec(line); const toks = line.trim().split(/\s+/); const last = toks[toks.length - 1]; const rtt = /^[0-9.]+$/.test(last) ? parseFloat(last) : null; if (aorM) rttMap[aorM[1].trim()] = rtt; } } catch (_) {}
   for (const t of trunks) {
     if (t.kind === 'webrtc-client') {
-      let st = null; try { const { rows } = await pool.query("SELECT state, detail FROM pbxng_wsbridge_status WHERE name=$1", [t.name]); st = rows[0]; } catch (_) {}
-      const s = st ? st.state : null;
-      out[t.name] = s === 'online' ? { status: 'online', detail: (st && st.detail) || 'Registrada (WSS saliente)' }
-        : (s === 'connected' || s === 'auth' || s === 'init') ? { status: 'pending', detail: (st && st.detail) || 'Conectando…' }
-        : { status: 'offline', detail: (st && st.detail) || 'Bridge sin conexión' };
+      /* El bridge cliente-WSS vivia en el SBC embebido, que ya no forma parte de
+       * PBX-NG. Estas troncales se administran en SBC-NG. */
+      out[t.name] = { status: 'offline', detail: 'Requiere SBC-NG (troncal WebRTC cliente)' };
       continue;
     }
     if (t.kind === 'webrtc') {
@@ -248,7 +339,7 @@ async function trunkStatuses(trunks) {
     }
     if (t.kind === 'kamailio') {
       const up = await sipProbeCached(t.provider_host, t.provider_port);
-      out[t.name] = up ? { status: 'online', detail: 'Alcanzable (OPTIONS) · vía SBC' } : { status: 'offline', detail: 'No responde · vía SBC' };
+      out[t.name] = up ? { status: 'online', detail: 'Alcanzable (OPTIONS) · vía SBC-NG' } : { status: 'offline', detail: 'No responde · vía SBC-NG' };
       continue;
     }
     const ep = eps[t.name]; const reachable = ep && ep.state === 'online';
@@ -291,7 +382,8 @@ async function getExtensions() {
   const viaMap = {};
   try {
     const { rows: cc } = await pool.query("SELECT endpoint, uri, via_addr, via_port FROM ps_contacts");
-    const SBC = NODES.sbc, NPM = NODES.npm;
+    const _lk = await sbcLink();
+    const SBC = _lk.active ? _lk.host : '__sin_sbc__', NPM = NODES.npm;
     const pmap = { '1': 'udp', '2': 'tcp', '3': 'tls', '4': 'sctp', '5': 'ws', '6': 'wss' };
     for (const c of cc) {
       const uri = c.uri || '';
@@ -397,7 +489,6 @@ const PUBLIC_API = [
   ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
   ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
   ['POST', /^\/api\/geo\/report$/],
-  ['GET',  /^\/api\/sbc\/rtpengine\/effective$/],
   // Las capturas de los manuales se piden con <img src>, que NO manda el token.
   // Sólo la LECTURA es pública (subir y borrar siguen pidiendo sesión).
   ['GET',  /^\/api\/manuales\/img\/[A-Za-z0-9._-]+$/],
@@ -413,12 +504,6 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, next));
-app.get('/api/sbc/rtpengine/effective', async (req, res) => {
-  const d = { portmin: '30000', portmax: '40000', timeout: '60', silent_timeout: '3600', loglevel: '6' };
-  try { for (const k of Object.keys(d)) { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key=$1", ['rtpe_' + k]); if (rows[0] && rows[0].value) d[k] = String(rows[0].value); } } catch (_) {}
-  res.json(d);
-});
-
 function clientIp(req) {
   const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return xf || (req.socket && req.socket.remoteAddress) || '';
@@ -589,7 +674,9 @@ pool.query("ALTER TABLE pbxng_trunks ADD COLUMN IF NOT EXISTS kind text DEFAULT 
     "SELECT 'to-sbc', COALESCE((SELECT match FROM ps_endpoint_id_ips WHERE id='to-sbc'),''), 5060, false, 1, 'sbc', " +
     "'{\"sbc\":true,\"label\":\"SBC\",\"mode\":\"ip\",\"transport\":\"udp\"}'::jsonb " +
     "WHERE EXISTS (SELECT 1 FROM ps_endpoints WHERE id='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_trunks WHERE name='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='sbc_link_removed')").catch(e => console.error('[TRK] sbc-seed', e.message));
-  pool.query("ALTER TABLE pbxng_sbc ADD COLUMN IF NOT EXISTS trunks jsonb").catch(e => console.error('[SBC] trunks-col', e.message));
+  /* Instalaciones anteriores al modulo: si ya habia una troncal al SBC, el modulo
+   * "Conexion a SBC-NG" arranca encendido (misma regla que la migracion 0007). */
+  pool.query("INSERT INTO pbxng_settings(key,value) SELECT 'mod_sbc','1' WHERE EXISTS (SELECT 1 FROM pbxng_trunks WHERE kind='sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='mod_sbc') ON CONFLICT (key) DO NOTHING").catch(e => console.error('[SBC] mod-seed', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_ivr_audios (id serial PRIMARY KEY, name text UNIQUE, text text, voice text, ref text, created_at timestamptz DEFAULT now())").catch(e => console.error('[IVRA] table', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_inbound_routes (id serial PRIMARY KEY, did text, name text, dest_type text, dest_value text, created_at timestamptz DEFAULT now())").catch(e => console.error('[ROUT] in', e.message));
 pool.query("CREATE TABLE IF NOT EXISTS pbxng_directory (ext text PRIMARY KEY, name text, updated_at timestamptz DEFAULT now())").catch(e => console.error('[DIR] table', e.message));
@@ -657,7 +744,8 @@ app.get('/api/enroll/:token', async (req, res) => {
     const isWeb = ep.webrtc === 'yes' || /ws/i.test(tr);
     const sipTransport = /tls/i.test(tr) ? 'tls' : /tcp/i.test(tr) ? 'tcp' : 'udp';
     const sipPort = sipTransport === 'tls' ? '5061' : '5060';
-    const sipHost = (await gS('sip_host')) || NODES.sbc || NODES.asterisk || dom;
+    const _lk = await sbcLink();
+    const sipHost = (await gS('sip_host')) || (_lk.active ? _lk.host : '') || NODES.asterisk || dom;
     const { rows: un } = await pool.query('SELECT id, username, name, role FROM pbxng_users WHERE ext=$1 LIMIT 1', [String(e.ext)]);
     const u = un[0] || null;
     const pubIp = process.env.PUBLIC_IP || process.env.DOMAIN || dom || '';
@@ -834,8 +922,12 @@ app.post('/api/calls/record', async (req, res) => {
   if (!ext) return res.status(400).json({ error: 'ext requerido' });
   try {
     let name = null;
-    if (ari) { const chans = await ari.channels.list(); const ch = chans.find(c => c.name && c.name.startsWith('PJSIP/' + ext + '-')); name = ch && ch.name; }
-    if (!name) return res.status(404).json({ error: 'sin canal activo' });
+    if (ari) { try { const chans = await ari.channels.list(); const ch = chans.find(c => c.name && c.name.startsWith('PJSIP/' + ext + '-')); name = ch && ch.name; } catch (_) {} }
+    if (!name && state.ami) {
+      /* ARI caido o sin respuesta: el nombre del canal tambien sale por AMI */
+      try { const out = await amiCommand('core show channels concise'); const line = String(out).split('\n').find((l) => l.startsWith('PJSIP/' + ext + '-')); if (line) name = line.split('!')[0]; } catch (_) {}
+    }
+    if (!name) return res.status(404).json({ error: (ari || state.ami) ? 'sin canal activo' : 'Asterisk no disponible (ARI/AMI desconectados)' });
     if (action === 'stop') { await amiAction({ Action: 'StopMixMonitor', Channel: name }); }
     else { const file = 'pbxng-' + ext + '-' + Date.now() + '.wav'; await amiAction({ Action: 'MixMonitor', Channel: name, File: file }); }
     res.json({ ok: true });
@@ -1259,7 +1351,8 @@ alerts.init(pool, {
      Antes checkServices() solo miraba la base y AMI/ARI —el estado interno del
      proceso— asi que un borde caido no generaba ninguna alerta. */
   saludNodos: async () => {
-    const { rows } = await pool.query('SELECT name, provider_host, provider_port, kind FROM pbxng_trunks').catch(() => ({ rows: [] }));
+    const lk = await sbcLink();
+    const { rows } = lk.active ? await pool.query('SELECT name, provider_host, provider_port, kind FROM pbxng_trunks').catch(() => ({ rows: [] })) : { rows: [] };
     const [propios, externos] = await Promise.all([salud.nodos(NODES), salud.bordesExternos(rows)]);
     return propios.concat(externos);
   },
@@ -1663,13 +1756,13 @@ async function runAsteriskCapture(id, preset, duration) {
 app.post('/api/capture/start', async (req, res) => {
   try {
     const b = req.body || {};
-    const node = b.node === 'asterisk' ? 'asterisk' : 'sbc';
+    const node = 'asterisk';   // las capturas en el borde se hacen desde el panel de SBC-NG
     const preset = ['sip', 'siprtp', 'all'].includes(b.preset) ? b.preset : 'sip';
     const duration = Math.min(300, Math.max(3, parseInt(b.duration, 10) || 30));
     const fn = `pbxng-${node}-${preset}-${new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '')}.pcap`;
     const { rows } = await pool.query("INSERT INTO pbxng_captures (node,preset,duration,status,filename) VALUES ($1,$2,$3,'pending',$4) RETURNING id", [node, preset, duration, fn]);
     const id = rows[0].id;
-    if (node === 'asterisk') runAsteriskCapture(id, preset, duration); // el SBC lo toma su agente por DB
+    runAsteriskCapture(id, preset, duration);
     res.json({ id, node, preset, duration });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1820,32 +1913,39 @@ app.post('/api/asterisk/hangup', async (req, res) => {
   catch (e) { res.status(500).json({ error: 'No se pudo colgar' }); }
 });
 
-// --- Troncal interna Asterisk <-> SBC (modelo borde) ---
-app.get('/api/asterisk/sbc-trunk', async (req, res) => {
+// --- Conexion a SBC-NG (modulo) ---
+app.get('/api/sbc-link', async (req, res) => {
   try {
-    const ep = (await pool.query("SELECT id,transport,aors,context,allow FROM ps_endpoints WHERE id='to-sbc'")).rows;
-    const aor = (await pool.query("SELECT contact,qualify_frequency FROM ps_aors WHERE id='to-sbc'")).rows;
-    const idp = (await pool.query("SELECT match FROM ps_endpoint_id_ips WHERE id='to-sbc'")).rows;
-    res.json({ exists: ep.length > 0, endpoint: ep[0] || null, aor: aor[0] || null, identify: idp[0] || null });
+    const lk = await sbcLink(true);
+    let estado = null;
+    if (lk.configured && lk.host) { const p = await salud.probarPuerto(lk.host, lk.port); estado = { vivo: p.vivo, ms: p.ms ?? null, motivo: p.motivo || null }; }
+    const { rows: ru } = await pool.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes WHERE trunk=$1', [lk.name]).catch(() => ({ rows: [{ n: 0 }] }));
+    res.json({ ...lk, estado, rutas_salientes: ru[0] ? ru[0].n : 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/asterisk/sbc-trunk', async (req, res) => {
+app.post('/api/sbc-link', async (req, res) => {
+  try { const r = await upsertSbcLink(req.body || {}); broadcastSoon(); res.json({ ok: true, ruta_creada: r.ruta, link: await sbcLink(true) }); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+/* Desconectar el SBC-NG: borra la troncal fija y las rutas salientes que dependian de
+ * ella (quedarian marcando a un endpoint inexistente) y apaga el modulo. La PBX sigue
+ * funcionando con sus troncales de operador directas. */
+app.delete('/api/sbc-link', async (req, res) => {
+  const c = await pool.connect();
   try {
-    const b = req.body || {};
-    const ip = (b.sbc_ip || NODES.sbc).trim();
-    const port = +b.sbc_port || 5060;
-    const ctx = (b.context || 'from-trunk').trim();
-    const codecs = (Array.isArray(b.codecs) && b.codecs.length ? b.codecs : ['ulaw', 'alaw', 'g722']).join(',');
-    const contact = 'sip:' + ip + ':' + port;
-    await pool.query("INSERT INTO ps_aors(id,contact,qualify_frequency) VALUES('to-sbc',$1,30) ON CONFLICT(id) DO UPDATE SET contact=$1,qualify_frequency=30", [contact]);
-    await pool.query("INSERT INTO ps_endpoints(id,transport,aors,context,disallow,allow,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) VALUES('to-sbc','transport-udp','to-sbc',$1,'all',$2,'no','yes','yes','yes','ip',1,'trunk') ON CONFLICT(id) DO UPDATE SET context=$1,allow=$2,transport='transport-udp',aors='to-sbc',identify_by='ip',direct_media='no'", [ctx, codecs]);
-    await pool.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES('to-sbc','to-sbc',$1) ON CONFLICT(id) DO UPDATE SET match=$1,endpoint='to-sbc'", [ip]); await pool.query("DELETE FROM pbxng_settings WHERE key='sbc_link_removed'");
+    await c.query('BEGIN');
+    const { rows: rutas } = await c.query('SELECT id, pattern FROM pbxng_outbound_routes WHERE trunk=$1', [SBC_TRUNK]);
+    for (const r of rutas) { await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [outExten(r.pattern)]); await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [r.id]); }
+    for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [SBC_TRUNK]);
+    await c.query('DELETE FROM pbxng_trunks WHERE kind=$1', ['sbc']);
+    await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'");
+    await c.query("INSERT INTO pbxng_settings(key,value) VALUES('mod_sbc','0') ON CONFLICT(key) DO UPDATE SET value='0'");
+    await c.query('COMMIT');
+    _sbcLinkCache.v = null;
     try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.delete('/api/asterisk/sbc-trunk', async (req, res) => {
-  try { await pool.query("DELETE FROM ps_endpoint_id_ips WHERE id='to-sbc'"); await pool.query("DELETE FROM ps_endpoints WHERE id='to-sbc'"); await pool.query("DELETE FROM ps_aors WHERE id='to-sbc'"); try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {} res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    broadcastSoon();
+    res.json({ ok: true, rutas_borradas: rutas.length });
+  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 
 // --- Base de datos (PostgreSQL ARA + control plane) ---
@@ -1886,9 +1986,12 @@ app.post('/api/ivr/gen-audio', async (req, res) => {
 app.delete('/api/ivr/audios/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_ivr_audios WHERE id=$1', [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // --- Modulos (PBX modular: activar/desactivar) ---
-const MODULE_IDS = ['sbc', 'turn', 'voz', 'clicktocall', 'push', 'autoprov', 'ai', 'wsbridge', 'callcenter', 'intercom'];
+/* `sbc` = "Conexion a SBC-NG" (otro producto): apagado por defecto; se enciende solo
+ * en instalaciones que ya tenian la troncal to-sbc (ver seed y migracion 0007).
+ * `wsbridge` se retiro: era un servicio del SBC embebido. */
+const MODULE_IDS = ['sbc', 'turn', 'voz', 'clicktocall', 'push', 'autoprov', 'ai', 'callcenter', 'intercom'];
 app.get('/api/modules', async (req, res) => {
-  try { const out = {}; for (const id of MODULE_IDS) { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', ['mod_' + id]); out[id] = rows[0] ? rows[0].value !== '0' : true; } res.json(out); }
+  try { const out = {}; for (const id of MODULE_IDS) out[id] = await moduleEnabled(id); res.json(out); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/modules', async (req, res) => {
@@ -1899,24 +2002,12 @@ app.post('/api/modules', async (req, res) => {
     let svc = null;
     try {
       if (id === 'turn') { const r = await turnFwd('POST', '/service', { action: enabled ? 'start' : 'stop' }, 12000); svc = await r.json(); }
-      else if (id === 'sbc') { await pool.query('INSERT INTO pbxng_sbc_cmd(cmd,arg) VALUES($1,$2)', [enabled ? 'svc_start' : 'svc_stop', 'kamailio']); svc = { queued: true }; }
     } catch (e) { svc = { error: e.message }; }
+    if (id === 'sbc') { _sbcLinkCache.v = null; broadcastSoon(); }
     res.json({ ok: true, id, enabled: !!enabled, svc });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-
-
-// ===== rtpengine config (aplicado por el sbc-agent) =====
-const RTPE_KEYS = ['portmin', 'portmax', 'timeout', 'silent_timeout', 'loglevel'];
-app.get('/api/sbc/rtpengine', async (req, res) => { try {
-  const out = {}; for (const k of RTPE_KEYS) { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key=$1", ['rtpe_' + k]); out[k] = rows[0] ? rows[0].value : null; }
-  try { const { rows } = await pool.query("SELECT rtpengine FROM pbxng_sbc WHERE id=1"); out.live = (rows[0] && rows[0].rtpengine) || {}; } catch (_) { out.live = {}; }
-  res.json(out); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/sbc/rtpengine', async (req, res) => { const b = req.body || {}; try {
-  for (const k of RTPE_KEYS) if (b[k] !== undefined && b[k] !== null && b[k] !== '') await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", ['rtpe_' + k, String(b[k])]);
-  await pool.query("INSERT INTO pbxng_sbc_cmd(cmd,arg) VALUES('rtpengine_apply',$1)", [JSON.stringify(b)]);
-  res.json({ ok: true, queued: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 
 // ===== Audios del sistema (voz coherente) =====
@@ -2188,8 +2279,6 @@ app.get('/api/system', async (req, res) => {
     { group: 'WebRTC', name: 'WSS + certificado (NPM/LE)', detail: NODES.domain, status: 'ok' },
     { group: 'WebRTC', name: 'STUN', detail: 'stun.l.google.com:19302', status: 'ok' },
     { group: 'WebRTC', name: 'TURN (Coturn)', detail: ('TURN ' + (NODES.turn||'-')), status: 'ok' },
-    { group: 'Escalado', name: 'SBC de borde (Kamailio)', detail: ('SBC ' + (NODES.sbc||'-')), status: 'ok' },
-    { group: 'Escalado', name: 'Relay de medios (rtpengine)', detail: 'userspace · ancla RTP en el borde', status: state.ami ? 'ok' : 'ok' },
     { group: 'Seguridad', name: 'Fail2Ban', detail: 'anti fuerza bruta PJSIP', status: 'ok' },
     { group: 'Seguridad', name: 'Proxy inverso (NPM + LE)', detail: ((NODES.npm||'-') + ' - TLS'), status: 'ok' },
   ];
@@ -2198,16 +2287,10 @@ app.get('/api/system', async (req, res) => {
 
 /* Topología CON estado medido.
  *
- * Antes esto devolvía sólo las IPs del archivo de configuración, y las pantallas
- * las pintaban siempre en verde: el borde estuvo caído medio día y Topología y
- * Resumen lo mostraron sano. Ahora cada nodo se prueba de verdad.
- *
- * Distingue dos cosas que estaban mezcladas y son distintas:
- *   borde propio    parte de ESTE appliance (lo que configura SBC_HOST)
- *   borde externo   otro producto (SBC-NG u otro) conectado por troncal, con su
- *                   propio panel. Antes los dos se dibujaban como una sola caja
- *                   rotulada "SBC-NG", asi que la caja podia estar verde por el
- *                   borde propio mientras el SBC-NG externo estaba apagado.
+ * Los componentes propios (Asterisk, base, TURN, voz, proxy) se miden abriendo el
+ * puerto real de cada servicio. El SBC-NG, si el modulo "Conexion a SBC-NG" esta
+ * activo, aparece como borde EXTERNO: es otro producto con su propio panel, y su
+ * caida no es una falla de esta central aunque le corte la salida.
  *
  * `nodes` se mantiene con el formato viejo a proposito: hay pantallas que lo leen
  * como texto plano y no tienen por que romperse por esto. */
@@ -2215,12 +2298,17 @@ app.get('/api/topology', async (req, res) => {
   const base = {
     domain: NODES.domain, public_ip: NODES.public_ip,
     nodes: {
-      asterisk: NODES.asterisk, db: NODES.db, sbc: NODES.sbc,
+      asterisk: NODES.asterisk, db: NODES.db, sbc: '',
       npm: NODES.npm, turn: NODES.turn, voz: NODES.voz,
     },
   };
   try {
-    const { rows } = await pool.query('SELECT name, provider_host, provider_port, kind FROM pbxng_trunks').catch(() => ({ rows: [] }));
+    const lk = await sbcLink();
+    base.nodes.sbc = lk.active ? lk.host : '';
+    base.sbc = { enabled: lk.enabled, configured: lk.configured, active: lk.active, host: lk.host, port: lk.port, panel_url: lk.panel_url };
+    /* Sin el modulo "Conexion a SBC-NG" no hay borde externo que medir ni mostrar:
+     * la PBX es autonoma y el diagrama no debe mencionar un producto que no esta. */
+    const { rows } = lk.active ? await pool.query('SELECT name, provider_host, provider_port, kind FROM pbxng_trunks').catch(() => ({ rows: [] })) : { rows: [] };
     const [propios, externos] = await Promise.all([salud.nodos(NODES), salud.bordesExternos(rows)]);
     const todos = propios.concat(externos);
     res.json({ ...base, componentes: propios, bordes_externos: externos, salud: salud.resumir(todos), medido: new Date().toISOString() });
@@ -2310,14 +2398,14 @@ app.get('/api/routes/outbound', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,name,pattern,trunk,strip,prepend,callerid FROM pbxng_outbound_routes ORDER BY id'); res.json(rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Troncal de salida por defecto: SBC-opcional. Si hay una troncal 'sbc' (to-sbc) el saliente
-// va por el SBC; si NO hay SBC, sale directo por la primera troncal de operador (asterisk/
-// register). Asi la PBX funciona con o sin SBC adelante.
+// Troncal de salida por defecto. Con el modulo "Conexion a SBC-NG" activo y la troncal
+// to-sbc configurada, el saliente va por el SBC; si no, sale directo por la primera
+// troncal de operador. La PBX funciona completa con o sin SBC adelante.
 async function defaultOutTrunk(q) {
   try {
-    let r = await q.query("SELECT name FROM pbxng_trunks WHERE kind='sbc' LIMIT 1");
-    if (r.rows[0]) return r.rows[0].name;
-    r = await q.query("SELECT name FROM pbxng_trunks WHERE COALESCE(kind,'asterisk') NOT IN ('webrtc','webrtc-client') ORDER BY id LIMIT 1");
+    const lk = await sbcLink();
+    if (lk.active) return lk.name;
+    const r = await q.query("SELECT name FROM pbxng_trunks WHERE COALESCE(kind,'asterisk') NOT IN ('webrtc','webrtc-client','sbc','kamailio') ORDER BY id LIMIT 1");
     return r.rows[0] ? r.rows[0].name : null;
   } catch (_) { return null; }
 }
@@ -2327,7 +2415,8 @@ app.post('/api/routes/outbound', async (req, res) => {
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    const tk = (trunk && String(trunk).trim()) || (await defaultOutTrunk(c)) || 'to-sbc';
+    const tk = (trunk && String(trunk).trim()) || (await defaultOutTrunk(c));
+    if (!tk) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'No hay ninguna troncal por donde salir: creá una troncal de operador primero (o conectá un SBC-NG en Configuración → SBC-NG).' }); }
     await c.query('INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ($1,$2,$3,$4,$5,$6)', [name || pattern, pattern, tk, +strip || 0, prepend || null, callerid || null]);
     const rows = []; let p = 1;
     if (callerid) rows.push([p++, 'Set', 'CALLERID(num)=' + callerid]);
@@ -2469,54 +2558,13 @@ app.post('/api/trunks', async (req, res) => {
       return res.status(201).json({ created: name, kind: 'webrtc', link, username: uname });
     } catch (e) { await c.query('ROLLBACK'); return res.status(500).json({ error: e.message }); } finally { c.release(); }
   }
-  // WebRTC cliente (PBX-NG se CONECTA a una troncal WebRTC remota, vía el servicio wsbridge)
-  if (kind === 'webrtc-client') {
-    if (!name || !b.remote_url || !b.username || !password) return res.status(400).json({ error: 'name, remote_url, username y password son obligatorios' });
-    try {
-      const rhost = (String(b.remote_url).match(/wss?:\/\/([^/:]+)/) || [])[1] || '';
-      const kam = { kind: 'webrtc-client', remote_url: b.remote_url, username: b.username, password, note: b.note || '' };
-      await pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,5060,$3,true,$4,'webrtc-client',$5) ON CONFLICT (name) DO UPDATE SET kind='webrtc-client',username=$3,kam_config=$5", [name, rhost, b.username, tenant_id, JSON.stringify(kam)]);
-      return res.status(201).json({ created: name, kind: 'webrtc-client' });
-    } catch (e) { return res.status(500).json({ error: e.message }); }
-  }
+  // Troncales que vivian en el SBC embebido: hoy se administran en SBC-NG (otro producto).
+  if (kind === 'webrtc-client' || kind === 'kamailio') return res.status(400).json({ error: 'Las troncales vía SBC se administran en el panel de SBC-NG. En PBX-NG solo se configura la conexión al SBC (Configuración → SBC-NG).' });
   if (kind === 'sbc') {
-    if (!b.provider_host) return res.status(400).json({ error: 'la IP del SBC es obligatoria' });
-    const ip = b.provider_host; const port = +b.provider_port || 5060;
-    const ctx = b.context || 'from-trunk';
-    const codecs = (Array.isArray(b.codecs) && b.codecs.length) ? b.codecs.join(',') : 'ulaw,alaw,g722';
-    const contact = 'sip:' + ip + ':' + port;
-    const c = await pool.connect();
-    try {
-      await c.query('BEGIN');
-      // El endpoint hacia el SBC SIEMPRE se llama 'to-sbc' (las rutas de salida dialan @to-sbc).
-      await c.query("INSERT INTO ps_aors(id,contact,qualify_frequency) VALUES('to-sbc',$1,30) ON CONFLICT(id) DO UPDATE SET contact=$1,qualify_frequency=30", [contact]);
-      await c.query("INSERT INTO ps_endpoints(id,transport,aors,context,disallow,allow,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) VALUES('to-sbc','transport-udp','to-sbc',$1,'all',$2,'no','yes','yes','yes','ip',$3,'trunk') ON CONFLICT(id) DO UPDATE SET context=$1,allow=$2,transport='transport-udp',aors='to-sbc',identify_by='ip',direct_media='no'", [ctx, codecs, tenant_id]);
-      await c.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES('to-sbc','to-sbc',$1) ON CONFLICT(id) DO UPDATE SET match=$1,endpoint='to-sbc'", [ip]);
-      const adv = { sbc: true, label: 'SBC', provider_host: ip, provider_port: port, context: ctx, codecs: codecs.split(','), mode: 'ip', transport: 'udp' };
-      await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ('to-sbc',$1,$2,NULL,false,$3,'sbc',$4) ON CONFLICT (name) DO UPDATE SET kind='sbc',provider_host=$1,provider_port=$2,adv_config=$4", [ip, port, tenant_id, JSON.stringify(adv)]); await c.query("DELETE FROM pbxng_settings WHERE key='sbc_link_removed'");
-      // Ruta de salida por defecto (si no hay ninguna): marcar 0 + numero -> sale por el SBC.
-      const rc = await c.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes');
-      let ruta = null;
-      if (!rc.rows[0] || rc.rows[0].n === 0) {
-        const pat = '0X.'; const strip = 1;
-        await c.query("INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ('Salida al SBC (marca 0)',$1,'to-sbc',$2,NULL,NULL)", [pat, strip]);
-        await setDialplan(c, 'internal', outExten(pat), [[1, 'Dial', 'PJSIP/${EXTEN:' + strip + '}@to-sbc,60'], [2, 'Hangup', '']]);
-        ruta = pat;
-      }
-      await c.query('COMMIT');
-      try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
-      broadcastSoon();
-      return res.status(201).json({ created: 'to-sbc', kind: 'sbc', ruta_creada: ruta });
-    } catch (e) { await c.query('ROLLBACK'); return res.status(500).json({ error: e.message }); } finally { c.release(); }
+    try { const r = await upsertSbcLink({ host: b.provider_host, port: b.provider_port, transport: b.transport, context: b.context, codecs: b.codecs, tenant_id }); broadcastSoon(); return res.status(201).json({ created: SBC_TRUNK, kind: 'sbc', ruta_creada: r.ruta }); }
+    catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
   }
   if (!name || !b.provider_host) return res.status(400).json({ error: 'name y provider_host son obligatorios' });
-  if (kind === 'kamailio') {
-    try {
-      const kam = Object.assign(trunkDefaults(b), { host: b.provider_host, port: +b.provider_port || 5060, register: b.mode !== 'ip', password: password || null });
-      await pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,$3,$4,$5,$6,'kamailio',$7)", [name, b.provider_host, +b.provider_port || 5060, b.username || null, kam.register, tenant_id, JSON.stringify(kam)]);
-      return res.status(201).json({ created: name, kind: 'kamailio' });
-    } catch (e) { return res.status(500).json({ error: e.message }); }
-  }
   const a = trunkDefaults(b);
   if (a.mode === 'register' && !(a.username && password)) return res.status(400).json({ error: 'usuario y contraseña son obligatorios en modo Registro' });
   const c = await pool.connect();
@@ -2591,7 +2639,7 @@ app.put('/api/trunks/:name', async (req, res) => {
 
 app.delete('/api/trunks/:name', async (req, res) => {
   const { name } = req.params; const c = await pool.connect();
-  try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); if (name === 'to-sbc') await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'"); await c.query('COMMIT'); res.json({ deleted: name }); }
+  try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); if (name === SBC_TRUNK) { await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'"); _sbcLinkCache.v = null; } await c.query('COMMIT'); res.json({ deleted: name }); }
   catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
 });
 
@@ -3273,70 +3321,6 @@ app.get('/api/dialplan', async (req, res) => { const ctx = req.query.context; tr
 app.get('/api/channels', async (req, res) => { try { res.json(await getChannels()); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/tenants', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,slug,context_prefix,active FROM tenants ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 
-// ---------------- SBC (Kamailio) ----------------
-app.get('/api/sbc', async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT version, uptime, dispatcher, banned, rtpengine, stats, extract(epoch from (now()-updated_at))::int AS age_s FROM pbxng_sbc WHERE id=1");
-    res.json(rows[0] || { error: 'sin datos' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.get('/api/sbc/trunks', async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT trunks, extract(epoch from (now()-updated_at))::int AS age_s FROM pbxng_sbc WHERE id=1");
-    const r = rows[0] || {};
-    const tr = Array.isArray(r.trunks) ? r.trunks : [];
-    res.json({ trunks: tr, age_s: r.age_s != null ? r.age_s : null, live: r.age_s != null && r.age_s < 120 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.get('/api/sbc/cfg', async (req, res) => {
-  try { const { rows } = await pool.query("SELECT cfg_content FROM pbxng_sbc WHERE id=1"); res.json({ cfg: (rows[0] && rows[0].cfg_content) || '' }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-// Comando genérico al SBC (lo aplica el agente). cmd + arg opcional.
-const SBC_CMDS = ['reload', 'unban_all', 'unban', 'ban', 'debug', 'disable_target', 'enable_target', 'add_target', 'del_target', 'restart', 'cfg_save', 'route_add', 'route_del'];
-app.post('/api/sbc/cmd', async (req, res) => {
-  const { cmd, arg } = req.body || {};
-  if (!SBC_CMDS.includes(cmd)) return res.status(400).json({ error: 'comando inválido' });
-  try { const { rows } = await pool.query("INSERT INTO pbxng_sbc_cmd (cmd, arg) VALUES ($1,$2) RETURNING id", [cmd, arg != null ? String(arg) : null]); res.json({ id: rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.get('/api/sbc/cmd/:id', async (req, res) => {
-  try { const { rows } = await pool.query("SELECT id, cmd, done, result FROM pbxng_sbc_cmd WHERE id=$1", [req.params.id]); res.json(rows[0] || { error: 'no existe' }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-// --- SBC rutas estaticas / multi-WAN ---
-app.get('/api/sbc/routes', async (req, res) => {
-  try {
-    await pool.query("CREATE TABLE IF NOT EXISTS pbxng_sbc_routes (id serial PRIMARY KEY, dest text, gw text, dev text, note text, created_at timestamptz DEFAULT now())");
-    const { rows } = await pool.query("SELECT id, dest, gw, dev, note, created_at FROM pbxng_sbc_routes ORDER BY id");
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/sbc/routes', async (req, res) => {
-  const { dest, gw, dev, note } = req.body || {};
-  if (!dest || !String(dest).trim()) return res.status(400).json({ error: 'destino requerido' });
-  if (!String(gw).trim() && !String(dev).trim()) return res.status(400).json({ error: 'indique gateway o interfaz' });
-  try {
-    await pool.query("CREATE TABLE IF NOT EXISTS pbxng_sbc_routes (id serial PRIMARY KEY, dest text, gw text, dev text, note text, created_at timestamptz DEFAULT now())");
-    const { rows } = await pool.query("INSERT INTO pbxng_sbc_routes (dest, gw, dev, note) VALUES ($1,$2,$3,$4) RETURNING id", [String(dest).trim(), String(gw || '').trim() || null, String(dev || '').trim() || null, String(note || '').trim() || null]);
-    const arg = [String(dest).trim(), String(gw || '').trim(), String(dev || '').trim()].join('|');
-    await pool.query("INSERT INTO pbxng_sbc_cmd (cmd, arg) VALUES ('route_add', $1)", [arg]);
-    res.json({ id: rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/sbc/routes/remove', async (req, res) => {
-  const { id } = req.body || {};
-  if (id == null) return res.status(400).json({ error: 'id requerido' });
-  try {
-    const { rows } = await pool.query("SELECT dest FROM pbxng_sbc_routes WHERE id=$1", [id]);
-    if (rows[0]) {
-      await pool.query("DELETE FROM pbxng_sbc_routes WHERE id=$1", [id]);
-      await pool.query("INSERT INTO pbxng_sbc_cmd (cmd, arg) VALUES ('route_del', $1)", [rows[0].dest]);
-    }
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-// --- SIP capture (debug tipo sngrep) ---
 app.get('/api/sip/messages', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 500, 2000);
   try {
@@ -3365,70 +3349,6 @@ app.post('/api/sip/clear', async (req, res) => {
   try { await pool.query("DELETE FROM pbxng_sip_capture"); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.get('/api/sbc/secfilter', async (req, res) => { try { const { rows } = await pool.query('SELECT id, action, type, data FROM secfilter ORDER BY action, type, data'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/sbc/secfilter', async (req, res) => { const b = req.body || {}; if (!b.data) return res.status(400).json({ error: 'falta data' }); try { await pool.query('INSERT INTO secfilter(action,type,data) VALUES($1,$2,$3) ON CONFLICT (action,type,data) DO NOTHING', [(+b.action ? 1 : 0), (+b.type || 0), String(b.data).trim()]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('secf_reload')"); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.delete('/api/sbc/secfilter/:id', async (req, res) => { try { await pool.query('DELETE FROM secfilter WHERE id=$1', [+req.params.id]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('secf_reload')"); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-// --- LCR / drouting (operadores + reglas de ruteo) ---
-app.get('/api/sbc/lcr/gateways', async (req, res) => { try { const { rows } = await pool.query('SELECT gwid, type, address, strip, pri_prefix, description FROM dr_gateways ORDER BY gwid'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/sbc/lcr/gateways', async (req, res) => { const b = req.body || {}; if (!b.address) return res.status(400).json({ error: 'falta address' }); try { const { rows } = await pool.query('INSERT INTO dr_gateways(type,address,strip,pri_prefix,description) VALUES($1,$2,$3,$4,$5) RETURNING gwid', [(+b.type||0), String(b.address).trim(), (+b.strip||0), (b.pri_prefix?String(b.pri_prefix).trim():null), String(b.description||'')]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('dr_reload')"); res.json({ ok: true, gwid: rows[0].gwid }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.delete('/api/sbc/lcr/gateways/:gwid', async (req, res) => { try { await pool.query('DELETE FROM dr_gateways WHERE gwid=$1', [+req.params.gwid]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('dr_reload')"); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/sbc/lcr/rules', async (req, res) => { try { const { rows } = await pool.query('SELECT ruleid, groupid, prefix, gwlist, priority, description FROM dr_rules ORDER BY priority, ruleid'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/sbc/lcr/rules', async (req, res) => { const b = req.body || {}; if (!b.gwlist) return res.status(400).json({ error: 'falta gwlist' }); try { const { rows } = await pool.query("INSERT INTO dr_rules(groupid,prefix,timerec,priority,routeid,gwlist,description) VALUES($1,$2,'',$3,'',$4,$5) RETURNING ruleid", [String(b.groupid||'0'), String(b.prefix||''), (+b.priority||0), String(b.gwlist).trim(), String(b.description||'')]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('dr_reload')"); res.json({ ok: true, ruleid: rows[0].ruleid }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.delete('/api/sbc/lcr/rules/:ruleid', async (req, res) => { try { await pool.query('DELETE FROM dr_rules WHERE ruleid=$1', [+req.params.ruleid]); await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('dr_reload')"); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-// --- Manipulacion SIP avanzada (por operador, saliente) ---
-function smEsc(v) { return String(v == null ? '' : v).replace(/[\r\n"]/g, '').slice(0, 300); }
-function smStmt(r) {
-  const h = smEsc(r.header), val = smEsc(r.value), mt = smEsc(r.match).replace(/\//g, '.');
-  switch (r.action) {
-    case 'remove_header': return h ? ('remove_hf("' + h + '");') : '';
-    case 'add_header': return h ? ('remove_hf("' + h + '"); append_hf("' + h + ': ' + val + '\\r\\n");') : '';
-    case 'set_from_user': return val ? ('uac_replace_from("", "sip:' + val + '@$rd");') : '';
-    case 'set_ppi': return val ? ('remove_hf("P-Preferred-Identity"); append_hf("P-Preferred-Identity: <sip:' + val + '@$rd>\\r\\n");') : '';
-    case 'set_pai': return val ? ('remove_hf("P-Asserted-Identity"); append_hf("P-Asserted-Identity: <sip:' + val + '@$rd>\\r\\n");') : '';
-    case 'set_diversion': return val ? ('append_hf("Diversion: <sip:' + val + '@$rd>;reason=unconditional;privacy=off\\r\\n");') : '';
-    case 'modify_header': return (h && mt) ? ('subst_hf("' + h + '", "/' + mt + '/' + val + '/", "a");') : '';
-    default: return '';
-  }
-}
-function smBuildBody(rules) {
-  const en = rules.filter((r) => r.enabled);
-  const glob = en.filter((r) => !r.scope || r.scope === 'all').map(smStmt).filter(Boolean);
-  const byGw = {}; en.filter((r) => r.scope && r.scope !== 'all').forEach((r) => { const s = smStmt(r); if (s) { (byGw[r.scope] = byGw[r.scope] || []).push(s); } });
-  if (!glob.length && !Object.keys(byGw).length) return '    return;';
-  const out = []; glob.forEach((s) => out.push('    ' + s));
-  for (const gw of Object.keys(byGw)) { out.push('    if ($rd == "' + smEsc(gw) + '") {'); byGw[gw].forEach((s) => out.push('        ' + s)); out.push('    }'); }
-  out.push('    return;');
-  return out.join('\n');
-}
-async function smApply() {
-  const { rows } = await pool.query('SELECT * FROM pbxng_sip_manip ORDER BY priority, id');
-  const body = smBuildBody(rows);
-  await pool.query("INSERT INTO pbxng_sbc_cmd (cmd, arg) VALUES ('sipmanip_apply', $1)", [Buffer.from(body).toString('base64')]);
-}
-const SM_PRESETS = [
-  { action: 'remove_header', header: 'Remote-Party-ID', value: '', scope: 'all', enabled: true, description: 'Quitar Remote-Party-ID (header legacy que muchos operadores rechazan). Seguro.' },
-  { action: 'remove_header', header: 'P-Asserted-Identity', value: '', scope: 'all', enabled: false, description: 'Quitar P-Asserted-Identity si el operador no lo acepta.' },
-  { action: 'set_ppi', header: '', value: '$fU', scope: 'all', enabled: false, description: 'Agregar P-Preferred-Identity con el numero de origen (operadores que lo exigen).' },
-  { action: 'set_pai', header: '', value: '$fU', scope: 'all', enabled: false, description: 'Agregar P-Asserted-Identity con el numero de origen.' },
-  { action: 'set_from_user', header: '', value: 'CUENTA_SIP', scope: 'all', enabled: false, description: 'Forzar el usuario del From al numero de cuenta del operador (editar el valor).' },
-  { action: 'set_diversion', header: '', value: '$fU', scope: 'all', enabled: false, description: 'Agregar header Diversion (desvios). Editar valor segun caso.' },
-  { action: 'remove_header', header: 'Allow', value: '', scope: 'all', enabled: false, description: 'Quitar Allow (reduce verbosidad; algunos operadores lo prefieren).' },
-];
-app.get('/api/sbc/sipmanip', async (req, res) => { try { const { rows } = await pool.query('SELECT id,scope,direction,action,header,match,value,priority,enabled,description FROM pbxng_sip_manip ORDER BY priority, id'); res.json(rows); } catch (e) { res.status(500).json({ error: 'error' }); } });
-app.post('/api/sbc/sipmanip', async (req, res) => { const b = req.body || {}; if (!b.action) return res.status(400).json({ error: 'falta action' }); try { await pool.query('INSERT INTO pbxng_sip_manip (scope,direction,action,header,match,value,priority,enabled,description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [b.scope || 'all', 'out', String(b.action), b.header || null, b.match || null, b.value || null, +b.priority || 100, b.enabled !== false, b.description || null]); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
-app.post('/api/sbc/sipmanip/:id/toggle', async (req, res) => { try { await pool.query('UPDATE pbxng_sip_manip SET enabled = NOT enabled WHERE id=$1', [+req.params.id]); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
-app.delete('/api/sbc/sipmanip/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_sip_manip WHERE id=$1', [+req.params.id]); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
-app.post('/api/sbc/sipmanip/presets', async (req, res) => { try { for (const p of SM_PRESETS) { await pool.query('INSERT INTO pbxng_sip_manip (scope,direction,action,header,match,value,priority,enabled,description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [p.scope, 'out', p.action, p.header || null, null, p.value || null, 100, p.enabled, p.description]); } await smApply(); res.json({ ok: true, added: SM_PRESETS.length }); } catch (e) { res.status(500).json({ error: 'error' }); } });
-app.post('/api/sbc/sipmanip/reset', async (req, res) => { try { await pool.query('DELETE FROM pbxng_sip_manip'); await smApply(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: 'error' }); } });
-app.post('/api/sbc/reload', async (req, res) => {
-  try { await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('reload')"); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/sbc/unban', async (req, res) => {
-  try { await pool.query("INSERT INTO pbxng_sbc_cmd (cmd) VALUES ('unban')"); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 let busy = false, deb = null;

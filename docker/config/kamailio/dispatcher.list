@@ -1,4 +1,0 @@
-# setid destino flags prioridad
-# set 1 = Asterisk (backend interno). Los operadores/troncales (set 2) se
-# agregan dinamicamente desde el panel (SBC/Troncales), NO se hardcodean aca.
-1 sip:@@ASTERISK_IP@@:5060 0 0

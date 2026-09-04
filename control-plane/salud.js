@@ -63,11 +63,9 @@ function definirNodos(NODES) {
            papel: 'Procesa las llamadas: dialplan, colas, IVR, buzón y grabación.' });
   n.push({ id: 'db', nombre: 'Base de datos', rol: 'datos', host: NODES.db, puerto: 5432,
            papel: 'Guarda la configuración, el historial y el CRM.' });
-  if (NODES.sbc) {
-    n.push({ id: 'borde', nombre: 'Borde propio', rol: 'borde-propio', host: NODES.sbc, puerto: 5060,
-             papel: 'El borde que viene con la central: recibe el SIP de afuera y ancla el audio.' });
-  }
-  if (NODES.turn && NODES.turn !== NODES.sbc) {
+  /* No hay "borde propio": el borde SIP es SBC-NG, otro producto. Si esta conectado
+   * aparece como borde EXTERNO (bordesExternos), nunca como parte de este appliance. */
+  if (NODES.turn) {
     n.push({ id: 'turn', nombre: 'TURN', rol: 'nat', host: NODES.turn, puerto: 3478,
              papel: 'Da camino al audio de los softphones detrás de NAT.' });
   }
