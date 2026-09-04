@@ -26,9 +26,12 @@ docker/edge-join.env
 *.log
 recordings/
 uploads/
-# modelos / binarios grandes
+# modelos / binarios grandes (los videos de fondo del login se distribuyen aparte, no por git)
 vosk-model-*/
 *.zip
+*.tgz
+*.mp4
+_to_delete/
 # os
 .DS_Store
 Thumbs.db
