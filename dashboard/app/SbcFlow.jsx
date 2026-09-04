@@ -111,7 +111,7 @@ const INFO = {
 
 export default function SbcFlow({ fullBleed }) {
   const { snap } = useLive();
-  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]); const [npmCert, setNpmCert] = useState(null); const [voz, setVoz] = useState(null); const [mods, setMods] = useState({}); const [db, setDb] = useState(null);
+  const [sbc, setSbc] = useState(null); const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [sbcRoutes, setSbcRoutes] = useState([]); const [voz, setVoz] = useState(null); const [mods, setMods] = useState({}); const [db, setDb] = useState(null);
   const [topo, setTopo] = useState(null);
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
@@ -124,7 +124,6 @@ export default function SbcFlow({ fullBleed }) {
     try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {}
     try { setSys(await fetch('/backend/api/system').then(r => r.json())); } catch (_) {}
     try { const _r = await fetch('/backend/api/sbc/routes').then(r => r.json()); if (Array.isArray(_r)) setSbcRoutes(_r); } catch (_) {}
-    try { setNpmCert(await fetch('/backend/api/npm/cert').then(r => r.json())); } catch (_) {}
     try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) {}
     try { setMods(await fetch('/backend/api/modules').then(r => r.json())); } catch (_) {}
     try { setDb(await fetch('/backend/api/db').then(r => r.json())); } catch (_) {}
@@ -147,8 +146,12 @@ export default function SbcFlow({ fullBleed }) {
    * siempre verde: estuvo caido medio dia y la topologia no se entero.
    *   comp('borde')   -> el borde PROPIO de este appliance
    *   externos        -> bordes de OTRO producto (SBC-NG), conectados por troncal */
-  const comps = Array.isArray(topo?.componentes) ? topo.componentes : [];
-  const externos = Array.isArray(topo?.bordes_externos) ? topo.bordes_externos : [];
+  /* OJO: memoizados. Antes eran `[]` nuevos en cada render cuando /api/topology
+   * todavia no habia respondido, entraban como deps del useMemo de abajo y el
+   * useEffect que sincroniza rfNodes se disparaba en cada render -> React #185
+   * (Maximum update depth) y la pagina moria al abrirse. */
+  const comps = useMemo(() => (Array.isArray(topo?.componentes) ? topo.componentes : []), [topo]);
+  const externos = useMemo(() => (Array.isArray(topo?.bordes_externos) ? topo.bordes_externos : []), [topo]);
   const comp2 = (id) => comps.find((c) => c.id === id) || null;
   const medido = (id, fallback) => { const c = comp2(id); return c ? (c.estado === 'ok' ? 'ok' : 'down') : fallback; };
   const borde = comp2('borde');
@@ -174,13 +177,6 @@ export default function SbcFlow({ fullBleed }) {
                     ...(borde.ms != null ? [{ label: 'Respuesta', value: borde.ms + ' ms' }] : []),
                     ...(borde.motivo ? [{ label: 'Motivo', value: borde.motivo }] : [])] } });
     }
-    const tr = trunks.length ? trunks : [{ name: 'Sin troncales', provider_host: 'agregá una en Troncales', status: 'pending', _empty: true }];
-    const step = 150, startY = 470;
-    const tnodes = tr.map((t, i) => { const ts = trunkStatus(t); return ({
-      id: 'trk-' + (t.name || i), type: 'pbx', position: { x: 100, y: startY + i * step },
-      data: { title: t.name, ip: t.provider_host, circle: true, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: t._empty ? undefined : (ts === 'offline' ? 'down' : ts === 'online' ? 'up' : undefined), status: t._empty ? 'pending' : (ts === 'online' ? 'ok' : ts === 'offline' ? 'down' : 'pending'), pulse: t._empty ? null : (ts === 'offline' ? 'down' : ts === 'online' ? 'ok' : null), metrics: t._empty ? undefined : [ (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? { label: 'WebRTC → ' + (t.target || t.provider_host || ''), value: 'WSS' } : { label: t.kind === 'kamailio' ? 'vía el borde' : 'directa a la central', value: (t.transport || 'udp').toUpperCase() }, ...(ts === 'offline' ? [{ label: 'Estado', value: 'CAÍDO' }] : ts === 'online' ? [{ label: 'Estado', value: 'Activo' }] : [])] },
-    }); });
-    const gwNodes = (Array.isArray(sbcRoutes) ? sbcRoutes : []).map((r, i) => ({ id: 'gw-' + r.id, type: 'gw', position: { x: 250, y: 480 + i * 112 }, data: { gw: r.gw || r.dev || '' } }));
     /* Ojo con que oculta cada cosa: 'borde' es el borde PROPIO (lo gobierna el
      * modulo sbc del appliance) y 'kamailio' pasó a ser el borde EXTERNO, que
      * existe solo si hay una troncal de tipo sbc. Antes los dos eran el mismo id
@@ -196,9 +192,18 @@ export default function SbcFlow({ fullBleed }) {
       data: { title: t.name, ip: t.provider_host, circle: true, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: ts === 'offline' ? 'down' : ts === 'online' ? 'up' : undefined, status: ts === 'online' ? 'ok' : ts === 'offline' ? 'down' : 'pending', pulse: ts === 'offline' ? 'down' : ts === 'online' ? 'ok' : null, metrics: [{ label: 'directa', value: (t.transport || 'udp').toUpperCase() }, ...(ts === 'offline' ? [{ label: 'Estado', value: 'CAÍDO' }] : ts === 'online' ? [{ label: 'Estado', value: 'Activo' }] : [])] },
     }); });
     return [...base, ...opNodes].filter((n) => !hidden.has(n.id));
-  }, [sbc, trunks, sys, snap, sbcRoutes, npmCert, voz, mods, db, topo, hasSbc, comps, externos]);
+  }, [sbc, trunks, sys, snap, voz, mods, db, topo, hasSbc, borde, extPrincipal]);
 
-  useEffect(() => { let saved = {}; try { saved = JSON.parse(localStorage.getItem('pbxng_sbc_nodepos_v4') || '{}'); } catch (_) {} setRfNodes((prev) => computedNodes.map((n) => { const ex = prev.find((p) => p.id === n.id); return { ...n, position: (ex && ex.position) || saved[n.id] || n.position }; })); }, [computedNodes, setRfNodes]);
+  useEffect(() => {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('pbxng_sbc_nodepos_v4') || '{}'); } catch (_) {}
+    setRfNodes((prev) => computedNodes.map((n) => {
+      const ex = prev.find((p) => p.id === n.id);
+      /* conservamos lo que React Flow ya midio (measured/width/height) para no
+       * disparar otra ronda de onNodesChange por cada refresco de datos */
+      return { ...(ex || {}), ...n, position: (ex && ex.position) || saved[n.id] || n.position };
+    }));
+  }, [computedNodes, setRfNodes]);
 
   const talking = ch.filter(c => /up|answer/i.test(c.state || '')).length;
   const callCount = (() => { const set = new Set(); ch.forEach(c => set.add([c.caller || '?', c.connected || '?'].sort().join('~'))); return set.size; })();
