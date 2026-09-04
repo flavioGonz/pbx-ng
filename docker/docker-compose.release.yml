@@ -3,7 +3,7 @@
 # 'docker compose pull' (con registry) o 'docker load' del bundle (air-gapped).
 # Perfiles = MODULOS, igual que el compose canonico. Uso:
 #   export PBXNG_VERSION=1.0.0 PBXNG_REGISTRY=pbxng     # air-gapped (nombres locales)
-#   export COMPOSE_PROFILES=core,sbc,turn,intercom
+#   export COMPOSE_PROFILES=core,turn,intercom
 #   docker compose -f docker-compose.release.yml up -d
 # Variables:
 #   PBXNG_REGISTRY  prefijo de imagen (def: pbxng). Para registry: ghcr.io/tuorg/pbx-ng
@@ -104,7 +104,6 @@ services:
       TURN_PASS: ${TURN_PASS:-}
       DEFAULT_COMPANY: ${DEFAULT_COMPANY:-Mi Empresa}
       ADMIN_DEFAULT_PASS: ${ADMIN_DEFAULT_PASS:-}
-      SBC_HOST: ${SBC_HOST:-}
       NPM_HOST: ${NPM_HOST:-}
       TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
       VOZ_HOST: ${VOZ_HOST:-}
@@ -124,50 +123,6 @@ services:
       API_URL: http://api:3000
     ports: ["3001:3001"]
     networks: [pbxng]
-
-  kamailio:
-    image: ${PBXNG_REGISTRY:-pbxng}/kamailio:${PBXNG_VERSION:-latest}
-    profiles: ["sbc"]
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      DB_HOST: ${DB_HOST:-127.0.0.1}
-      DB_PORT: ${DB_PORT:-5432}
-      DB_NAME: ${DB_NAME:-pbxng}
-      DB_USER: ${DB_USER:-pbxng}
-      DB_PASS: ${DB_PASS:?}
-      ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
-      PUBLIC_IP: ${PUBLIC_IP:-}
-      TRUSTED_NET: ${TRUSTED_NET:-}
-
-  rtpengine:
-    image: drachtio/rtpengine:latest
-    profiles: ["sbc"]
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      PUBLIC_IP: ${PUBLIC_IP:-}
-    entrypoint: ["/bin/sh","-c"]
-    command:
-      - |
-        PUB=$$(getent hosts "$$PUBLIC_IP" | awk '{print $$1}'); [ -z "$$PUB" ] && PUB="$$PUBLIC_IP"
-        LAN=$$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $$7; exit}'); [ -z "$$LAN" ] && LAN=$$(hostname -I | awk '{print $$1}')
-        exec rtpengine --foreground --interface "$$LAN!$$PUB" --listen-ng 127.0.0.1:2223 --port-min 30000 --port-max 40000
-
-  wsbridge:
-    image: ${PBXNG_REGISTRY:-pbxng}/wsbridge:${PBXNG_VERSION:-latest}
-    profiles: ["sbc"]
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      DB_HOST: ${DB_HOST:-127.0.0.1}
-      DB_PORT: ${DB_PORT:-5432}
-      DB_NAME: ${DB_NAME:-pbxng}
-      DB_USER: ${DB_USER:-pbxng}
-      DB_PASS: ${DB_PASS:?}
-      ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
-      KAM_HOST: ${KAM_HOST:-127.0.0.1}
-      KAM_PORT: ${KAM_PORT:-5060}
 
   coturn:
     image: ${PBXNG_REGISTRY:-pbxng}/coturn:${PBXNG_VERSION:-latest}

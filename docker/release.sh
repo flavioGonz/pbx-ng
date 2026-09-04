@@ -19,10 +19,10 @@ for a in "$@"; do case "$a" in
   *) echo "arg desconocido: $a"; exit 1;; esac; done
 
 # imagenes construidas por el compose canonico -> nombre corto del servicio
+# (kamailio/wsbridge/rtpengine ya no forman parte de PBX-NG: el borde es SBC-NG, otro producto)
 declare -A SRC=( [asterisk]=pbxng/asterisk:22 [api]=pbxng/api:latest \
-  [dashboard]=pbxng/dashboard:latest [kamailio]=pbxng/kamailio:5.6 \
-  [wsbridge]=pbxng/wsbridge:latest [coturn]=pbxng/coturn:latest [voz]=pbxng/voz:latest )
-THIRD=( postgres:16-alpine redis:7-alpine drachtio/rtpengine:latest \
+  [dashboard]=pbxng/dashboard:latest [coturn]=pbxng/coturn:latest [voz]=pbxng/voz:latest )
+THIRD=( postgres:16-alpine redis:7-alpine \
   alexxit/go2rtc:latest jc21/nginx-proxy-manager:latest )
 
 echo "== PBX-NG release v$VERSION  (registry=$REGISTRY) =="
@@ -30,7 +30,7 @@ echo "== PBX-NG release v$VERSION  (registry=$REGISTRY) =="
 # NO se hornean en las imágenes (son variables de runtime; los valores reales van en .env al desplegar).
 export DB_PASS="${DB_PASS:-build}" ARI_PASS="${ARI_PASS:-build}" AMI_PASS="${AMI_PASS:-build}" \
        JWT_SECRET="${JWT_SECRET:-build}" TURN_PASS="${TURN_PASS:-build}" TURN_CLI_PASS="${TURN_CLI_PASS:-build}"
-COMPOSE_PROFILES=core,sbc,turn,ai,intercom,proxy docker compose -f docker-compose.yml build
+COMPOSE_PROFILES=core,turn,ai,intercom,proxy docker compose -f docker-compose.yml build
 
 echo "== Tag =="
 for svc in "${!SRC[@]}"; do

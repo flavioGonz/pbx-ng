@@ -80,13 +80,13 @@ recommend_node(){ echo "$BEST_NODE"; }
 
 # ---------- 1) forma de despliegue ----------
 c "1) Forma de despliegue"
-echo "   1) Compacto      · 1 contenedor con TODO el stack                    (demo)"
-echo "   2) Standalone    · 2 CTs: app+telefonía (DB+Asterisk+App) / SBC aparte  (RECOMENDADO stand-alone)"
-echo "   3) Híbrido       · 3 CTs: núcleo / borde / voz"
-echo "   4) Separado      · 1 contenedor por componente                       (aislamiento máx.)"
+echo "   1) Compacto      · 1 contenedor con TODO el stack                          (demo)"
+echo "   2) Núcleo + acceso · 2 CTs: núcleo (LAN) / acceso WebRTC: TURN + proxy (DMZ)   (RECOMENDADO comercial)"
+echo "   3) Núcleo + voz   · 2 CTs: núcleo+TURN+proxy / voz IA (pesado, aislado)"
+echo "   4) Separado      · 1 contenedor por componente                              (aislamiento máx.)"
 echo "   5) Personalizado · vos agrupás los servicios en los contenedores que quieras"
-echo "   6) Dos VMs      · núcleo (LAN) + borde SBC (DMZ, doble NIC opcional)     (RECOMENDADO comercial)"
-SHAPE=$(ask "Elegí" "6")
+echo "   (El borde SIP es otro producto, SBC-NG: se instala aparte y se conecta desde el panel.)"
+SHAPE=$(ask "Elegí" "2")
 echo
 
 # define los ROLES (nombre → perfiles docker-compose) segun la forma
@@ -94,38 +94,33 @@ declare -A ROLE_PROFILES ROLE_DESC
 ROLES=()
 case "$SHAPE" in
   1) ROLES=(all)
-     ROLE_PROFILES[all]="core sbc turn ai intercom proxy"; ROLE_DESC[all]="Stack completo (DB+Asterisk+App+SBC+media+voz)" ;;
-  2) ROLES=(main sbc)
-     ROLE_PROFILES[main]="core turn ai intercom proxy"; ROLE_DESC[main]="App+telefonía: DB, Redis, Asterisk, API, Dashboard, media, voz, proxy"
-     ROLE_PROFILES[sbc]="sbc";                  ROLE_DESC[sbc]="SBC: Kamailio + rtpengine (borde, aparte)" ;;
-  3) ROLES=(core edge ai)
-     ROLE_PROFILES[core]="core intercom";   ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard, Intercom"
-     ROLE_PROFILES[edge]="sbc turn proxy"; ROLE_DESC[edge]="Borde: SBC Kamailio, rtpengine, TURN, Proxy"
-     ROLE_PROFILES[ai]="ai";                ROLE_DESC[ai]="Voz IA: TTS/STT (pesado, aislado)" ;;
-  4) ROLES=(core sbc turn ai intercom proxy)
+     ROLE_PROFILES[all]="core turn ai intercom proxy"; ROLE_DESC[all]="Stack completo (DB+Asterisk+App+TURN+voz+intercom+proxy)" ;;
+  2) ROLES=(core edge)
+     ROLE_PROFILES[core]="core ai intercom"; ROLE_DESC[core]="Núcleo (LAN): DB, Redis, Asterisk, API, Dashboard, voz, intercom"
+     ROLE_PROFILES[edge]="turn proxy";      ROLE_DESC[edge]="Acceso WebRTC (DMZ): TURN (coturn) + proxy inverso TLS/WSS" ;;
+  3) ROLES=(core ai)
+     ROLE_PROFILES[core]="core turn intercom proxy"; ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard, TURN, intercom, proxy"
+     ROLE_PROFILES[ai]="ai";                        ROLE_DESC[ai]="Voz IA: TTS/STT (pesado, aislado)" ;;
+  4) ROLES=(core turn ai intercom proxy)
      ROLE_PROFILES[core]="core";         ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
-     ROLE_PROFILES[sbc]="sbc";           ROLE_DESC[sbc]="SBC: Kamailio + rtpengine + wsbridge"
      ROLE_PROFILES[turn]="turn";         ROLE_DESC[turn]="TURN: Coturn (TURN/STUN)"
      ROLE_PROFILES[ai]="ai";             ROLE_DESC[ai]="Voz IA: TTS/STT"
      ROLE_PROFILES[intercom]="intercom"; ROLE_DESC[intercom]="Intercom: go2rtc (RTSP->WebRTC/MSE)"
      ROLE_PROFILES[proxy]="proxy";       ROLE_DESC[proxy]="Proxy inverso: Nginx Proxy Manager" ;;
-  5) # personalizado: el usuario agrupa los 5 perfiles en N contenedores
+  5) # personalizado: el usuario agrupa los perfiles en N contenedores
      c "Modo personalizado — agrupá los servicios en contenedores"
-     echo "   Perfiles: core (DB+Asterisk+App) · sbc · turn (Coturn) · ai (voz) · intercom (go2rtc) · proxy (NPM)"
+     echo "   Perfiles: core (DB+Asterisk+App) · turn (Coturn) · ai (voz) · intercom (go2rtc) · proxy (NPM)"
      echo "   Poné un número de grupo a cada uno (mismo número = mismo contenedor)."
      echo
      declare -A GRP SEEN
-     for p in core sbc turn ai intercom proxy; do GRP[$p]=$(ask "   Grupo para '$p'" "1"); done
-     for p in core sbc turn ai intercom proxy; do
+     for p in core turn ai intercom proxy; do GRP[$p]=$(ask "   Grupo para '$p'" "1"); done
+     for p in core turn ai intercom proxy; do
        gid="${GRP[$p]}"; rname="g${gid}"
        if [[ -z "${SEEN[$gid]:-}" ]]; then ROLES+=("$rname"); ROLE_PROFILES[$rname]="$p"; SEEN[$gid]=1
        else ROLE_PROFILES[$rname]="${ROLE_PROFILES[$rname]} $p"; fi
        ROLE_DESC[$rname]="Grupo $gid"
      done
      [[ ${#ROLES[@]} -gt 0 ]] || die "No definiste ningún grupo." ;;
-  6) ROLES=(core edge)
-     ROLE_PROFILES[core]="core intercom"; ROLE_DESC[core]="Núcleo (LAN): DB, Redis, Asterisk, API, Dashboard, Intercom"
-     ROLE_PROFILES[edge]="sbc turn proxy"; ROLE_DESC[edge]="Borde (DMZ): SBC Kamailio + rtpengine + TURN + Proxy" ;;
   *) die "Opción inválida" ;;
 esac
 
@@ -176,12 +171,12 @@ if [[ "$NET_MODE" == "static" ]]; then
   GW=$(ask "Gateway" "192.168.1.1")
   STATIC_BASE=$(ask "IP base (se asigna secuencial /24, ej 192.168.1.50)" "192.168.1.50")
 fi
-# 2 VMs: NIC extra del borde hacia WAN/DMZ (opcional)
+# Núcleo + acceso: NIC extra del CT de acceso (TURN+proxy) hacia WAN/DMZ (opcional)
 DMZ_BRIDGE=""; EDGE_WAN_IP=""; EDGE_WAN_GW=""
-if [[ "$SHAPE" == "6" ]]; then
-  if yn "¿El borde va en una DMZ con NIC separada hacia WAN?" "n"; then
-    DMZ_BRIDGE=$(ask "Bridge DMZ/WAN del borde" "vmbr1")
-    EDGE_WAN_IP=$(ask "IP WAN del borde (CIDR, ej 203.0.113.10/24; vacío = dhcp)" "")
+if [[ "$SHAPE" == "2" ]]; then
+  if yn "¿El CT de acceso (TURN+proxy) va en una DMZ con NIC separada hacia WAN?" "n"; then
+    DMZ_BRIDGE=$(ask "Bridge DMZ/WAN" "vmbr1")
+    EDGE_WAN_IP=$(ask "IP WAN del CT de acceso (CIDR, ej 203.0.113.10/24; vacío = dhcp)" "")
     [[ -n "$EDGE_WAN_IP" ]] && EDGE_WAN_GW=$(ask "Gateway WAN" "")
   fi
 fi
@@ -211,7 +206,6 @@ res_for(){
   local p=" ${ROLE_PROFILES[$1]} " cores=1 ram=1024 disk=8
   [[ "$p" == *" core "* ]]  && { cores=4; ram=4096; disk=20; }
   [[ "$p" == *" ai "*   ]]  && { (( cores<4 )) && cores=4; ram=$((ram+2048)); disk=$((disk+8)); }
-  [[ "$p" == *" sbc "*  ]]  && { (( cores<2 )) && cores=2; (( ram<2048 )) && ram=2048; (( disk<12 )) && disk=12; }
   echo "$cores $ram $disk"
 }
 
@@ -329,12 +323,11 @@ provision_ct(){
   "
   # IPs de los nodos por perfil (todos los CT ya fueron creados: ROLE_IP está poblado)
   ip_for_profile(){ local p="$1" r; for r in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$r]} " == *" $p "* ]] && { echo "${ROLE_IP[$r]}"; return; }; done; }
-  local sbc_ip turn_ip voz_ip npm_ip media_ip
-  sbc_ip="$(ip_for_profile sbc)"
-  turn_ip="$(ip_for_profile turn)"; [[ -n "$turn_ip" ]] || turn_ip="$sbc_ip"
+  local turn_ip voz_ip npm_ip media_ip
+  turn_ip="$(ip_for_profile turn)"
   voz_ip="$(ip_for_profile ai)"
   npm_ip="$(ip_for_profile proxy)"
-  media_ip="${sbc_ip:-${voz_ip:-$core_ip}}"
+  media_ip="$core_ip"   # AudioSocket de la IA: la API (core) es quien escucha
   # escribir .env (inyecta la IP del núcleo para servicios que viven en otro CT)
   pct exec "$ctid" -- bash -lc "
     set -e
@@ -358,7 +351,6 @@ AMI_USER=pbxng-ami
 AMI_PASS=$AMI_PASS
 ASTERISK_HOST=$core_ip
 REDIS_HOST=$core_ip
-SBC_HOST=$sbc_ip
 TURN_HOST=$turn_ip
 VOZ_HOST=$voz_ip
 NPM_HOST=$npm_ip
@@ -427,12 +419,13 @@ g "  API       : http://$CORE_IP:3000"
 PROXY_ROLE=""; for role in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$role]} " == *" proxy "* ]] && PROXY_ROLE="$role"; done
 [[ -n "$PROXY_ROLE" ]] && g "  Proxy NPM : http://${ROLE_IP[$PROXY_ROLE]}:81  (admin@example.com / changeme)"
 g "  Modo app  : $TENANT_MODE   Plan guardado en $PLAN_FILE"
-if [[ "$SHAPE" == "6" ]]; then
+if [[ "$SHAPE" == "2" ]]; then
   echo "  ---------------------------------------------------------------"
-  y "  Topología 2 VMs:  núcleo=${ROLE_IP[core]:-?} (LAN)   ·   borde=${ROLE_IP[edge]:-?} (SBC/TURN)"
-  y "  Firewall: al WAN exponé SOLO 5060/5061 (SIP), 3478 + rango relay (TURN), 443 (WSS)."
-  r "  Restringí Postgres(5432), AMI(5038) y ARI(8088) del núcleo SOLO desde la IP del borde."
+  y "  Topología:  núcleo=${ROLE_IP[core]:-?} (LAN)   ·   acceso=${ROLE_IP[edge]:-?} (TURN + proxy)"
+  y "  Firewall: al WAN exponé SOLO 443 (HTTPS/WSS), 3478 + rango relay (TURN). SIP 5060 solo si hay troncales/telefonos remotos sin SBC-NG."
+  r "  Restringí Postgres(5432), AMI(5038) y ARI(8088) del núcleo a la LAN."
 fi
+y "  ¿Hay un SBC-NG adelante? Conectalo desde el panel: Configuración -> SBC-NG."
 y "  Publicá el dominio con TLS/WSS desde el proxy inverso y abrí los"
 y "  puertos SIP/RTP/TURN en tu firewall/NAT."
 g "================================================================"

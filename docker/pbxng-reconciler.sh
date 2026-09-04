@@ -10,7 +10,8 @@ DIR="${PBXNG_DIR:-/opt/pbx-ng/docker}"
 CTL="${PBXNG_CTL:-/usr/local/bin/pbxng-ctl}"
 set -a; . "$DIR/.env" 2>/dev/null || true; set +a
 PSQL(){ docker exec -i pbxng-postgres-1 psql -U "${DB_USER:-pbxng}" -d "${DB_NAME:-pbxng}" -tAc "$1" 2>/dev/null || true; }
-declare -A KEY=( [sbc]=mod_sbc [turn]=mod_turn [ai]=mod_ai [intercom]=mod_intercom )
+# mod_sbc NO esta aca: es la conexion a SBC-NG (otro producto), no un contenedor de esta central.
+declare -A KEY=( [turn]=mod_turn [ai]=mod_ai [intercom]=mod_intercom )
 prof="$("$CTL" status 2>/dev/null | grep '^COMPOSE_PROFILES=' | cut -d= -f2 | tr -d ' ')"
 cur=",${prof},"
 for m in "${!KEY[@]}"; do

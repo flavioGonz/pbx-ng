@@ -8,18 +8,17 @@
 #  pbxng-ctl disable <modulo>       DESTRUYE los contenedores del modulo y saca el perfil
 #  pbxng-ctl up | down | ps         aplica el COMPOSE_PROFILES actual
 #  pbxng-ctl reconcile              sincroniza contenedores <-> COMPOSE_PROFILES del .env
-#  Modulos: core(siempre) sbc turn ai intercom proxy
+#  Modulos: core(siempre) turn ai intercom proxy   (el SBC es otro producto: SBC-NG)
 # ============================================================================
 set -euo pipefail
 DIR="${PBXNG_DIR:-/opt/pbx-ng/docker}"
 [ -f "$DIR/docker-compose.yml" ] || { echo "No encuentro $DIR/docker-compose.yml (exporta PBXNG_DIR)"; exit 1; }
 cd "$DIR"
 ENVF="$DIR/.env"
-MODULES="core sbc turn ai intercom proxy"
+MODULES="core turn ai intercom proxy"   # el SBC es otro producto (SBC-NG), no un modulo de la central
 
 svcs_of(){ case "$1" in
   core)     echo "postgres redis asterisk api dashboard" ;;
-  sbc)      echo "kamailio rtpengine wsbridge" ;;
   turn)     echo "coturn" ;;
   ai)       echo "voz" ;;
   intercom) echo "go2rtc" ;;

@@ -9,8 +9,7 @@ FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive DOMAIN=pbx.local
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      postgresql redis-server asterisk kamailio kamailio-postgres-modules \
-      kamailio-websocket-modules kamailio-tls-modules rtpengine-daemon \
+      postgresql redis-server asterisk coturn \
       curl ca-certificates gnupg supervisor openssl \
  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && apt-get install -y nodejs \
