@@ -11,16 +11,16 @@
     "@mantine/core": "^7.17.8",
     "@mantine/hooks": "^7.17.8",
     "@mantine/notifications": "^7.17.8",
-    "@tabler/icons-react": "^3.44.0",
-    "@xyflow/react": "^12.11.1",
+    "@tabler/icons-react": "^3.46.0",
+    "@xyflow/react": "^12.11.6",
     "jsqr": "^1.4.0",
-    "next": "14.2.5",
+    "next": "14.2.35",
     "qrcode.react": "^4.2.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "sileo": "^0.1.5",
     "sip.js": "^0.21.2",
-    "slot-text": "^0.3.1",
+    "slot-text": "^0.3.4",
     "socket.io-client": "^4.8.3"
   }
 }

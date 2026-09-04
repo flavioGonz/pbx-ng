@@ -13,25 +13,25 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --host",
-    "electron": "electron .",
+    "electron": "^33.4.11",
     "dist": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sip.js": "^0.21.2",
-    "electron-updater": "^6.3.9",
+    "electron-updater": "^6.8.9",
     "sip": "0.0.6",
     "qrcode": "1.5.4",
     "jsqr": "1.4.0",
-    "ws": "8.18.0",
-    "gsap": "3.12.5"
+    "ws": "8.21.3",
+    "gsap": "3.15.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^5.4.11",
-    "vite-plugin-pwa": "^0.21.1",
-    "electron": "^33.2.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "vite": "^5.4.21",
+    "vite-plugin-pwa": "^0.21.2",
+    "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
   },
   "build": {
