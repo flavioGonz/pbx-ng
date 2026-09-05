@@ -34,9 +34,9 @@ ALTER TABLE pbxng_enroll ADD COLUMN IF NOT EXISTS user_agent text;
 ALTER TABLE pbxng_enroll ADD COLUMN IF NOT EXISTS ip text;
 ALTER TABLE pbxng_enroll ADD COLUMN IF NOT EXISTS uses int DEFAULT 0;
 
--- ── fail2ban (estado que reporta el agente y cola de comandos) ─────────────────
-CREATE TABLE IF NOT EXISTS pbxng_fail2ban (jail text PRIMARY KEY, banned jsonb DEFAULT '[]', total_failed int DEFAULT 0, total_banned int DEFAULT 0, updated_at timestamptz DEFAULT now());
-CREATE TABLE IF NOT EXISTS pbxng_fail2ban_cmd (id serial PRIMARY KEY, cmd text, ip text, jail text, created_at timestamptz DEFAULT now(), done_at timestamptz);
+-- (pbxng_fail2ban / pbxng_fail2ban_cmd se creaban acá hasta 1.5.1: eran el estado de un
+--  fail2ban que ninguna imagen instalaba. 0010_soc.sql las borra y trae el esquema del
+--  módulo de seguridad real.)
 
 -- ── Grabaciones (índice + transcripción/análisis) y su almacenamiento ──────────
 CREATE TABLE IF NOT EXISTS pbxng_recordings (id serial PRIMARY KEY, filename text UNIQUE NOT NULL, ext text, src text, dst text, started_at timestamptz, bytes bigint DEFAULT 0, duration int DEFAULT 0, storage text DEFAULT 'local', remote_url text, linkedid text, deleted boolean DEFAULT false, created_at timestamptz DEFAULT now());

@@ -14,7 +14,7 @@ set -e
 # Los .conf horneados hacen #include de pbxng.d/. Si el panel todavía no escribió nada,
 # dejamos los archivos vacíos para que Asterisk no avise por cada include faltante.
 mkdir -p /etc/asterisk/pbxng.d
-for f in parking.conf moh.conf features.conf pjsip.conf rtp.conf; do
+for f in parking.conf moh.conf features.conf pjsip.conf rtp.conf pjsip-security.conf; do
   [ -f "/etc/asterisk/pbxng.d/$f" ] || echo "; generado por el panel PBX-NG (vacío por ahora)" > "/etc/asterisk/pbxng.d/$f"
 done
 # Carpeta de audios de música en espera administrada desde el panel.
@@ -86,8 +86,19 @@ done
 # --- resolver la URL de la API en el dialplan (wake webhook, etc.) ---
 sed -i "s|@@API_URL@@|${API_URL:-127.0.0.1:3000}|g" /etc/asterisk/extensions.conf 2>/dev/null || true
 
+# --- firewall del módulo /seguridad (nftables en el kernel del host) ---
+# Idempotente: crea tabla inet pbxng + set banned + regla drop sólo si faltan, y nunca
+# borra los bloqueos vigentes. Si el kernel no trae nf_tables o falta NET_ADMIN, avisa
+# y sigue: la central tiene que arrancar igual (el panel mostrará enforcement.nft=false).
+if command -v nft >/dev/null 2>&1; then
+  python3 /usr/local/bin/pbxng-ast-agent.py --ensure-fw 2>&1 || echo "aviso: no se pudo preparar nftables (se sigue sin bloqueo de IPs)"
+else
+  echo "aviso: nft no está instalado, el bloqueo de IPs de /seguridad queda deshabilitado"
+fi
+
 # --- agente HTTP PBX-NG (:8092) en background ---
-# El script no usa token (la API le manda X-PBXNG-Token pero el agente no lo valida).
+# Sólo /fw/* valida X-PBXNG-Token (/etc/pbxng/agent.token, mismo volumen que la API);
+# el resto de rutas sigue sin token como hasta ahora.
 # Se arranca antes de Asterisk; las llamadas a "asterisk -rx" responderan vacio
 # hasta que el core este arriba, sin romper el arranque.
 python3 /usr/local/bin/pbxng-ast-agent.py &

@@ -93,6 +93,27 @@ Variables que la API lee pero que **el compose todavía no reenvía** desde el `
 `LOG_FORMAT`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `CORS_ORIGINS`, `TZ`. Ver
 `docs/CONTRATOS.md` §6.
 
+## Firewall del centro de seguridad (1.6.0)
+
+El bloqueo de IPs de **Sistema → Seguridad** lo aplica el contenedor de Asterisk en
+**nftables del host** (tabla `inet pbxng`, ver `docs/FIREWALL.md` §1.1), a través de su agente
+`:8092` (`/fw/*`). Lo que necesita el empaquetado, y ya está en ambos compose: Asterisk en
+`network_mode: host` con `cap_add: NET_ADMIN`, el volumen `certs` montado en Asterisk (`/etc/
+pbxng`, ro) y en la API (rw), y `ASTERISK_HOST`/`AST_AGENT` apuntando a la IP LAN del host de
+Asterisk. La imagen 1.6.0 instala `nftables` y el entrypoint prepara la tabla antes de arrancar
+Asterisk; si el host no tiene `nf_tables` la central arranca igual y el panel avisa.
+
+Al actualizar desde 1.5.x: **la imagen de Asterisk cambia** (build o pull) y hay que recrear
+el contenedor (`pbxng-ctl up` drena antes); la migración `0010_soc.sql` corre sola al arrancar
+la API y borra `pbxng_fail2ban` / `pbxng_fail2ban_cmd`. Después de instalar, tocar una vez
+**Aplicar** en Seguridad → Ajustes de la central (`CHANGELOG.md` 1.6.0, «Known issues»).
+
+Token del agente: `/fw/*` valida `X-PBXNG-Token` contra `/etc/pbxng/agent.token` si el archivo
+existe. **Hoy ninguna instalación lo genera** (ni `install.sh` ni la API), así que el agente
+acepta esos pedidos sólo desde redes privadas/loopback. Para habilitarlo a mano, en el host:
+`docker compose exec api sh -c 'head -c 32 /dev/urandom | base64 > /etc/pbxng/agent.token && chmod 600 /etc/pbxng/agent.token'`
+y reiniciar la API (lee el archivo al arrancar; el agente lo lee en cada pedido `/fw/*`).
+
 ## Respaldo programado
 
 Dos caminos que hacen lo mismo (`backup.programado()` en `control-plane/backup.js`: crear el

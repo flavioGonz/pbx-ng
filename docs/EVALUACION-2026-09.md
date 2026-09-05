@@ -9,7 +9,8 @@ estimados.
 
 > **Actualización 1.4.0 (2026-09-05, sprint 1 de seguridad):** los ítems marcados con **✅ 1.4.0**
 > quedaron resueltos en esa versión (ver `CHANGELOG.md` y `docs/CONTRATOS.md`). El texto original
-> se conserva tal cual como registro de lo que había.
+> se conserva tal cual como registro de lo que había. Lo mismo para **✅ 1.5.0** (robustez) y
+> **✅ 1.6.0** (centro de seguridad real sobre Asterisk + nftables).
 
 ## 1. Qué es hoy, en una frase
 
@@ -124,12 +125,18 @@ delante de UFW: la advertencia de `install.sh` («nunca publicar 5432/6379/3000/
 incumple el propio compose. Socket.io con `origin:'*'` y un bypass `scratch` sin token que
 permite unirse a cualquier pizarra de videollamada (`app.js:3376-3386`).
 
-**3.6 Fail2ban es una pantalla sin servicio.** El panel de Seguridad, las alertas y la API leen
+**3.6 Fail2ban es una pantalla sin servicio.** ✅ resuelto en 1.6.0 — `control-plane/guard.js`
+consume los eventos de seguridad de Asterisk por AMI (`res_security_log`), cuenta fallos por IP,
+banea vía el agente de Asterisk en **nftables del host** (`/fw/*`, tabla `inet pbxng`), con
+lista blanca, geo-bloqueo, alertas y registro en vivo; `POST /api/security/apply` escribe
+`unidentified_request_*` en `pbxng.d/pjsip-security.conf`; la migración 0010 borra las tablas
+de fail2ban. `acl.conf` sigue vacío (el corte lo hace nftables, no Asterisk). · El panel de Seguridad, las alertas y la API leen
 jaulas de un fail2ban que ninguna imagen instala (`images/asterisk/Dockerfile`: cero
 referencias). `acl.conf` está vacío y `pjsip.conf` no define `unidentified_request_count`. La
 central no tiene protección real contra fuerza bruta SIP mientras el panel transmite lo contrario.
 
-**3.7 Sin pruebas, sin lint, sin tipos.** Cero tests en todo el repositorio (control-plane,
+**3.7 Sin pruebas, sin lint, sin tipos.** (Desde 1.6.0 hay una: `control-plane/test/guard.test.js`,
+`npm test`; el resto del párrafo sigue vigente.) Cero tests en todo el repositorio (control-plane,
 dashboard, softphone). Cero ESLint/Prettier. `app.js` tiene 3.668 líneas (54 % del backend) con
 líneas de hasta 1.322 caracteres y 262 endpoints; `app.js.orig` está commiteado. 97 `catch` vacíos
 en el backend y 237 en el panel: los errores se tragan sin avisar. El panel no tiene ningún
@@ -236,12 +243,20 @@ para Asterisk ✅ 1.5.0 (60 s; api 20 s) y drenado antes de recrear ✅ 1.5.0 (`
 entrypoint y retirar los `CREATE TABLE` del módulo) ✅ 1.5.0 (`docker-entrypoint.sh` + `0009_schema_runtime.sql`; cero DDL en runtime), middleware de error de Express que no filtre
 mensajes de Postgres ✅ 1.5.0 (`errores.js`; quedan 8 `catch` con `status(400).json({error:e.message})` en rutas admin/supervisor, menor), logger con niveles y formato JSON ✅ 1.5.0 (`log.js`, `LOG_LEVEL`/`LOG_FORMAT`).
 
-**Bloque 4 — fail2ban de verdad y endurecimiento de Asterisk.** Instalar fail2ban en la imagen (o
-un vigía propio sobre el canal `security` que ya se emite) y que el panel muestre lo que existe;
-`unidentified_request_*` en `pjsip.conf`; `*98` sin buzón abierto; `URIENCODE` en el `CURL` del
-wake; ARI en loopback o con TLS; STUN configurable (no Google).
+**Bloque 4 — fail2ban de verdad y endurecimiento de Asterisk.** Parcial en 1.6.0. Instalar fail2ban en la imagen (o
+un vigía propio sobre el canal `security` que ya se emite) y que el panel muestre lo que existe
+✅ 1.6.0 (vigía propio: `guard.js` sobre los eventos de seguridad del AMI + nftables en el host
+por el agente de Asterisk; el panel `/seguridad` muestra sólo lo que existe, incluido si el
+firewall está aplicando o no);
+`unidentified_request_*` en `pjsip.conf` ✅ 1.6.0 (`pbxng.d/pjsip-security.conf`, editable desde
+Seguridad → Ajustes de la central). Pendiente: `*98` sin buzón abierto; `URIENCODE` en el `CURL` del
+wake; ARI en loopback o con TLS; STUN configurable (no Google); generar `/etc/pbxng/agent.token`
+en alguna instalación (hoy `/fw/*` acepta sin token desde redes privadas) y poner token al resto
+de rutas del agente (`/route`, `/iface`, `/netmode`).
 
-**Bloque 5 — red de seguridad de desarrollo.** ESLint + Prettier, pruebas de integración de los
+**Bloque 5 — red de seguridad de desarrollo.** Primer paso en 1.6.0: `control-plane/test/guard.test.js`
+(`npm test`, `node --test`, con mocks) es la primera prueba automatizada del repo. Sigue pendiente
+el resto: ESLint + Prettier, pruebas de integración de los
 endpoints críticos (auth, roles, troncales, rutas, sbc-link, calls) contra un Postgres efímero en
 CI, y una prueba e2e de humo del panel (login → topología → troncales) con Playwright. Partir
 `app.js` por dominio (auth, trunks, routes, recordings, provisioning, backup…) siguiendo el

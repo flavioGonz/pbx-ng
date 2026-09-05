@@ -1423,43 +1423,61 @@ CREATE TABLE public.pbxng_f2b_whitelist (
 ALTER TABLE public.pbxng_f2b_whitelist OWNER TO pbxng;
 
 --
--- Name: pbxng_fail2ban; Type: TABLE; Schema: public; Owner: pbxng
+-- Name: pbxng_blocked; Type: TABLE; Schema: public; Owner: pbxng
+-- (1.6.0, migración 0010_soc.sql: IPs bloqueadas en nftables por el módulo /seguridad;
+--  reemplaza a pbxng_fail2ban / pbxng_fail2ban_cmd, que 0010 borra)
 --
 
-CREATE TABLE public.pbxng_fail2ban (
-    jail text NOT NULL,
-    banned jsonb DEFAULT '[]'::jsonb,
-    total_failed integer DEFAULT 0,
-    total_banned integer DEFAULT 0,
-    updated_at timestamp with time zone DEFAULT now(),
-    bans jsonb DEFAULT '[]'::jsonb,
-    config jsonb DEFAULT '{}'::jsonb
+CREATE TABLE public.pbxng_blocked (
+    ip text NOT NULL,
+    reason text,
+    country text,
+    cc text,
+    isp text,
+    hits integer DEFAULT 1 NOT NULL,
+    permanent boolean DEFAULT false NOT NULL,
+    blocked_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone
 );
 
 
-ALTER TABLE public.pbxng_fail2ban OWNER TO pbxng;
+ALTER TABLE public.pbxng_blocked OWNER TO pbxng;
 
 --
--- Name: pbxng_fail2ban_cmd; Type: TABLE; Schema: public; Owner: pbxng
+-- Name: pbxng_geoblock; Type: TABLE; Schema: public; Owner: pbxng
+-- (1.6.0: filtro por país; el modo bloquear|permitir vive en pbxng_settings.sec_geoblock_modo)
 --
 
-CREATE TABLE public.pbxng_fail2ban_cmd (
+CREATE TABLE public.pbxng_geoblock (
+    cc character(2) NOT NULL,
+    nombre text,
+    added_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.pbxng_geoblock OWNER TO pbxng;
+
+--
+-- Name: pbxng_sec_events; Type: TABLE; Schema: public; Owner: pbxng
+-- (1.6.0: línea de tiempo del SOC: bloqueo | desbloqueo | ataque | geo | ajustes | motor | fallo)
+--
+
+CREATE TABLE public.pbxng_sec_events (
     id integer NOT NULL,
-    cmd text,
-    ip text,
-    jail text,
-    created_at timestamp with time zone DEFAULT now(),
-    done_at timestamp with time zone
+    kind text NOT NULL,
+    severity text DEFAULT 'info'::text NOT NULL,
+    detail jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
-ALTER TABLE public.pbxng_fail2ban_cmd OWNER TO pbxng;
+ALTER TABLE public.pbxng_sec_events OWNER TO pbxng;
 
 --
--- Name: pbxng_fail2ban_cmd_id_seq; Type: SEQUENCE; Schema: public; Owner: pbxng
+-- Name: pbxng_sec_events_id_seq; Type: SEQUENCE; Schema: public; Owner: pbxng
 --
 
-CREATE SEQUENCE public.pbxng_fail2ban_cmd_id_seq
+CREATE SEQUENCE public.pbxng_sec_events_id_seq
     AS integer
     START WITH 1
     INCREMENT BY 1
@@ -1468,13 +1486,13 @@ CREATE SEQUENCE public.pbxng_fail2ban_cmd_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.pbxng_fail2ban_cmd_id_seq OWNER TO pbxng;
+ALTER SEQUENCE public.pbxng_sec_events_id_seq OWNER TO pbxng;
 
 --
--- Name: pbxng_fail2ban_cmd_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: pbxng
+-- Name: pbxng_sec_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: pbxng
 --
 
-ALTER SEQUENCE public.pbxng_fail2ban_cmd_id_seq OWNED BY public.pbxng_fail2ban_cmd.id;
+ALTER SEQUENCE public.pbxng_sec_events_id_seq OWNED BY public.pbxng_sec_events.id;
 
 
 --
@@ -3451,10 +3469,10 @@ ALTER TABLE ONLY public.pbxng_conferences ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- Name: pbxng_fail2ban_cmd id; Type: DEFAULT; Schema: public; Owner: pbxng
+-- Name: pbxng_sec_events id; Type: DEFAULT; Schema: public; Owner: pbxng
 --
 
-ALTER TABLE ONLY public.pbxng_fail2ban_cmd ALTER COLUMN id SET DEFAULT nextval('public.pbxng_fail2ban_cmd_id_seq'::regclass);
+ALTER TABLE ONLY public.pbxng_sec_events ALTER COLUMN id SET DEFAULT nextval('public.pbxng_sec_events_id_seq'::regclass);
 
 
 --
@@ -3881,19 +3899,27 @@ ALTER TABLE ONLY public.pbxng_f2b_whitelist
 
 
 --
--- Name: pbxng_fail2ban_cmd pbxng_fail2ban_cmd_pkey; Type: CONSTRAINT; Schema: public; Owner: pbxng
+-- Name: pbxng_blocked pbxng_blocked_pkey; Type: CONSTRAINT; Schema: public; Owner: pbxng
 --
 
-ALTER TABLE ONLY public.pbxng_fail2ban_cmd
-    ADD CONSTRAINT pbxng_fail2ban_cmd_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.pbxng_blocked
+    ADD CONSTRAINT pbxng_blocked_pkey PRIMARY KEY (ip);
 
 
 --
--- Name: pbxng_fail2ban pbxng_fail2ban_pkey; Type: CONSTRAINT; Schema: public; Owner: pbxng
+-- Name: pbxng_geoblock pbxng_geoblock_pkey; Type: CONSTRAINT; Schema: public; Owner: pbxng
 --
 
-ALTER TABLE ONLY public.pbxng_fail2ban
-    ADD CONSTRAINT pbxng_fail2ban_pkey PRIMARY KEY (jail);
+ALTER TABLE ONLY public.pbxng_geoblock
+    ADD CONSTRAINT pbxng_geoblock_pkey PRIMARY KEY (cc);
+
+
+--
+-- Name: pbxng_sec_events pbxng_sec_events_pkey; Type: CONSTRAINT; Schema: public; Owner: pbxng
+--
+
+ALTER TABLE ONLY public.pbxng_sec_events
+    ADD CONSTRAINT pbxng_sec_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -4422,6 +4448,27 @@ ALTER TABLE ONLY public.version
 
 ALTER TABLE ONLY public.voicemail
     ADD CONSTRAINT voicemail_pkey PRIMARY KEY (uniqueid);
+
+
+--
+-- Name: pbxng_blocked_expires_idx; Type: INDEX; Schema: public; Owner: pbxng
+--
+
+CREATE INDEX pbxng_blocked_expires_idx ON public.pbxng_blocked USING btree (expires_at) WHERE (expires_at IS NOT NULL);
+
+
+--
+-- Name: pbxng_sec_events_created_idx; Type: INDEX; Schema: public; Owner: pbxng
+--
+
+CREATE INDEX pbxng_sec_events_created_idx ON public.pbxng_sec_events USING btree (created_at DESC);
+
+
+--
+-- Name: pbxng_sec_events_kind_idx; Type: INDEX; Schema: public; Owner: pbxng
+--
+
+CREATE INDEX pbxng_sec_events_kind_idx ON public.pbxng_sec_events USING btree (kind, created_at DESC);
 
 
 --

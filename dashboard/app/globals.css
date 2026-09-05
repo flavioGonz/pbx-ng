@@ -58,6 +58,12 @@ body, .mantine-AppShell-navbar, .mantine-AppShell-header, .mantine-AppShell-main
 
 @keyframes pbxPageIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .pbx-anim { animation: pbxPageIn .35s cubic-bezier(.4,0,.2,1) both; }
+/* Entradas de tarjeta y de solapa del módulo /seguridad (equivalentes a sbc-fade-in /
+ * sbc-tabin del SBC-NG, que se clonó): más cortas que pbx-anim porque son varias a la vez. */
+@keyframes pbxFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.pbx-fade-in { animation: pbxFadeIn .3s ease both; }
+@keyframes pbxTabIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+.pbx-tabin { animation: pbxTabIn .25s ease both; }
 .pbx-pip { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 @keyframes pbxPulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
 .pbx-pulse { animation: pbxPulse 2s infinite; }

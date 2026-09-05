@@ -163,49 +163,32 @@ async function tick() {
   await checkDigest();
 }
 
-/** Bans nuevos + rafaga de intentos fallidos (una sola alerta agrupada). */
+/** Ráfaga de intentos fallidos = "estás bajo ataque" (una sola alerta agrupada).
+ *  Los bans individuales ya no se detectan acá: guard.js dispara `security.ban` en el
+ *  momento (con país, ISP y motivo) y `security.attack` cuando el ritmo en vivo pasa el
+ *  umbral. Este chequeo queda como red de contención por ventana larga (10 min por
+ *  defecto) sobre los fallos agregados de pbxng_sec_events. */
 async function checkSecurity() {
-  const { rows } = await pool.query('SELECT jail, banned, total_failed FROM pbxng_fail2ban');
-  if (!rows.length) return;
-  const nowBanned = [];
-  let failed = 0;
-  for (const j of rows) {
-    failed += Number(j.total_failed || 0);
-    const list = Array.isArray(j.banned) ? j.banned : [];
-    for (const b of list) { const ip = typeof b === 'string' ? b : (b && (b.ip || b.address)); if (ip) nowBanned.push(ip); }
-  }
-  // 1) IPs recien baneadas
-  const st = await getState('sec', { banned: [], failed: 0, failed_at: nowMin() });
-  const fresh = nowBanned.filter((ip) => !(st.banned || []).includes(ip));
-  if (fresh.length) {
-    const g = deps.geoLookup ? await deps.geoLookup(fresh.slice(0, 20)).catch(() => ({})) : {};
-    const lines = fresh.slice(0, 10).map((ip) => { const v = g[ip]; return [ip, v ? [v.country, v.isp].filter(Boolean).join(' · ') : '—']; });
-    await raise('security.ban', {
-      severity: fresh.length > 3 ? 'crit' : 'warn',
-      title: fresh.length === 1 ? `IP bloqueada: ${fresh[0]}` : `${fresh.length} IPs bloqueadas por el firewall`,
-      lines: [['Bloqueadas ahora', fresh.length], ['Total bloqueadas', nowBanned.length], ...lines],
-      foot: 'Bloqueos automáticos de fail2ban sobre los intentos de registro SIP.',
+  const r = await rule('security.attack');
+  if (!r || !r.enabled) return;
+  const p = r.params || {}; const win = Number(p.window_min || 10), need = Number(p.failed || 20);
+  const st = await getState('sec', { failed_at: nowMin() });
+  const prevAt = Number(st.failed_at || nowMin());
+  if (nowMin() - prevAt < win) return;
+  const { rows } = await pool.query(
+    `SELECT COALESCE(sum((detail->>'n')::int),0)::int AS fallos, count(DISTINCT detail->>'ip')::int AS ips
+       FROM pbxng_sec_events WHERE kind='fallo' AND created_at > now() - ($1::int || ' minutes')::interval`, [win]);
+  const fallos = (rows[0] && rows[0].fallos) || 0;
+  if (fallos >= need) {
+    const { rows: b } = await pool.query('SELECT count(*)::int AS n FROM pbxng_blocked');
+    await raise('security.attack', {
+      severity: 'crit',
+      title: `Ataque en curso: ${fallos} intentos de registro fallidos en ${win} min`,
+      lines: [['Intentos fallidos', fallos], ['IPs distintas', (rows[0] && rows[0].ips) || 0], ['Ventana', win + ' min'], ['IPs bloqueadas', (b[0] && b[0].n) || 0]],
+      foot: 'Los bloqueos automáticos siguen corriendo (nftables). Si el volumen es alto y sostenido, conviene vetar el país de origen (Seguridad → Filtro por país) o cerrar el SIP al WAN.',
     });
   }
-  // 2) rafaga = "estas bajo ataque" (agrupada, no una por IP)
-  const r = await rule('security.attack');
-  if (r && r.enabled) {
-    const p = r.params || {}; const win = Number(p.window_min || 10), need = Number(p.failed || 20);
-    const prev = Number(st.failed || 0), prevAt = Number(st.failed_at || nowMin());
-    const delta = failed - prev;
-    if (nowMin() - prevAt >= win) {
-      if (delta >= need) {
-        await raise('security.attack', {
-          severity: 'crit',
-          title: `Ataque en curso: ${delta} intentos de registro fallidos en ${win} min`,
-          lines: [['Intentos fallidos', delta], ['Ventana', win + ' min'], ['IPs bloqueadas', nowBanned.length], ['Acumulado', failed]],
-          foot: 'Los intentos ya están siendo bloqueados por fail2ban. Si el volumen es alto y sostenido, conviene bloquear el país de origen o cerrar el SIP al WAN.',
-        });
-      }
-      st.failed = failed; st.failed_at = nowMin();
-    }
-  }
-  st.banned = nowBanned;
+  st.failed_at = nowMin(); delete st.banned; delete st.failed;
   await setState('sec', st);
 }
 
@@ -380,7 +363,8 @@ async function checkDigest() {
       count(*) FILTER (WHERE dcontext='from-trunk')::int inbound
     FROM cdr WHERE start >= current_date - 1 AND start < current_date`);
   const top = await q(`SELECT src, count(*)::int n FROM cdr WHERE start >= current_date - 1 AND start < current_date AND dcontext <> 'from-trunk' GROUP BY src ORDER BY n DESC LIMIT 5`);
-  const bans = await q(`SELECT coalesce(sum(total_banned),0)::int b, coalesce(sum(total_failed),0)::int f FROM pbxng_fail2ban`);
+  const bans = await q(`SELECT (SELECT count(*)::int FROM pbxng_blocked) b,
+      (SELECT coalesce(sum((detail->>'n')::int),0)::int FROM pbxng_sec_events WHERE kind='fallo' AND created_at >= current_date - 1 AND created_at < current_date) f`);
   const vm = await q(`SELECT count(*)::int n FROM pbxng_vm_sent WHERE sent_at >= current_date - 1 AND sent_at < current_date`);
 
   const t = tot || {};
@@ -394,8 +378,8 @@ async function checkDigest() {
       ['Entrantes', t.inbound || 0],
       ['Duración media', (t.avg_talk || 0) + ' s'],
       ['Mensajes de voz enviados', (vm[0] && vm[0].n) || 0],
-      ['IPs bloqueadas (acumulado)', (bans[0] && bans[0].b) || 0],
-      ['Intentos fallidos (acumulado)', (bans[0] && bans[0].f) || 0],
+      ['IPs bloqueadas (vigentes)', (bans[0] && bans[0].b) || 0],
+      ['Intentos fallidos (ayer)', (bans[0] && bans[0].f) || 0],
       ...top.map((x, i) => ['Top interno ' + (i + 1), (x.src || '—') + ' · ' + x.n + ' llamadas']),
     ],
     foot: 'Resumen automático de la central.',

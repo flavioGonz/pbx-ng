@@ -114,7 +114,7 @@ La seguridad perimetral, el LCR con failover, la salud de operadores, la manipul
 **Operación**
 - Dashboard en tiempo real (Socket.io + AMI), topología animada con salud.
 - **Diagnóstico ICE/TURN en vivo**: el panel (Configuración → WebRTC / TURN) y el softphone levantan una `RTCPeerConnection` real y muestran los candidatos que juntan — verde solo si el TURN está *alcanzable y autenticado*, y si el RTP de la llamada va **por TURN** o **directo**.
-- Fail2Ban con geolocalización de ataques, gestión de bloqueos.
+- **Centro de seguridad (SOC)**: eventos de seguridad de Asterisk en vivo, bloqueo automático de IPs en nftables del host (vía el agente de Asterisk), geolocalización con mapa, lista blanca, filtro por país y alertas por correo.
 - Watchdog de agentes (auto-recuperación de cuelgues).
 
 ## Instalación
@@ -354,7 +354,7 @@ Defensa en capas:
 - **Enrolamiento y softphone**: el enlace/QR es de un solo uso (2 min de gracia) y entrega un token de alcance `phone` (nunca una sesión de panel); el socket.io exige JWT (panel o softphone) también para la pizarra.
 - **Red**: Postgres y API solo en loopback del host; el panel en loopback cuando NPM corre en el mismo compose. Sin Redis.
 - **Borde**: TLS (5061) y DTLS-SRTP los termina Asterisk. Anti-flood, listas de bloqueo, auto-ban y ocultamiento de topología en el perímetro los aporta SBC-NG, si se lo pone adelante.
-- **Fail2Ban** sobre logs PJSIP con geolocalización y gestión de bloqueos/lista blanca.
+- **Anti fuerza bruta SIP real** (`control-plane/guard.js`, desde 1.6.0): los eventos de seguridad de Asterisk (`res_security_log`, por AMI) alimentan un contador por IP; el bloqueo lo aplica **nftables en el host** (tabla `inet pbxng`, `docs/FIREWALL.md` §1.1) a través del agente del contenedor de Asterisk. Lista blanca por IP/CIDR, geo-bloqueo por país, `unidentified_request_*` de PJSIP desde el panel, y la pantalla dice si el firewall está aplicando de verdad.
 - **Agentes internos** protegidos por token compartido; comandos de sistema con validación (sin `shell=True`).
 - **Recomendado en producción**: rotar todos los secretos, activar TLS en teléfonos, y no exponer `:3001` sin proxy fuera de la LAN (el aislamiento multi-tenant real sigue pendiente, ver `docs/EVALUACION-2026-09.md` 3.10).
 

@@ -2,7 +2,10 @@
 import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 let socket;
-function getSocket() {
+/* Exportado para que otras pantallas (el registro de seguridad en vivo, p. ej.) usen
+ * la MISMA conexión en vez de abrir otra: cada socket extra es otro long-polling
+ * contra la API por el proxy, y el JWT ya viaja en este handshake. */
+export function getSocket() {
   if (!socket && typeof window !== 'undefined') {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('pbxng_jwt') : null;
     // Siempre mismo origen: server.js proxya /socket.io a la API tanto en `npm run dev`

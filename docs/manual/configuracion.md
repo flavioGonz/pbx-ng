@@ -450,7 +450,7 @@ La consola de Asterisk (**Asterisk** en el menú) es la ventana al motor de llam
 | **Red** | Interfaces y conectividad |
 | **Dialplan** | El plan de marcación generado, tal cual lo ve Asterisk |
 | **Rutas** | Las rutas resueltas |
-| **Seguridad** | Fail2ban sobre los registros SIP |
+| **Seguridad** | Ya no vive acá: el centro de seguridad es **Sistema → Seguridad** (sección 16) |
 
 Casi nunca vas a tener que tocar nada acá: el panel genera el dialplan solo a partir de las colas,
 los IVR y las rutas. Es para **ver** y para **diagnosticar**.
@@ -919,8 +919,8 @@ ahora o puede esperar.
 
 | Alerta | Qué la dispara | Qué trae el correo | Qué hacer |
 |---|---|---|---|
-| **Estamos bajo ataque** | Ráfaga de registros SIP fallidos en poco tiempo (típico de un escaneo automatizado). | Cantidad de intentos, las IPs implicadas con país e ISP, y los usuarios que probaron. | Normalmente nada: el SBC y Fail2ban ya los están bloqueando. Si el ataque insiste desde un país donde no tenés clientes, bloqueá el país en el SBC. |
-| **IP bloqueada** | El firewall metió una IP en la lista negra. | IP, país, ISP y motivo del bloqueo. | Nada, salvo que sea una IP tuya: entonces desbloqueala desde **Seguridad**. |
+| **Estamos bajo ataque** | Más de 12 eventos de seguridad SIP en 60 segundos (típico de un escaneo automatizado). Sale como máximo uno cada 10 minutos. | Golpes por minuto, IPs distintas, la IP más insistente, cuántas hay bloqueadas y si el firewall está activo. | Normalmente nada: los bloqueos automáticos siguen corriendo. Si el ataque insiste desde un país donde no tenés clientes, vetalo en **Seguridad → Filtro por país**. |
+| **IP bloqueada** | El centro de seguridad metió una IP en el firewall del host (nftables). | IP, motivo, país, ISP, cuenta probada, duración, cuántas veces se la bloqueó y si el firewall confirmó el bloqueo. | Nada, salvo que sea una IP tuya (un proveedor de troncal, una sucursal): entonces desbloqueala y ponela en la **lista blanca** desde **Seguridad**. |
 | **Inicio de sesión al panel** | Alguien entró al panel. Por defecto **solo avisa desde una IP nueva**, para no molestar con los ingresos de todos los días. | Usuario, rol, IP, país y navegador. | Si no reconocés el ingreso, cambiá esa contraseña ya. |
 | **Intentos fallidos al panel** | Varias contraseñas erradas seguidas contra el panel. | Usuario probado, IP y cantidad. | Fuerza bruta contra el administrador: revisá que la contraseña sea fuerte. |
 
@@ -1052,15 +1052,124 @@ después**.
 
 ---
 
-## 16. Seguridad
+## 16. Seguridad (SOC)
 
 » Menú lateral → Sistema → Seguridad
 
-Además del SBC, el núcleo tiene **Fail2ban** sobre los registros SIP: quien intenta adivinar
-contraseñas queda bloqueado. La sección **Seguridad** muestra las IPs bloqueadas con su país y
-permite desbloquear o bloquear a mano.
+Es el **centro de operaciones de seguridad** de la central: quién intentó entrar, desde dónde,
+y qué lo frenó. Funciona igual que el módulo de seguridad de SBC-NG, pero acá la fuente es la
+propia central (Asterisk avisa cada intento de registro, cada clave errada, cada cuenta que no
+existe) y el que corta es el **firewall del host** (nftables): una IP bloqueada deja de llegar
+a la central antes de que Asterisk la procese. No hay ningún fail2ban.
 
 ![Seguridad](img/cfg-13-seguridad.png)
+
+### 16.1 Qué se ve
+
+- **Estado del firewall**, arriba a la derecha: «firewall activo · nftables» en verde es lo
+  normal. Si está en naranja («sin nftables» o «agente sin respuesta») aparece además un aviso
+  explicando por qué: mirá 16.6.
+- **BAJO ATAQUE**: banner rojo que se prende solo cuando hay más de 12 eventos de seguridad en
+  un minuto. Dice cuántos golpes por minuto, desde cuántas IPs y cuál es la más insistente. Se
+  apaga solo cuando baja el ritmo. Si tenés las alertas encendidas, también llega un correo.
+- **Registro en vivo**: cada evento de seguridad a medida que ocurre — clave errada, cuenta
+  inexistente, rechazo por ACL, escáner, límite de carga, país vetado, bloqueo, y también los
+  registros correctos (OK). Tiene pausa, limpiar y filtros por tipo. Al abrir la pantalla carga
+  los últimos 200.
+- **Mapa de ataques**: un punto por país con IPs bloqueadas, y los cinco números que importan:
+  bloqueados ahora, bloqueos en las últimas 24 h, países, fallos en 24 h y permanentes.
+- **Centro de operaciones**: países que más atacan (con bandera y un botón para vetar el país
+  entero), la **línea de tiempo** (bloqueos, desbloqueos, ataques, cambios de ajustes y de
+  geo-bloqueo), **los más insistentes** (las IPs con más bloqueos, con botón para dejarlas
+  permanentes) y la tabla de **bloqueos activos** con buscador: IP, país, ISP, motivo, cuántas
+  veces se la bloqueó, cuándo vence y el botón para desbloquear.
+
+### 16.2 Cómo se bloquea (y cuándo)
+
+Cada IP tiene un contador de fallos en una ventana de tiempo. Por defecto: **5 fallos en 60
+segundos → bloqueo de 1 hora**. Cuenta como fallo una clave errada, una cuenta inexistente, un
+rechazo por ACL o un pedido SIP raro; un registro correcto pone el contador de esa IP en cero.
+Además:
+
+- **Escáneres**: si una misma IP prueba **tres cuentas distintas que no existen** en la ventana,
+  no es un teléfono mal configurado, es alguien enumerando internos: se bloquea a la primera
+  (interruptor «Bloquear escáneres a la primera», encendido por defecto).
+- **Reincidentes**: el **tercer** bloqueo de la misma IP en 24 h es **permanente** (ajustable).
+- **Sobrecarga**: los avisos de límite de sesiones/memoria/carga de Asterisk (flood) cuentan como
+  fallo y se marcan en rojo en el registro en vivo.
+- **La red local nunca se bloquea**: un teléfono de la oficina con la clave vieja no puede
+  dejar a la empresa sin central. Tampoco se puede bloquear a mano una IP privada.
+- **Las troncales no se eximen solas.** Si un proveedor manda llamadas que la central no
+  reconoce (por ejemplo, desde una IP que no está en la troncal), a los 5 intentos queda una
+  hora afuera. Poné la IP del proveedor en la **lista blanca** al dar de alta la troncal.
+
+Cada bloqueo queda en la línea de tiempo y, si «Avisar por correo» está encendido, manda la
+alerta «IP bloqueada» (sección 14). Cuando vence, la IP sale sola del firewall.
+
+**Bloquear a mano**: desde «los más insistentes» o desde la tabla (candado) una IP queda
+**permanente**. **Desbloquear**: el botón de la tabla la saca del firewall en el acto; ojo que
+también le borra el historial, así que si vuelve a atacar arranca de cero.
+
+### 16.3 Ajustes de la central (sólo administrador)
+
+| Ajuste | Qué hace | Por defecto |
+|---|---|---|
+| **Fallos permitidos** / **…en esta ventana (s)** | Cuántos fallos tolera una IP y en cuánto tiempo antes de bloquearla. | 5 en 60 s |
+| **Duración del bloqueo (s)** | Cuánto queda afuera. 0 = todos los bloqueos son permanentes. | 3600 (1 hora) |
+| **Permanente tras N bloqueos** | Bloqueos en 24 h que vuelven permanente el siguiente. 0 = nunca. | 3 |
+| **Pedidos sin identificar** / **período** / **limpieza** | Lo que Asterisk mismo tolera de una IP que manda pedidos que no matchean ningún interno (`unidentified_request_*` de PJSIP). Van a `pjsip-security.conf`. | 5 en 60 s, limpieza cada 30 s |
+| **Bloquear escáneres a la primera** | Ver 16.2. | encendido |
+| **Avisar por correo** | Manda «IP bloqueada» y «Estamos bajo ataque» (usa las alertas de la sección 14). | encendido |
+
+**Guardar** aplica los umbrales de bloqueo por IP en el acto. **Aplicar** además escribe los
+tres valores de «pedidos sin identificar» en Asterisk y recarga PJSIP **sin cortar llamadas**.
+
+> Después de instalar la central, entrá una vez a esta solapa y tocá **Aplicar**: hasta que lo
+> hagas Asterisk corre con sus valores de fábrica para «pedidos sin identificar», aunque la
+> pantalla muestre los de PBX-NG.
+
+### 16.4 Listas negras y blancas
+
+- **Lista negra**: IPs bloqueadas **para siempre** en el firewall del host, sin importar qué
+  manden. Es la misma tabla de bloqueos activos filtrada por «permanente»; se carga una IPv4
+  pública con una nota, y se saca con el mismo botón de desbloquear.
+- **Lista blanca**: IPs o rangos (`203.0.113.5` o `203.0.113.0/24`) que **nunca** se bloquean:
+  no cuentan fallos ni les aplica el filtro por país. Al agregar una IP que estaba bloqueada,
+  se desbloquea sola (un rango no suelta las que ya estaban adentro: desbloquealas a mano).
+  Es el lugar para los proveedores de troncal, las sucursales y tu propia IP pública.
+
+### 16.5 Filtro por país
+
+La central ubica cada IP en el primer intento y decide por país. Dos modos:
+
+- **Bloquear** los países de la lista (todo lo demás pasa). Es el modo normal: vetás los
+  países desde donde llegan los ataques y donde no tenés clientes.
+- **Permitir** sólo los países de la lista (todo lo demás se bloquea). Más estricto; ojo con
+  los proveedores de troncal en el exterior y con la gente que viaja.
+
+La primera señal desde un país vetado —aunque sea un registro correcto— es **bloqueo
+permanente** con motivo «país no permitido». **Guardar y aplicar** guarda la lista y además
+revisa lo ya visto: suelta las IPs bloqueadas por país que ya no está vetado y bloquea las IPs
+vistas en las últimas 24 h cuyo país sí lo está. El botón «bloquear país» del centro de
+operaciones agrega el país y aplica en el acto. Si la geolocalización no responde, no se
+decide nada por país (nadie se queda afuera por un servicio externo caído).
+
+### 16.6 Si el firewall no responde
+
+El bloqueo lo aplica el contenedor de Asterisk en el firewall del host. Cuando el badge está en
+naranja, la central **sigue atendiendo** y los bloqueos **se anotan igual**, pero no se aplican:
+
+| Badge | Qué pasa | Qué hacer |
+|---|---|---|
+| **agente sin respuesta** | La API no llega al agente de Asterisk (puerto 8092). Suele ser Asterisk reiniciando o una imagen anterior a 1.6.0. | Esperá que Asterisk termine de levantar; si persiste, `pbxng-ctl status` y que `ASTERISK_HOST` del `.env` sea la IP LAN del host. |
+| **sin nftables** | El agente responde pero el host no tiene `nftables` disponible (falta el módulo del kernel o el permiso `NET_ADMIN`). | Ver `docs/FIREWALL.md` §1.1. |
+
+En cuanto el firewall vuelve, la central le manda la lista completa de bloqueos (lo hace al
+arrancar y cada 5 minutos), así que no hay que rehacer nada a mano. En el registro en vivo, una
+IP bloqueada que sigue golpeando aparece como «sigue golpeando estando bloqueada (firewall sin
+confirmar)»: es la señal de que el corte no está llegando al kernel.
+
+Para ver el firewall desde el host: `nft list set inet pbxng banned`.
 
 ---
 

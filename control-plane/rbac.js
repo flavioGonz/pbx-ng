@@ -81,12 +81,15 @@ const PERMISOS = [
   ['GET',      /^\/api\/enrollments$/,                      SUP],
   ['POST',     /^\/api\/enroll(\/email)?$/,                 SUP],     // enrolar un interno / mandar el QR por correo
   ['GET',      /^\/api\/phones$/,                           SUP],
+  // Centro de seguridad (/seguridad): el supervisor VE el estado y el registro en vivo;
+  // bloquear, listas y ajustes quedan en admin (caen al default).
+  ['GET',      /^\/api\/security(\/live)?$/,                 SUP],
 
   /* ── Todo lo demás (configuración del sistema) queda en ADMIN por defecto:
    *    users, settings, trunks, routes, sbc-link, modules (escritura), backup,
    *    asterisk, net, system, turn, acme, npm, integrations, branding (escritura),
    *    extensions/endpoints (escritura), ivr, queues/ringgroups (escritura),
-   *    recordings (borrado y almacenamiento), vm/email, security, email, voz,
+   *    recordings (borrado y almacenamiento), vm/email, security (escritura, whitelist, geoblock, settings), email, voz,
    *    prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, etc. */
 ];
 

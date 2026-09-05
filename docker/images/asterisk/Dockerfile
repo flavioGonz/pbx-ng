@@ -45,7 +45,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libcurl4 libspeex1 libspeexdsp1 libogg0 libvorbis0a libgsm1 libuuid1 \
       openssl ca-certificates gettext-base postgresql-client procps \
       python3 iproute2 tcpdump iputils-ping traceroute \
+      nftables \
     && rm -rf /var/lib/apt/lists/*
+# nftables: el bloqueo de IPs del módulo /seguridad lo hace este contenedor (corre en
+# network_mode host con NET_ADMIN), así que el set "banned" vive en el kernel del host
+# y sobrevive a reinicios del contenedor. Lo administra pbxng-ast-agent.py (/fw/*).
 
 # binarios + módulos + datos de Asterisk desde el build
 COPY --from=build /usr/sbin/asterisk /usr/sbin/asterisk

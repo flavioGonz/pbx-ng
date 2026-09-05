@@ -72,12 +72,16 @@ acá no se puede asumir.
   | `provision` | GET | SUP | config completa de un teléfono |
   | `enrollments` · `enroll`, `enroll/email` | GET · POST | SUP | enrolar un interno / mandar el QR por correo |
   | `phones` | GET | SUP | |
-  | Todo lo demás | * | admin | users, settings, trunks, routes, sbc-link, modules (escritura), backup, asterisk, net, system, turn, acme, npm, integrations, branding (escritura), extensions/endpoints (escritura), ivr, queues/ringgroups (escritura), recordings (borrado y almacenamiento), vm/email, security, email, voz, prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, geo, push/devices… |
+  | `security` · `security/live` | GET | SUP | centro de seguridad: resumen y registro en vivo (sólo lectura); bloquear/desbloquear, listas, geo-bloqueo, ajustes y `apply` son `admin` |
+  | Todo lo demás | * | admin | users, settings, trunks, routes, sbc-link, modules (escritura), backup, asterisk, net, system, turn, acme, npm, integrations, branding (escritura), extensions/endpoints (escritura), ivr, queues/ringgroups (escritura), recordings (borrado y almacenamiento), vm/email, security (escritura, whitelist, geoblock, settings, apply), ipgeo, email, voz, prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, geo, push/devices… |
 
   El RBAC no aplica a rutas públicas (sin `req.user`) ni a tokens `scope:'phone'` (van por
   `FONO_PERMITIDO`). Nota para el panel: `GET /api/geo` (pantalla `/mapa`) y `GET /api/settings`
   (`/telefonos`) son `admin` aunque `SUP_OK` del shell los liste; hoy no rompe porque el
-  supervisor nunca ve el shell (auth.jsx lo manda a `/supervisor`).
+  supervisor nunca ve el shell (auth.jsx lo manda a `/supervisor`). Lo mismo vale para
+  `/seguridad`: las solapas «Listas negras/blancas» y «Filtro por país» hacen `GET
+  security/whitelist` y `GET security/geoblock`, que son `admin`; si algún día se abre esa
+  ruta al supervisor hay que ocultar esas solapas o pasar esos dos GET a SUP acá y en `rbac.js`.
 - Usuarios (`/api/users`, solo admin): rol por defecto al crear = `agente`; `role` ∈
   `{admin, supervisor, agente}`; contraseñas de 8+ caracteres; no se puede borrar el propio
   usuario ni el último `admin`.
@@ -110,7 +114,7 @@ acá no se puede asumir.
 
 ## 3. API HTTP (`/api`, servida por control-plane :3000; el panel la ve en `/backend/api`)
 
-272 rutas. Familias y su dueño funcional en el panel:
+285 rutas (contadas como `app.<método>('/api…')` en `control-plane/*.js`, 1.6.0). Familias y su dueño funcional en el panel:
 
 | Familia | Para qué | Pantalla |
 |---|---|---|
@@ -130,6 +134,66 @@ acá no se puede asumir.
 | `voz`, `prompts`, `sysprompts` | TTS/STT y audios | `/voz`, `/ia-voz` |
 | `softphone` | instalador y feed OTA del softphone | login |
 | `manuales` | manuales in-panel | `/manuales` |
+| `security`, `ipgeo` | centro de seguridad (`control-plane/guard.js`): bloqueos por IP en nftables, registro en vivo, lista blanca, filtro por país, ajustes anti fuerza bruta | `/seguridad` |
+
+Centro de seguridad (`control-plane/guard.js`, clon funcional del SOC de SBC-NG; desde 1.6.0
+reemplaza a `/api/security` de fail2ban, `security/ban` y `security/unban`, que ya no existen):
+
+- `GET /api/security` (SUP) → `{kpis:{bloqueados, permanentes, ultimas_24h, paises, fallos_24h},
+  bloqueos:[{ip, reason, country, cc, flag, isp, hits, permanent, blocked_at, expires_at}] (500 más
+  recientes), top_paises:[{pais, cc, flag, n}] (12), top_atacantes:[…bloqueos por hits] (10),
+  eventos:[{id, kind, severity, detail, created_at}] (100; `kind` ∈ bloqueo | desbloqueo | ataque |
+  geo | ajustes | motor; `detail.motivo` es el texto para la línea de tiempo),
+  ataque:{activo, golpes_min, ips, top_ip, top_ip_golpes, por_tipo} (umbral: 12 eventos de
+  seguridad en 60 s, igual que el SBC), enforcement:{nft, agente, motivo}}`. `enforcement.agente`
+  = el agente de Asterisk contesta; `nft` = nftables está aplicando el set; con `nft:false` los
+  bloqueos quedan en la base y se reintentan en cada sync, y el panel debe avisarlo.
+- `GET /api/security/live` (SUP) → últimos 200 eventos del buffer en vivo (misma forma que
+  `sec:ev`, §4). `GET /api/security/enforcement` (admin) fuerza un sync con el agente y devuelve
+  `enforcement`.
+- `POST /api/security/block {ip, reason?, permanent?=true}` (admin) → `{ok, ip, permanent}`;
+  `400` si la IP es inválida o privada (nunca se bloquea la LAN), `409` si está en la lista blanca.
+  `POST /api/security/unblock {ip}` → `{ok, ip, habia}`.
+- `GET|PUT /api/security/settings` (admin): `{max_fallos, ventana_s, ban_s, ban_permanente_tras,
+  escaneres, unidentified_count, unidentified_period, unidentified_prune, alertar}` (defaults
+  5 / 60 / 3600 / 3 / true / 5 / 60 / 30 / true; `ban_s` 0 = permanente). Se guardan en
+  `pbxng_settings` como `sec_<clave>`; los tres `unidentified_*` recién llegan a Asterisk con
+  `POST /api/security/apply` (escribe `pbxng.d/pjsip-security.conf` con `[global](+)` y hace
+  `module reload res_pjsip.so`; `502` si el reload lanzó error — ojo, hallazgo abierto del
+  revisor: con el AMI desconectado `amiCommand()` resuelve vacío y la ruta responde `200
+  {ok:true, output:''}`). La API crea ese archivo con los defaults en el arranque si no existe;
+  como el entrypoint de Asterisk lo crea vacío antes, en una instalación nueva queda vacío
+  hasta el primer `apply` (Asterisk corre mientras tanto con los `unidentified_*` de fábrica).
+- Lista blanca (`pbxng_f2b_whitelist`, IP o CIDR; exime del contador y del geo-bloqueo):
+  `GET /api/security/whitelist` → `[{ip, note, created}]`; `POST {ip, note?}` (si esa IP estaba
+  bloqueada, la desbloquea); `DELETE /api/security/whitelist?ip=` / `DELETE …/whitelist/:ip` /
+  `POST …/whitelist/remove {ip}` (compatibilidad).
+- Filtro por país (`pbxng_geoblock`, modo en `pbxng_settings.sec_geoblock_modo`):
+  `GET /api/security/geoblock` → `{paises:[{cc, nombre, added_at}], modo:'bloquear'|'permitir',
+  geoip:true}`; `PUT {paises:[cc|{cc,nombre}], modo}` reemplaza la lista;
+  `POST /api/security/geoblock/apply` → `{ok, modo, paises, bloqueadas, desbloqueadas}`: libera
+  las bloqueadas por geo cuyo país ya no está vetado y banea (permanente, motivo `país no
+  permitido (geo-bloqueo)`) las IPs vistas en las últimas 24 h cuyo país sí lo está;
+  `POST /api/security/geoblock/add {cc, nombre?}` = "banear este país" desde el SOC (en modo
+  permitir lo SACA de los permitidos) y aplica en el acto. En vivo, el primer `SecurityEvent`
+  (aunque sea `SuccessfulAuth`) desde un país vetado es ban permanente. Sin país resuelto
+  (ip-api caído) no se decide nada.
+- `GET /api/ipgeo?ips=a,b` (admin) → `{ip:{country, cc, city, isp}}` (cache en memoria, ip-api).
+- Reglas del motor: fallos por IP en ventana deslizante (`max_fallos` en `ventana_s`) → ban
+  de `ban_s`; el ban número `ban_permanente_tras` en 24 h es permanente; `InvalidAccountID`
+  con ≥3 cuentas distintas en la ventana = escáner (ban inmediato si `escaneres`);
+  `SuccessfulAuth` resetea el contador de esa IP; IPs privadas nunca se banean. Un
+  `unblock` manual borra también el historial de bans de esa IP (la escalada a permanente
+  arranca de cero: es un "perdón"; la escalada sólo se acumula cuando el ban vence solo).
+  Agregar un CIDR a la lista blanca no suelta las IPs ya bloqueadas dentro del rango (sólo
+  una IP suelta se desbloquea al agregarla). Cada minuto
+  vencen los temporales (`DELETE` + `/fw/unban`); al arrancar y cada 5 min `POST /fw/sync`
+  con el set vigente y `GET /fw/bans` para `enforcement`. Los fallos se guardan agregados
+  (`pbxng_sec_events` kind `fallo`, una fila por IP cada 15 s con `detail.n`; se podan a los
+  30 días, el resto de eventos a los 180). Alertas por correo: `security.ban` (por bloqueo,
+  throttle global de la regla) y `security.attack` (al pasar el umbral en vivo, cada 10 min
+  como máximo) si `alertar` está prendido; `alerts.js` mantiene además el chequeo por
+  ventana larga de `security.attack` sobre los fallos agregados.
 
 Convenciones: JSON siempre; errores `{ error: '<mensaje en español para el usuario>' }` con
 el status HTTP correcto (400 validación, 401 sin sesión, 403 sin permiso, 404, 409, 500). Los
@@ -183,6 +247,17 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
 - Handshake con `auth.token` = JWT de panel. Sala `state` recibe `snapshot` (`{ts, health:{db,ari,ami},
   extensions, channels, queues}`) al conectar, en cada evento relevante (debounce 300 ms) y cada
   15 s como reconciliado.
+- Registro en vivo de seguridad (pantalla `/seguridad`): el panel emite `sec:join` (sin
+  argumentos) sobre el mismo socket; si el JWT es de panel con rol `admin` o `supervisor` el
+  socket entra a la sala `security` y recibe `sec:hist` (array con los últimos 200 eventos) y
+  después un `sec:ev` por evento: `{t (ms epoch), sev:'crit'|'warn'|'info',
+  tipo:'auth'|'cuenta'|'acl'|'escaner'|'ban'|'flood'|'geo'|'ok', ip, cuenta, texto}`.
+  `sec:leave` sale de la sala. Un token `phone` o un rol `agente` no entra (sin error: se
+  ignora el `sec:join`). `GET /api/security/live` devuelve el mismo buffer para arrancar sin socket.
+  Lado panel: `app/LiveLog.jsx` usa el socket compartido de `app/useLive.js` (`getSocket()`),
+  emite `sec:join` en cada `connect` (al reconectar la API lo ve como socket nuevo) y `sec:leave`
+  al desmontar; `app/seguridad/page.jsx` escucha `sec:ev` en ese mismo socket para refrescar
+  `GET /api/security` con debounce de 1,5 s (más un poll de 8 s como reconciliado).
 - Pizarra de videollamada: eventos `scratch:join|leave|op|clear` por sala. **Desde 1.4.0 exige
   un JWT válido**: `auth.token` (panel) o `auth.scratch` (token de softphone, scope `phone`);
   `scratch: true` a secas ya no alcanza. Un token `phone` (venga en `token` o en `scratch`)
@@ -194,9 +269,55 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   motor de llamadas; `Stasis(pbxng,ai,<agentId>)` para IVR con IA; `spysnoop,<id>` /
   `spyjoin,<id>` para supervisión. AMI (`:5038`): acciones (Originate, Redirect, MixMonitor,
   QueuePause, Command…) y eventos. AudioSocket: la API escucha en `:9092`.
-- Config generada por el panel: `pbxng.d/{parking,features,moh,pjsip,rtp}.conf` (volumen `asterisk_conf`)
-  incluida por `#include` desde los `.conf` base. Dialplan de aplicaciones: tabla realtime
-  `extensions`. Contextos: `from-trunk` (entrantes), `internal` (internos), `ivr`, `c2c`.
+- Config generada por el panel: `pbxng.d/{parking,features,moh,pjsip,rtp,pjsip-security}.conf`
+  (volumen `asterisk_conf`) incluida por `#include` desde los `.conf` base. Dialplan de
+  aplicaciones: tabla realtime `extensions`. Contextos: `from-trunk` (entrantes), `internal`
+  (internos), `ivr`, `c2c`. `pjsip-security.conf` lo escribe `POST /api/security/apply`
+  (`[global](+)` con `unidentified_request_count|period|prune_interval`) y se incluye desde
+  `pjsip.conf` después de `pbxng.d/pjsip.conf`.
+- Eventos de seguridad: `res_security_log` está cargado (`modules.conf` autoload, sin
+  `noload`) y `logger.conf` tiene el canal `security`; el AMI (usuario con `read=all`) recibe
+  **un evento por tipo, cuyo nombre ES el del evento de seguridad** (Asterisk 20,
+  `main/security_events.c`): `Event: InvalidPassword|InvalidAccountID|ChallengeResponseFailed|
+  FailedACL|RequestNotAllowed|RequestNotSupported|RequestBadFormat|UnexpectedAddress|
+  InvalidTransport|SessionLimit|MemoryLimit|LoadAverageLimit|ChallengeSent|SuccessfulAuth`, con
+  `Privilege: security,all`, `EventTV`, `Severity`, `Service`, `EventVersion`, `AccountID`,
+  `SessionID`, `LocalAddress`, `RemoteAddress=IPV4/UDP/1.2.3.4/5060`. **No existe** un
+  `Event: SecurityEvent` ni un campo `SecurityEvent` en el AMI: ese formato
+  (`SecurityEvent="InvalidPassword"`) es el del archivo `security.log`. Ojo: PJSIP no emite
+  `InvalidPassword` para clave errada sino `ChallengeResponseFailed`.
+  Del lado de la API los consume `control-plane/guard.js` (`ami.on('managerevent')`: se toma
+  `e.event` y se acepta si es una clave de `CLASES`; asterisk-manager baja las CLAVES a
+  minúscula y conserva los valores: `event`, `privilege`, `remoteaddress`, `accountid`,
+  `service`, `eventtv`). Clasificación: `InvalidPassword` /
+  `ChallengeResponseFailed` → `auth`; `InvalidAccountID` → `cuenta` (≥3 cuentas distintas desde
+  la misma IP en la ventana → `escaner`, crit); `FailedACL` → `acl`; `RequestNotAllowed` /
+  `RequestNotSupported` / `RequestBadFormat` / `UnexpectedAddress` / `InvalidTransport` →
+  `escaner`; `SessionLimit` / `MemoryLimit` / `LoadAverageLimit` → `flood` (crit);
+  `SuccessfulAuth` → `ok` (no cuenta como fallo y resetea el contador de la IP);
+  `ChallengeSent` se ignora. Sólo `IPV4/...` se procesa (nftables del módulo es IPv4).
+- Firewall del módulo `/seguridad` (agente de Asterisk `:8092`, `docker/images/asterisk/
+  pbxng-ast-agent.py`; la API le habla con `astFwd()`). Sólo las rutas `/fw/*` exigen
+  `X-PBXNG-Token` = `/etc/pbxng/agent.token` (volumen `certs`, montado en Asterisk como
+  `/etc/pbxng` ro; también `PBXNG_AGENT_TOKEN` por entorno); si no hay token configurado
+  se aceptan sólo pedidos desde redes privadas/loopback (de ahí llega la API por el bridge).
+  - `POST /fw/ban {ip, seconds}` (`seconds` 0 = permanente, tope 10 años) →
+    `200 {ok, ip, seconds, enabled:true}`.
+  - `POST /fw/unban {ip}` → `200 {ok, ip, enabled:true}` (idempotente: no estar en el set no es error).
+  - `GET /fw/bans` → `{enabled:bool, bans:[{ip, expires_s|null}], motivo?}` (`expires_s` = segundos
+    que le quedan; `null` = permanente).
+  - `POST /fw/sync {bans:[{ip,seconds}]}` → `200 {ok, enabled, total, rechazados:[{ip,error}]}`:
+    deja el set EXACTAMENTE así (flush + add en una sola transacción `nft -f`).
+  - Errores: `400 {error}` (IP inválida, IPv6, privada/loopback/reservada, IP del propio host,
+    `bans` no es lista), `401 {error:'token inválido'}`, `503 {ok:false, enabled:false, motivo}`
+    si no hay `nft` o el kernel no soporta nf_tables, `500 {ok:false, error}` si `nft` falló.
+  - Implementación: tabla `inet pbxng`, set `banned {type ipv4_addr; flags timeout;}`, chain
+    `input` (`type filter hook input priority -10; policy accept`) con la regla
+    `ip saddr @banned drop`. `ensure_fw()` es idempotente (crea sólo lo que falta, nunca borra el
+    set): la corre el entrypoint (`pbxng-ast-agent.py --ensure-fw`, tolera un host sin nftables
+    y sigue), el agente al arrancar y cada `/fw/*`. Los bloqueos viven en el kernel del host:
+    sobreviven a reinicios del contenedor; la API debe llamar a `/fw/sync` al arrancar para
+    reconciliar con `pbxng_blocked`.
 
 ## 6. Variables de entorno (`.env` del compose)
 
@@ -299,6 +420,8 @@ réplicas no migren a la vez); `deploy.sh` lo corre además antes del `up -d` (c
 `run --rm --no-deps --entrypoint node api migrate.js`: el entrypoint de la imagen ignora los
 argumentos y terminaría levantando la API, hay que pisarlo) para que un esquema roto frene el
 deploy en vez de dejar la API en crash-loop; al arrancar no hace nada la segunda vez.
+`0010_soc.sql` crea `pbxng_blocked`, `pbxng_sec_events`, `pbxng_geoblock` (y `pbxng_f2b_whitelist`
+si faltara) y **borra** `pbxng_fail2ban` / `pbxng_fail2ban_cmd` (nadie las llenaba).
 Desde `0009_schema_runtime.sql` **ningún módulo crea tablas ni columnas en tiempo de
 ejecución** (`app.js`, `ai-pipeline.js`, `push-providers.js` ya no traen `CREATE TABLE` /
 `ADD COLUMN`); el esquema base de una instalación nueva lo sigue creando

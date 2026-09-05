@@ -5,7 +5,8 @@
   "main": "app.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "ari-client": "^2.2.0",

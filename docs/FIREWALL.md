@@ -47,8 +47,62 @@ Solo estos. Nada más.
 | `3001` | Dashboard | el proxy (con NPM en el mismo compose queda en `127.0.0.1`); si el proxy está en otro host, solo la IP del proxy (`DASHBOARD_TRUST_PROXY=1`) |
 | `5038` | Asterisk AMI | solo el core |
 | `8088` | Asterisk ARI/WS | solo el core y el proxy (para `/ws`) |
-| `8091` / `8092` | Agentes internos (turn-agent, ast-agent) | solo la API, con token |
+| `8091` / `8092` | Agentes internos (turn-agent, ast-agent) | solo la API, con token (en `8092` hoy sólo `/fw/*` lo valida; sin `agent.token` acepta desde redes privadas, ver §1.1) |
 | `81` | Nginx Proxy Manager (admin) | solo LAN / VPN |
+
+### 1.1 La tabla `inet pbxng` de nftables (bloqueo de IPs del módulo Seguridad)
+
+Desde 1.6.0 el bloqueo de atacantes SIP que decide **Sistema → Seguridad** no lo hace
+Asterisk ni un fail2ban: lo hace **nftables en el kernel del host**. Como el contenedor de
+Asterisk corre en `network_mode: host` con `cap_add: NET_ADMIN`, su agente
+(`pbxng-ast-agent.py`, rutas `/fw/*`) crea y administra esta tabla, y las reglas viven en
+el host aunque el contenedor se reinicie:
+
+```
+table inet pbxng {
+    set banned {
+        type ipv4_addr
+        flags timeout          # cada elemento puede vencer solo; sin timeout = permanente
+    }
+    chain input {
+        type filter hook input priority -10; policy accept;
+        ip saddr @banned drop
+    }
+}
+```
+
+Qué hay que saber para convivir con ella:
+
+- **Hook `input`, prioridad -10**: corta el tráfico **dirigido al host** (Asterisk y coturn
+  corren en `network_mode: host`: SIP 5060/5061, RTP, 3478, y también ssh o cualquier otro
+  servicio del host) *antes* que `filter` (prioridad 0), o sea antes que UFW/firewalld/
+  iptables-nft. Lo que Docker reenvía a contenedores en bridge (el panel `:3001`, NPM 80/443)
+  pasa por el hook `forward`, no por `input`: una IP baneada por SIP sigue pudiendo pegarle
+  al proxy web (el rate limit del login es otra capa).
+- **Policy accept**: la tabla no cierra nada por sí sola. Sacarla (`nft delete table inet
+  pbxng`) deja el host como estaba; el agente la vuelve a crear en el próximo `/fw/*` o
+  reinicio del contenedor (`ensure_fw()` es idempotente y **nunca borra** el set).
+- **Sólo IPv4**, y el agente rechaza (`400`) IPs privadas, loopback, link-local, multicast,
+  reservadas y las del propio host: no podés dejarte afuera desde el panel.
+- **Fuente de verdad = la base** (`pbxng_blocked`). La API manda el set completo con
+  `POST /fw/sync` al arrancar y cada 5 min, así que un `nft flush set` a mano se revierte
+  solo; para soltar una IP usá el panel (o `POST /api/security/unblock`).
+- Si tu firewall del host usa `nft flush ruleset` en su arranque (algunos scripts de
+  firewalld/UFW lo hacen), la tabla desaparece hasta el próximo sync; el panel lo muestra
+  como «sin nftables» o «firewall activo» según el momento. Conviene que ese script no borre
+  tablas ajenas o que se ejecute antes de levantar el compose.
+- Requisitos: kernel con `nf_tables` (cualquier 4.x+ estándar de Debian/Ubuntu) y el
+  `cap_add: NET_ADMIN` que ambos compose ya le dan a Asterisk. Si `nft` no puede hablar con
+  el kernel (típico: un contenedor LXC sin permiso para nf_tables), el agente responde `503`,
+  la central arranca igual y el panel avisa «los bloqueos se registran pero no se aplican».
+
+Ver cómo está:
+
+```bash
+nft list table inet pbxng                 # tabla completa
+nft list set inet pbxng banned            # IPs bloqueadas con el tiempo que les queda
+nft list chain inet pbxng input           # tiene que haber UNA sola línea "ip saddr @banned drop"
+```
 
 ### Interno (LAN): core ↔ SBC-NG
 
@@ -216,6 +270,7 @@ internas andando es lo normal, no un síntoma.
 - [ ] `PUBLIC_IP` correcta en `.env` → `external-ip=<publica>/<privada>` en coturn.
 - [ ] `TURN_PASS` rotada (no `pbxng-turn-changeme`) y, si el coturn corre en otro host, **la misma** en los dos `.env`.
 - [ ] Postgres `5432`, AMI `5038` y ARI `8088` sin publicar (ni al SBC-NG).
+- [ ] `nft list table inet pbxng` existe en el host y **Sistema → Seguridad** muestra «firewall activo · nftables» (si no, revisá `nf_tables` / `NET_ADMIN`, §1.1).
 - [ ] Con SBC-NG: desde su IP, permitido `5060` y `10000-20000/UDP` hacia el core.
 - [ ] `scripts/check-turn.py` da **ALLOCATE 200 · relay = …** desde fuera de la LAN.
 - [ ] (Opcional) Hairpin resuelto, para que el diagnóstico también dé verde desde adentro.

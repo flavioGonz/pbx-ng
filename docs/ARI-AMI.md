@@ -43,12 +43,20 @@ Hay una sola aplicación Stasis, `pbxng`, con dos "sub-apps" por argumento:
   `module reload res_pjsip.so` (grupos de captura), `moh reload`.
 - **Consola CLI de sólo lectura** del panel (`Action: Command` con lista blanca `CLI_ALLOW`).
 - **Estado de troncales**: `pjsip show registrations` / `pjsip show contacts`.
+- **Centro de seguridad** (`guard.js`, 1.6.0+): los eventos de `res_security_log` llegan por
+  AMI **con el nombre del evento de seguridad como nombre del evento** (`Event:
+  ChallengeResponseFailed | InvalidAccountID | FailedACL | … | SuccessfulAuth`, `Privilege:
+  security,all`, `RemoteAddress=IPV4/UDP/1.2.3.4/5060`); no existe un `Event: SecurityEvent`
+  (ese es el formato de `security.log`). El usuario AMI tiene `read=all`. Los reloads de
+  `res_pjsip` tras `POST /api/security/apply` también van por AMI.
 
 ## Qué pasa si se cae cada una
 
 - **Sin AMI**: no hay eventos → el panel deja de refrescarse solo, no salen push de llamada
   entrante ni avisos de perdidas, no se puede grabar/espiar/pausar. `amiCommand` devuelve
-  vacío y los reloads responden `ok` sin haber recargado. AMI reconecta sola.
+  vacío y los reloads responden `ok` sin haber recargado (también `POST /api/security/apply`).
+  El centro de seguridad se queda ciego: no ve fallos ni banea (los bloqueos ya hechos siguen
+  en nftables, que no depende de AMI). AMI reconecta sola.
 - **Sin ARI**: todos los internos aparecen `offline`, 0 llamadas activas, la conferencia a 3
   responde `503`, el IVR con IA cuelga (`ai-pipeline` no tiene cliente) y el servidor
   AudioSocket no se inicializa hasta que ARI vuelva. Hasta 1.2.x ARI se conectaba **una sola

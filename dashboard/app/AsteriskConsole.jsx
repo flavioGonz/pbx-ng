@@ -10,11 +10,10 @@ import { toast } from './notify';
 export default function AsteriskConsole() {
   const { snap } = useLive();
   const [health, setHealth] = useState(null);
-  const [core, setCore] = useState(null); const [net, setNet] = useState(null); const [f2b, setF2b] = useState(null);
+  const [core, setCore] = useState(null); const [net, setNet] = useState(null);
   const [exts, setExts] = useState([]);
   async function load() { try { setHealth(await fetch('/backend/health').then((r) => r.json())); } catch (_) {} try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {} }
   useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, []);
-  useEffect(() => { const lf = () => fetch('/backend/api/security').then((r) => r.json()).then(setF2b).catch(() => {}); lf(); const t = setInterval(lf, 8000); return () => clearInterval(t); }, []);
   useEffect(() => { const lf = () => fetch('/backend/api/extensions').then((r) => r.json()).then((d) => Array.isArray(d) && setExts(d)).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
   const ch = (snap && snap.channels) || []; const m = (core && core.metrics) || {};
   const amiUp = health ? !!health.ami : !!(snap && snap.health && snap.health.ami); const ariUp = health ? !!health.ari : !!(snap && snap.health && snap.health.ari);

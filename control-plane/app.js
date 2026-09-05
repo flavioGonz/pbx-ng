@@ -151,7 +151,16 @@ app.set('trust proxy', 1);
  * CORP en cross-origin: /softphone/ (instalador + feed OTA) y los audios se piden
  * desde el origen del panel, que por el proxy puede ser otro host/puerto. */
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' }, crossOriginEmbedderPolicy: false }));
-const AGENT_TOKEN =(() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
+/* Token compartido con los agentes (Asterisk :8092, TURN, voz). Vive en el volumen `certs`
+ * (/etc/pbxng), que la API monta rw y Asterisk ro: si no existe, la API lo genera acá y el
+ * agente lo lee del mismo archivo. Sin él, el agente de Asterisk sólo acepta /fw/* desde
+ * redes privadas, o sea cualquiera de la LAN podría vaciar el set de baneados. */
+const AGENT_TOKEN = (() => {
+  const fs = require('fs'); const f = '/etc/pbxng/agent.token';
+  try { const t = fs.readFileSync(f, 'utf8').trim(); if (t) return t; } catch (_) {}
+  try { const t = crypto.randomBytes(32).toString('hex'); fs.mkdirSync('/etc/pbxng', { recursive: true }); fs.writeFileSync(f, t + '\n', { mode: 0o600 }); return t; }
+  catch (e) { console.error('[agent] no se pudo generar ' + f + ': ' + e.message); return ''; }
+})();
 /* Las capturas de los manuales viajan como data URL dentro del JSON: una captura de
  * pantalla pegada del portapapeles pesa varios MB, muy por encima de los 100 kB que
  * trae express.json() por defecto. Sin esto la subida moria con un 413 que ademas
@@ -1635,52 +1644,9 @@ app.post('/api/enroll', async (req, res) => {
   } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
-// Seguridad: estado de Fail2Ban + geolocalizacion
-app.get('/api/security', async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT jail, banned, bans, config, total_failed, total_banned, extract(epoch from (now()-updated_at))::int AS age_s FROM pbxng_fail2ban ORDER BY jail");
-    const ips = [...new Set(rows.flatMap(r => r.banned || []))];
-    const geo = await geoLookup(ips);
-    const { rows: wl } = await pool.query("SELECT ip, note, extract(epoch from created_at)::int AS created FROM pbxng_f2b_whitelist ORDER BY created_at");
-    res.json({ jails: rows, geo, whitelist: wl });
-  } catch (e) { errorHttp(res, e); }
-});
-// Geolocalización de IPs (para banderitas): ?ips=1.2.3.4,5.6.7.8
-app.get('/api/ipgeo', async (req, res) => {
-  try {
-    const ips = (req.query.ips || '').toString().split(',').map(s => s.trim()).filter(Boolean).slice(0, 200);
-    if (!ips.length) return res.json({});
-    res.json(await geoLookup(ips));
-  } catch (e) { errorHttp(res, e); }
-});
-app.post('/api/security/unban', async (req, res) => {
-  const { ip, jail } = req.body || {};
-  if (!ip) return res.status(400).json({ error: 'ip requerida' });
-  try { await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip, jail) VALUES ('unban',$1,$2)", [ip, jail || null]); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
-app.post('/api/security/ban', async (req, res) => {
-  const { ip, jail } = req.body || {};
-  if (!ip) return res.status(400).json({ error: 'ip requerida' });
-  try { await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip, jail) VALUES ('ban',$1,$2)", [ip, jail || null]); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
-app.get('/api/security/whitelist', async (req, res) => {
-  try { const { rows } = await pool.query("SELECT ip, note, extract(epoch from created_at)::int AS created FROM pbxng_f2b_whitelist ORDER BY created_at"); res.json(rows); }
-  catch (e) { errorHttp(res, e); }
-});
-app.post('/api/security/whitelist', async (req, res) => {
-  const { ip, note } = req.body || {};
-  if (!ip) return res.status(400).json({ error: 'ip requerida' });
-  try { await pool.query("INSERT INTO pbxng_f2b_whitelist (ip,note) VALUES ($1,$2) ON CONFLICT (ip) DO UPDATE SET note=EXCLUDED.note", [ip.trim(), note || null]); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
-app.post('/api/security/whitelist/remove', async (req, res) => {
-  const { ip } = req.body || {};
-  if (!ip) return res.status(400).json({ error: 'ip requerida' });
-  try { await pool.query("DELETE FROM pbxng_f2b_whitelist WHERE ip=$1", [ip]); await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip) VALUES ('wl_del',$1)", [ip]); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
+/* Seguridad (/seguridad): vive en guard.js, se monta más abajo cuando ya existen
+ * `astFwd` e `io` (las rutas /api/security*, /api/ipgeo, el socket 'security' y el
+ * baneo por nftables salen de ahí). Las rutas viejas de fail2ban se retiraron. */
 
 // Email por empresa (SMTP)
 app.get('/api/email/config', async (req, res) => {
@@ -3656,7 +3622,15 @@ io.on('connection', async (s) => {
   s.on('scratch:leave', (room) => { if (room) s.leave('scratch:' + room); });
   s.on('scratch:op', (m) => { if (m && m.room) s.to('scratch:' + m.room).emit('scratch:op', m.op); });
   s.on('scratch:clear', (m) => { if (m && m.room) s.to('scratch:' + m.room).emit('scratch:clear'); });
+  // Registro en vivo de seguridad: sólo panel admin/supervisor (docs/CONTRATOS.md §4).
+  s.on('sec:join', () => { if (!s.scratchOnly) guard.unirSocket(s); });
+  s.on('sec:leave', () => s.leave('security'));
 });
+/* Guardia de seguridad (guard.js): eventos de seguridad por AMI (ChallengeResponseFailed,
+ * InvalidAccountID, FailedACL…) → contador por IP → ban en
+ * nftables vía el agente de Asterisk; rutas /api/security*, /api/ipgeo y sala 'security'. */
+const guard = require('./guard')({ app, pool, ami, io, astFwd, escribir: astconf.escribir, alerts, geoLookup, amiCommand, log: logger('guard') });
+guard.iniciar().catch((e) => logger('guard').error('arranque', e));
 setInterval(broadcast, 15000);   // reconciliado: el refresco real llega por eventos ARI/AMI (broadcastSoon)
 ami.on('managerevent', (e) => { const t = e && e.event; if (['Newchannel', 'Hangup', 'Newstate', 'DeviceStateChange', 'ContactStatus', 'QueueMemberStatus', 'QueueCallerJoin', 'QueueCallerLeave', 'PeerStatus'].includes(t)) broadcastSoon(); });
 // Push de llamada entrante con dedupe por interno (lo usan el wake del dialplan y AMI)
