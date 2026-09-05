@@ -65,7 +65,14 @@ export default function Shell({ children }) {
   const [rail, setRail] = useState(false);
   const [abiertos, setAbiertos] = useState([]);  // acordeón: máximo 2 grupos abiertos a la vez (como el SBC)
   const [mods, setMods] = useState({});
-  useEffect(() => { fetch('/backend/api/modules').then((r) => r.json()).then(setMods).catch(() => {}); }, []);
+  /* Los modulos solo se piden con sesion de PANEL. En /login o /phone no hay JWT de
+   * panel y el parche de fetch mandaba el token del softphone (scope 'phone'), que la
+   * API rechaza con 403 para esta ruta: ruido en consola en cada carga del login. */
+  useEffect(() => {
+    let tienePanel = false; try { tienePanel = !!localStorage.getItem('pbxng_jwt'); } catch (_) {}
+    if (!tienePanel) return;
+    fetch('/backend/api/modules').then((r) => (r.ok ? r.json() : null)).then((m) => { if (m) setMods(m); }).catch(() => {});
+  }, [path]);
   const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/sbc': 'sbc' };
   const visibleItem = (it) => !MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false;
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
