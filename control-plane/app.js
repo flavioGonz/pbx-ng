@@ -202,8 +202,23 @@ const pendingConf = {};
  * activas, y el IVR con IA muerto hasta reiniciar la API. AMI ya reconectaba solo
  * (keepConnected); ARI merece lo mismo. Backoff 2s -> 30s. */
 let ariBackoff = 2000;
+/* ari-client, cuando Asterisk todavía no escucha, no rechaza la promesa: el cliente
+ * swagger tira la excepción en un callback suelto y eso llega como uncaughtException
+ * (con el manejador de cierre de 1.5.0 el proceso salía con 1 en cada arranque hasta
+ * que Asterisk levantaba). Por eso primero se sondea el HTTP de ARI con fetch y sólo
+ * si responde se llama a AriClient.connect. */
+async function ariDisponible() {
+  try {
+    const r = await fetch(CFG.ari.url.replace(/\/+$/, '') + '/ari/api-docs/resources.json', {
+      headers: { Authorization: 'Basic ' + Buffer.from(CFG.ari.user + ':' + CFG.ari.pass).toString('base64') },
+      signal: AbortSignal.timeout(3000),
+    });
+    return r.ok;
+  } catch (_) { return false; }
+}
 async function connectAri() {
   try {
+    if (!(await ariDisponible())) throw new Error('ARI no responde en ' + CFG.ari.url);
     const c = await AriClient.connect(CFG.ari.url, CFG.ari.user, CFG.ari.pass);
     c.on('StasisStart', async (event, channel) => {
       const args = event.args || [];

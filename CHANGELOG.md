@@ -2,6 +2,10 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.5.1] - 2026-09-05
+### Fixed
+- La API salía con código 1 en cada arranque hasta que Asterisk levantaba: `ari-client` no rechaza la promesa cuando ARI no escucha sino que tira la excepción en un callback suelto, y el manejador de `uncaughtException` de 1.5.0 la tomaba como fatal. Ahora se sondea el HTTP de ARI (`/ari/api-docs/resources.json`) antes de conectar y se reintenta con el backoff de siempre.
+
 ## [1.5.0] - 2026-09-05
 Sprint 2 de robustez: cierra los **bloques 2 y 3** de `docs/EVALUACION-2026-09.md` (que el release no pierda datos; que el proceso no muera solo). Sin cambios de esquema visibles para el operador: la migración `0009` sólo formaliza tablas que antes creaba el código al vuelo. Tres cosas que conviene leer antes de actualizar: las **migraciones corren solas al arrancar la API** (y si fallan, la API no arranca), **`/health` responde 503 sin base de datos** (los monitores externos van a verlo) y el **socket.io rechaza orígenes ajenos** (en desarrollo, `CORS_ORIGINS`).
 ### Added
