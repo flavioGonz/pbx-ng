@@ -1,10 +1,25 @@
 'use client';
 import { createContext, useContext, useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { toast } from './notify';
 const Ctx = createContext(null);
 const PUBLIC = ['/login'];
 const isPhone = (p) => p && p.startsWith('/phone');
 let patched = false;
+/* Una pantalla suele disparar varios fetch a la vez (polling, listas, módulos): sin
+ * dedupe un agente que abre una ruta de admin recibiría una lluvia de toasts iguales. */
+const DEDUPE_403_MS = 3000;
+let ultimo403 = 0;
+function avisar403(r) {
+  const ahora = Date.now();
+  if (ahora - ultimo403 < DEDUPE_403_MS) return;
+  ultimo403 = ahora;
+  const mostrar = (msg) => toast(msg || 'No tenés permiso para esta acción', 'bad');
+  // El body original queda intacto para la página; el clon es sólo para leer el `error`.
+  let clon = null; try { clon = r.clone(); } catch (_) {}
+  if (!clon) return mostrar();
+  clon.json().then(d => mostrar(d && typeof d.error === 'string' ? d.error : '')).catch(() => mostrar());
+}
 function patchFetch() {
   if (patched || typeof window === 'undefined') return; patched = true;
   const orig = window.fetch.bind(window);
@@ -23,6 +38,11 @@ function patchFetch() {
       if (r.status === 401 && !location.pathname.startsWith('/login') && !location.pathname.startsWith('/phone') && !location.pathname.startsWith('/enroll') && !location.pathname.startsWith('/call')) {
         localStorage.removeItem('pbxng_jwt'); location.href = '/login';
       }
+      /* 403 = sesión válida pero sin permiso (RBAC desde 1.4.0). No se redirige: el
+       * usuario sigue logueado, sólo hay que decírselo. Se avisa acá y no en cada
+       * página porque hay ~245 fetch sueltos y la mayoría ignora el status. Se clona
+       * la respuesta para que la página pueda seguir leyendo el body como siempre. */
+      if (r.status === 403) avisar403(r);
       return r;
     });
   };

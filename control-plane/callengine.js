@@ -25,6 +25,10 @@ const extOf = (name) => { const m = /^PJSIP\/([^-]+)-/.exec(name || ''); return 
 
 module.exports = function initCallEngine(deps) {
   const { app, auth, amiAction, amiCommand, broadcastSoon, log } = deps;
+  /* ¿El que pide puede operar sobre `ext`? (app.js mismaExt: admin/supervisor todo,
+   * agente y token phone sólo su interno). Si no viene, se deja pasar (compatibilidad). */
+  const mismaExt = deps.mismaExt || (() => true);
+  const soloPropia = (req, ext) => { if (!mismaExt(req, ext)) { const e = new Error('no podés operar llamadas de otra extensión'); e.status = 403; throw e; } return ext; };
   const L = log || ((...a) => console.log('[calls]', ...a));
   let ari = null;
   let primed = false;
@@ -150,7 +154,7 @@ module.exports = function initCallEngine(deps) {
 
   // click-to-dial: llama al interno y, cuando atiende, marca el destino por el dialplan
   app.post('/api/calls/dial', auth, wrap(async (req) => {
-    const from = need(req.body && req.body.from, 'from'); const to = need(req.body && req.body.to, 'to');
+    const from = soloPropia(req, need(req.body && req.body.from, 'from')); const to = need(req.body && req.body.to, 'to');
     if (!ari) { const e = new Error('ARI no disponible'); e.status = 503; throw e; }
     const ch = await ari.channels.originate({ endpoint: PJSIP + from, extension: String(to), context: (req.body && req.body.context) || 'internal', priority: 1, callerId: '"' + to + '" <' + to + '>', timeout: 40, variables: { PBXNG_C2D: '1' } });
     return { ok: true, channel: ch.id };
@@ -158,8 +162,8 @@ module.exports = function initCallEngine(deps) {
   app.post('/api/calls/:id/hangup', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.hangup({ channelId: req.params.id }); return { ok: true }; }));
   app.post('/api/calls/:id/hold', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.hold({ channelId: req.params.id }); return { ok: true }; }));
   app.post('/api/calls/:id/unhold', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.unhold({ channelId: req.params.id }); return { ok: true }; }));
-  app.post('/api/calls/transfer', auth, wrap(async (req) => ({ ok: true, ...(await blindTransfer(need(req.body && req.body.ext, 'ext'), need(req.body && req.body.to, 'to'), req.body && req.body.context)) })));
-  app.post('/api/calls/park', auth, wrap(async (req) => ({ ok: true, ...(await blindTransfer(need(req.body && req.body.ext, 'ext'), (req.body && req.body.slot) || '700', 'internal')) })));
+  app.post('/api/calls/transfer', auth, wrap(async (req) => ({ ok: true, ...(await blindTransfer(soloPropia(req, need(req.body && req.body.ext, 'ext')), need(req.body && req.body.to, 'to'), req.body && req.body.context)) })));
+  app.post('/api/calls/park', auth, wrap(async (req) => ({ ok: true, ...(await blindTransfer(soloPropia(req, need(req.body && req.body.ext, 'ext')), (req.body && req.body.slot) || '700', 'internal')) })));
 
   app.get('/api/calls/spy', auth, wrap(async () => Array.from(spies.values())));
   app.post('/api/calls/spy', auth, wrap(async (req) => { const b = req.body || {}; need(b.sup, 'supervisor'); need(b.target, 'destino'); if (String(b.sup) === String(b.target)) throw Object.assign(new Error('el supervisor no puede espiarse a si mismo'), { status: 400 }); return { ok: true, ...(await startSpy({ sup: b.sup, target: b.target, mode: b.mode })) }; }));

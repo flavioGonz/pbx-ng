@@ -56,8 +56,9 @@ los recursos de cada CT se dimensionan solos según los perfiles que agrupa
 (core→4 vCPU/4 GB, +voz→+2 GB, +sbc→mín 2 vCPU/2 GB).
 
 El **núcleo se crea primero** para conocer su IP; los demás CTs la reciben en su
-`.env` (`DB_HOST`, `ARI_URL`, `AMI_HOST`, `ASTERISK_HOST`, `REDIS_HOST`) porque
-`docker-compose` publica esos puertos en el host del CT.
+`.env` (`ARI_URL`, `AMI_HOST`, `ASTERISK_HOST`) porque Asterisk corre en host
+network y expone ARI/AMI en la IP del CT. Postgres NO se comparte entre CTs:
+solo ata `127.0.0.1` del CT del núcleo (`DB_HOST=127.0.0.1`).
 
 ## Requisitos
 
@@ -73,5 +74,9 @@ El **núcleo se crea primero** para conocer su IP; los demás CTs la reciben en 
   con `pct destroy <id>` si querés rehacer.
 - **Secretos**: se generan aleatorios (DB/JWT/ARI/AMI) y se comparten entre los
   CTs para que los servicios se entiendan. No se versionan.
+- **Panel**: con NPM en el mismo CT se entra por `https://<dominio>` (`:3001` queda en `127.0.0.1`
+  del CT); con NPM en otro CT el `.env` del núcleo lleva `DASHBOARD_BIND=0.0.0.0` y
+  `DASHBOARD_TRUST_PROXY=1`, y hay que publicar `http://<ip-core>:3001` en NPM y restringir ese
+  puerto a la IP del CT de acceso (ver `docs/PACKAGING.md`).
 - **Producción**: publicá el dominio con TLS/WSS desde el proxy inverso y abrí
   los puertos SIP/RTP/TURN en el firewall/NAT. Rotá los secretos.

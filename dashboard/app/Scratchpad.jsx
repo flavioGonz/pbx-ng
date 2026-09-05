@@ -32,8 +32,13 @@ export default function Scratchpad({ room, onClose }) {
     sizeCanvas();
     const onR = () => sizeCanvas(); window.addEventListener('resize', onR);
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    let tok = ''; try { tok = localStorage.getItem('pbxng_jwt') || ''; } catch (_) {}
-    const sk = io(origin, { path: '/socket.io', transports: ['polling'], upgrade: false, auth: { scratch: true, token: tok } });
+    /* Desde 1.4.0 el socket exige un JWT válido (docs/CONTRATOS.md §4): `token` = sesión de
+     * panel (estado completo) o, si no hay, `scratch` = token del softphone (scope 'phone',
+     * sólo pizarra). Antes `scratch` era un flag y cualquiera se colgaba de la pizarra. */
+    let panel = '', fono = '';
+    try { panel = localStorage.getItem('pbxng_jwt') || ''; fono = localStorage.getItem('pbxng_phone_jwt') || ''; } catch (_) {}
+    const auth = panel ? { token: panel } : { scratch: fono };
+    const sk = io(origin, { path: '/socket.io', transports: ['polling'], upgrade: false, auth });
     sock.current = sk;
     sk.on('connect', () => sk.emit('scratch:join', room));
     sk.on('scratch:op', (op) => {

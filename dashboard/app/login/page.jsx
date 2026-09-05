@@ -72,13 +72,16 @@ export default function Login() {
   async function changePass(e) {
     e.preventDefault();
     setErr('');
-    if (np.length < 4) { setErr('La contraseña debe tener al menos 4 caracteres'); return; }
+    // Mismo mínimo que la API (POST /api/auth/password): validar acá evita el viaje de ida y vuelta.
+    if (np.length < 8) { setErr('La contraseña debe tener al menos 8 caracteres'); return; }
     if (np !== np2) { setErr('Las contraseñas no coinciden'); return; }
     setLoading(true);
     try {
       const r = await fetch('/backend/api/auth/password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+        // Esta pantalla sólo aparece con must_change=true: el backend no pide la clave
+        // actual (es justo la que estamos obligando a cambiar), por eso no se manda `current`.
         body: JSON.stringify({ password: np }),
       });
       const d = await r.json();

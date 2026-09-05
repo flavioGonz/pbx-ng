@@ -13,6 +13,9 @@ const aiPipeline = require('./ai-pipeline');
 const AsteriskManager = require('asterisk-manager');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const helmet = require('helmet');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const rbac = require('./rbac');         // tabla de permisos por rol (docs/CONTRATOS.md §2)
 const webpush = require('web-push');
 const pushProviders = require('./push-providers');
 const crypto = require('crypto');
@@ -36,7 +39,15 @@ const IMG_OK = /^[a-z0-9][a-z0-9._-]{1,80}\.(png|jpe?g|webp|gif|svg)$/i;
 const IMG_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml' };
 const numbering = require('./numbering');
 const QRCode = require('qrcode');
-const SECRET = process.env.JWT_SECRET || '__SET_JWT_SECRET__';
+const SECRET = process.env.JWT_SECRET || '';
+/* Sin secreto real la API NO arranca. Antes caía al placeholder '__SET_JWT_SECRET__'
+ * y seguía andando: cualquiera que leyera el repo podía firmarse una sesión de admin.
+ * Un arranque que falla con un mensaje claro es mejor que una central abierta
+ * (docs/CONTRATOS.md §6: install.sh genera el valor; acá sólo se exige). */
+if (!SECRET || SECRET === '__SET_JWT_SECRET__' || SECRET.length < 16) {
+  console.error('[API] JWT_SECRET vacío, placeholder o demasiado corto (mínimo 16 caracteres). Definilo en el .env (install.sh lo genera) y volvé a arrancar.');
+  process.exit(1);
+}
 
 // ---------------- Web Push (VAPID) ----------------
 const VAPID = {
@@ -62,11 +73,12 @@ async function sendPushToExt(ext, payload) {
 }
 
 async function createWebrtcEndpoint(c, id, password, context = 'internal', tenant_id = 1, video = false, max_contacts = 2) {
-  const allow = video ? 'ulaw,alaw,g722,vp8,h264' : 'ulaw,alaw,g722';
+  const allow = await sipConf.defaultCodecs(video);
   await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,$2,'no','yes','yes',60,$3) ON CONFLICT (id) DO UPDATE SET max_contacts=EXCLUDED.max_contacts,remove_existing='no',remove_unavailable='yes',support_path='yes'", [id, max_contacts, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
   await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-ws',$1,$1,$2,'all',$3,$4,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-ws',allow=EXCLUDED.allow,webrtc='yes'", [id, context, allow, tenant_id]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await sipConf.afterCreate(c, id);
   await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
 }
 
@@ -106,11 +118,27 @@ const NODES = {
 };
 // (VM_AGENT retirado: los buzones se leen del volumen compartido /voicemail, sin agente HTTP)
 const pool = new Pool(CFG.db);
+/* Un cliente ocioso del pool emite 'error' si PostgreSQL se reinicia o corta la
+ * conexión. Sin oyente, Node lo trata como excepción no capturada y tumba TODA la
+ * API (y con ella el softphone, la presencia y el IVR) por un corte de un segundo.
+ * Se loguea y se sigue: el pool descarta ese cliente y abre otro en el próximo query. */
+pool.on('error', (e) => console.error('[DB] cliente del pool con error (se descarta, el pool reconecta):', e && e.message));
 const diagtrunk = require('./diagtrunk');
 const backup = require('./backup');     // respaldo y restauracion del appliance
 const salud = require('./salud');       // estado REAL de los nodos (medido, no configurado)
 const app = express();
-const AGENT_TOKEN = (() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
+/* La API siempre está detrás del proxy (NPM / nginx del compose): la IP real del
+ * cliente viene en X-Forwarded-For. Con trust proxy = 1 express confía SÓLO en el
+ * primer salto, así req.ip es la del cliente y el rate limit del login no castiga
+ * al proxy entero ni se deja engañar con un X-Forwarded-For inventado. */
+app.set('trust proxy', 1);
+/* Cabeceras defensivas (nosniff, frame-deny, referrer, sin X-Powered-By…).
+ * CSP apagada: el panel (Next) y el softphone traen inline scripts y se sirven por
+ * el proxy con su propia política; una CSP acá rompería ambos sin sumar nada.
+ * CORP en cross-origin: /softphone/ (instalador + feed OTA) y los audios se piden
+ * desde el origen del panel, que por el proxy puede ser otro host/puerto. */
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' }, crossOriginEmbedderPolicy: false }));
+const AGENT_TOKEN =(() => { try { return require('fs').readFileSync('/etc/pbxng/agent.token','utf8').trim(); } catch (e) { return ''; } })();
 /* Las capturas de los manuales viajan como data URL dentro del JSON: una captura de
  * pantalla pegada del portapapeles pesa varios MB, muy por encima de los 100 kB que
  * trae express.json() por defecto. Sin esto la subida moria con un 413 que ademas
@@ -128,6 +156,30 @@ app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'El cuerpo del pedido no es JSON válido.' });
   return next(err);
 });
+/* ============================================================
+ *  Gate de auth + RBAC de /api, montados ANTES de cualquier ruta.
+ *  Express resuelve en orden de registro: un módulo que registra sus rutas
+ *  antes de estas tres líneas (pasó con callengine.js) queda
+ *  fuera del gate y responde sin token ni rol. Por eso van acá, pegadas al
+ *  parser del body, y no más abajo junto a PUBLIC_API. Las funciones y
+ *  constantes que usan (auth, isPublicApi, PUBLIC_API, FONO_PERMITIDO, rbac)
+ *  se evalúan recién en tiempo de request, cuando el módulo ya cargó entero.
+ * ============================================================ */
+/* Nada de lo que sale de /api puede quedar guardado en un intermediario. El proxy
+ * estaba cacheando el audio de las grabaciones: despues de cerrar el acceso publico,
+ * seguia devolviendo 200 con una copia vieja a quien pedia SIN sesion. Un control de
+ * acceso que el proxy puede saltear por cache no es un control de acceso. */
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  next();
+});
+app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, next));
+/* Permisos por rol (rbac.js): con sesión válida, ¿este ROL puede esta ruta?
+ * Va pegado al gate de auth para que ninguna ruta lo esquive; las públicas (sin
+ * req.user) y los tokens phone (ya filtrados por FONO_PERMITIDO) pasan de largo.
+ * Lo que no figura en la tabla es sólo admin. */
+app.use('/api', rbac.middleware);
 const state = { ari: false, ami: false };
 let ari = null;
 const pendingConf = {};
@@ -282,7 +334,10 @@ async function upsertSbcLink(b) {
 }
 /* Motor de llamadas sobre ARI (callengine.js): cache por eventos, click-to-dial,
  * colgar/retener/transferir/aparcar, supervision con snoop. */
-const callEngine = require('./callengine')({ app, auth, amiAction, amiCommand, broadcastSoon: (...a) => broadcastSoon(...a), appName: CFG.ari.app, log: (...a) => console.log('[calls]', ...a) });
+/* Configuración SIP de la central (Configuración → SIP): NAT, RTP, timers, TLS, códecs.
+ * Genera pbxng.d/{pjsip,rtp}.conf y recarga; sólo admin (rbac: no está en la tabla). */
+const sipConf = require('./sipconf')({ app, pool, amiCommand, escribir: astconf.escribir, log: (...a) => console.log('[sipconf]', ...a) });
+const callEngine = require('./callengine')({ app, auth, mismaExt, amiAction, amiCommand, broadcastSoon: (...a) => broadcastSoon(...a), appName: CFG.ari.app, log: (...a) => console.log('[calls]', ...a) });
 async function endpointStates() { return callEngine.endpointStates(); }
 // Sondeo SIP OPTIONS a una troncal (para troncales gestionadas por el SBC/kamailio)
 const _dgram = require('dgram');
@@ -362,6 +417,7 @@ async function setRecFlag(ext, on) { try { await amiAction(on ? { Action: 'DBPut
 async function setRecAll(on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: '_ALL_', Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: '_ALL_' }); } catch (_) {} }
 async function syncRecFlags() { try { const { rows } = await pool.query("SELECT id FROM ps_endpoints WHERE pbxng_record=true"); for (const r of rows) await setRecFlag(r.id, true); const { rows: s } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); await setRecAll(!!(s[0] && s[0].value === '1')); } catch (_) {} }
 setTimeout(() => { syncRecFlags().catch(() => {}); }, 9000);
+setTimeout(() => { sipConf.ensure().then(() => amiCommand('module reload res_pjsip.so').catch(() => {})).catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados antes de que el panel toque nada
 
 async function getExtensions() {
   const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record, dtmf_mode FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' ORDER BY id");
@@ -451,7 +507,14 @@ const FONO_PERMITIDO = [
   ['GET',  /^\/api\/ice$/],
   ['GET',  /^\/api\/branding$/],
   ['POST', /^\/api\/calls\/(record|conference)$/],
-  ['*',    /^\/api\/push\//],
+  // Sólo lo que necesita el propio aparato para sus notificaciones: el comodín push/*
+  // dejaba leer GET push/devices (inventario push de todas las extensiones, sólo admin).
+  ['POST', /^\/api\/push\/(subscribe|register|unsubscribe|test)$/],
+  // Desde 1.4.0 el enrolado entrega un token phone (no una sesión de panel): para que
+  // el softphone conserve el historial propio y el screen-pop, se abren estas dos
+  // lecturas. /api/cdr fuerza ext = la del token (ver la ruta).
+  ['GET',  /^\/api\/cdr$/],
+  ['GET',  /^\/api\/clients\/lookup$/],
 ];
 
 /* ¿El que pide puede meterse con la extensión `ext`?
@@ -470,6 +533,16 @@ function exigirExt(req, res, ext) {
   if (mismaExt(req, ext)) return true;
   res.status(403).json({ error: 'no podés acceder a los datos de otra extensión' });
   return false;
+}
+/* ¿A qué extensión queda ACOTADO el que pide?
+ *   null  -> a ninguna: admin/supervisor ven todo
+ *   'NNN' -> sólo esa (agente o token de softphone)
+ *   ''    -> agente sin interno asignado: no puede ver nada de nadie */
+function extPropia(req) {
+  const u = req.user || {};
+  if (u.scope === 'phone') return String(u.ext || '');
+  if (u.role === 'admin' || u.role === 'supervisor') return null;
+  return String(u.ext || '');
 }
 // --- Gate de autenticacion deny-by-default: TODA /api requiere JWT salvo la allowlist publica explicita ---
 const PUBLIC_API = [
@@ -492,16 +565,6 @@ const PUBLIC_API = [
   ['GET',  /^\/api\/manuales\/img\/[A-Za-z0-9._-]+$/],
 ];
 function isPublicApi(req) { const full = (req.baseUrl || '') + req.path; return PUBLIC_API.some(([m, re]) => m === req.method && re.test(full)); }
-/* Nada de lo que sale de /api puede quedar guardado en un intermediario. El proxy
- * estaba cacheando el audio de las grabaciones: despues de cerrar el acceso publico,
- * seguia devolviendo 200 con una copia vieja a quien pedia SIN sesion. Un control de
- * acceso que el proxy puede saltear por cache no es un control de acceso. */
-app.use('/api', (req, res, next) => {
-  res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
-  res.set('Pragma', 'no-cache');
-  next();
-});
-app.use('/api', (req, res, next) => isPublicApi(req) ? next() : auth(req, res, next));
 
 /* ============================================================
  *  Softphone de escritorio: cada central sirve SU instalador y el feed OTA.
@@ -524,19 +587,58 @@ function softphoneLatest() {
   } catch (_) { return { available: false }; }
 }
 app.get('/api/softphone/latest', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(softphoneLatest()); });
+/* IP del cliente = req.ip: Express ya aplicó `trust proxy = 1`, así que es la que
+ * agregó el proxy al FINAL de X-Forwarded-For. Antes se leía el PRIMER elemento del
+ * header, que lo escribe el propio cliente: alcanzaba con rotar ese valor para
+ * saltear el rate limit del login y falsear la IP de la bitácora y del enrolado. */
 function clientIp(req) {
-  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return xf || (req.socket && req.socket.remoteAddress) || '';
+  return req.ip || (req.socket && req.socket.remoteAddress) || '';
 }
-app.post('/api/auth/login', async (req, res) => {
+/* Freno a la fuerza bruta en las dos puertas que validan contraseñas sin sesión.
+ * Dos límites encadenados, ambos sobre req.ip (ver clientIp):
+ *   - por IP + usuario (o IP + interno), 10 fallos / 10 min: quien rota IPs contra
+ *     un usuario no puede bloquear al usuario legítimo desde otra red (sólo se
+ *     cuenta SU par IP+usuario).
+ *   - por IP sola, 50 fallos / 10 min: la clave IP+usuario NO frena a quien rota
+ *     usuarios desde una misma IP (password spraying); este segundo tope sí.
+ * Sólo cuentan los intentos fallidos: un login correcto no consume cupo. */
+const MSG_429 = 'Demasiados intentos. Esperá 10 minutos y volvé a probar.';
+function limiteIntentos(campo) {
+  const porIp = rateLimit({
+    windowMs: 10 * 60 * 1000, limit: 50,
+    standardHeaders: 'draft-7', legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => ipKeyGenerator(clientIp(req)),
+    handler: (req, res) => res.status(429).json({ error: MSG_429 }),
+  });
+  const porIpUsuario = rateLimit({
+    windowMs: 10 * 60 * 1000, limit: 10,
+    standardHeaders: 'draft-7', legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => ipKeyGenerator(clientIp(req)) + ':' + String((req.body || {})[campo] || '').toLowerCase().slice(0, 64),
+    handler: (req, res) => res.status(429).json({ error: MSG_429 }),
+  });
+  return [porIp, porIpUsuario];
+}
+/* Roles que la API entiende. Un usuario con otro rol (p.ej. 'operator'/'viewer', que
+ * el panel ofrecía antes de 1.4.0) no debe recibir sesión: la migración 0008 (y el
+ * bootstrap de más abajo) los convierte, pero si alguno quedara, el RBAC le daría 403
+ * hasta en /api/auth/me y el panel lo dejaría en un bucle login → 403 → login. */
+const ROLES = ['admin', 'supervisor', 'agente'];
+app.post('/api/auth/login', limiteIntentos('username'), async (req, res) => {
   const { username, password } = req.body || {};
   const ip = clientIp(req), ua = String(req.headers['user-agent'] || '').slice(0, 120);
   try {
     const { rows } = await pool.query('SELECT id,username,name,role,ext,password_hash,must_change FROM pbxng_users WHERE username=$1', [username]);
     const u = rows[0];
-    if (!u || !bcrypt.compareSync(password || '', u.password_hash)) {
+    /* bcrypt async: compareSync bloquea el event loop ~100 ms por intento, y con el
+     * socket.io, el ARI y el AudioSocket de la IA en el mismo proceso eso se nota. */
+    if (!u || !(await bcrypt.compare(String(password || ''), u.password_hash))) {
       alerts.onLogin({ ok: false, username, ip, ua }).catch(() => {});   // no bloquea la respuesta
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
+    if (!ROLES.includes(u.role)) {
+      return res.status(403).json({ error: 'Tu usuario tiene un rol no soportado (' + String(u.role) + '). Pedile al administrador que lo corrija desde Usuarios.' });
     }
     const token = jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext: u.ext || null }, SECRET, { expiresIn: '12h' });
     alerts.onLogin({ ok: true, username: u.username, role: u.role, ip, ua }).catch(() => {});
@@ -580,7 +682,9 @@ app.get('/api/provision', auth, async (req, res) => {
       transport: 'webrtc', name, domain, ext, pass: au[0].password, wss,
       stun, turn: useTurn ? ('turn:' + pub + ':3478') : '', turnUser: useTurn ? tuser : '', turnPass: useTurn ? tpass : '',
       apiBase,
-      apiToken: u ? jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext }, SECRET, { expiresIn: '30d' }) : '',
+      /* Token de softphone (scope 'phone'), no una sesión de panel: si no, un supervisor
+       * pidiendo la config del interno de un admin se llevaba una sesión de admin por 30 días. */
+      apiToken: jwt.sign({ scope: 'phone', ext }, SECRET, { expiresIn: '30d' }),
     };
     const b64url = Buffer.from(JSON.stringify(cfg), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     res.json({ ...cfg, prov_url: 'pbxng://prov#' + b64url });
@@ -605,11 +709,22 @@ app.get('/api/auth/setup', async (req, res) => {
   catch (e) { res.json({ defaultAdmin: false }); }
 });
 // Cambio de contrasena propia (autenticado); limpia el flag must_change
+/* Pide la clave ACTUAL (`current`): una sesión robada del localStorage no debe alcanzar
+ * para cambiar la contraseña y dejar afuera al dueño. La única excepción es el primer
+ * ingreso (must_change=true), donde la clave actual es la que estamos obligando a cambiar. */
 app.post('/api/auth/password', auth, async (req, res) => {
-  const { password } = req.body || {};
-  if (!password || String(password).length < 4) return res.status(400).json({ error: 'contrasena minima 4 caracteres' });
-  try { await pool.query('UPDATE pbxng_users SET password_hash=$1, must_change=false WHERE id=$2', [bcrypt.hashSync(String(password), 10), req.user.uid]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  const { password, current } = req.body || {};
+  if (!password || String(password).length < 8) return res.status(400).json({ error: 'la contraseña nueva debe tener al menos 8 caracteres' });
+  try {
+    const { rows } = await pool.query('SELECT password_hash, must_change FROM pbxng_users WHERE id=$1', [req.user.uid]);
+    if (!rows[0]) return res.status(404).json({ error: 'usuario inexistente' });
+    if (!rows[0].must_change) {
+      if (!current) return res.status(400).json({ error: 'indicá tu contraseña actual' });
+      if (!(await bcrypt.compare(String(current), rows[0].password_hash))) return res.status(403).json({ error: 'la contraseña actual no es correcta' });
+    }
+    await pool.query('UPDATE pbxng_users SET password_hash=$1, must_change=false WHERE id=$2', [await bcrypt.hash(String(password), 10), req.user.uid]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: { username: req.user.username, name: req.user.name, role: req.user.role, ext: req.user.ext || null } }));
 
@@ -640,11 +755,18 @@ try { pushProviders.init(pool); } catch (e) { console.error('[PUSH] init', e.mes
 
 // --- Bootstrap primer arranque: columna must_change + admin por defecto si no hay usuarios ---
 pool.query("ALTER TABLE pbxng_users ADD COLUMN IF NOT EXISTS ext text").catch(() => {});
+/* Roles viejos ('operator'/'viewer', de antes de 1.4.0) → los de rbac.js. Es lo mismo
+ * que hace migrations/0008_roles.sql, repetido acá porque las migraciones sólo las
+ * corre deploy.sh y una central actualizada a mano quedaría con usuarios que no
+ * pueden entrar (el login los rechaza con 403). Idempotente. */
+pool.query("UPDATE pbxng_users SET role='supervisor' WHERE role='operator'").catch(() => {});
+pool.query("UPDATE pbxng_users SET role='agente' WHERE role='viewer'").catch(() => {});
+pool.query("ALTER TABLE pbxng_users ALTER COLUMN role SET DEFAULT 'agente'").catch(() => {});
 pool.query("ALTER TABLE pbxng_users ADD COLUMN IF NOT EXISTS must_change boolean DEFAULT false").then(async () => {
   const { rows } = await pool.query('SELECT count(*)::int n FROM pbxng_users');
   if (rows[0].n === 0) {
     const pass = process.env.ADMIN_DEFAULT_PASS || 'admin';
-    await pool.query("INSERT INTO pbxng_users (username,password_hash,name,role,must_change) VALUES ('admin',$1,'Administrador','admin',true)", [bcrypt.hashSync(pass, 10)]);
+    await pool.query("INSERT INTO pbxng_users (username,password_hash,name,role,must_change) VALUES ('admin',$1,'Administrador','admin',true)", [await bcrypt.hash(pass, 10)]);
     console.log("[BOOTSTRAP] usuario 'admin' creado (clave por defecto: '" + pass + "') - cambiala en el primer ingreso");
   }
 }).catch(e => console.error('[BOOTSTRAP] admin', e.message));
@@ -713,36 +835,34 @@ pool.query("ALTER TABLE pbxng_rec_config ADD COLUMN IF NOT EXISTS nas_type text 
  *
  * No hace falta volver a enrolar ningún teléfono: el softphone ya guarda ext y clave,
  * así que canjea solo la primera vez que arranca. */
-const FONO_INTENTOS = new Map();   // ip -> { n, hasta }
-app.post('/api/phone/token', async (req, res) => {
+/* Freno contra la fuerza bruta (mismo limitador que el login: 10 fallos / 10 min por
+ * IP + interno). Las claves SIP son largas y generadas, pero un endpoint que valida
+ * contraseñas sin límite es una invitación. */
+app.post('/api/phone/token', limiteIntentos('ext'), async (req, res) => {
   const { ext, password } = req.body || {};
-  const ip = clientIp(req);
-  const ahora = Date.now();
-  const reg = FONO_INTENTOS.get(ip);
-  // Freno simple contra la fuerza bruta: las claves SIP son largas y generadas, pero
-  // un endpoint que valida contraseñas sin límite es una invitación.
-  if (reg && reg.hasta > ahora) return res.status(429).json({ error: 'demasiados intentos, esperá un minuto' });
   if (!ext || !password) return res.status(400).json({ error: 'ext y password son obligatorios' });
   try {
     const { rows } = await pool.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
     const ok = rows[0] && String(rows[0].password) === String(password);
-    if (!ok) {
-      const n = (reg && reg.hasta > ahora ? reg.n : (reg ? reg.n : 0)) + 1;
-      FONO_INTENTOS.set(ip, { n, hasta: n >= 8 ? ahora + 60000 : 0 });
-      return res.status(401).json({ error: 'extensión o clave incorrecta' });
-    }
-    FONO_INTENTOS.delete(ip);
+    if (!ok) return res.status(401).json({ error: 'extensión o clave incorrecta' });
     const token = jwt.sign({ scope: 'phone', ext: String(ext) }, SECRET, { expiresIn: '30d' });
     res.json({ token, ext: String(ext) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* El enlace/QR de enrolado es de UN solo uso: entrega la clave SIP en claro, así que
+ * un link reenviado o un QR fotografiado no puede seguir canjeándose días después.
+ * Ventana de gracia (ENROLL_REUSE_SECONDS, 120 s): el mismo aparato suele canjearlo
+ * dos veces seguidas (la PWA abre el link y el softphone de escritorio lo toma por
+ * pbxng://), y un reintento por red lenta no debe dejar al usuario sin teléfono. */
+const ENROLL_REUSE_MS = Math.max(0, +(process.env.ENROLL_REUSE_SECONDS || 120)) * 1000;
 app.get('/api/enroll/:token', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT token,ext,password,expires_at FROM pbxng_enroll WHERE token=$1', [req.params.token]);
+    const { rows } = await pool.query('SELECT token,ext,password,expires_at,used_at FROM pbxng_enroll WHERE token=$1', [req.params.token]);
     const e = rows[0];
     if (!e) return res.status(404).json({ error: 'token invalido' });
     if (e.expires_at && new Date(e.expires_at) < new Date()) return res.status(410).json({ error: 'token expirado' });
+    if (e.used_at && (Date.now() - new Date(e.used_at).getTime()) > ENROLL_REUSE_MS) return res.status(410).json({ error: 'token ya usado' });
     const ua = req.headers['user-agent'] || '';
     const dv = parseDevice(ua);
     await pool.query(
@@ -787,9 +907,13 @@ app.get('/api/enroll/:token', async (req, res) => {
       sipServer: isWeb ? '' : sipHost, sipPort: isWeb ? '' : sipPort,
       sipTransport: isWeb ? '' : sipTransport,
       sipSrtp: (!isWeb && String(ep.media_encryption || '') === 'sdes') ? 'sdes' : 'none',
-      // sesion en la plataforma: directorio, clientes (CRM) e intercom sin volver a loguearse
+      /* Token de SOFTPHONE (scope 'phone', 30 d), igual al que da POST /api/phone/token:
+       * sólo lo que lista FONO_PERMITIDO y sólo sobre esta extensión. Antes salía una
+       * sesión de panel con el rol del usuario: quien tuviera el QR de un admin tenía
+       * la central entera por 30 días. Para el CRM completo o supervisar, el softphone
+       * inicia sesión con usuario y contraseña (POST /api/auth/login). */
       apiBase,
-      apiToken: u ? jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext: String(e.ext) }, SECRET, { expiresIn: '30d' }) : '',
+      apiToken: jwt.sign({ scope: 'phone', ext: String(e.ext) }, SECRET, { expiresIn: '30d' }),
     };
     const b64u = Buffer.from(JSON.stringify(prov), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     res.json({ ext: e.ext, password: e.password, server: dom, prov, prov_url: 'pbxng://prov#' + b64u });
@@ -798,8 +922,11 @@ app.get('/api/enroll/:token', async (req, res) => {
 
 app.get('/api/recordings/:id/audio', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT filename FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
+    const { rows } = await pool.query('SELECT filename, ext, src, dst FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
     if (!rows[0]) return res.status(404).end();
+    // Un agente escucha sólo las llamadas en las que estuvo su interno; el resto es de supervisión.
+    const propio = extPropia(req);
+    if (propio !== null && ![rows[0].ext, rows[0].src, rows[0].dst].map(v => String(v || '')).includes(propio)) return res.status(403).json({ error: 'no podés acceder a las grabaciones de otra extensión' });
     const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
     if (!r.ok) return res.status(502).end();
     res.set('Content-Type', 'audio/wav');
@@ -932,6 +1059,7 @@ app.post('/api/push/unsubscribe', async (req, res) => {
 });
 app.post('/api/push/test', auth, async (req, res) => {
   const ext = req.body?.ext;
+  if (!exigirExt(req, res, ext)) return;    // sólo al propio teléfono (agente / token phone)
   const sent = await sendPushToExt(ext, { type: 'info', title: 'PBX-NG', body: 'Notificaciones activadas para el interno ' + ext, url: '/phone' });
   res.json({ ok: true, sent });
 });
@@ -940,6 +1068,7 @@ app.post('/api/push/test', auth, async (req, res) => {
 app.post('/api/calls/record', async (req, res) => {
   const { ext, action } = req.body || {};
   if (!ext) return res.status(400).json({ error: 'ext requerido' });
+  if (!exigirExt(req, res, ext)) return;    // agente y token phone: sólo su propia llamada
   try {
     let name = null;
     if (ari) { try { const chans = await ari.channels.list(); const ch = chans.find(c => c.name && c.name.startsWith('PJSIP/' + ext + '-')); name = ch && ch.name; } catch (_) {} }
@@ -960,6 +1089,7 @@ app.post('/api/calls/record', async (req, res) => {
 app.post('/api/calls/conference', async (req, res) => {
   const { ext, third } = req.body || {};
   if (!ext || !third) return res.status(400).json({ error: 'ext y third requeridos' });
+  if (!exigirExt(req, res, ext)) return;    // agente y token phone: sólo su propia llamada
   if (!ari) return res.status(503).json({ error: 'ARI no disponible' });
   try {
     const chans = await ari.channels.list();
@@ -1073,8 +1203,9 @@ pool.query("CREATE TABLE IF NOT EXISTS pbxng_phones (id serial PRIMARY KEY, mac 
 async function createSipEndpoint(c, id, password, context = 'internal', tenant_id = 1) {
   await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,1,'no','yes','yes',60,$2) ON CONFLICT (id) DO NOTHING", [id, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
-  await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-udp',$1,$1,$2,'all','ulaw,alaw,g722',$3,'extension','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-udp'", [id, context, tenant_id]);
+  await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-udp',$1,$1,$2,'all',$4,$3,'extension','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-udp'", [id, context, tenant_id, await sipConf.defaultCodecs(false)]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await sipConf.afterCreate(c, id);
   await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
 }
 const normMac = (m) => String(m || '').toLowerCase().replace(/[^0-9a-f]/g, '');
@@ -2170,6 +2301,9 @@ app.get('/api/recordings/match', async (req, res) => {
     const b = (req.query.to || '').toString().slice(0, 40);
     const ts = parseInt(req.query.ts, 10) || 0;
     if (!a && !b) return res.json({});
+    // Un agente sólo puede buscar grabaciones de llamadas en las que participó su interno.
+    const propio = extPropia(req);
+    if (propio !== null && a !== propio && b !== propio) return res.status(403).json({ error: 'no podés acceder a las grabaciones de otra extensión' });
     const { rows } = await pool.query(
       `SELECT id, duration, src, dst, extract(epoch from started_at)*1000 AS started_ms
        FROM pbxng_recordings
@@ -2207,24 +2341,39 @@ app.get('/api/users', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,username,name,role,ext,created_at FROM pbxng_users ORDER BY id'); res.json(rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+/* Toda la familia /api/users es sólo admin (rbac.js: no figura en la tabla). */
 app.post('/api/users', async (req, res) => {
-  const { username, password, name, role = 'admin', ext = null } = req.body || {};
+  /* Rol por defecto 'agente': el más chico. Antes era 'admin', así que un alta apurada
+   * desde el panel (o un POST sin `role`) creaba administradores sin querer. */
+  const { username, password, name, role = 'agente', ext = null } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'usuario y contraseña obligatorios' });
+  if (String(password).length < 8) return res.status(400).json({ error: 'la contraseña debe tener al menos 8 caracteres' });
+  if (!ROLES.includes(role)) return res.status(400).json({ error: 'rol inválido (admin, supervisor o agente)' });
   try {
-    await pool.query('INSERT INTO pbxng_users (username,password_hash,name,role,ext) VALUES ($1,$2,$3,$4,$5)', [username, bcrypt.hashSync(password, 10), name || username, role, ext || null]);
+    await pool.query('INSERT INTO pbxng_users (username,password_hash,name,role,ext) VALUES ($1,$2,$3,$4,$5)', [String(username).trim(), await bcrypt.hash(String(password), 10), name || username, role, ext || null]);
     res.status(201).json({ created: username });
   } catch (e) { res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'el usuario ya existe' : e.message }); }
 });
 app.post('/api/users/:id/password', async (req, res) => {
   const { password } = req.body || {};
-  if (!password) return res.status(400).json({ error: 'falta contraseña' });
-  try { await pool.query('UPDATE pbxng_users SET password_hash=$1 WHERE id=$2', [bcrypt.hashSync(password, 10), req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  if (!password || String(password).length < 8) return res.status(400).json({ error: 'la contraseña debe tener al menos 8 caracteres' });
+  try {
+    const r = await pool.query('UPDATE pbxng_users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(String(password), 10), req.params.id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'usuario inexistente' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/users/:id', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT username FROM pbxng_users WHERE id=$1', [req.params.id]);
-    if (rows[0] && rows[0].username === 'admin') return res.status(400).json({ error: 'no se puede borrar admin' });
+    if (String(req.user.uid) === String(req.params.id)) return res.status(400).json({ error: 'no podés borrar tu propio usuario' });
+    const { rows } = await pool.query('SELECT username, role FROM pbxng_users WHERE id=$1', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'usuario inexistente' });
+    if (rows[0].role === 'admin') {
+      /* Sin al menos un admin nadie puede volver a configurar la central: sería
+       * quedarse afuera de la propia casa. */
+      const { rows: n } = await pool.query("SELECT count(*)::int AS n FROM pbxng_users WHERE role='admin'");
+      if (n[0].n <= 1) return res.status(400).json({ error: 'no se puede borrar el último administrador' });
+    }
     await pool.query('DELETE FROM pbxng_users WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2353,7 +2502,7 @@ const dtmfOk = (v) => (DTMF_MODES.includes(String(v)) ? String(v) : null);
 app.post('/api/endpoints', async (req, res) => {
   const { id, password, context = 'internal', tenant_id = 1, video = false, webrtc = false, max_contacts = 2 } = req.body || {};
   const dtmf = dtmfOk((req.body || {}).dtmf_mode) || 'rfc4733';
-  const allow = (video || webrtc) ? 'ulaw,alaw,g722,vp8,h264' : 'ulaw,alaw,g722';
+  const allow = await sipConf.defaultCodecs(video || webrtc);
   const transport = webrtc ? 'transport-ws' : 'transport-udp';
   if (!id || !password) return res.status(400).json({ error: 'id y password son obligatorios' });
   // No alcanza con validar en el panel: cualquiera puede pegarle a la API. El numero se
@@ -2371,10 +2520,12 @@ app.post('/api/endpoints', async (req, res) => {
     if (webrtc) {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact,dtmf_mode) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes',$6)", [id, transport, context, allow, tenant_id, dtmf]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await sipConf.afterCreate(c, id);
   await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
     } else {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact,dtmf_mode) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','no','yes','yes','yes',$6)", [id, transport, context, allow, tenant_id, dtmf]);
   await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await sipConf.afterCreate(c, id);
   await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
     }
     if (req.body && req.body.name) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
@@ -2384,7 +2535,7 @@ app.post('/api/endpoints', async (req, res) => {
 app.put('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params;
   const { password, context, video = false, webrtc = false, max_contacts } = req.body || {};
-  const allow = (video || webrtc) ? 'ulaw,alaw,g722,vp8,h264' : 'ulaw,alaw,g722';
+  const allow = await sipConf.defaultCodecs(video || webrtc);
   const transport = webrtc ? 'transport-ws' : 'transport-udp';
   // null = el body no lo trae -> COALESCE deja el valor que ya tenia el endpoint.
   const dtmf = dtmfOk((req.body || {}).dtmf_mode);
@@ -3005,7 +3156,9 @@ app.get('/api/wallboard', async (req, res) => {
   res.json(out);
 });
 
-app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); const ext = req.query.ext ? String(req.query.ext) : null; try { const q = ext ? await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr WHERE src=$2 OR dst=$2 ORDER BY start DESC LIMIT $1", [limit, ext]) : await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(q.rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+/* Historial: admin y supervisor ven todo (con ?ext= filtran); agente y token de softphone
+ * SIEMPRE ven sólo su interno, se ignore lo que manden en ?ext=. */
+app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); const propio = extPropia(req); const ext = propio ? propio : (req.query.ext ? String(req.query.ext) : null); if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' }); try { const q = ext ? await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr WHERE src=$2 OR dst=$2 ORDER BY start DESC LIMIT $1", [limit, ext]) : await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(q.rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 app.get('/api/conferences', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,pin FROM pbxng_conferences ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/conferences', async (req, res) => {
@@ -3370,13 +3523,19 @@ const io = new Server(server, { cors: { origin: '*' } });
 let busy = false, deb = null;
 async function broadcast() { if (busy) return; busy = true; try { io.to('state').emit('snapshot', await snapshot()); } catch (e) {} finally { busy = false; } }
 function broadcastSoon() { clearTimeout(deb); deb = setTimeout(broadcast, 300); }
+/* Handshake: auth.token = JWT de panel (estado completo) o auth.scratch = JWT de
+ * softphone (scope 'phone', sólo pizarra). Antes `scratch` era un flag cualquiera y
+ * entraba sin verificar nada: cualquiera en internet podía sumarse a la pizarra de
+ * una videollamada ajena y garabatearla. Un token phone también sirve como auth.token
+ * pero queda igual de acotado (scratchOnly): el estado de la central es del panel. */
 io.use((socket, next) => {
-  try { const t = socket.handshake.auth && socket.handshake.auth.token; socket.user = jwt.verify(t, SECRET); next(); }
-  catch (e) {
-    // Conexión limitada a la pizarra (PWA softphone sin JWT de dashboard): sin acceso al estado.
-    if (socket.handshake.auth && socket.handshake.auth.scratch) { socket.scratchOnly = true; next(); }
-    else next(new Error('unauthorized'));
-  }
+  const a = (socket.handshake && socket.handshake.auth) || {};
+  const verificar = (t) => { try { return t ? jwt.verify(String(t), SECRET) : null; } catch (_) { return null; } };
+  const u = verificar(a.token) || verificar(a.scratch);
+  if (!u) return next(new Error('unauthorized'));
+  socket.user = u;
+  socket.scratchOnly = u.scope === 'phone';
+  next();
 });
 io.on('connection', async (s) => {
   if (!s.scratchOnly) { s.join('state'); try { s.emit('snapshot', await snapshot()); } catch (_) {} }

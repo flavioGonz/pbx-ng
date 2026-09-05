@@ -72,7 +72,7 @@ export default function Extensiones() {
   const [qrExt, setQrExt] = useState(''); const [enroll, setEnroll] = useState(null); const [gen, setGen] = useState(false);
   const [emailTo, setEmailTo] = useState(''); const [sending, setSending] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const [recAll, setRecAll] = useState(false); const [recBusy, setRecBusy] = useState(false);
+  const [recAll, setRecAll] = useState(false);
   // Bitacora del acceso enviado: si lo activaron, cuando y con que aparato.
   const [acc, setAcc] = useState({});
   async function loadAcc() {
@@ -83,7 +83,7 @@ export default function Extensiones() {
   }
   useEffect(() => { loadAcc(); const t = setInterval(loadAcc, 20000); return () => clearInterval(t); }, []);
   useEffect(() => { fetch('/backend/api/extensions/record-all').then(r => r.json()).then(d => setRecAll(!!d.enabled)).catch(() => {}); }, []);
-  async function toggleRecAll(on) { setRecBusy(true); setRecAll(on); const r = await fetch('/backend/api/extensions/record-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then(x => x.json()).catch(() => ({ error: 1 })); setRecBusy(false); if (r.error) { setRecAll(!on); toast('Error', 'bad'); } else toast(on ? 'Grabación global activada' : 'Grabación global desactivada', 'ok'); }
+  // La grabación global se administra en Configuración → SIP; acá sólo se lee para avisar en el editor.
 
   // Plan de numeracion: el backend sabe que numeros estan ocupados (y por quien) y cual es el
   // proximo libre dentro del rango que ya se usa. Sugerimos ese, no "el ultimo + 1" a ciegas.
@@ -162,13 +162,6 @@ export default function Extensiones() {
           </Card>
         ))}
       </SimpleGrid>
-      <Card withBorder radius="lg" padding="md" shadow="sm" style={{ background: recAll ? 'rgba(225,29,72,.05)' : undefined }}>
-        <Group justify="space-between" wrap="nowrap">
-          <Group gap={12} wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={recAll ? 'red' : 'gray'}><IconMicrophone2 size={22} /></ThemeIcon>
-            <div><Text fw={700}>Grabación global de llamadas</Text><Text fz="sm" c="dimmed">Si la activás, se graban todas las llamadas internas de la central (anula los interruptores por interno).</Text></div></Group>
-          <Switch size="lg" color="red" checked={recAll} disabled={recBusy} onChange={e => toggleRecAll(e.currentTarget.checked)} />
-        </Group>
-      </Card>
       <Card withBorder radius="lg" padding="lg" shadow="sm">
         <Group justify="space-between" mb="md">
           <Group gap="xs"><Text fw={600}>{list.length} extensiones</Text><Badge variant="light" color="teal">{online} en línea</Badge></Group>
@@ -266,7 +259,7 @@ export default function Extensiones() {
                 <div><Text fw={600} fz="sm">Grabar las llamadas de esta extensión</Text><Text fz="xs" c="dimmed">Se guardan en Grabaciones y quedan enlazadas en el Historial</Text></div></Group>
               <Switch checked={form.record} onChange={e => set('record', e.currentTarget.checked)} color="red" disabled={recAll} />
             </Group>
-            {recAll && <Text fz="xs" c="dimmed" mt={6}>La grabación global está activa: se graban TODAS las llamadas, sin importar este interruptor.</Text>}
+            {recAll && <Text fz="xs" c="dimmed" mt={6}>La grabación global está activa (Configuración → SIP): se graban TODAS las llamadas, sin importar este interruptor.</Text>}
           </Card>
 
           {editing &&

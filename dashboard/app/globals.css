@@ -99,6 +99,33 @@ body, .mantine-AppShell-navbar, .mantine-AppShell-header, .mantine-AppShell-main
 .pbx-tk-draw { stroke-dasharray: 40; stroke-dashoffset: 40; animation: pbxDraw .5s .12s ease forwards; }
 @keyframes pbxDraw { to { stroke-dashoffset: 0; } }
 
+/* ---- Notificaciones (sileo): colores legibles + iconos SVG animados ----
+   sileo pinta el título con el color del estado y sólo el fondo con `fill`; el fondo lo
+   ponemos nosotros según el tema (ver notify.js). Acá va todo lo que sileo no trae:
+   la descripción con contraste, el título sin "Capitalize" (rompía los emails) y las
+   animaciones de los iconos de NotifyIcons.jsx, que hasta ahora no existían. */
+[data-sileo-viewport] { --sileo-state-success: #12b76a; --sileo-state-error: #f04438; --sileo-state-warning: #f79009; --sileo-state-info: #2f80ff; --sileo-state-action: #7c3aed; --sileo-state-loading: #2f80ff; }
+[data-sileo-viewport] [data-sileo-title] { text-transform: none; font-weight: 650; font-size: .86rem; letter-spacing: .1px; }
+[data-sileo-viewport] [data-sileo-description] { color: rgba(238,241,246,.82); }
+[data-mantine-color-scheme="light"] [data-sileo-viewport] [data-sileo-description] { color: #3b4458; }
+[data-sileo-viewport] [data-sileo-badge] { background: var(--sileo-tone-bg); border-radius: 999px; }
+.pbx-nico { display: inline-grid; place-items: center; width: 22px; height: 22px; position: relative; color: var(--nc, #2f80ff); }
+.pbx-nico::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 1.5px solid var(--nc); opacity: 0; animation: pbxNicoHalo 1.6s .1s ease-out 2; }
+.pbx-nico svg { display: block; overflow: visible; animation: pbxNicoPop .45s cubic-bezier(.34,1.56,.64,1) both; }
+.pbx-nico .pbx-draw, .pbx-nico .pbx-draw path, .pbx-nico .pbx-draw circle[stroke] { stroke-dasharray: 48; stroke-dashoffset: 48; animation: pbxNicoDraw .55s .18s cubic-bezier(.4,0,.2,1) forwards; }
+.pbx-nico .pbx-draw circle[fill]:not([fill="none"]) { transform-origin: center; transform: scale(0); animation: pbxNicoDot .3s .55s cubic-bezier(.34,1.56,.64,1) forwards; }
+.pbx-nico .pbx-shake { transform-origin: 12px 12px; animation: pbxNicoShake .9s .2s ease-in-out 3; }
+.pbx-nico .pbx-wave path { stroke-dasharray: 12; animation: pbxNicoWave 1.1s ease-in-out infinite; }
+.pbx-nico .pbx-nico-spin { animation: pbxNicoSpin .9s linear infinite; transform-origin: center; }
+@keyframes pbxNicoPop { from { transform: scale(.5); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pbxNicoHalo { 0% { transform: scale(.7); opacity: .7; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes pbxNicoDraw { to { stroke-dashoffset: 0; } }
+@keyframes pbxNicoDot { to { transform: scale(1); } }
+@keyframes pbxNicoShake { 0%,100% { transform: rotate(0); } 20% { transform: rotate(-14deg); } 40% { transform: rotate(12deg); } 60% { transform: rotate(-9deg); } 80% { transform: rotate(6deg); } }
+@keyframes pbxNicoWave { 0%,100% { stroke-dashoffset: 0; opacity: .55; } 50% { stroke-dashoffset: 6; opacity: 1; } }
+@keyframes pbxNicoSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pbx-nico *, .pbx-nico::before { animation: none !important; stroke-dashoffset: 0 !important; transform: none !important; opacity: 1; } }
+
 /* PBX-NG · logo grande flotante del login */
 .pbx-login-float {
   display: flex; justify-content: center; margin-bottom: 8px;

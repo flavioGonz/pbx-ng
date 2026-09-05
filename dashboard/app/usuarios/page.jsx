@@ -5,33 +5,41 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconKey, IconSearch, IconUser, IconId, IconShieldCheck, IconCalendar } from '@tabler/icons-react';
 import { toast } from '../notify';
 import { TableSkeleton } from '../Skeletons';
-const ROLES = [{ value: 'admin', label: 'Administrador' }, { value: 'operator', label: 'Operador' }, { value: 'viewer', label: 'Solo lectura' }];
+/* Mismos roles que control-plane/rbac.js (docs/CONTRATOS.md §2). Los viejos 'operator' y
+ * 'viewer' ya no existen en la API: un usuario con ese rol guardado se muestra con la
+ * etiqueta cruda (roleLabel) para que el admin lo vea y lo corrija. */
+const ROLES = [{ value: 'admin', label: 'Administrador' }, { value: 'supervisor', label: 'Supervisor' }, { value: 'agente', label: 'Agente' }];
+// Por defecto el rol MENOS privilegiado: crear administradores tiene que ser una decisión explícita.
+const ROL_DEFAULT = 'agente';
+const PASS_MIN = 8;
 
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 export default function Usuarios() {
   const [list, setList] = useState([]); const [loading, setLoading] = useState(true); const [q, setQ] = useState('');
   const [opened, { open, close }] = useDisclosure(false);
   const [pwOpen, { open: openPw, close: closePw }] = useDisclosure(false);
-  const [f, setF] = useState({ role: 'admin' }); const [pwTarget, setPwTarget] = useState(null); const [pw, setPw] = useState('');
+  const [f, setF] = useState({ role: ROL_DEFAULT }); const [pwTarget, setPwTarget] = useState(null); const [pw, setPw] = useState('');
   async function load() { try { const d = await fetch('/backend/api/users').then(r => r.json()); setList(Array.isArray(d) ? d : []); } catch (_) { setList([]); } setLoading(false); }
   useEffect(() => { load(); }, []);
   const up = (k, v) => setF(s => ({ ...s, [k]: v }));
   async function create() {
+    if (!f.password || f.password.length < PASS_MIN) { toast(`La contraseña debe tener al menos ${PASS_MIN} caracteres`, 'bad'); return; }
     const r = await fetch('/backend/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) }).then(x => x.json());
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('Usuario ' + r.created + ' creado', 'ok'); setF({ role: 'admin' }); close(); load(); }
+    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('Usuario ' + r.created + ' creado', 'ok'); setF({ role: ROL_DEFAULT }); close(); load(); }
   }
   async function del(u) { if (!confirm('¿Eliminar el usuario ' + u.username + '?')) return; const r = await fetch('/backend/api/users/' + u.id, { method: 'DELETE' }).then(x => x.json()); if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('Usuario eliminado', 'info'); load(); } }
   async function resetPw() {
+    if (pw.length < PASS_MIN) { toast(`La contraseña debe tener al menos ${PASS_MIN} caracteres`, 'bad'); return; }
     const r = await fetch('/backend/api/users/' + pwTarget.id + '/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) }).then(x => x.json());
     if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('Contraseña actualizada', 'ok'); setPw(''); closePw(); }
   }
   const roleLabel = (r) => (ROLES.find(x => x.value === r) || {}).label || r;
-  const roleColor = (r) => r === 'admin' ? 'pbx' : r === 'operator' ? 'teal' : 'gray';
+  const roleColor = (r) => r === 'admin' ? 'pbx' : r === 'supervisor' ? 'teal' : r === 'agente' ? 'blue' : 'gray';
   const fl = list.filter(u => !q || u.username.toLowerCase().includes(q.toLowerCase()) || (u.name || '').toLowerCase().includes(q.toLowerCase()));
   return (
     <Stack gap="lg">
       <Group justify="space-between"><div className="pbx-pagehead"><span className="pbx-acc-bar" style={{ background: 'linear-gradient(180deg,var(--mantine-color-indigo-5),var(--mantine-color-indigo-8))' }} /><ThemeIcon size={44} radius="md" variant="gradient" gradient={{ from: 'indigo.5', to: 'indigo.8', deg: 135 }}><IconKey size={24} /></ThemeIcon><div><Title order={2} lh={1.1}>Usuarios</Title><Text c="dimmed" size="sm">Cuentas de acceso al panel de administración</Text></div></div>
-        <Button leftSection={<IconPlus size={16} />} onClick={() => { setF({ role: 'admin' }); open(); }}>Nuevo usuario</Button></Group>
+        <Button leftSection={<IconPlus size={16} />} onClick={() => { setF({ role: ROL_DEFAULT }); open(); }}>Nuevo usuario</Button></Group>
       <Card withBorder radius="lg" padding="lg" shadow="sm">
         <Group justify="space-between" mb="md">
           <Text fw={600}>{list.length} cuentas</Text>
@@ -60,14 +68,14 @@ export default function Usuarios() {
         <Stack>
           <TextInput label="Usuario" placeholder="operador1" value={f.username || ''} onChange={e => up('username', e.target.value)} required />
           <TextInput label="Nombre completo" value={f.name || ''} onChange={e => up('name', e.target.value)} />
-          <PasswordInput label="Contraseña" value={f.password || ''} onChange={e => up('password', e.target.value)} required />
+          <PasswordInput label="Contraseña" description={`Mínimo ${PASS_MIN} caracteres`} value={f.password || ''} onChange={e => up('password', e.target.value)} required />
           <Select label="Rol" data={ROLES} value={f.role} onChange={v => up('role', v)} />
           <Button onClick={create} mt="xs">Crear usuario</Button>
         </Stack>
       </Modal>
       <Modal opened={pwOpen} onClose={closePw} title={`Cambiar contraseña · ${pwTarget?.username || ''}`} centered radius="lg">
         <Stack>
-          <PasswordInput label="Nueva contraseña" value={pw} onChange={e => setPw(e.target.value)} required />
+          <PasswordInput label="Nueva contraseña" description={`Mínimo ${PASS_MIN} caracteres`} value={pw} onChange={e => setPw(e.target.value)} required />
           <Button onClick={resetPw} mt="xs">Actualizar</Button>
         </Stack>
       </Modal>

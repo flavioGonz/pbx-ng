@@ -633,19 +633,24 @@ configure nada:
   credenciales del TURN; si es SIP, va con el servidor SIP, el puerto y el transporte. **El sistema
   lo deduce del endpoint real**, no lo asume.
 - El **extensión y su contraseña**.
-- La **sesión en la plataforma** (si la extensión tiene un usuario asociado): así la persona ve el
-  directorio, la ficha de los clientes y el intercom sin volver a loguearse.
+- Un **acceso de teléfono** (no una sesión del panel): con él el softphone ve el directorio y la
+  presencia, su propio historial, su buzón y la ficha del cliente que llama. Nada más: ni la
+  configuración, ni las grabaciones de otros, ni el CRM completo, aunque el interno sea de un
+  administrador. Para eso el softphone entra con **usuario y contraseña** del panel.
 
 ### 12.4 Reglas del enlace
 
 - **Vence en 24 horas.** Si expira, se genera uno nuevo.
+- **Es de un solo uso.** Se puede canjear dos veces seguidas dentro de **2 minutos** (por ejemplo, el
+  navegador y la app de escritorio del mismo aparato); pasado eso responde *"token ya usado"* y hay
+  que generar otro. Un enlace reenviado o un QR fotografiado no sirve días después.
 - **Sirve para los tres clientes**: navegador, celular (agregar a la pantalla de inicio) y app de
   escritorio (botón QR → "Pegar código").
-- Se puede reenviar las veces que haga falta.
+- Se puede generar y reenviar las veces que haga falta.
 
-> **Para que el usuario vea clientes e intercom**, la extensión tiene que tener un **usuario asociado**
-> en **Usuarios** (con su rol). Si no lo tiene, el enlace configura el teléfono igual, pero sin
-> sesión en la plataforma.
+> **Para que el usuario vea el CRM completo o el intercom** desde el softphone, tiene que tener un
+> **usuario** en **Usuarios** (con su rol) e iniciar sesión con él. El enlace configura el teléfono
+> igual, con el acceso de teléfono.
 
 ![Enviar acceso desde el panel](img/cfg-33-enviar-acceso.png)
 
@@ -1063,14 +1068,25 @@ permite desbloquear o bloquear a mano.
 
 » Menú lateral → Sistema → Usuarios
 
-En **Usuarios**. Cada persona puede tener un **extensión asociado** — y eso es lo que habilita que su
-softphone vea clientes e intercom.
+En **Usuarios**. Cada persona puede tener un **extensión asociado** — y eso es lo que define qué
+teléfono, qué historial y qué buzón son "los suyos".
 
 | Rol | Qué puede hacer |
 |---|---|
 | **Administrador** | Todo |
-| **Supervisor** | Monitorear colas y agentes, escuchar/susurrar/irrumpir, gestionar clientes |
-| **Agente** | Su softphone, su historial y su buzón |
+| **Supervisor** | Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, grabaciones, clientes (CRM completo), intercom, aprovisionar y enrolar internos. **Nada** de configuración del sistema (troncales, rutas, usuarios, respaldos…) |
+| **Agente** | Su softphone, su historial, su buzón, sus grabaciones (sólo las llamadas en las que participó), la ficha del cliente y la encuesta de la llamada — todo sobre **su** extensión |
+
+Reglas que aplica la central (no sólo el panel: la API rechaza con *"no tenés permiso para esta
+acción"* lo que el rol no puede):
+
+- El rol por defecto al crear un usuario es **Agente**, el de menos privilegio. Crear un administrador
+  es una decisión explícita.
+- Contraseñas de **8 caracteres como mínimo**.
+- No se puede borrar el propio usuario ni el **último administrador**.
+- Los roles viejos *Operador* y *Solo lectura* ya no existen: la actualización los convierte solos en
+  Supervisor y Agente. Si un usuario quedara con un rol que la central no conoce, se muestra tal cual en
+  la lista para que lo corrijas, y no puede entrar hasta entonces.
 
 ![Usuarios y roles](img/cfg-14-usuarios.png)
 
@@ -1568,7 +1584,7 @@ Qué tiene:
 - **Mis llamadas**: su historial personal, con estado (contestada, saliente, perdida) y duración.
 - **La encuesta de la llamada**: al cortar, completa los campos que definió el administrador (motivo,
   resuelto, derivado). Puede omitirla si no aplica.
-- **Cambiar contraseña** y **salir**.
+- **Cambiar contraseña** (pide la contraseña actual y una nueva de 8 caracteres como mínimo) y **salir**.
 
 Lo que **no** ve: la configuración de la central, las troncales, la seguridad, las llamadas de otros.
 Su mundo es su teléfono y sus clientes.

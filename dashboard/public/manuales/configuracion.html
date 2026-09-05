@@ -107,8 +107,8 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
       </div>
       <div class="metatable">
         <div><span>Dirigido a</span><b>Administrador</b></div>
-        <div><span>Versión del producto</span><b>1.1.0</b></div>
-        <div><span>Actualizado</span><b>20/07/2026</b></div>
+        <div><span>Versión del producto</span><b>1.4.0</b></div>
+        <div><span>Actualizado</span><b>05/09/2026</b></div>
         <div><span>Documento</span><b>CONFIGURACION</b></div>
       </div>
       <div class="foot">© 2026 PBX-NG · Este documento puede actualizarse sin previo aviso.</div>
@@ -337,13 +337,15 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <p>Es importante que sepas qué estás mandando, porque explica por qué funciona sin que el usuario configure nada:</p>
 <ul><li>El <strong>transporte correcto según la extensión</strong>: si es WebRTC, va con el servidor WebSocket y las</li></ul>
 <p>  credenciales del TURN; si es SIP, va con el servidor SIP, el puerto y el transporte. <strong>El sistema   lo deduce del endpoint real</strong>, no lo asume.</p>
-<ul><li>El <strong>extensión y su contraseña</strong>.</li><li>La <strong>sesión en la plataforma</strong> (si la extensión tiene un usuario asociado): así la persona ve el</li></ul>
-<p>  directorio, la ficha de los clientes y el intercom sin volver a loguearse.</p>
+<ul><li>El <strong>extensión y su contraseña</strong>.</li><li>Un <strong>acceso de teléfono</strong> (no una sesión del panel): con él el softphone ve el directorio y la</li></ul>
+<p>  presencia, su propio historial, su buzón y la ficha del cliente que llama. Nada más: ni la   configuración, ni las grabaciones de otros, ni el CRM completo, aunque el interno sea de un   administrador. Para eso el softphone entra con <strong>usuario y contraseña</strong> del panel.</p>
 <h3 id="12-4-reglas-del-enlace">12.4 Reglas del enlace</h3>
-<ul><li><strong>Vence en 24 horas.</strong> Si expira, se genera uno nuevo.</li><li><strong>Sirve para los tres clientes</strong>: navegador, celular (agregar a la pantalla de inicio) y app de</li></ul>
+<ul><li><strong>Vence en 24 horas.</strong> Si expira, se genera uno nuevo.</li><li><strong>Es de un solo uso.</strong> Se puede canjear dos veces seguidas dentro de <strong>2 minutos</strong> (por ejemplo, el</li></ul>
+<p>  navegador y la app de escritorio del mismo aparato); pasado eso responde <em>"token ya usado"</em> y hay   que generar otro. Un enlace reenviado o un QR fotografiado no sirve días después.</p>
+<ul><li><strong>Sirve para los tres clientes</strong>: navegador, celular (agregar a la pantalla de inicio) y app de</li></ul>
 <p>  escritorio (botón QR → "Pegar código").</p>
-<ul><li>Se puede reenviar las veces que haga falta.</li></ul>
-<blockquote><p><strong>Para que el usuario vea clientes e intercom</strong>, la extensión tiene que tener un <strong>usuario asociado</strong></p><p>en <strong>Usuarios</strong> (con su rol). Si no lo tiene, el enlace configura el teléfono igual, pero sin</p><p>sesión en la plataforma.</p></blockquote>
+<ul><li>Se puede generar y reenviar las veces que haga falta.</li></ul>
+<blockquote><p><strong>Para que el usuario vea el CRM completo o el intercom</strong> desde el softphone, tiene que tener un</p><p><strong>usuario</strong> en <strong>Usuarios</strong> (con su rol) e iniciar sesión con él. El enlace configura el teléfono</p><p>igual, con el acceso de teléfono.</p></blockquote>
 <figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/cfg-33-enviar-acceso.png" alt="Enviar acceso desde el panel" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 21</span>Enviar acceso desde el panel<span class="fn">cfg-33-enviar-acceso.png</span></figcaption></figure>
 <hr />
 <div class="chapter"><span class="num">Capítulo 13</span><h2 id="13-aplicaciones">Aplicaciones</h2></div>
@@ -480,8 +482,13 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <hr />
 <div class="chapter"><span class="num">Capítulo 17</span><h2 id="17-usuarios-y-roles">Usuarios y roles</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Menú lateral</b> <span class="sep">›</span> <b>Sistema</b> <span class="sep">›</span> <b>Usuarios</b></div>
-<p>En <strong>Usuarios</strong>. Cada persona puede tener un <strong>extensión asociado</strong> — y eso es lo que habilita que su softphone vea clientes e intercom.</p>
-<div class="tw"><table><thead><tr><th>Rol</th><th>Qué puede hacer</th></tr></thead><tbody><tr><td><strong>Administrador</strong></td><td>Todo</td></tr><tr><td><strong>Supervisor</strong></td><td>Monitorear colas y agentes, escuchar/susurrar/irrumpir, gestionar clientes</td></tr><tr><td><strong>Agente</strong></td><td>Su softphone, su historial y su buzón</td></tr></tbody></table></div>
+<p>En <strong>Usuarios</strong>. Cada persona puede tener un <strong>extensión asociado</strong> — y eso es lo que define qué teléfono, qué historial y qué buzón son "los suyos".</p>
+<div class="tw"><table><thead><tr><th>Rol</th><th>Qué puede hacer</th></tr></thead><tbody><tr><td><strong>Administrador</strong></td><td>Todo</td></tr><tr><td><strong>Supervisor</strong></td><td>Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, grabaciones, clientes (CRM completo), intercom, aprovisionar y enrolar internos. <strong>Nada</strong> de configuración del sistema (troncales, rutas, usuarios, respaldos…)</td></tr><tr><td><strong>Agente</strong></td><td>Su softphone, su historial, su buzón, sus grabaciones (sólo las llamadas en las que participó), la ficha del cliente y la encuesta de la llamada — todo sobre <strong>su</strong> extensión</td></tr></tbody></table></div>
+<p>Reglas que aplica la central (no sólo el panel: la API rechaza con <em>"no tenés permiso para esta acción"</em> lo que el rol no puede):</p>
+<ul><li>El rol por defecto al crear un usuario es <strong>Agente</strong>, el de menos privilegio. Crear un administrador</li></ul>
+<p>  es una decisión explícita.</p>
+<ul><li>Contraseñas de <strong>8 caracteres como mínimo</strong>.</li><li>No se puede borrar el propio usuario ni el <strong>último administrador</strong>.</li><li>Los roles viejos <em>Operador</em> y <em>Solo lectura</em> ya no existen: la actualización los convierte solos en</li></ul>
+<p>  Supervisor y Agente. Si un usuario quedara con un rol que la central no conoce, se muestra tal cual en   la lista para que lo corrijas, y no puede entrar hasta entonces.</p>
 <figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/cfg-14-usuarios.png" alt="Usuarios y roles" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 31</span>Usuarios y roles<span class="fn">cfg-14-usuarios.png</span></figcaption></figure>
 <hr />
 <hr />
@@ -666,7 +673,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <p>  es** antes de atender (viene del CRM). Si es un cliente con portero, ve también sus personas   autorizadas y sus espacios.</p>
 <ul><li><strong>Mis llamadas</strong>: su historial personal, con estado (contestada, saliente, perdida) y duración.</li><li><strong>La encuesta de la llamada</strong>: al cortar, completa los campos que definió el administrador (motivo,</li></ul>
 <p>  resuelto, derivado). Puede omitirla si no aplica.</p>
-<ul><li><strong>Cambiar contraseña</strong> y <strong>salir</strong>.</li></ul>
+<ul><li><strong>Cambiar contraseña</strong> (pide la contraseña actual y una nueva de 8 caracteres como mínimo) y <strong>salir</strong>.</li></ul>
 <p>Lo que <strong>no</strong> ve: la configuración de la central, las troncales, la seguridad, las llamadas de otros. Su mundo es su teléfono y sus clientes.</p>
 <figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/cfg-53-panel-agente.png" alt="Panel del agente" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 49</span>Panel del agente<span class="fn">cfg-53-panel-agente.png</span></figcaption></figure>
 <h3 id="32-2-panel-de-supervisor">32.2 Panel de Supervisor</h3>
@@ -691,7 +698,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <p>Para completar una: guardá la captura con ese nombre en <code>docs/manual/img/</code> del repositorio, corré <code>python3 scripts/build-manuals.py</code> desde la raíz y volvé a desplegar el panel.</p>
 <blockquote><p>Los manuales se compilan y se empaquetan <strong>junto con el panel</strong>. Editar el Markdown no cambia nada</p><p>de lo que ves en pantalla hasta que recompiles y despliegues. Y una vez desplegado, hacé</p><p><strong>Ctrl+F5</strong>: el navegador cachea las imágenes y vas a jurar que no se actualizó nada.</p></blockquote>
 <figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/cfg-36-manuales.png" alt="Sección Manuales del panel" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 51</span>Sección Manuales del panel<span class="fn">cfg-36-manuales.png</span></figcaption></figure></main>
-  <footer>PBX-NG · Manual de Configuración · versión 1.1.0 · 20/07/2026</footer>
+  <footer>PBX-NG · Manual de Configuración · versión 1.4.0 · 05/09/2026</footer>
 </div>
 <button class="top" onclick="window.print()">Descargar PDF</button>
 <script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>

@@ -13,7 +13,7 @@ módulo «Conexión a SBC-NG» del panel (Sistema → SBC-NG (conexión)).
 | Rol    | Zona | Contenedores (perfiles)                                            | Expone a Internet |
 |--------|------|--------------------------------------------------------------------|-------------------|
 | `all`  | —    | `core,turn,ai,intercom` (+`proxy` opcional). Default.              | según proxy       |
-| `core` | LAN  | `core` = Postgres, Redis, Asterisk, API, Dashboard (+ai,intercom)  | No                |
+| `core` | LAN  | `core` = Postgres, Asterisk, API, Dashboard (+ai,intercom)         | No                |
 
 `core` es para cuando el TURN (y, si se quiere, el proxy) viven en otro host: se le pasa
 `--turn-ip=<IP_DEL_TURN>` y la central reparte esas credenciales ICE a los clientes. No
@@ -36,7 +36,7 @@ secretos**, y no se comparte nada con un SBC-NG.
  │   NÚCLEO    │◄─ SIP ──►│  SBC-NG (opcional, aparte)   │ → operador
  │  (LAN)      │  + RTP   │  troncal to-sbc, LAN only    │
  └─────────────┘          └──────────────────────────────┘
-   Asterisk · API · Dashboard · Postgres · Redis (+voz, go2rtc)
+   Asterisk · API · Dashboard · Postgres (+voz, go2rtc)
 ```
 
 - **WebRTC sin SBC**: el softphone entra por WSS `https://dominio/ws`; el proxy reenvía
@@ -145,7 +145,9 @@ bash pbx-ng/deploy/pbxng-proxmox.sh
 ```
 
 Qué hace la forma 2:
-- Crea **`pbxng-core`** (DB, Redis, Asterisk, API, Dashboard, voz, go2rtc) en el bridge LAN.
+- Crea **`pbxng-core`** (DB, Asterisk, API, Dashboard, voz, go2rtc) en el bridge LAN. Como el
+  proxy vive en el otro CT, su `.env` lleva `DASHBOARD_BIND=0.0.0.0` y `DASHBOARD_TRUST_PROXY=1`
+  (el panel confía en el `X-Forwarded-For` de NPM); conviene restringir `:3001` a la IP del CT de acceso.
 - Crea **`pbxng-access`** (coturn + NPM). Si activás DMZ, le agrega una **segunda NIC**
   (`eth1`) hacia el bridge WAN/DMZ, dejando `eth0` en la LAN para hablar con el núcleo.
 - Escribe el `.env` de cada CT con las IPs cruzadas (el núcleo apunta `TURN_HOST` al

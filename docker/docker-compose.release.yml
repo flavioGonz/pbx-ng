@@ -8,6 +8,18 @@
 # Variables:
 #   PBXNG_REGISTRY  prefijo de imagen (def: pbxng). Para registry: ghcr.io/tuorg/pbx-ng
 #   PBXNG_VERSION   tag de version (def: latest). Debe coincidir con el bundle/registry.
+#
+# ESPEJO de docker-compose.yml: mismos servicios, volumenes, capabilities, puertos
+# y variables; SOLO cambia build: por image:. Cualquier diferencia es un bug
+# (los clientes corren este archivo, el desarrollo corre el otro: si divergen,
+# lo que se prueba no es lo que se entrega). Si tocas algo aca, tocalo alla.
+#
+# NOTA: asterisk/coturn usan network_mode: host (SIP/RTP necesitan la red real),
+# asi que no ven la red bridge 'pbxng'. Para que Asterisk llegue a Postgres
+# (realtime/CDR) y a la API (CURL de wake, AudioSocket), esos dos servicios atan
+# su puerto SOLO a 127.0.0.1 del host: desde afuera de la maquina no se ven, y
+# DB_HOST / API_URL de asterisk son 127.0.0.1. Nunca publicar 5432/3000 en
+# 0.0.0.0: Docker mete sus reglas por delante de UFW y quedaria abierto.
 name: pbxng
 
 networks:
@@ -15,16 +27,21 @@ networks:
 
 volumes:
   pg_data: {}
-  redis_data: {}
   npm_data: {}
   npm_letsencrypt: {}
   asterisk_sounds: {}
+  # Config que genera el panel (aparcado, captura, MoH): sobrevive a recrear
+  # contenedores y la comparten Asterisk (lee) y la API (escribe).
+  asterisk_conf: {}
   voz_models: {}
   go2rtc_config: {}
   recordings: {}
-
-x-reg: &REG ${PBXNG_REGISTRY:-pbxng}
-x-ver: &VER ${PBXNG_VERSION:-latest}
+  voicemail: {}
+  # Certificados ACME y config persistente de la API (/etc/pbxng).
+  certs: {}
+  # Los archivos de respaldo. Volumen propio: no se mezclan con las grabaciones
+  # ni viven en el disco del contenedor (se perderian al recrearlo).
+  respaldos: {}
 
 services:
   postgres:
@@ -38,7 +55,11 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./config/initdb:/docker-entrypoint-initdb.d:ro
-    ports: ["5432:5432"]
+    # Solo loopback: Asterisk (host network) entra por 127.0.0.1; la API usa la
+    # red interna (DB_HOST=postgres). Si necesitas la DB desde otra maquina
+    # NO cambies esto a 0.0.0.0: usa un tunel ssh (ssh -L 5432:127.0.0.1:5432 host)
+    # o docker exec psql.
+    ports: ["127.0.0.1:5432:5432"]
     networks: [pbxng]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
@@ -46,18 +67,13 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    profiles: ["core"]
-    restart: unless-stopped
-    volumes: [redis_data:/data]
-    networks: [pbxng]
-
   asterisk:
     image: ${PBXNG_REGISTRY:-pbxng}/asterisk:${PBXNG_VERSION:-latest}
     profiles: ["core"]
     restart: unless-stopped
-    network_mode: host
+    network_mode: host                 # SIP/RTP necesitan red del host
+    cap_add:
+      - NET_ADMIN                     # cambiar IP / activar-desactivar placas desde el panel
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -75,6 +91,16 @@ services:
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
       - recordings:/var/spool/asterisk/monitor
+      - voicemail:/var/spool/asterisk/voicemail
+      # Certificado ACME que renueva la API: Asterisk solo lo lee (TLS/WSS de PJSIP).
+      - certs:/etc/pbxng:ro
+      # Config que GENERA el panel (aparcado, captura, música en espera). Los .conf
+      # horneados hacen #include de este directorio: así el panel cambia comportamiento
+      # sin reconstruir la imagen.
+      - asterisk_conf:/etc/asterisk/pbxng.d
+      # Mismo volumen de respaldos que la API (contrato §7): una restauración que
+      # necesite tocar el spool de Asterisk lo encuentra en el mismo lugar.
+      - respaldos:/respaldos
 
   api:
     image: ${PBXNG_REGISTRY:-pbxng}/api:${PBXNG_VERSION:-latest}
@@ -84,6 +110,7 @@ services:
       postgres: { condition: service_healthy }
     environment:
       PORT: 3000
+      CONF_DIR: /etc/pbxng
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-pbxng}
@@ -96,6 +123,10 @@ services:
       AMI_PORT: 5038
       AMI_USER: ${AMI_USER:-pbxng-ami}
       AMI_PASS: ${AMI_PASS:?}
+      # Dónde vive el agente del núcleo (:8092): placas de red, rutas y diagnóstico.
+      # Sin esta variable la API arma "http://:8092" y NADA del agente funciona
+      # (no se ven las interfaces ni se puede cambiar el modo de red).
+      ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       TENANT_MODE: ${TENANT_MODE:-single}
       DOMAIN: ${DOMAIN:-}
@@ -103,15 +134,30 @@ services:
       TURN_USER: ${TURN_USER:-pbxng}
       TURN_PASS: ${TURN_PASS:-}
       DEFAULT_COMPANY: ${DEFAULT_COMPANY:-Mi Empresa}
+      # Clave inicial de 'admin' (la genera install.sh). Vacía = 'admin', inseguro.
       ADMIN_DEFAULT_PASS: ${ADMIN_DEFAULT_PASS:-}
+      # --- topologia de nodos (parametriza IPs mostradas/usadas; sin lab viejo) ---
       NPM_HOST: ${NPM_HOST:-}
       TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
       VOZ_HOST: ${VOZ_HOST:-}
       MEDIA_HOST: ${MEDIA_HOST:-${ASTERISK_HOST:-}}
+      AST_AGENT: ${AST_AGENT:-}
+      TURN_AGENT: ${TURN_AGENT:-}
+      # API de administracion de go2rtc (modulo intercom), por la red interna.
       GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}
     volumes:
-      - recordings:/recordings:ro
-    ports: ["3000:3000"]
+      - recordings:/recordings        # rw: la API indexa Y borra grabaciones
+      - voicemail:/voicemail
+      - certs:/etc/pbxng
+      # El panel escribe acá la config de aparcado/captura/MoH que Asterisk incluye,
+      # y deja los audios de música en espera junto a los sonidos personalizados.
+      - asterisk_conf:/etc/asterisk/pbxng.d
+      - asterisk_sounds:/var/lib/asterisk/sounds/custom
+      - respaldos:/respaldos
+    # Solo loopback: el dialplan de Asterisk (host network) llama a
+    # http://127.0.0.1:3000/api/internal/wake. El panel llega por la red interna
+    # (API_URL=http://api:3000). Nunca 0.0.0.0: la API no tiene TLS ni rate-limit propio.
+    ports: ["127.0.0.1:3000:3000"]
     networks: [pbxng]
 
   dashboard:
@@ -121,7 +167,16 @@ services:
     depends_on: [api]
     environment:
       API_URL: http://api:3000
-    ports: ["3001:3001"]
+      # El panel arma X-Forwarded-For para la API (rate limit del login por IP real).
+      # Con el perfil `proxy` (NPM adelante) confía en ese salto; sin proxy, en nadie.
+      # DASHBOARD_TRUST_PROXY (.env) fuerza la cantidad de proxies si hay uno externo.
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      TRUST_PROXY: ${DASHBOARD_TRUST_PROXY:-}
+    # Con NPM adelante (perfil proxy, misma red bridge: llega a dashboard:3001) el
+    # instalador ata :3001 a 127.0.0.1: si quedara en 0.0.0.0 cualquiera de la LAN
+    # podría entrar directo con un X-Forwarded-For inventado y falsificar la IP
+    # que usa el rate limit del login. Sin proxy, 0.0.0.0 (se entra por :3001).
+    ports: ["${DASHBOARD_BIND:-0.0.0.0}:3001:3001"]
     networks: [pbxng]
 
   coturn:
@@ -133,6 +188,7 @@ services:
       DOMAIN: ${DOMAIN:-pbx.local}
       TURN_REALM: ${TURN_REALM:-${DOMAIN:-pbx.local}}
       TURN_USER: ${TURN_USER:-pbxng}
+      # Sin default: un TURN con clave conocida es un relay abierto a Internet.
       TURN_PASS: ${TURN_PASS:?set TURN_PASS in .env (lo genera install.sh)}
       TURN_CLI_PASS: ${TURN_CLI_PASS:?set TURN_CLI_PASS in .env}
       PUBLIC_IP: ${PUBLIC_IP:-}
@@ -142,7 +198,7 @@ services:
     profiles: ["ai"]
     restart: unless-stopped
     volumes: [voz_models:/opt/voz/models]
-    ports: ["8080:8080"]
+    ports: ["8080:8080"]            # solo LAN (ver docs/FIREWALL.md)
     networks: [pbxng]
 
   go2rtc:
@@ -150,6 +206,7 @@ services:
     profiles: ["intercom"]
     restart: unless-stopped
     volumes: [go2rtc_config:/config]
+    # 1984: API/streams (el navegador del panel los consume); 8555: WebRTC. Solo LAN.
     ports: ["1984:1984", "8555:8555/tcp", "8555:8555/udp"]
     networks: [pbxng]
 

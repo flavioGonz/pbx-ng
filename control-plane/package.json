@@ -12,6 +12,8 @@
     "asterisk-manager": "^0.2.0",
     "bcryptjs": "^3.0.3",
     "express": "^4.22.2",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.1.1",
     "pg": "^8.23.0",

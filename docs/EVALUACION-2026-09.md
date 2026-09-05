@@ -7,6 +7,10 @@ líneas en 91 archivos, empaquetado y configuración de Asterisk) y contrastando
 instalación real de pbx01. Cada afirmación tiene archivo y línea; los números son medidos, no
 estimados.
 
+> **Actualización 1.4.0 (2026-09-05, sprint 1 de seguridad):** los ítems marcados con **✅ 1.4.0**
+> quedaron resueltos en esa versión (ver `CHANGELOG.md` y `docs/CONTRATOS.md`). El texto original
+> se conserva tal cual como registro de lo que había.
+
 ## 1. Qué es hoy, en una frase
 
 Una central Asterisk 22 con panel propio en tiempo real, WebRTC nativo, softphone de escritorio
@@ -65,7 +69,11 @@ de él.
 Ordenadas por lo que más puede costar. Las cinco primeras son de seguridad y hay que cerrarlas
 antes de vender el producto a un tercero.
 
-**3.1 No hay control de acceso por rol.** 272 endpoints y solo 4 chequean rol (`app.js:559`,
+**3.1 No hay control de acceso por rol.** ✅ 1.4.0 — `control-plane/rbac.js`: tabla única
+deny-by-default montada en `/api` antes de cualquier ruta (callengine incluido); rol por defecto
+`agente` y validado; clave propia exige la actual; agente acotado a su extensión; `DELETE` no
+borra el propio usuario ni el último admin. Sigue sin haber registro de auditoría (bloque 4+). ·
+272 endpoints y solo 4 chequean rol (`app.js:559`,
 `2236`, `3492` y `mismaExt`). El gate global solo verifica que el JWT sea válido. Con un token de
 `agente`: `POST /api/users` crea usuarios y **el rol por defecto es `admin`** (`app.js:2210`);
 `POST /api/users/:id/password` resetea la clave de cualquier usuario sin pedir la actual
@@ -77,20 +85,26 @@ mismo agente (`3308`, `3319`, `backup.js:226`) — SQL arbitrario sobre toda la 
 `/api/net/mode/apply`, `/api/db/maintenance`, `/api/security/whitelist` sin rol. Un agente es
 administrador en un POST. No hay registro de auditoría de nada de esto.
 
-**3.2 El enlace de enrolamiento entrega una sesión de panel.** `GET /api/enroll/:token` es
+**3.2 El enlace de enrolamiento entrega una sesión de panel.** ✅ 1.4.0 — `apiToken` de
+enroll y de `/api/provision` es un token `scope:'phone'`; el token de enrolamiento es de un solo
+uso (`used_at` + `ENROLL_REUSE_SECONDS`, 410 después). · `GET /api/enroll/:token` es
 público y devuelve la clave SIP en claro, las credenciales TURN y un `apiToken` de 30 días
 firmado **con el rol real del usuario** (`app.js:792`). Si el interno es de un admin, el QR de
 aprovisionamiento es una sesión de administrador por un mes. El token de enrolamiento cuenta usos
 pero no los limita (`758`): es reutilizable hasta que vence.
 
-**3.3 Login sin límite de intentos y con bcrypt síncrono.** `POST /api/auth/login`
+**3.3 Login sin límite de intentos y con bcrypt síncrono.** ✅ 1.4.0 — `express-rate-limit`
+doble (10/10 min por IP+usuario, 50/10 min por IP) en login y `phone/token`, `trust proxy = 1`
+con `req.ip` (el panel arma `X-Forwarded-For` en `dashboard/server.js`), bcrypt asíncrono. · `POST /api/auth/login`
 (`app.js:531-544`) no tiene rate limit; `bcrypt.compareSync` bloquea el event loop ~90 ms por
 intento, así que un ataque de fuerza bruta moderado también tumba la API. `clientIp()` confía en
 `X-Forwarded-For` sin `trust proxy` (`527`), por lo que cualquier limitador por IP que se agregue
 es falsificable con un header. El limitador correcto ya existe para el softphone
 (`FONO_INTENTOS`); no se aplicó al panel.
 
-**3.4 El compose de release —el que va a clientes— pierde datos.** `docker-compose.release.yml`
+**3.4 El compose de release —el que va a clientes— pierde datos.** ✅ 1.4.0 — release espejo
+exacto del canónico (volúmenes, `NET_ADMIN`, `recordings` rw, go2rtc) y `check-compose-parity.sh`
+en `release.sh` y en la CI. · `docker-compose.release.yml`
 no declara los volúmenes `respaldos`, `voicemail`, `certs` ni `asterisk_conf` que sí tiene el
 compose de desarrollo, no da `NET_ADMIN` a Asterisk y monta `recordings` como `:ro` en la API.
 Consecuencias en un despliegue de cliente: los respaldos van a la capa efímera y desaparecen al
@@ -98,7 +112,10 @@ recrear el contenedor, los buzones de voz también, los certificados ACME no per
 aparcado/captura/MoH que el panel genera en `pbxng.d/` nunca llega a Asterisk. pbx01 no lo sufre
 porque corre el compose de desarrollo.
 
-**3.5 Superficie de red del appliance.** `http.conf` expone ARI y el WebSocket SIP en HTTP plano
+**3.5 Superficie de red del appliance.** Parcial en 1.4.0: ✅ Redis retirado del stack, ✅ 5432
+y 3000 sólo en `127.0.0.1` del host, ✅ `scratch` atado a un JWT válido, ✅ `:3001` en loopback
+cuando NPM corre en el mismo compose. Pendiente: ARI/WS en `0.0.0.0:8088` y `origin:'*'` del
+socket. · `http.conf` expone ARI y el WebSocket SIP en HTTP plano
 sobre `0.0.0.0:8088` del host (Asterisk va en `network_mode: host`): las credenciales ARI viajan
 en Basic Auth sin cifrar y ARI es control total de la central. Redis se publica en `6379` sin
 `requirepass` en el compose de desarrollo y **la API no lo usa** (única mención: un nombre en
@@ -119,7 +136,8 @@ en el backend y 237 en el panel: los errores se tragan sin avisar. El panel no t
 `error.jsx`/`loading.jsx`: un throw en render deja la pantalla en blanco, y con la API caída
 muestra datos viejos sin ninguna señal.
 
-**3.8 Proceso sin red de seguridad.** `new Pool(CFG.db)` sin `max`, sin `statement_timeout` y
+**3.8 Proceso sin red de seguridad.** `pool.on('error')` ✅ 1.4.0 (loguea y el pool reconecta);
+el resto sigue pendiente. · `new Pool(CFG.db)` sin `max`, sin `statement_timeout` y
 **sin `pool.on('error')`**: un cliente idle que falla (reinicio de Postgres) emite `error` sin
 handler y el proceso muere. Cero handlers de `SIGTERM`/`unhandledRejection`: un `docker stop`
 mata la API a los 10 s con transacciones abiertas y espías de ARI huérfanos. `/health` devuelve
@@ -190,22 +208,28 @@ Como producto, hay pocas funciones de central que no tenga. Lo que falta está e
 
 En orden de ejecución sugerido. Los tres primeros bloques son días, no semanas.
 
-**Bloque 1 — cerrar los agujeros de acceso (antes de cualquier venta).** Middleware de rol
+**Bloque 1 — cerrar los agujeros de acceso (antes de cualquier venta).** ✅ 1.4.0 (todo salvo el
+origen del socket). Middleware de rol
 (`soloAdmin`, `adminOSupervisor`) aplicado por defecto a todo `/api` de escritura y a las lecturas
-sensibles (grabaciones, usuarios, settings, respaldos, spy); `role` en `POST /api/users` sin
-default y validado contra la lista; cambio de clave que exija la actual (o rol admin); `enroll`
-que entregue un token de alcance `phone`, nunca uno de panel, y de un solo uso; rate limit en
-login (`express-rate-limit` + bcrypt asíncrono) con `trust proxy` configurado; `helmet`; socket.io
-con origen restringido y el bypass `scratch` atado a un token; abortar el arranque si
-`JWT_SECRET` es el placeholder.
+sensibles (grabaciones, usuarios, settings, respaldos, spy) ✅ 1.4.0 (`rbac.js`, tabla
+deny-by-default por método+ruta en vez de dos middlewares); `role` en `POST /api/users` sin
+default y validado contra la lista ✅ 1.4.0 (default `agente`, el menos privilegiado, y validado);
+cambio de clave que exija la actual (o rol admin) ✅ 1.4.0; `enroll`
+que entregue un token de alcance `phone`, nunca uno de panel, y de un solo uso ✅ 1.4.0; rate limit en
+login (`express-rate-limit` + bcrypt asíncrono) con `trust proxy` configurado ✅ 1.4.0; `helmet`
+✅ 1.4.0; socket.io
+con origen restringido (pendiente: sigue `origin:'*'`, menor con el JWT obligatorio) y el bypass
+`scratch` atado a un token ✅ 1.4.0; abortar el arranque si
+`JWT_SECRET` es el placeholder ✅ 1.4.0 (también vacío o de menos de 16 caracteres).
 
 **Bloque 2 — que el release no pierda datos.** Igualar `docker-compose.release.yml` al canónico
-(volúmenes, `NET_ADMIN`, `recordings` rw), y un test de CI que compare ambos compose para que no
-vuelvan a divergir. Sacar Redis del stack (no se usa) o autenticarlo y no publicarlo; dejar de
-publicar 5432. Healthchecks en los 8 servicios, `mem_limit`, rotación de logs, `stop_grace_period`
+(volúmenes, `NET_ADMIN`, `recordings` rw) ✅ 1.4.0, y un test de CI que compare ambos compose para que no
+vuelvan a divergir ✅ 1.4.0 (`docker/check-compose-parity.sh`). Sacar Redis del stack (no se usa) ✅ 1.4.0
+o autenticarlo y no publicarlo; dejar de
+publicar 5432 ✅ 1.4.0 (queda en `127.0.0.1` del host para Asterisk, igual que 3000). Healthchecks en los 8 servicios, `mem_limit`, rotación de logs, `stop_grace_period`
 para Asterisk y drenado antes de recrear. Respaldo programado.
 
-**Bloque 3 — que el proceso no muera solo.** `pool.on('error')`, `max`/`statement_timeout`,
+**Bloque 3 — que el proceso no muera solo.** `pool.on('error')` ✅ 1.4.0, `max`/`statement_timeout`,
 `SIGTERM` con cierre ordenado (cerrar espías ARI, esperar transacciones), `/health` que devuelva
 503 si la base no responde, esquema creado por migraciones al arrancar (correr `migrate.js` en el
 entrypoint y retirar los `CREATE TABLE` del módulo), middleware de error de Express que no filtre

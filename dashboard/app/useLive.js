@@ -4,11 +4,13 @@ import { io } from 'socket.io-client';
 let socket;
 function getSocket() {
   if (!socket && typeof window !== 'undefined') {
-    const url = location.port === '3001' ? `${location.protocol}//${location.hostname}:3000` : undefined;
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('pbxng_jwt') : null;
+    // Siempre mismo origen: server.js proxya /socket.io a la API tanto en `npm run dev`
+    // como en producción, y :3000 sólo escucha en loopback (CONTRATOS §2/§4), así que
+    // saltar directo a la API rompería el tiempo real para quien entra por :3001.
     // Polling-only: el upgrade a WebSocket no prospera detrás del proxy (h2) y el
     // realtime ya llega por snapshots; evitamos el error de consola sin perder función.
-    socket = io(url, { path: '/socket.io', transports: ['polling'], upgrade: false, auth: { token } });
+    socket = io({ path: '/socket.io', transports: ['polling'], upgrade: false, auth: { token } });
   }
   return socket;
 }

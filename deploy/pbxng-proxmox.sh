@@ -96,13 +96,13 @@ case "$SHAPE" in
   1) ROLES=(all)
      ROLE_PROFILES[all]="core turn ai intercom proxy"; ROLE_DESC[all]="Stack completo (DB+Asterisk+App+TURN+voz+intercom+proxy)" ;;
   2) ROLES=(core edge)
-     ROLE_PROFILES[core]="core ai intercom"; ROLE_DESC[core]="Núcleo (LAN): DB, Redis, Asterisk, API, Dashboard, voz, intercom"
+     ROLE_PROFILES[core]="core ai intercom"; ROLE_DESC[core]="Núcleo (LAN): DB, Asterisk, API, Dashboard, voz, intercom"
      ROLE_PROFILES[edge]="turn proxy";      ROLE_DESC[edge]="Acceso WebRTC (DMZ): TURN (coturn) + proxy inverso TLS/WSS" ;;
   3) ROLES=(core ai)
-     ROLE_PROFILES[core]="core turn intercom proxy"; ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard, TURN, intercom, proxy"
+     ROLE_PROFILES[core]="core turn intercom proxy"; ROLE_DESC[core]="Núcleo: DB, Asterisk, API, Dashboard, TURN, intercom, proxy"
      ROLE_PROFILES[ai]="ai";                        ROLE_DESC[ai]="Voz IA: TTS/STT (pesado, aislado)" ;;
   4) ROLES=(core turn ai intercom proxy)
-     ROLE_PROFILES[core]="core";         ROLE_DESC[core]="Núcleo: DB, Redis, Asterisk, API, Dashboard"
+     ROLE_PROFILES[core]="core";         ROLE_DESC[core]="Núcleo: DB, Asterisk, API, Dashboard"
      ROLE_PROFILES[turn]="turn";         ROLE_DESC[turn]="TURN: Coturn (TURN/STUN)"
      ROLE_PROFILES[ai]="ai";             ROLE_DESC[ai]="Voz IA: TTS/STT"
      ROLE_PROFILES[intercom]="intercom"; ROLE_DESC[intercom]="Intercom: go2rtc (RTSP->WebRTC/MSE)"
@@ -261,6 +261,11 @@ JWT_SECRET=$(openssl rand -hex 24)
 ARI_PASS=$(openssl rand -hex 8)
 AMI_PASS=$(openssl rand -hex 8)
 TURN_PASS=$(openssl rand -hex 8)
+# el compose exige TURN_CLI_PASS (${VAR:?}) aunque el perfil turn no esté activo en
+# ese CT: la interpolación es global, así que va en el .env de TODOS los CTs.
+TURN_CLI_PASS=$(openssl rand -hex 8)
+# clave inicial del admin del panel (se pide cambiarla en el primer ingreso)
+ADMIN_DEFAULT_PASS=$(openssl rand -hex 4)
 COMPANY="$(ask 'Nombre de la empresa (empresa por defecto)' 'Mi Empresa')"
 
 # ---------- helper: crear un CT ----------
@@ -328,7 +333,24 @@ provision_ct(){
   voz_ip="$(ip_for_profile ai)"
   npm_ip="$(ip_for_profile proxy)"
   media_ip="$core_ip"   # AudioSocket de la IA: la API (core) es quien escucha
-  # escribir .env (inyecta la IP del núcleo para servicios que viven en otro CT)
+  # Panel detrás de NPM: si el proxy vive en OTRO CT, el panel no lo ve en su
+  # COMPOSE_PROFILES y asumiría que nadie está adelante (descartaría el X-Forwarded-For
+  # de NPM y la API vería la IP de NPM para todos → el rate limit por IP bloquearía a
+  # toda la empresa). Se lo decimos explícito con DASHBOARD_TRUST_PROXY=1. Y como NPM
+  # llega desde otro CT, :3001 tiene que escuchar en todas las interfaces; si NPM está
+  # en el MISMO CT llega por la red bridge (dashboard:3001) y :3001 se ata a loopback
+  # para que nadie entre directo falsificando X-Forwarded-For.
+  local dash_trust="" dash_bind="0.0.0.0"
+  if [[ " $profiles " == *" core "* ]]; then
+    if [[ " $profiles " == *" proxy "* ]]; then
+      dash_bind="127.0.0.1"
+    elif [[ -n "$npm_ip" ]]; then
+      dash_trust="1"
+    fi
+  fi
+  # escribir .env (inyecta la IP del núcleo para servicios que viven en otro CT).
+  # DB_HOST queda en 127.0.0.1: Postgres solo ata loopback y el único que lo usa por
+  # fuera de la red interna es Asterisk, que vive en el MISMO CT que la DB (perfil core).
   pct exec "$ctid" -- bash -lc "
     set -e
     cd /opt/pbx-ng/docker
@@ -337,7 +359,7 @@ provision_ct(){
 DOMAIN=$DOMAIN
 PUBLIC_IP=$PUBLIC_IP
 TENANT_MODE=$TENANT_MODE
-DB_HOST=$core_ip
+DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_NAME=pbxng
 DB_USER=pbxng
@@ -350,16 +372,19 @@ AMI_PORT=5038
 AMI_USER=pbxng-ami
 AMI_PASS=$AMI_PASS
 ASTERISK_HOST=$core_ip
-REDIS_HOST=$core_ip
 TURN_HOST=$turn_ip
 VOZ_HOST=$voz_ip
 NPM_HOST=$npm_ip
 MEDIA_HOST=$media_ip
 TURN_USER=pbxng
 TURN_PASS=$TURN_PASS
+TURN_CLI_PASS=$TURN_CLI_PASS
+ADMIN_DEFAULT_PASS=$ADMIN_DEFAULT_PASS
 DEFAULT_COMPANY=$COMPANY
 JWT_SECRET=$JWT_SECRET
 GO2RTC_MGMT=http://go2rtc:1984
+DASHBOARD_BIND=$dash_bind
+DASHBOARD_TRUST_PROXY=$dash_trust
 COMPOSE_PROFILES=$(echo $profiles | tr " " ",")
 EOF
   "
@@ -414,9 +439,16 @@ for role in "${ROLES[@]}"; do
 done
 CORE_IP="${ROLE_IP[$CORE_ROLE]:-}"
 echo "  ---------------------------------------------------------------"
-g "  Dashboard : http://$CORE_IP:3001"
-g "  API       : http://$CORE_IP:3000"
 PROXY_ROLE=""; for role in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$role]} " == *" proxy "* ]] && PROXY_ROLE="$role"; done
+if [[ "$PROXY_ROLE" == "$CORE_ROLE" ]]; then
+  # NPM en el mismo CT: :3001 quedó en loopback, se entra por el proxy (443)
+  g "  Dashboard : https://$DOMAIN  (por el proxy; :3001 solo escucha en loopback del CT)"
+else
+  g "  Dashboard : http://$CORE_IP:3001"
+  [[ -n "$PROXY_ROLE" ]] && y "              (publicá https://$DOMAIN -> http://$CORE_IP:3001 en NPM; restringí :3001 a la IP de NPM en el firewall)"
+fi
+g "  API       : 127.0.0.1:3000 del CT núcleo (solo local, la usa el panel)"
+g "  Admin     : admin / $ADMIN_DEFAULT_PASS  (se pide cambiarla en el primer ingreso)"
 [[ -n "$PROXY_ROLE" ]] && g "  Proxy NPM : http://${ROLE_IP[$PROXY_ROLE]}:81  (admin@example.com / changeme)"
 g "  Modo app  : $TENANT_MODE   Plan guardado en $PLAN_FILE"
 if [[ "$SHAPE" == "2" ]]; then

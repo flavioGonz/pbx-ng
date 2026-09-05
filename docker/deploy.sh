@@ -31,4 +31,4 @@ docker compose -f "$CF" run --rm -T api node migrate.js || echo "  (migraciones:
 echo "== Up (modulos: ${COMPOSE_PROFILES:-core}) =="
 docker compose -f "$CF" up -d
 docker compose -f "$CF" ps
-echo "OK. Dashboard :3001 · API :3000"
+echo "OK. Dashboard :3001 (la API solo escucha en 127.0.0.1:3000; el panel la sirve en /backend)"

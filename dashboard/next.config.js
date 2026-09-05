@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
-const API = process.env.API_URL || 'http://127.0.0.1:3000';
+/* Sin `rewrites` hacia la API: los hace server.js (proxy propio) porque el de Next no
+ * agrega X-Forwarded-For y el rate limit del login de la API depende de esa cabecera.
+ * API_URL se lee al arrancar server.js, no en el build. */
 const SECURITY_HEADERS = [
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -10,19 +12,9 @@ const SECURITY_HEADERS = [
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',               // imagen Docker chica: solo server.js + .next/static + public (antes ~1.4 GB)
-  skipTrailingSlashRedirect: true,   // no redirigir /socket.io/ -> /socket.io (rompe el handshake socket.io)
+  skipTrailingSlashRedirect: true,   // por si un /socket.io/ llega a Next (no debería: lo toma server.js antes)
   async headers() {
     return [{ source: '/:path*', headers: SECURITY_HEADERS }];
-  },
-  async rewrites() {
-    return [
-      { source: '/backend/:path*', destination: `${API}/:path*` },
-      { source: '/socket.io/', destination: `${API}/socket.io/` },
-      { source: '/socket.io/:path*', destination: `${API}/socket.io/:path*` },
-      { source: '/socket.io', destination: `${API}/socket.io/` },
-      { source: '/prov/:path*', destination: `${API}/prov/:path*` },
-      { source: '/descargas/softphone/:path*', destination: `${API}/softphone/:path*` },   // instalador + feed OTA del softphone (lo sirve la API)
-    ];
   },
 };
 module.exports = nextConfig;

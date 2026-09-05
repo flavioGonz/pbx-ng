@@ -3,7 +3,7 @@
 #  PBX-NG · Instalador
 #  Roles:
 #    all   · Todo en esta maquina (nucleo + TURN + IA + intercom)     [default]
-#    core  · Solo el nucleo (Asterisk + API + Dashboard + Postgres + Redis);
+#    core  · Solo el nucleo (Asterisk + API + Dashboard + Postgres);
 #            el TURN puede vivir en otro host (--turn-ip=)
 #
 #  Modelo: MODULO = PERFIL de compose = CONTENEDOR (COMPOSE_PROFILES en .env).
@@ -108,6 +108,13 @@ install_ctl(){
     systemctl daemon-reload 2>/dev/null && systemctl enable --now pbxng-reconciler.timer 2>/dev/null && g "  reconciliador activo (cada 20s)." || y "  (timer systemd no activado; el panel togglea via pbxng-ctl igual)"
   fi
 }
+# Con NPM en este mismo compose (perfil proxy) el panel se ata a loopback: NPM le
+# llega por la red bridge (dashboard:3001) y nadie de la LAN puede entrar directo a
+# :3001 con un X-Forwarded-For inventado (falsificaria la IP del rate limit del login).
+# Sin proxy queda en 0.0.0.0 porque :3001 ES la entrada al panel.
+put_dashboard_bind(){   # $1 = perfiles activos (csv)
+  if [[ ",$1," == *",proxy,"* ]]; then put DASHBOARD_BIND 127.0.0.1; else put DASHBOARD_BIND 0.0.0.0; fi
+}
 deploy(){
   preflight_secrets
   install_ctl
@@ -138,8 +145,9 @@ fw_note(){   # $1 = perfiles activos (csv)
   echo "  5349/TCP           TURNS (TLS) — recomendado para redes corporativas"
   fi
   echo
-  r "  NUNCA publicar: 5432 (Postgres), 6379 (Redis), 3000/3001 (API/panel),"
-  r "                  5038 (AMI), 8088 (ARI), 8091/8092 (agentes), 81 (NPM admin)."
+  r "  NUNCA publicar: 5432 (Postgres), 3000/3001 (API/panel), 5038 (AMI),"
+  r "                  8088 (ARI), 8091/8092 (agentes), 81 (NPM admin)."
+  echo "  (5432 y 3000 solo escuchan en 127.0.0.1 del host: los necesita Asterisk, que corre en host network)"
   if [[ "$P" == *",turn,"* ]]; then
     echo
     y "  NAT hairpin: si probas el TURN por el FQDN publico DESDE LA LAN y falla"
@@ -185,10 +193,21 @@ all)
   PUBLIC_IP="${PUBLIC_IP_F:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP publica (TURN/RTP, opcional)' '')}"
   ensure_env; gen_shared_secrets
   put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"; put TENANT_MODE "$TENANT_MODE"
-  put DB_HOST "$LAN"; put ASTERISK_HOST "$LAN"
+  # DB_HOST es 127.0.0.1 y no la IP LAN: Postgres solo escucha en loopback del host
+  # y el unico que lo usa por fuera de la red interna es Asterisk (host network).
+  put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"
   put TURN_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
+  put_dashboard_bind "$CPROFILES"
   put COMPOSE_PROFILES "$CPROFILES"
   deploy
+  echo; g "================================================================"
+  if [[ ",$CPROFILES," == *",proxy,"* ]]; then
+    g "  Listo.  Panel: https://$DOMAIN (por NPM, publicalo en :81 -> http://dashboard:3001)"
+    y "  :3001 quedo en 127.0.0.1 del host: con proxy se entra por 443, no por :3001."
+  else
+    g "  Listo.  Panel: http://$LAN:3001 (la API queda en 127.0.0.1:3000, solo local)"
+  fi
+  g "================================================================"
   fw_note "$CPROFILES"
   [[ "$CPROFILES" == *turn* ]] && turn_selfcheck
 ;;
@@ -204,12 +223,21 @@ core)
   CPROFILES="$(IFS=,; echo "${PROFS[*]}")"
   ensure_env; gen_shared_secrets
   put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"; put TENANT_MODE "$TENANT_MODE"
-  put DB_HOST 127.0.0.1; put ASTERISK_HOST 127.0.0.1; put VOZ_HOST 127.0.0.1; put MEDIA_HOST "$LAN"
+  # ASTERISK_HOST lo usa la API (red bridge) para llegar a ARI/AMI/agente de Asterisk,
+  # que corre en host network: tiene que ser la IP LAN del host, nunca 127.0.0.1
+  # (dentro del contenedor de la API eso seria la propia API).
+  put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
   put TURN_HOST "${TURN_IP:-$LAN}"
+  put_dashboard_bind "$CPROFILES"
   put COMPOSE_PROFILES "$CPROFILES"
   deploy
   echo; g "================================================================"
-  g "  CORE listo.  Dashboard :3001 · API :3000"
+  if [[ ",$CPROFILES," == *",proxy,"* ]]; then
+    g "  CORE listo.  Panel: https://$DOMAIN (por NPM; :3001 quedo en 127.0.0.1, con proxy se entra por 443)"
+  else
+    g "  CORE listo.  Panel: http://$LAN:3001 (la API queda en 127.0.0.1:3000, solo local)"
+    y "  Si el reverse proxy esta en OTRO host: DASHBOARD_TRUST_PROXY=1 en .env y restringi :3001 a su IP."
+  fi
   [[ -n "$TURN_IP" ]] && y "  TURN esperado en $TURN_IP:3478 (instalalo con: ./install.sh --role=all --profiles=turn en ese host, mismas TURN_USER/TURN_PASS)"
   y "  Si hay un SBC-NG adelante, conectalo desde el panel: Configuracion -> SBC-NG."
   g "================================================================"

@@ -22,10 +22,11 @@ for a in "$@"; do case "$a" in
 # (kamailio/wsbridge/rtpengine ya no forman parte de PBX-NG: el borde es SBC-NG, otro producto)
 declare -A SRC=( [asterisk]=pbxng/asterisk:22 [api]=pbxng/api:latest \
   [dashboard]=pbxng/dashboard:latest [coturn]=pbxng/coturn:latest [voz]=pbxng/voz:latest )
-THIRD=( postgres:16-alpine redis:7-alpine \
-  alexxit/go2rtc:latest jc21/nginx-proxy-manager:latest )
+THIRD=( postgres:16-alpine alexxit/go2rtc:latest jc21/nginx-proxy-manager:latest )
 
 echo "== PBX-NG release v$VERSION  (registry=$REGISTRY) =="
+# Nunca publicar un release cuyo compose no sea espejo del canonico.
+"$(dirname "$0")/check-compose-parity.sh"
 # el instalador del softphone de escritorio viaja dentro de la imagen api (login + OTA por central)
 "$(dirname "$0")/fetch-softphone.sh" || true
 # Placeholders SOLO para satisfacer la interpolación del compose durante el BUILD.
@@ -54,7 +55,7 @@ if [ "$BUNDLE" = 1 ]; then
   gzip -f "$ROOT/dist/pbxng-$VERSION-images.tar"
   tar -czf "$ROOT/dist/pbxng-$VERSION.tar.gz" -C "$ROOT" \
     VERSION docker/docker-compose.release.yml docker/deploy.sh docker/.env.example \
-    docker/pbxng-ctl docker/config control-plane/migrate.js control-plane/migrations 2>/dev/null || true
+    docker/pbxng-ctl docker/install.sh docker/config control-plane/migrate.js control-plane/migrations 2>/dev/null || true
   echo "  -> dist/pbxng-$VERSION-images.tar.gz   (docker load)"
   echo "  -> dist/pbxng-$VERSION.tar.gz          (compose + scripts + config)"
 fi

@@ -10,7 +10,7 @@ cd docker
 ## Topologías
 
 1. **Un contenedor por servicio** (recomendado, producción)
-   Usa `docker-compose.yml` con perfiles: `core` (DB/Redis/Asterisk/API/Dashboard), `sbc` (Kamailio+rtpengine), `media` (Coturn), `ai` (Voz), `proxy` (Nginx Proxy Manager). Cada servicio aislado y escalable.
+   Usa `docker-compose.yml` con perfiles: `core` (DB/Asterisk/API/Dashboard), `turn` (Coturn), `ai` (Voz), `intercom` (go2rtc), `proxy` (Nginx Proxy Manager). Cada servicio aislado y escalable. `docker-compose.release.yml` es su espejo por imagen (sin `build:`).
 
 2. **Todo en un contenedor** (experimental, demos)
    `Dockerfile.allinone` corre todo el stack con supervisord en un único contenedor. Rápido para probar; no recomendado en producción.
@@ -21,7 +21,7 @@ cd docker
 ## Perfiles (compose)
 
 ```bash
-docker compose --profile core --profile sbc --profile media up -d --build
+docker compose --profile core --profile turn up -d --build
 ```
 
 ## Configuración
@@ -31,5 +31,5 @@ docker compose --profile core --profile sbc --profile media up -d --build
 ## URLs
 
 - Dashboard: `http://localhost:3001`
-- API: `http://localhost:3000`
+- API: `http://127.0.0.1:3000` (solo loopback del host; el panel la consume por `/backend`)
 - Nginx Proxy Manager: `http://localhost:81` (admin@example.com / changeme)

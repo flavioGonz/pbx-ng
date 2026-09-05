@@ -1,5 +1,5 @@
 # PBX-NG · stack Docker completo. Perfiles (profiles) para instalar separado o junto:
-#   core     -> postgres, redis, asterisk, api, dashboard
+#   core     -> postgres, asterisk, api, dashboard
 #   turn     -> coturn (TURN/STUN para WebRTC detras de NAT)
 #   ai       -> voz (TTS/STT)
 #   intercom -> go2rtc
@@ -9,9 +9,16 @@
 # adelante se conecta desde el panel (Configuracion -> SBC-NG).
 # Uso:  docker compose --profile core --profile turn up -d --build   (o usar install.sh)
 #
-# NOTA: asterisk/coturn usan network_mode: host (SIP/RTP necesitan la red
-# real). Para que alcancen a Postgres, éste publica 5432 en el host; por eso
-# DB_HOST para esos servicios es la IP del host (o 127.0.0.1 en single-node).
+# ESTE ARCHIVO ES EL CANONICO: docker-compose.release.yml tiene que ser su espejo
+# exacto (servicios, volumenes, capabilities, puertos, variables) y solo cambiar
+# build: por image:. Si tocas algo aca, tocalo alla.
+#
+# NOTA: asterisk/coturn usan network_mode: host (SIP/RTP necesitan la red real),
+# asi que no ven la red bridge 'pbxng'. Para que Asterisk llegue a Postgres
+# (realtime/CDR) y a la API (CURL de wake, AudioSocket), esos dos servicios atan
+# su puerto SOLO a 127.0.0.1 del host: desde afuera de la maquina no se ven, y
+# DB_HOST / API_URL de asterisk son 127.0.0.1. Nunca publicar 5432/3000 en
+# 0.0.0.0: Docker mete sus reglas por delante de UFW y quedaria abierto.
 name: pbxng
 
 networks:
@@ -20,14 +27,17 @@ networks:
 
 volumes:
   pg_data:
-  redis_data:
   npm_data:
   npm_letsencrypt:
   asterisk_sounds:
+  # Config que genera el panel (aparcado, captura, MoH): sobrevive a recrear
+  # contenedores y la comparten Asterisk (lee) y la API (escribe).
   asterisk_conf:
   voz_models:
+  go2rtc_config:
   recordings:
   voicemail:
+  # Certificados ACME y config persistente de la API (/etc/pbxng).
   certs:
   # Los archivos de respaldo. Volumen propio: no se mezclan con las grabaciones
   # ni viven en el disco del contenedor (se perderian al recrearlo).
@@ -45,21 +55,17 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./config/initdb:/docker-entrypoint-initdb.d:ro   # esquema realtime + app (primer arranque)
-    ports: ["5432:5432"]                                  # host-net asterisk alcanza la DB
+    # Solo loopback: Asterisk (host network) entra por 127.0.0.1; la API usa la
+    # red interna (DB_HOST=postgres). Si necesitas la DB desde otra maquina
+    # (por ejemplo un cliente SQL en desarrollo), NO cambies esto a 0.0.0.0:
+    # usa un tunel ssh (ssh -L 5432:127.0.0.1:5432 host) o docker exec psql.
+    ports: ["127.0.0.1:5432:5432"]
     networks: [pbxng]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  redis:
-    image: redis:7-alpine
-    profiles: ["core"]
-    restart: unless-stopped
-    volumes: [redis_data:/data]
-    ports: ["6379:6379"]
-    networks: [pbxng]
 
   asterisk:
     build:
@@ -89,10 +95,15 @@ services:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
       - recordings:/var/spool/asterisk/monitor
       - voicemail:/var/spool/asterisk/voicemail
+      # Certificado ACME que renueva la API: Asterisk solo lo lee (TLS/WSS de PJSIP).
+      - certs:/etc/pbxng:ro
       # Config que GENERA el panel (aparcado, captura, música en espera). Los .conf
       # horneados hacen #include de este directorio: así el panel cambia comportamiento
       # sin reconstruir la imagen.
       - asterisk_conf:/etc/asterisk/pbxng.d
+      # Mismo volumen de respaldos que la API (contrato §7): una restauración que
+      # necesite tocar el spool de Asterisk lo encuentra en el mismo lugar.
+      - respaldos:/respaldos
 
   api:
     build: ../control-plane
@@ -127,6 +138,8 @@ services:
       TURN_USER: ${TURN_USER:-pbxng}
       TURN_PASS: ${TURN_PASS:-}
       DEFAULT_COMPANY: ${DEFAULT_COMPANY:-Mi Empresa}
+      # Clave inicial de 'admin' (la genera install.sh). Vacía = 'admin', inseguro.
+      ADMIN_DEFAULT_PASS: ${ADMIN_DEFAULT_PASS:-}
       # --- topologia de nodos (parametriza IPs mostradas/usadas; sin lab viejo) ---
       NPM_HOST: ${NPM_HOST:-}
       TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
@@ -134,9 +147,10 @@ services:
       MEDIA_HOST: ${MEDIA_HOST:-${ASTERISK_HOST:-}}
       AST_AGENT: ${AST_AGENT:-}
       TURN_AGENT: ${TURN_AGENT:-}
-      VM_AGENT: ${VM_AGENT:-}
+      # API de administracion de go2rtc (modulo intercom), por la red interna.
+      GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}
     volumes:
-      - recordings:/recordings
+      - recordings:/recordings        # rw: la API indexa Y borra grabaciones
       - voicemail:/voicemail
       - certs:/etc/pbxng
       # El panel escribe acá la config de aparcado/captura/MoH que Asterisk incluye,
@@ -144,7 +158,10 @@ services:
       - asterisk_conf:/etc/asterisk/pbxng.d
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
       - respaldos:/respaldos
-    ports: ["3000:3000"]
+    # Solo loopback: el dialplan de Asterisk (host network) llama a
+    # http://127.0.0.1:3000/api/internal/wake. El panel llega por la red interna
+    # (API_URL=http://api:3000). Nunca 0.0.0.0: la API no tiene TLS ni rate-limit propio.
+    ports: ["127.0.0.1:3000:3000"]
     networks: [pbxng]
 
   dashboard:
@@ -155,7 +172,16 @@ services:
     depends_on: [api]
     environment:
       API_URL: http://api:3000
-    ports: ["3001:3001"]
+      # El panel arma X-Forwarded-For para la API (rate limit del login por IP real).
+      # Con el perfil `proxy` (NPM adelante) confía en ese salto; sin proxy, en nadie.
+      # DASHBOARD_TRUST_PROXY (.env) fuerza la cantidad de proxies si hay uno externo.
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      TRUST_PROXY: ${DASHBOARD_TRUST_PROXY:-}
+    # Con NPM adelante (perfil proxy, misma red bridge: llega a dashboard:3001) el
+    # instalador ata :3001 a 127.0.0.1: si quedara en 0.0.0.0 cualquiera de la LAN
+    # podría entrar directo con un X-Forwarded-For inventado y falsificar la IP
+    # que usa el rate limit del login. Sin proxy, 0.0.0.0 (se entra por :3001).
+    ports: ["${DASHBOARD_BIND:-0.0.0.0}:3001:3001"]
     networks: [pbxng]
 
   coturn:
@@ -170,8 +196,9 @@ services:
       DOMAIN: ${DOMAIN:-pbx.local}
       TURN_REALM: ${TURN_REALM:-${DOMAIN:-pbx.local}}
       TURN_USER: ${TURN_USER:-pbxng}
-      TURN_PASS: ${TURN_PASS:-pbxng-turn-changeme}
-      TURN_CLI_PASS: ${TURN_CLI_PASS:-pbxng-cli}
+      # Sin default: un TURN con clave conocida es un relay abierto a Internet.
+      TURN_PASS: ${TURN_PASS:?set TURN_PASS in .env (lo genera install.sh)}
+      TURN_CLI_PASS: ${TURN_CLI_PASS:?set TURN_CLI_PASS in .env}
       PUBLIC_IP: ${PUBLIC_IP:-}
 
   voz:
@@ -182,7 +209,16 @@ services:
     profiles: ["ai"]
     restart: unless-stopped
     volumes: [voz_models:/opt/voz/models]
-    ports: ["8080:8080"]
+    ports: ["8080:8080"]            # solo LAN (ver docs/FIREWALL.md)
+    networks: [pbxng]
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    profiles: ["intercom"]
+    restart: unless-stopped
+    volumes: [go2rtc_config:/config]
+    # 1984: API/streams (el navegador del panel los consume); 8555: WebRTC. Solo LAN.
+    ports: ["1984:1984", "8555:8555/tcp", "8555:8555/udp"]
     networks: [pbxng]
 
   npm:

@@ -8,7 +8,7 @@ existe **solo si su módulo está activo**. El estado activo vive en
 
 | Módulo | Perfil | Contenedor(es) | Función |
 |---|---|---|---|
-| core | `core` | postgres, redis, asterisk, api, dashboard | Núcleo (siempre) |
+| core | `core` | postgres, asterisk, api, dashboard | Núcleo (siempre) |
 | turn | `turn` | coturn | TURN/STUN para WebRTC |
 | ai | `ai` | voz | IVR con IA (TTS/STT) |
 | intercom | `intercom` | go2rtc | Video RTSP (intercom/cámaras) |
@@ -38,6 +38,20 @@ empaquetan acá.
    - Crea los LXC, instala Docker, clona el repo, escribe `.env` con `COMPOSE_PROFILES`
      por rol e instala `pbxng-ctl` + reconciliador en cada CT.
 3. **All-in-one** (1 contenedor, demo) → `install.sh` opción 2.
+
+## Por dónde se entra al panel
+
+- **Con el perfil `proxy` en el mismo compose** (`install.sh` con NPM, forma compacta de Proxmox):
+  se entra por `https://<dominio>` (443, NPM → `http://dashboard:3001` por la red bridge). El
+  instalador escribe `DASHBOARD_BIND=127.0.0.1`: `:3001` **no** queda accesible desde la LAN, así
+  nadie puede saltear a NPM y falsificar la IP del rate limit del login con un `X-Forwarded-For`.
+- **Sin proxy**: `http://<ip>:3001` directo (`DASHBOARD_BIND=0.0.0.0`); el panel arma él mismo el
+  `X-Forwarded-For` con la IP del socket.
+- **Con NPM en otro host/CT** (formas 2 y 4 de Proxmox, o un nginx externo): `DASHBOARD_BIND=0.0.0.0`
+  + `DASHBOARD_TRUST_PROXY=1` (si no, la API vería la IP del proxy para todos los usuarios y el
+  límite de 50 fallos/10 min por IP bloquearía a toda la empresa) y restringir `:3001` a la IP del
+  proxy por firewall. `pbxng-proxmox.sh` lo escribe solo; con un proxy propio va a mano en `.env`.
+- La API (`:3000`) y Postgres (`:5432`) escuchan sólo en `127.0.0.1` del host, en todas las formas.
 
 ## pbxng-ctl (módulos = contenedores)
 

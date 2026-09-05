@@ -178,7 +178,7 @@ export default function AgentePanel() {
   const [dir, setDir] = useState([]);
   const [cliCache, setCliCache] = useState({});
   const [pwOpen, setPwOpen] = useState(false);
-  const [np, setNp] = useState(''); const [np2, setNp2] = useState(''); const [pwBusy, setPwBusy] = useState(false);
+  const [cur, setCur] = useState(''); const [np, setNp] = useState(''); const [np2, setNp2] = useState(''); const [pwBusy, setPwBusy] = useState(false);
   const [filter, setFilter] = useState('all');
   const [client, setClient] = useState(null);
   const [surveyFields, setSurveyFields] = useState([]);
@@ -237,13 +237,16 @@ export default function AgentePanel() {
     else toast('No se pudo cambiar el estado', 'bad');
   }
   async function changePw() {
-    if (np.length < 4) { toast('Mínimo 4 caracteres', 'bad'); return; }
+    if (!cur) { toast('Indicá tu contraseña actual', 'bad'); return; }
+    if (np.length < 8) { toast('Mínimo 8 caracteres', 'bad'); return; }
     if (np !== np2) { toast('No coinciden', 'bad'); return; }
     setPwBusy(true);
-    const r = await fetch('/backend/api/auth/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: np }) }).then(x => x.json()).catch(() => ({ error: 1 }));
+    /* `current` es obligatorio desde 1.4.0: una sesión robada del localStorage no alcanza
+     * para cambiar la clave (docs/CONTRATOS.md §2). */
+    const r = await fetch('/backend/api/auth/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ current: cur, password: np }) }).then(x => x.json()).catch(() => ({ error: 1 }));
     setPwBusy(false);
-    if (r.error) { toast('No se pudo cambiar', 'bad'); return; }
-    toast('Contraseña actualizada', 'ok'); setPwOpen(false); setNp(''); setNp2('');
+    if (r.error) { toast(typeof r.error === 'string' ? r.error : 'No se pudo cambiar', 'bad'); return; }
+    toast('Contraseña actualizada', 'ok'); setPwOpen(false); setCur(''); setNp(''); setNp2('');
   }
 
   const nameOf = (n) => { const d = dir.find(x => String(x.ext) === String(n)); return d?.name || null; };
@@ -354,7 +357,8 @@ export default function AgentePanel() {
       <SurveyModal opened={surveyOpen} onClose={() => setSurveyOpen(false)} fields={surveyFields} ctx={surveyCtx} />
       <Modal opened={pwOpen} onClose={() => setPwOpen(false)} title="Cambiar mi contraseña" centered radius="lg">
         <Stack>
-          <PasswordInput label="Nueva contraseña" value={np} onChange={(e) => setNp(e.target.value)} />
+          <PasswordInput label="Contraseña actual" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
+          <PasswordInput label="Nueva contraseña" description="Mínimo 8 caracteres" value={np} onChange={(e) => setNp(e.target.value)} autoComplete="new-password" />
           <PasswordInput label="Repetir" value={np2} onChange={(e) => setNp2(e.target.value)} />
           <Button color="teal" loading={pwBusy} onClick={changePw}>Guardar</Button>
         </Stack>

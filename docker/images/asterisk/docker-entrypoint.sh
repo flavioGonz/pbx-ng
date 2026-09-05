@@ -14,7 +14,7 @@ set -e
 # Los .conf horneados hacen #include de pbxng.d/. Si el panel todavía no escribió nada,
 # dejamos los archivos vacíos para que Asterisk no avise por cada include faltante.
 mkdir -p /etc/asterisk/pbxng.d
-for f in parking.conf moh.conf features.conf; do
+for f in parking.conf moh.conf features.conf pjsip.conf rtp.conf; do
   [ -f "/etc/asterisk/pbxng.d/$f" ] || echo "; generado por el panel PBX-NG (vacío por ahora)" > "/etc/asterisk/pbxng.d/$f"
 done
 # Carpeta de audios de música en espera administrada desde el panel.

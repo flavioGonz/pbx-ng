@@ -200,6 +200,8 @@ Tu panel muestra las llamadas en espera, tus estadísticas del día y tu histori
 - **Descanso entre llamadas**: después de cortar tenés unos segundos para tipificar antes de que
   entre la siguiente.
 - **Historial**: cada llamada con su grabación y su transcripción.
+- **Cambiar mi contraseña**: te pide la **contraseña actual** y la nueva, de **8 caracteres como
+  mínimo**. La primera vez que entrás (con la clave que te dio el administrador) sólo te pide la nueva.
 
 ![Panel del agente](img/usr-09-agente.png)
 
@@ -216,6 +218,7 @@ Tu panel muestra las llamadas en espera, tus estadísticas del día y tu histori
 | **No escuchás** | Revisá el altavoz en Ajustes → Dispositivos y el volumen de la llamada. |
 | **Se corta el audio** | Suele ser la red. Pasale al administrador la etiqueta *VÍA TURN / DIRECTO* y la sección Diagnóstico. |
 | **Se venció el acceso** | Pedile al administrador un enlace nuevo. |
+| **El enlace dice "token ya usado"** | El enlace es de un solo uso (vale 2 minutos después del primer canje). Pedile al administrador uno nuevo. |
 
 ![Ajustes de dispositivos](img/usr-10-dispositivos.png)
 

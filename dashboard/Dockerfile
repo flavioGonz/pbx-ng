@@ -19,5 +19,8 @@ ENV HOSTNAME=0.0.0.0
 COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+# Pisa el server.js genérico del standalone con el nuestro (Next + proxy a la API con
+# X-Forwarded-For real); lee la config embebida en .next/required-server-files.json.
+COPY --from=build /app/server.js ./server.js
 EXPOSE 3001
 CMD ["node", "server.js"]

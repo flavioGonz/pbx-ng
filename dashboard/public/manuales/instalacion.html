@@ -107,8 +107,8 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
       </div>
       <div class="metatable">
         <div><span>Dirigido a</span><b>Técnico / integrador</b></div>
-        <div><span>Versión del producto</span><b>1.1.0</b></div>
-        <div><span>Actualizado</span><b>20/07/2026</b></div>
+        <div><span>Versión del producto</span><b>1.4.0</b></div>
+        <div><span>Actualizado</span><b>05/09/2026</b></div>
         <div><span>Documento</span><b>INSTALACION</b></div>
       </div>
       <div class="foot">© 2026 PBX-NG · Este documento puede actualizarse sin previo aviso.</div>
@@ -231,7 +231,7 @@ cd pbx-ng/docker
 <div class="tw"><table><thead><tr><th>Puerto</th><th>Protocolo</th><th>Para qué</th></tr></thead><tbody><tr><td><code>443</code> (y <code>80</code> para el certificado)</td><td>TCP</td><td>Panel, softphone web y <strong>WSS</strong></td></tr><tr><td><code>5060</code> / <code>5061</code></td><td>UDP+TCP / TCP</td><td>SIP: troncales y teléfonos físicos</td></tr><tr><td><code>30000-40000</code></td><td>UDP</td><td>Audio (RTP) de las troncales y los teléfonos</td></tr><tr><td><code>3478</code></td><td><strong>UDP y TCP</strong></td><td>STUN/TURN — <strong>los dos</strong>, muchas redes bloquean UDP saliente</td></tr><tr><td><code>49152-65535</code></td><td>UDP</td><td><strong>Rango relay del TURN</strong></td></tr><tr><td><code>5349</code></td><td>TCP</td><td>TURN sobre TLS (recomendado para redes corporativas)</td></tr></tbody></table></div>
 <blockquote><p><strong>Los dos errores más comunes:</strong></p><p>1. Abrir <code>3478</code> y olvidar el rango <code>49152-65535/UDP</code>. El teléfono obtiene el candidato de relay,</p><p>   pero el audio nunca fluye. Van juntos, siempre.</p><p>2. Abrir <code>3478/UDP</code> y no <code>3478/TCP</code>. Muchas redes corporativas bloquean UDP saliente.</p></blockquote>
 <h3 id="5-2-lo-que-nunca-se-publica">5.2 Lo que nunca se publica</h3>
-<p><code>5432</code> (base de datos), <code>6379</code> (Redis), <code>3000</code> y <code>3001</code> (API y panel, van detrás del proxy), <code>5038</code> (AMI), <code>8088</code> (ARI), <code>81</code> (admin del proxy).</p>
+<p><code>5432</code> (base de datos) y <code>3000</code> (API) escuchan sólo en <code>127.0.0.1</code> del host; <code>3001</code> (panel) va detrás del proxy — con el proxy en el mismo equipo el instalador lo deja también en <code>127.0.0.1</code> y se entra por 443 —; <code>5038</code> (AMI), <code>8088</code> (ARI), <code>81</code> (admin del proxy). No hay Redis.</p>
 <h3 id="5-3-verificarlo-de-verdad">5.3 Verificarlo de verdad</h3>
 <p>Que el servicio esté "activo" no prueba nada. Verificá lo que hace un teléfono real:</p>
 <pre><code>scripts/check-turn.py --env docker/.env --tcp</code></pre>
@@ -257,7 +257,7 @@ export PBXNG_VERSION=X.Y.Z
 <div class="nav"><span class="navk">Cómo llegar</span><b>Panel</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Monitoreo</b></div>
 <div class="tw"><table><thead><tr><th>Síntoma</th><th>Dónde mirar</th></tr></thead><tbody><tr><td>El teléfono registra pero <strong>no hay audio</strong></td><td>Firewall: rango de relay del TURN y <code>30000-40000/UDP</code>. Corré <code>check-turn.py</code>.</td></tr><tr><td>El softphone web no conecta</td><td>El proxy debe permitir <strong>WebSocket</strong> en <code>/ws</code> (y con HTTP/2 <strong>desactivado</strong>).</td></tr><tr><td>El panel no carga datos</td><td>Contenedor <code>api</code>: <code>docker compose logs api</code>.</td></tr><tr><td>No entran llamadas</td><td>Estado de la troncal en <strong>Monitoreo</strong>. Activá la alerta de <em>troncal caída</em>.</td></tr></tbody></table></div>
 <figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/inst-07-monitor.png" alt="Panel de monitoreo con el estado de los componentes" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 13</span>Panel de monitoreo con el estado de los componentes<span class="fn">inst-07-monitor.png</span></figcaption></figure></main>
-  <footer>PBX-NG · Manual de Instalación · versión 1.1.0 · 20/07/2026</footer>
+  <footer>PBX-NG · Manual de Instalación · versión 1.4.0 · 05/09/2026</footer>
 </div>
 <button class="top" onclick="window.print()">Descargar PDF</button>
 <script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>

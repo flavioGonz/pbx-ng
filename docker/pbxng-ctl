@@ -18,7 +18,7 @@ ENVF="$DIR/.env"
 MODULES="core turn ai intercom proxy"   # el SBC es otro producto (SBC-NG), no un modulo de la central
 
 svcs_of(){ case "$1" in
-  core)     echo "postgres redis asterisk api dashboard" ;;
+  core)     echo "postgres asterisk api dashboard" ;;
   turn)     echo "coturn" ;;
   ai)       echo "voz" ;;
   intercom) echo "go2rtc" ;;

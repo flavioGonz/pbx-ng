@@ -67,7 +67,7 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 │  Asterisk 22 │ │ PostgreSQL │ │  Voz IA  │         │
 │  chan_pjsip  │◄┤ Realtime   │ │ TTS/STT  │         │
 │  (Realtime)  │ │ + CDR      │ └──────────┘         │
-│  WSS :8088   │ │ + Redis    │                      │
+│  WSS :8088   │ │            │                      │
 └──────▲───────┘ └────────────┘                      │
        └─────────────────────────────────────────────┘
        Sin SBC-NG: internos, WebRTC y troncales del operador
@@ -79,10 +79,9 @@ Diseño modular; cada servicio es independiente y puede correr en su propio cont
 | Servicio | Rol | Puertos |
 |---|---|---|
 | **Asterisk 22** | Núcleo PBX (chan_pjsip, realtime ARA, transcoding) | 5060 UDP/TCP, 5061 TLS, 8088 WS, 10000-20000 RTP |
-| **PostgreSQL 16** | Config realtime + CDR + datos de la app | 5432 |
-| **Redis** | Caché / sesiones | 6379 |
-| **Control Plane (API)** | Node/Express, ARI+AMI, Socket.io, JWT | 3000 |
-| **Dashboard** | Next.js (admin + softphone WebRTC + PWA) | 3001 |
+| **PostgreSQL 16** | Config realtime + CDR + datos de la app | 5432 (solo `127.0.0.1` del host) |
+| **Control Plane (API)** | Node/Express, ARI+AMI, Socket.io, JWT, RBAC | 3000 (solo `127.0.0.1` del host) |
+| **Dashboard** | Next.js + proxy propio hacia la API (`server.js`); admin + softphone WebRTC + PWA | 3001 (`127.0.0.1` si NPM corre en el mismo compose) |
 | **Coturn (TURN/STUN)** | Traversía NAT para WebRTC | 3478 **UDP y TCP**, 5349 (TLS), 49152-65535 UDP (relay) |
 | **Voz IA** | TTS (Piper/Edge) + STT (faster-whisper) | 8080 |
 | **Nginx Proxy Manager** | Terminación TLS/WSS + certificados | 80, 443, 81 |
@@ -155,7 +154,7 @@ El instalador es **interactivo**: te pregunta la topología, qué **módulos** l
 
 | Módulo | Perfil | Contenedor(es) | Función |
 |---|---|---|---|
-| core | `core` | postgres, redis, asterisk, api, dashboard | Núcleo (siempre) |
+| core | `core` | postgres, asterisk, api, dashboard | Núcleo (siempre) |
 | turn | `turn` | coturn | TURN/STUN para WebRTC |
 | ai | `ai` | voz | IVR con IA (TTS/STT) |
 | intercom | `intercom` | go2rtc | Video RTSP (intercom/cámaras) |
@@ -235,8 +234,10 @@ Hacia Internet se publica **solo** esto:
 Si hay un **SBC-NG** adelante, el SIP/RTP público se expone en el SBC-NG (ver su documentación) y la central solo
 necesita LAN hacia él: no se publican 5060/5061 ni 10000-20000.
 
-Nunca se publican: `5432` (Postgres), `6379` (Redis), `3000`/`3001` (API/panel), `5038` (AMI),
-`8088` (ARI), `8091`/`8092` (agentes), `81` (admin del proxy).
+Nunca se publican a Internet: `5432` (Postgres) y `3000` (API) escuchan **solo en `127.0.0.1` del host**
+(los necesita Asterisk, que corre en host network; desde 1.4.0 no hay Redis en el stack), `3001` (panel: va
+detrás del proxy; con NPM en el mismo compose queda en loopback), `5038` (AMI), `8088` (ARI),
+`8091`/`8092` (agentes), `81` (admin del proxy).
 
 El instalador **imprime la lista exacta** según los módulos activos y al terminar **verifica el
 TURN de verdad** (STUN Binding → Allocate 401 → Allocate firmado → candidato relay):
@@ -276,7 +277,8 @@ npm run dist       # instalador Windows en release/
 
 - **Secretos**: nunca se versionan. El instalador genera `.env` con contraseñas y JWT aleatorios. Claves de OpenAI (IVR IA), FCM/APNs (push nativo) y SMTP se cargan **cifradas desde el panel** (no en `.env`).
 - **Variables clave** (`.env`): `DOMAIN`, `DB_PASS`, `JWT_SECRET`, `PUBLIC_IP`, `VAPID_*`. Ver [`.env.example`](.env.example).
-- **Primer acceso**: el dashboard corre en `:3001`; publicá el dominio con TLS/WSS vía Nginx Proxy Manager (`:81`).
+- **Primer acceso**: el dashboard corre en `:3001`; publicá el dominio con TLS/WSS vía Nginx Proxy Manager (`:81`). Con el perfil `proxy` en el mismo compose el instalador ata `:3001` a `127.0.0.1` (`DASHBOARD_BIND`) y se entra por 443; si el proxy está en otro host, `DASHBOARD_TRUST_PROXY=1` y restringí `:3001` a su IP por firewall. La API **no arranca** con `JWT_SECRET` vacío, placeholder o de menos de 16 caracteres.
+- **Roles** (desde 1.4.0): `admin` (todo), `supervisor` (operación y call center, sin configuración del sistema) y `agente` (su panel y su extensión). El rol por defecto al crear usuarios es `agente`; contraseñas de 8+ caracteres. Tabla completa de permisos en [`docs/CONTRATOS.md`](docs/CONTRATOS.md) §2.
 
 ## Estructura del repositorio
 
@@ -303,8 +305,9 @@ Requisitos: **Node 20+** (las imágenes usan `node:20-slim`), Docker para el sta
 # API (control plane) — necesita un Postgres y un Asterisk alcanzables (ver .env.example)
 cd control-plane && npm ci && npm start                 # :3000
 
-# Dashboard — proxya /backend/* a la API (API_URL, por defecto http://127.0.0.1:3000)
-cd dashboard && npm ci && npm run dev                   # :3001
+# Dashboard — `node server.js` (Next + proxy propio a la API: /backend, /socket.io, /prov, /descargas/softphone).
+# API_URL se lee al arrancar (por defecto http://127.0.0.1:3000), no en el build.
+cd dashboard && npm ci && npm run dev                   # :3001 (NODE_ENV=development, con HMR)
 npm run build                                           # verifica que compila antes de commitear
 
 # Softphone de escritorio
@@ -325,7 +328,7 @@ Reglas de la casa:
 - `VERSION` + [`CHANGELOG.md`](CHANGELOG.md) siguen **SemVer** / *Keep a Changelog*.
 - Un tag `vX.Y.Z` dispara [`release.yml`](.github/workflows/release.yml), que construye y publica las 5 imágenes
   `ghcr.io/flaviogonz/pbx-ng/<asterisk|api|dashboard|coturn|voz>:X.Y.Z` (Asterisk compila desde fuente: ~15–50 min).
-  Las de terceros (postgres, redis, go2rtc, npm) se usan pinneadas. Kamailio/rtpengine/wsbridge ya no se construyen acá: son de SBC-NG.
+  Las de terceros (postgres, go2rtc, npm) se usan pinneadas. Kamailio/rtpengine/wsbridge ya no se construyen acá: son de SBC-NG.
 - `docker/release.sh --bundle` genera el paquete *air-gapped* (`dist/pbxng-<ver>-images.tar.gz`) para clientes sin acceso a Internet.
 - En el host destino, `docker/deploy.sh` hace `pull`/`load` → migraciones → `up -d`. Rollback = desplegar la versión anterior. Detalle en [`RELEASE.md`](RELEASE.md).
 - El tag `softphone-vX.Y.Z` publica el instalador Windows del softphone ([`softphone.yml`](.github/workflows/softphone.yml)).
@@ -342,11 +345,13 @@ Reglas de la casa:
 
 Defensa en capas:
 
-- **API**: autenticación **deny-by-default** (todo `/api` requiere JWT salvo una allowlist pública explícita).
+- **API**: autenticación **deny-by-default** (todo `/api` requiere JWT salvo una allowlist pública explícita) y **RBAC por método+ruta** (`control-plane/rbac.js`, lo que no figura es solo `admin`; un agente solo opera su propia extensión). Rate limit en login y token de softphone (10 fallos/10 min por IP+usuario y 50 por IP, con la IP real que arma el proxy del panel), `helmet`, bcrypt asíncrono, arranque abortado sin `JWT_SECRET` real.
+- **Enrolamiento y softphone**: el enlace/QR es de un solo uso (2 min de gracia) y entrega un token de alcance `phone` (nunca una sesión de panel); el socket.io exige JWT (panel o softphone) también para la pizarra.
+- **Red**: Postgres y API solo en loopback del host; el panel en loopback cuando NPM corre en el mismo compose. Sin Redis.
 - **Borde**: TLS (5061) y DTLS-SRTP los termina Asterisk. Anti-flood, listas de bloqueo, auto-ban y ocultamiento de topología en el perímetro los aporta SBC-NG, si se lo pone adelante.
 - **Fail2Ban** sobre logs PJSIP con geolocalización y gestión de bloqueos/lista blanca.
 - **Agentes internos** protegidos por token compartido; comandos de sistema con validación (sin `shell=True`).
-- **Recomendado en producción**: rotar todos los secretos, activar TLS en teléfonos, y RBAC multi-tenant.
+- **Recomendado en producción**: rotar todos los secretos, activar TLS en teléfonos, y no exponer `:3001` sin proxy fuera de la LAN (el aislamiento multi-tenant real sigue pendiente, ver `docs/EVALUACION-2026-09.md` 3.10).
 
 ## Productos relacionados
 

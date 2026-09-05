@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Card, Title, Text, Stack, SimpleGrid, Group, Badge, Tabs, Button, Skeleton, Select, TextInput, PasswordInput, NumberInput, Switch, ThemeIcon, Divider, Table, ActionIcon, FileButton, Tooltip, Code, Alert } from '@mantine/core';
-import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle, IconShieldLock, IconBell } from '@tabler/icons-react';
+import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle, IconShieldLock, IconBell, IconPhone } from '@tabler/icons-react';
 import { toast } from '../notify';
 import ModulesPanel from '../ModulesPanel';
 import BrandingPanel from '../BrandingPanel';
 import ProxyPanel from '../ProxyPanel';
 import AlertsPanel from '../AlertsPanel';
 import TurnConsole from '../TurnConsole';
+import SipPanel from '../SipPanel';
 const STMAP = { ok: ['teal', 'Activo'], pending: ['yellow', 'Pendiente'], optional: ['gray', 'Opcional'], down: ['red', 'Caído'], off: ['gray', 'Inactivo'] };
 
 export default function Configuracion() {
@@ -54,6 +55,7 @@ export default function Configuracion() {
           <Tabs.Tab value="modulos" leftSection={<IconAdjustments size={16} />}>Módulos</Tabs.Tab>
           <Tabs.Tab value="branding" leftSection={<IconAdjustments size={16} />}>Branding</Tabs.Tab>
           <Tabs.Tab value="proxy" leftSection={<IconShieldLock size={16} />}>Proxy / TLS</Tabs.Tab>
+          <Tabs.Tab value="sip" leftSection={<IconPhone size={16} />}>SIP</Tabs.Tab>
           <Tabs.Tab value="webrtc" leftSection={<IconPlugConnected size={16} />}>WebRTC / TURN</Tabs.Tab>
           <Tabs.Tab value="componentes" leftSection={<IconServer2 size={16} />}>Componentes</Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={16} />}>Email por empresa</Tabs.Tab>
@@ -71,6 +73,7 @@ export default function Configuracion() {
         {/* WebRTC funciona sin SBC: el softphone entra por WSS (/ws -> Asterisk :8088, via el
             proxy) y el audio va con ICE/STUN/TURN. Aca se administra el TURN propio y se
             prueba el ICE real desde el navegador. */}
+        <Tabs.Panel value="sip"><SipPanel /></Tabs.Panel>
         <Tabs.Panel value="webrtc"><TurnConsole /></Tabs.Panel>
 
         <Tabs.Panel value="componentes">

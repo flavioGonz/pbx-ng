@@ -42,10 +42,9 @@ Solo estos. Nada más.
 
 | Puerto | Servicio | Quién debe alcanzarlo |
 |---|---|---|
-| `5432` | PostgreSQL | solo el core (no se comparte con nadie, tampoco con SBC-NG) |
-| `6379` | Redis | solo el core (no publica al host) |
-| `3000` | API control-plane | solo el proxy |
-| `3001` | Dashboard | solo el proxy |
+| `5432` | PostgreSQL | solo el core: escucha en `127.0.0.1` del host (lo necesita Asterisk, host network); no se comparte con nadie, tampoco con SBC-NG |
+| `3000` | API control-plane | solo `127.0.0.1` del host (Asterisk) y el panel por la red interna; nadie más |
+| `3001` | Dashboard | el proxy (con NPM en el mismo compose queda en `127.0.0.1`); si el proxy está en otro host, solo la IP del proxy (`DASHBOARD_TRUST_PROXY=1`) |
 | `5038` | Asterisk AMI | solo el core |
 | `8088` | Asterisk ARI/WS | solo el core y el proxy (para `/ws`) |
 | `8091` / `8092` | Agentes internos (turn-agent, ast-agent) | solo la API, con token |

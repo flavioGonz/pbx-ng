@@ -73,8 +73,20 @@ export default function Shell({ children }) {
     if (!tienePanel) return;
     fetch('/backend/api/modules').then((r) => (r.ok ? r.json() : null)).then((m) => { if (m) setMods(m); }).catch(() => {});
   }, [path]);
+  const { user } = useAuth();
   const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/sbc': 'sbc' };
-  const visibleItem = (it) => !MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false;
+  /* Menú por rol (espejo de control-plane/rbac.js, docs/CONTRATOS.md §2). Lo que no está
+   * en SUP_OK es sólo admin; 'agente' no ve nada porque no tiene ninguna pantalla de este
+   * shell (auth.jsx lo manda a /agente). Mientras no se conoce el usuario (user === undefined,
+   * igual en servidor y primer render) se muestra todo, como antes, para no parpadear. */
+  const SUP_OK = ['/cdr', '/wallboard', '/monitor', '/mapa', '/telefonos'];
+  const roleOk = (it) => {
+    const rol = user && user.role;
+    if (!rol || rol === 'admin') return true;
+    if (rol === 'supervisor') return SUP_OK.includes(it.href);
+    return false;
+  };
+  const visibleItem = (it) => roleOk(it) && (!MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false);
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
   useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then((bb) => { setBrand(bb); if (bb && bb.name && typeof document !== 'undefined') document.title = bb.name; }).catch(() => {}); }, []);
   useEffect(() => { try { setRail(localStorage.getItem('pbxng_rail') === '1'); } catch (_) {} }, []);
@@ -94,7 +106,6 @@ export default function Shell({ children }) {
   // dejandolos afuera en /phone,/agente,etc. el conteo de hooks cambiaba entre renders
   // (React #300) y rompia la hidratacion (#418/#423). Ahora se llaman incondicionalmente.
   const { connected } = useLive();
-  const { user } = useAuth();
   const { setColorScheme } = useMantineColorScheme();
   /* El esquema real (claro/oscuro) vive en localStorage y solo se conoce en el
    * navegador: en el HTML del servidor siempre es 'dark'. Si el boton de tema se
@@ -132,7 +143,7 @@ export default function Shell({ children }) {
 
           {/* navegación */}
           <ScrollArea style={{ flex: 1, marginTop: 14 }} type="hover">
-            {groups.map(g => {
+            {groups.filter(g => g.items.some(visibleItem)).map(g => {
               const opened = rail ? true : abiertos.includes(g.label);
               const GIcon = g.icon;
               return (

@@ -312,8 +312,9 @@ lo primero que se rompe.
 
 ### 5.2 Lo que nunca se publica
 
-`5432` (base de datos), `6379` (Redis), `3000` y `3001` (API y panel, van detrás del proxy),
-`5038` (AMI), `8088` (ARI), `81` (admin del proxy).
+`5432` (base de datos) y `3000` (API) escuchan sólo en `127.0.0.1` del host; `3001` (panel) va
+detrás del proxy — con el proxy en el mismo equipo el instalador lo deja también en `127.0.0.1` y se
+entra por 443 —; `5038` (AMI), `8088` (ARI), `81` (admin del proxy). No hay Redis.
 
 ### 5.3 Verificarlo de verdad
 

@@ -48,6 +48,12 @@ jobs:
           echo "REG=ghcr.io/${OWNER}/pbx-ng" >> "$GITHUB_ENV"
           echo "Publicando v${V} en ghcr.io/${OWNER}/pbx-ng"
 
+      # Antes de gastar 40 min de build: lo que se entrega (release.yml) tiene que
+      # ser lo mismo que se desarrolla (docker-compose.yml). Si divergen, no se publica.
+      - name: Paridad de compose (dev == release)
+        working-directory: docker
+        run: bash check-compose-parity.sh
+
       - name: Build & push (release.sh)
         working-directory: docker
         env:

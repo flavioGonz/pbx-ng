@@ -102,4 +102,4 @@ function mohArchivos(nombre) {
   } catch (_) { return []; }
 }
 
-module.exports = { parking, moh, mohCarpeta, mohBorrarCarpeta, mohArchivos, DIR, MOH_DIR };
+module.exports = { parking, moh, mohCarpeta, mohBorrarCarpeta, mohArchivos, escribir, DIR, MOH_DIR };
