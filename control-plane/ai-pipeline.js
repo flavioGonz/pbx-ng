@@ -8,6 +8,7 @@
 const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const log = require('./log')('AI');
 
 const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
 const VOSK_MODEL = '/opt/vosk-model-es';
@@ -262,7 +263,9 @@ function finalize(session) {
 // ============================================================
 //  Servidor AudioSocket
 // ============================================================
+let SRV = null;   // servidor AudioSocket (uno solo: init() se vuelve a llamar en cada reconexión ARI)
 function startServer() {
+  if (SRV) return;
   const srv = net.createServer((socket) => {
     try { socket.setNoDelay(true); } catch (_) {}   // sin Nagle: audio en tiempo real, sin tirones
     let buf = Buffer.alloc(0); let session = null;
@@ -291,7 +294,17 @@ function startServer() {
     socket.on('close', () => { if (session && !session.closed) endSession(session, 'socket-close'); });
     socket.on('error', () => {});
   });
-  srv.listen(AS_PORT, '0.0.0.0', () => console.log('[AI] AudioSocket escuchando en :' + AS_PORT));
+  srv.on('error', (e) => { log.error('AudioSocket', e); if (SRV === srv) SRV = null; });
+  srv.listen(AS_PORT, '0.0.0.0', () => log.info('AudioSocket escuchando', { port: AS_PORT }));
+  SRV = srv;
+}
+
+/* Cierre ordenado (SIGTERM en app.js): corta las sesiones de IA en curso y deja de
+ * escuchar. Devuelve una promesa que resuelve cuando el socket de escucha se cerró. */
+function close() {
+  for (const s of Array.from(sessions.values())) { try { endSession(s, 'shutdown'); } catch (_) {} }
+  for (const s of Array.from(pendingByUuid.values())) { try { finalize(s); } catch (_) {} }
+  return new Promise((ok) => { const srv = SRV; SRV = null; if (!srv) return ok(); srv.close(() => ok()); });
 }
 
 function handleInAudio(session, pcm) {
@@ -347,12 +360,7 @@ function init(ari, pool, opts = {}) {
   ARI = ari; POOL = pool;
   if (opts.app) APP = opts.app;
   if (opts.mediaHost) MEDIA_HOST = opts.mediaHost;
-  POOL.query("CREATE TABLE IF NOT EXISTS pbxng_settings (key text PRIMARY KEY, value text)").catch(() => {});
-  POOL.query("ALTER TABLE pbxng_ai_agents ADD COLUMN IF NOT EXISTS sales_exten text").catch(() => {});
-  POOL.query("ALTER TABLE pbxng_ai_agents ADD COLUMN IF NOT EXISTS support_exten text").catch(() => {});
-  POOL.query("ALTER TABLE pbxng_ai_agents ADD COLUMN IF NOT EXISTS default_exten text").catch(() => {});
-  POOL.query("ALTER TABLE pbxng_ai_agents ADD COLUMN IF NOT EXISTS crm_webhook text").catch(() => {});
-  POOL.query("ALTER TABLE pbxng_ai_agents ADD COLUMN IF NOT EXISTS greeting_text text").catch(() => {});
+  // Esquema (pbxng_settings, columnas de pbxng_ai_agents): migrations/0009_schema_runtime.sql
   startServer();
 }
 
@@ -370,7 +378,7 @@ async function startAiSession(channel, agent) {
     greetingText: agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),
     uttBuf: [], speaking: false, speakToken: 0, bargeMs: 0, busy: false, closed: false, _turns: 0,
     lastPartial: '', speechActive: false, speechMs: 0, silenceMs: 0,
-    log: (m) => console.log('[AI ' + uuid.slice(0, 8) + '] ' + m),
+    log: (m) => log.info(m, { session: uuid.slice(0, 8) }),
   };
   try { await channel.answer(); } catch (_) {}
   try {
@@ -386,9 +394,9 @@ async function startAiSession(channel, agent) {
     session.endpointTimer = setInterval(() => checkEndpoint(session), 250);
     channel.once('StasisEnd', () => endSession(session, 'caller-hangup'));
   } catch (e) {
-    console.error('[AI] startAiSession error', e.message);
+    log.error('startAiSession', e);
     cleanupMedia(session); try { await channel.hangup(); } catch (_) {}
   }
 }
 
-module.exports = { init, startAiSession };
+module.exports = { init, startAiSession, close };

@@ -40,12 +40,19 @@ cd docker
 export PBXNG_VERSION=X.Y.Z COMPOSE_PROFILES=core,turn,intercom
 ./deploy.sh --images=/ruta/pbxng-X.Y.Z-images.tar.gz
 ```
-`deploy.sh` carga/pull las imagenes, corre **migraciones** de DB y hace `up -d` (sin build).
+`deploy.sh` carga/pull las imagenes, corre **migraciones** de DB, drena Asterisk si el `up`
+lo va a recrear (pide confirmacion si hay llamadas; `--yes` para no preguntar) y hace `up -d`
+(sin build). Si las migraciones fallan, corta ahi con exit 1 y no toca nada.
 
 ## Migraciones de DB
 - Los cambios de schema NUEVOS van como `control-plane/migrations/000N_descripcion.sql`.
 - Nunca editar una migracion ya aplicada; agregar otra.
-- `deploy.sh` las corre solo (`node migrate.js`), registrando en `pbxng_schema_migrations`.
+- Las corre **el arranque del contenedor de la API** (`docker-entrypoint.sh` → `node migrate.js`
+  → `node app.js`), registrando en `pbxng_schema_migrations`; si una falla la API no arranca.
+  `deploy.sh` las corre ademas antes del `up -d` (`run --rm --no-deps --entrypoint node api
+  migrate.js`) para que un esquema roto frene el deploy con el error a la vista.
+- Desde 1.5.0 ningun modulo crea tablas ni columnas en runtime (`0009_schema_runtime.sql`
+  formalizo lo que antes hacia `app.js` al importar): todo cambio de esquema es una migracion.
 
 ## Verificacion post-deploy (obligatoria)
 Un deploy "verde" no garantiza audio. Antes de entregar:

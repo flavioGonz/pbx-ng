@@ -75,11 +75,17 @@ const pesar = async (f) => { try { return (await fsp.stat(f)).size; } catch (_) 
 
 async function asegurarDir() { await fsp.mkdir(DIR, { recursive: true }); }
 
-/* Nombre estable y ordenable: pbxng-20260720-1432.tar.gz */
-function nombreNuevo() {
+/* Nombre estable y ordenable: pbxng-20260720-1432.tar.gz. Los programados llevan
+ * `auto` en el nombre (pbxng-auto-20260720-0300.tar.gz): la retención decide por el
+ * nombre y no por el manifiesto, así no hay que abrir catorce tar.gz cada noche para
+ * saber cuáles se pueden borrar. Un respaldo hecho a mano desde el panel nunca
+ * entra en esa poda, justamente porque no tiene ese prefijo. */
+const PREFIJO_AUTO = 'pbxng-auto-';
+function nombreNuevo(programado) {
   const d = new Date(), z = (n) => String(n).padStart(2, '0');
-  return `pbxng-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.tar.gz`;
+  return `${programado ? PREFIJO_AUTO : 'pbxng-'}${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.tar.gz`;
 }
+const esProgramado = (nombre) => String(nombre || '').startsWith(PREFIJO_AUTO);
 
 const dbEnv = () => ({
   ...process.env,
@@ -96,10 +102,10 @@ async function versionPg() {
 }
 
 /* ---------------------------------------------------------------- crear ---- */
-async function crear({ grabaciones = false, nota = '' } = {}) {
+async function crear({ grabaciones = false, nota = '', programado = false } = {}) {
   await asegurarDir();
   const trabajo = await fsp.mkdtemp('/tmp/pbxng-bk-');
-  const nombre = nombreNuevo();
+  const nombre = nombreNuevo(programado);
   const destino = path.join(DIR, nombre);
 
   try {
@@ -131,6 +137,7 @@ async function crear({ grabaciones = false, nota = '' } = {}) {
       host: process.env.DOMAIN || process.env.PUBLIC_IP || null,
       postgres: await versionPg(),
       nota: String(nota || '').slice(0, 300),
+      programado: !!programado,          // lo hizo el planificador / cron, no una persona
       incluye_grabaciones: !!grabaciones,
       partes,
       // El respaldo no lleva las credenciales del entorno: esto le dice al destino qué
@@ -155,9 +162,34 @@ async function listar() {
   const out = [];
   for (const f of files) {
     const st = await fsp.stat(path.join(DIR, f)).catch(() => null);
-    if (st) out.push({ nombre: f, bytes: st.size, creado: st.mtime.toISOString() });
+    if (st) out.push({ nombre: f, bytes: st.size, creado: st.mtime.toISOString(), programado: esProgramado(f) });
   }
   return out.sort((a, b) => b.creado.localeCompare(a.creado));
+}
+
+/* ------------------------------------------------------------- retención --- */
+/* Deja los `keep` respaldos PROGRAMADOS más nuevos y borra el resto. Los manuales
+ * (sin prefijo auto) no se tocan nunca: si el operador hizo uno antes de un cambio
+ * grande, no puede desaparecer porque pasaron dos semanas. */
+async function retener(keep) {
+  const n = Math.max(1, parseInt(keep, 10) || 14);
+  const autos = (await listar()).filter((b) => b.programado);   // ya viene de más nuevo a más viejo
+  const borrados = [];
+  for (const b of autos.slice(n)) {
+    await borrar(b.nombre);
+    borrados.push(b.nombre);
+  }
+  return { keep: n, borrados, quedan: Math.min(n, autos.length) };
+}
+
+/* Respaldo programado completo: crear + retención. Es lo que usan el planificador
+ * interno de la API (app.js) y backup-cli.js (cron del host / pbxng-ctl backup), para
+ * que los dos caminos hagan exactamente lo mismo. Si la creación falla NO se poda:
+ * borrar respaldos viejos justo cuando no se pudo hacer uno nuevo es la peor combinación. */
+async function programado({ grabaciones = false, keep = 14, nota = 'programado' } = {}) {
+  const creado = await crear({ grabaciones, nota, programado: true });
+  const ret = await retener(keep);
+  return { ...creado, retencion: ret };
 }
 
 async function borrar(nombre) {
@@ -250,4 +282,4 @@ async function restaurar(nombre, { partes = null, confirmar = false } = {}) {
   }
 }
 
-module.exports = { crear, listar, borrar, inspeccionar, restaurar, seguro, DIR, PARTES, FORMATO };
+module.exports = { crear, listar, borrar, retener, programado, esProgramado, inspeccionar, restaurar, seguro, DIR, PARTES, FORMATO, PREFIJO_AUTO };

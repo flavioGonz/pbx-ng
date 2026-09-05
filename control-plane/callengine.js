@@ -20,6 +20,7 @@
  * ==========================================================================*/
 'use strict';
 
+const { errorHttp } = require('./errores');   // errores de pg → mensaje genérico (docs/CONTRATOS.md §3)
 const PJSIP = 'PJSIP/';
 const extOf = (name) => { const m = /^PJSIP\/([^-]+)-/.exec(name || ''); return m ? m[1] : null; };
 
@@ -29,7 +30,7 @@ module.exports = function initCallEngine(deps) {
    * agente y token phone sólo su interno). Si no viene, se deja pasar (compatibilidad). */
   const mismaExt = deps.mismaExt || (() => true);
   const soloPropia = (req, ext) => { if (!mismaExt(req, ext)) { const e = new Error('no podés operar llamadas de otra extensión'); e.status = 403; throw e; } return ext; };
-  const L = log || ((...a) => console.log('[calls]', ...a));
+  const L = log || ((...a) => require('./log')('calls').info(...a));
   let ari = null;
   let primed = false;
   const channels = new Map();   // id -> { id, name, state, caller, connected, started, ext }
@@ -148,7 +149,7 @@ module.exports = function initCallEngine(deps) {
 
   /* ---------- rutas ---------- */
   const need = (v, what) => { if (!v) { const e = new Error(what + ' requerido'); e.status = 400; throw e; } return v; };
-  const wrap = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); } };
+  const wrap = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { errorHttp(res, e); } };
 
   app.get('/api/calls/live', auth, wrap(async () => ({ channels: await getChannels(), spies: Array.from(spies.values()), via: ari ? (primed ? 'eventos' : 'api') : 'sin-ari' })));
 

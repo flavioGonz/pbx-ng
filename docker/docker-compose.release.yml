@@ -20,57 +20,90 @@
 # su puerto SOLO a 127.0.0.1 del host: desde afuera de la maquina no se ven, y
 # DB_HOST / API_URL de asterisk son 127.0.0.1. Nunca publicar 5432/3000 en
 # 0.0.0.0: Docker mete sus reglas por delante de UFW y quedaria abierto.
+#
+# ROBUSTEZ (igual en los dos compose):
+#   - healthcheck en TODOS los servicios: `docker compose ps` dice la verdad y
+#     depends_on (service_healthy) no arranca la API contra una DB a medio levantar.
+#   - mem_limit por servicio (variables MEM_* del .env): un proceso desbocado
+#     (whisper, un leak de Node) se reinicia solo en vez de tirar abajo la central
+#     entera. memswap_limit = mem_limit: sin swap, porque Asterisk paginando a disco
+#     corta el audio; preferimos que Docker lo reinicie limpio.
+#   - logging json-file con rotacion (x-logging): sin esto los logs de Asterisk
+#     llenan el disco en meses y Postgres deja de escribir.
+#   - stop_grace_period: Asterisk recibe SIGTERM y espera hasta 60 s a que
+#     terminen las llamadas (ademas pbxng-ctl/deploy.sh drenan antes de recrear);
+#     la API 20 s para cerrar transacciones y espias ARI.
 name: pbxng
 
+# Rotacion de logs compartida por todos los servicios (10 MB x 5 = 50 MB por
+# contenedor como mucho). Se referencia con `logging: *pbxng-logging`.
+x-logging: &pbxng-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 networks:
-  pbxng: { driver: bridge }
+  pbxng:
+    driver: bridge
 
 volumes:
-  pg_data: {}
-  npm_data: {}
-  npm_letsencrypt: {}
-  asterisk_sounds: {}
+  pg_data:
+  npm_data:
+  npm_letsencrypt:
+  asterisk_sounds:
   # Config que genera el panel (aparcado, captura, MoH): sobrevive a recrear
   # contenedores y la comparten Asterisk (lee) y la API (escribe).
-  asterisk_conf: {}
-  voz_models: {}
-  go2rtc_config: {}
-  recordings: {}
-  voicemail: {}
+  asterisk_conf:
+  voz_models:
+  go2rtc_config:
+  recordings:
+  voicemail:
   # Certificados ACME y config persistente de la API (/etc/pbxng).
-  certs: {}
+  certs:
   # Los archivos de respaldo. Volumen propio: no se mezclan con las grabaciones
   # ni viven en el disco del contenedor (se perderian al recrearlo).
-  respaldos: {}
+  respaldos:
 
 services:
   postgres:
     image: postgres:16-alpine
     profiles: ["core"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    mem_limit: ${MEM_POSTGRES:-1g}
+    memswap_limit: ${MEM_POSTGRES:-1g}
     environment:
       POSTGRES_DB: ${DB_NAME:-pbxng}
       POSTGRES_USER: ${DB_USER:-pbxng}
       POSTGRES_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./config/initdb:/docker-entrypoint-initdb.d:ro
+      - ./config/initdb:/docker-entrypoint-initdb.d:ro   # esquema realtime + app (primer arranque)
     # Solo loopback: Asterisk (host network) entra por 127.0.0.1; la API usa la
     # red interna (DB_HOST=postgres). Si necesitas la DB desde otra maquina
-    # NO cambies esto a 0.0.0.0: usa un tunel ssh (ssh -L 5432:127.0.0.1:5432 host)
-    # o docker exec psql.
+    # (por ejemplo un cliente SQL en desarrollo), NO cambies esto a 0.0.0.0:
+    # usa un tunel ssh (ssh -L 5432:127.0.0.1:5432 host) o docker exec psql.
     ports: ["127.0.0.1:5432:5432"]
     networks: [pbxng]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxng} -d ${DB_NAME:-pbxng}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   asterisk:
     image: ${PBXNG_REGISTRY:-pbxng}/asterisk:${PBXNG_VERSION:-latest}
     profiles: ["core"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    mem_limit: ${MEM_ASTERISK:-1g}
+    memswap_limit: ${MEM_ASTERISK:-1g}
+    # SIGTERM -> Asterisk corta limpio; le damos hasta 60 s para que las llamadas en
+    # curso terminen antes del SIGKILL. pbxng-ctl/deploy.sh ademas drenan antes
+    # ("core stop gracefully": no acepta llamadas nuevas y espera a las activas).
+    stop_grace_period: 60s
     network_mode: host                 # SIP/RTP necesitan red del host
     cap_add:
       - NET_ADMIN                     # cambiar IP / activar-desactivar placas desde el panel
@@ -101,11 +134,26 @@ services:
       # Mismo volumen de respaldos que la API (contrato §7): una restauración que
       # necesite tocar el spool de Asterisk lo encuentra en el mismo lugar.
       - respaldos:/respaldos
+    # Sano = el core responde por la consola (no alcanza con que el proceso exista:
+    # Asterisk puede quedar colgado con el PID vivo). start_period cubre la espera
+    # de Postgres y la carga de modulos.
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' | grep -q 'System uptime'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
 
   api:
     image: ${PBXNG_REGISTRY:-pbxng}/api:${PBXNG_VERSION:-latest}
     profiles: ["core"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    mem_limit: ${MEM_API:-768m}
+    memswap_limit: ${MEM_API:-768m}
+    # Tiempo para que el cierre ordenado (SIGTERM) termine transacciones y suelte
+    # los espias ARI antes del SIGKILL.
+    stop_grace_period: 20s
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -145,6 +193,17 @@ services:
       TURN_AGENT: ${TURN_AGENT:-}
       # API de administracion de go2rtc (modulo intercom), por la red interna.
       GO2RTC_MGMT: ${GO2RTC_MGMT:-http://go2rtc:1984}
+      # Cuantos respaldos programados conserva backup-cli.js (docker/backup-cron.sh).
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      # Zona horaria: el respaldo programado corre a la hora LOCAL (sin esto sería UTC
+      # y con el cron del host habría dos respaldos por día).
+      TZ: ${TZ:-America/Montevideo}
+      # Observabilidad y límites (docs/CONTRATOS.md §6); vacíos = defaults de la API.
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      PG_POOL_MAX: ${PG_POOL_MAX:-10}
+      PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-30000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
     volumes:
       - recordings:/recordings        # rw: la API indexa Y borra grabaciones
       - voicemail:/voicemail
@@ -159,11 +218,23 @@ services:
     # (API_URL=http://api:3000). Nunca 0.0.0.0: la API no tiene TLS ni rate-limit propio.
     ports: ["127.0.0.1:3000:3000"]
     networks: [pbxng]
+    # /health/ready devuelve 503 si la base no responde (a diferencia de /health,
+    # que siempre da 200): asi "healthy" significa que la API puede atender de verdad.
+    # Pisa el HEALTHCHECK de la imagen (que apunta a /health).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:3000/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
 
   dashboard:
     image: ${PBXNG_REGISTRY:-pbxng}/dashboard:${PBXNG_VERSION:-latest}
     profiles: ["core"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    mem_limit: ${MEM_DASHBOARD:-512m}
+    memswap_limit: ${MEM_DASHBOARD:-512m}
     depends_on: [api]
     environment:
       API_URL: http://api:3000
@@ -178,11 +249,22 @@ services:
     # que usa el rate limit del login. Sin proxy, 0.0.0.0 (se entra por :3001).
     ports: ["${DASHBOARD_BIND:-0.0.0.0}:3001:3001"]
     networks: [pbxng]
+    # La imagen (node:20-slim) no trae curl ni wget: se usa el propio Node. /login
+    # es una pagina estatica de Next: si responde, el server.js standalone esta vivo.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3001/login',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   coturn:
     image: ${PBXNG_REGISTRY:-pbxng}/coturn:${PBXNG_VERSION:-latest}
     profiles: ["turn"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    mem_limit: ${MEM_COTURN:-256m}
+    memswap_limit: ${MEM_COTURN:-256m}
     network_mode: host
     environment:
       DOMAIN: ${DOMAIN:-pbx.local}
@@ -192,30 +274,71 @@ services:
       TURN_PASS: ${TURN_PASS:?set TURN_PASS in .env (lo genera install.sh)}
       TURN_CLI_PASS: ${TURN_CLI_PASS:?set TURN_CLI_PASS in .env}
       PUBLIC_IP: ${PUBLIC_IP:-}
+    # python3 esta seguro (lo usa el agente :8091); nc/curl no en todas las variantes
+    # de la imagen. Sano = turnserver acepta TCP en 3478 (listening-port).
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 3478), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   voz:
     image: ${PBXNG_REGISTRY:-pbxng}/voz:${PBXNG_VERSION:-latest}
     profiles: ["ai"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    # 4 GB: faster-whisper carga el modelo en RAM; con menos se reinicia en bucle.
+    mem_limit: ${MEM_VOZ:-4g}
+    memswap_limit: ${MEM_VOZ:-4g}
     volumes: [voz_models:/opt/voz/models]
     ports: ["8080:8080"]            # solo LAN (ver docs/FIREWALL.md)
     networks: [pbxng]
+    # python:3.11-slim no trae curl: urllib. start_period largo porque el primer
+    # arranque descarga/carga modelos.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   go2rtc:
     image: alexxit/go2rtc:latest
     profiles: ["intercom"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    mem_limit: ${MEM_GO2RTC:-512m}
+    memswap_limit: ${MEM_GO2RTC:-512m}
     volumes: [go2rtc_config:/config]
     # 1984: API/streams (el navegador del panel los consume); 8555: WebRTC. Solo LAN.
     ports: ["1984:1984", "8555:8555/tcp", "8555:8555/udp"]
     networks: [pbxng]
+    # Imagen Alpine: wget de busybox. /api responde con la info del servidor.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:1984/api"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   npm:
     image: jc21/nginx-proxy-manager:latest
     profiles: ["proxy"]
     restart: unless-stopped
+    logging: *pbxng-logging
+    mem_limit: ${MEM_NPM:-512m}
+    memswap_limit: ${MEM_NPM:-512m}
     ports: ["80:80", "443:443", "81:81"]
     volumes:
       - npm_data:/data
       - npm_letsencrypt:/etc/letsencrypt
     networks: [pbxng]
+    # :81 es la consola de administracion (backend + nginx): si responde, el proxy
+    # esta arriba. La imagen trae curl.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:81/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

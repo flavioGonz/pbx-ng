@@ -361,6 +361,17 @@ export PBXNG_VERSION=X.Y.Z
 `deploy.sh` baja las imágenes, corre las **migraciones de base de datos** y levanta todo. Para
 volver atrás, desplegá la versión anterior. El detalle está en `RELEASE.md`.
 
+Desde 1.5.0:
+
+- **Si una migración falla, no se actualiza nada**: `deploy.sh` corta ahí con el error a la
+  vista, y la API tampoco arranca con un esquema viejo (su contenedor sale con error hasta que
+  se corrija). Es a propósito: una central a medio migrar es peor que una parada.
+- **Si Asterisk tiene que recrearse** (cambió su imagen), `deploy.sh` primero **drena**: cuenta
+  las llamadas activas, te pide confirmación, deja de aceptar llamadas nuevas y espera hasta
+  60 s a que cuelguen las que están. Con `./deploy.sh --yes` no pregunta (para actualizar de
+  madrugada por script). Si la imagen de Asterisk no cambió, no toca las llamadas.
+- Lo mismo hace `pbxng-ctl up|enable|down` (y `pbxng-ctl drain` a mano).
+
 ---
 
 ## 8. Si algo no funciona
@@ -371,7 +382,10 @@ volver atrás, desplegá la versión anterior. El detalle está en `RELEASE.md`.
 |---|---|
 | El teléfono registra pero **no hay audio** | Firewall: rango de relay del TURN y `30000-40000/UDP`. Corré `check-turn.py`. |
 | El softphone web no conecta | El proxy debe permitir **WebSocket** en `/ws` (y con HTTP/2 **desactivado**). |
-| El panel no carga datos | Contenedor `api`: `docker compose logs api`. |
+| El panel no carga datos | Contenedor `api`: `docker compose logs api`. Los logs son una línea JSON por evento; `jq -c 'select(.level=="error")'` filtra los errores. |
+| El panel muestra **«Base de datos sin respuesta»** | Postgres no contesta: `docker compose ps` muestra `api` como `unhealthy` y `postgres` caído o `unhealthy`. `docker compose logs postgres`. Las llamadas siguen; el panel no guarda hasta que vuelva. |
+| Un contenedor se reinicia en bucle | `docker compose ps` lo muestra reiniciando; `docker inspect <contenedor> --format '{{.State.OOMKilled}}'` en `true` = pasó su límite de memoria (`MEM_*` en `.env`, subilo y `pbxng-ctl up`). Si es `api`, mirá si las migraciones fallaron (`docker compose logs api`, primeras líneas). |
+| No se hacen los respaldos automáticos | Sistema → Respaldos → «Respaldo programado»: fijate en «Última corrida» si falló y por qué. Si además instalaste el cron del host, `/var/log/pbxng-backup.log`. |
 | No entran llamadas | Estado de la troncal en **Monitoreo**. Activá la alerta de *troncal caída*. |
 
 ![Panel de monitoreo con el estado de los componentes](img/inst-07-monitor.png)

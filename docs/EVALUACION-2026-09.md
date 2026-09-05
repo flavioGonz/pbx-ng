@@ -114,8 +114,8 @@ porque corre el compose de desarrollo.
 
 **3.5 Superficie de red del appliance.** Parcial en 1.4.0: ✅ Redis retirado del stack, ✅ 5432
 y 3000 sólo en `127.0.0.1` del host, ✅ `scratch` atado a un JWT válido, ✅ `:3001` en loopback
-cuando NPM corre en el mismo compose. Pendiente: ARI/WS en `0.0.0.0:8088` y `origin:'*'` del
-socket. · `http.conf` expone ARI y el WebSocket SIP en HTTP plano
+cuando NPM corre en el mismo compose. ✅ 1.5.0 `origin:'*'` del socket reemplazado por mismo
+origen / `CORS_ORIGINS`. Pendiente: ARI/WS en `0.0.0.0:8088`. · `http.conf` expone ARI y el WebSocket SIP en HTTP plano
 sobre `0.0.0.0:8088` del host (Asterisk va en `network_mode: host`): las credenciales ARI viajan
 en Basic Auth sin cifrar y ARI es control total de la central. Redis se publica en `6379` sin
 `requirepass` en el compose de desarrollo y **la API no lo usa** (única mención: un nombre en
@@ -134,10 +134,11 @@ dashboard, softphone). Cero ESLint/Prettier. `app.js` tiene 3.668 líneas (54 % 
 líneas de hasta 1.322 caracteres y 262 endpoints; `app.js.orig` está commiteado. 97 `catch` vacíos
 en el backend y 237 en el panel: los errores se tragan sin avisar. El panel no tiene ningún
 `error.jsx`/`loading.jsx`: un throw en render deja la pantalla en blanco, y con la API caída
-muestra datos viejos sin ninguna señal.
+muestra datos viejos sin ninguna señal (resuelto en 1.5.0: `ErrorBoundary.jsx` dentro del shell,
+`error.jsx`, `loading.jsx` y banner «Base de datos sin respuesta»; el resto de 3.7 sigue).
 
-**3.8 Proceso sin red de seguridad.** `pool.on('error')` ✅ 1.4.0 (loguea y el pool reconecta);
-el resto sigue pendiente. · `new Pool(CFG.db)` sin `max`, sin `statement_timeout` y
+**3.8 Proceso sin red de seguridad.** ✅ resuelto en 1.5.0 (bloques 2 y 3 de §5): `pool.on('error')` ✅ 1.4.0 (loguea y el pool reconecta);
+pool acotado, cierre ordenado, `/health` 503, healthchecks, `mem_limit` y rotación ✅ 1.5.0. Lo que sigue describe el estado previo. · `new Pool(CFG.db)` sin `max`, sin `statement_timeout` y
 **sin `pool.on('error')`**: un cliente idle que falla (reinicio de Postgres) emite `error` sin
 handler y el proceso muere. Cero handlers de `SIGTERM`/`unhandledRejection`: un `docker stop`
 mata la API a los 10 s con transacciones abiertas y espías de ARI huérfanos. `/health` devuelve
@@ -145,7 +146,7 @@ mata la API a los 10 s con transacciones abiertas y espías de ARI huérfanos. `
 base caída. Solo 1 de 8 servicios tiene healthcheck (Postgres); ninguno tiene límite de memoria
 ni rotación de logs.
 
-**3.9 Esquema de base con dos verdades.** `migrate.js` es correcto pero solo lo ejecuta
+**3.9 Esquema de base con dos verdades.** ✅ resuelto en 1.5.0 (`migrate.js` en el entrypoint, DDL de runtime movido a `0009_schema_runtime.sql`; `initdb` sigue siendo el baseline de una instalación nueva y las migraciones lo completan). Estado previo: `migrate.js` es correcto pero solo lo ejecuta
 `deploy.sh` (flujo de release). El entrypoint hace `exec node app.js`, y el esquema real sale de
 30 `CREATE TABLE IF NOT EXISTS` + 13 `ALTER TABLE` lanzados al importar el módulo, sin `await`,
 mientras el servidor ya acepta tráfico (carrera en el arranque; `ACCESS EXCLUSIVE` en cada
@@ -156,7 +157,7 @@ reinicio). Las migraciones y el `initdb` divergen.
 multi-empresa, cada empresa ve y modifica la otra. Cerrarlo es refactorizar las 262 rutas, no un
 parche.
 
-**3.11 Sin respaldo automático ni monitoreo externo.** `backup.js` está bien, pero no hay
+**3.11 Sin respaldo automático ni monitoreo externo.** Respaldo programado ✅ 1.5.0 (planificador interno + cron opcional, retención) y logs estructurados ✅ 1.5.0 (`log.js`, JSON con niveles); sigue pendiente `/metrics` Prometheus. Estado previo: `backup.js` está bien, pero no hay
 programación (ningún cron ni timer). No hay `/metrics` en formato Prometheus, ni trazas, ni logs
 estructurados (52 `console.error` con prefijos a mano; la clave de admin por defecto se loguea en
 claro, `app.js:647`). Si la central cae de madrugada, nadie se entera salvo por Uptime Kuma
@@ -226,14 +227,14 @@ con origen restringido (pendiente: sigue `origin:'*'`, menor con el JWT obligato
 (volúmenes, `NET_ADMIN`, `recordings` rw) ✅ 1.4.0, y un test de CI que compare ambos compose para que no
 vuelvan a divergir ✅ 1.4.0 (`docker/check-compose-parity.sh`). Sacar Redis del stack (no se usa) ✅ 1.4.0
 o autenticarlo y no publicarlo; dejar de
-publicar 5432 ✅ 1.4.0 (queda en `127.0.0.1` del host para Asterisk, igual que 3000). Healthchecks en los 8 servicios, `mem_limit`, rotación de logs, `stop_grace_period`
-para Asterisk y drenado antes de recrear. Respaldo programado.
+publicar 5432 ✅ 1.4.0 (queda en `127.0.0.1` del host para Asterisk, igual que 3000). Healthchecks en los 8 servicios ✅ 1.5.0 (cada uno con la herramienta que trae su imagen; el de la API pega a `/health/ready`), `mem_limit` ✅ 1.5.0 (`MEM_*` en `.env`, sin swap), rotación de logs ✅ 1.5.0 (json-file 10 MB × 5), `stop_grace_period`
+para Asterisk ✅ 1.5.0 (60 s; api 20 s) y drenado antes de recrear ✅ 1.5.0 (`docker/asterisk-drain.sh`, lo llaman `pbxng-ctl` y `deploy.sh` sólo si el `up -d` recrea asterisk). Respaldo programado ✅ 1.5.0 (planificador interno de la API con pantalla en `/respaldos`, más cron del host opcional con `backup-cli.js`; retención sólo de los `pbxng-auto-*`). Queda para después: verificación automática de la restauración (§4).
 
-**Bloque 3 — que el proceso no muera solo.** `pool.on('error')` ✅ 1.4.0, `max`/`statement_timeout`,
-`SIGTERM` con cierre ordenado (cerrar espías ARI, esperar transacciones), `/health` que devuelva
-503 si la base no responde, esquema creado por migraciones al arrancar (correr `migrate.js` en el
-entrypoint y retirar los `CREATE TABLE` del módulo), middleware de error de Express que no filtre
-mensajes de Postgres, logger con niveles y formato JSON.
+**Bloque 3 — que el proceso no muera solo.** ✅ 1.5.0 (completo). `pool.on('error')` ✅ 1.4.0, `max`/`statement_timeout` ✅ 1.5.0 (`PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, timeouts de conexión e idle),
+`SIGTERM` con cierre ordenado (cerrar espías ARI, esperar transacciones) ✅ 1.5.0 (`cerrarOrdenado`: 10 s de espera al pool, tope duro de 15 s; `unhandledRejection` logueado), `/health` que devuelva
+503 si la base no responde ✅ 1.5.0 (también `/health/ready`, que usan el compose y el Dockerfile), esquema creado por migraciones al arrancar (correr `migrate.js` en el
+entrypoint y retirar los `CREATE TABLE` del módulo) ✅ 1.5.0 (`docker-entrypoint.sh` + `0009_schema_runtime.sql`; cero DDL en runtime), middleware de error de Express que no filtre
+mensajes de Postgres ✅ 1.5.0 (`errores.js`; quedan 8 `catch` con `status(400).json({error:e.message})` en rutas admin/supervisor, menor), logger con niveles y formato JSON ✅ 1.5.0 (`log.js`, `LOG_LEVEL`/`LOG_FORMAT`).
 
 **Bloque 4 — fail2ban de verdad y endurecimiento de Asterisk.** Instalar fail2ban en la imagen (o
 un vigía propio sobre el canal `security` que ya se emite) y que el panel muestre lo que existe;

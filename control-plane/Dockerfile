@@ -29,5 +29,5 @@ RUN chmod +x /app/docker-entrypoint.sh
 ENV NODE_ENV=production PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-  CMD curl -fsS http://127.0.0.1:3000/health || exit 1
+  CMD curl -fsS http://127.0.0.1:3000/health/ready || exit 1
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

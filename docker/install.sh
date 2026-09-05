@@ -115,9 +115,31 @@ install_ctl(){
 put_dashboard_bind(){   # $1 = perfiles activos (csv)
   if [[ ",$1," == *",proxy,"* ]]; then put DASHBOARD_BIND 127.0.0.1; else put DASHBOARD_BIND 0.0.0.0; fi
 }
+# Respaldo programado: una linea en el cron del host (3:00) que corre backup-cron.sh
+# (respaldo + retencion BACKUP_KEEP dentro del contenedor de la API). Idempotente:
+# si la linea ya esta no la duplica; si apunta a otro directorio la reemplaza.
+install_backup_cron(){
+  local sh="$HERE/backup-cron.sh" tag="# pbxng-backup" line cur
+  [[ -f "$sh" ]] || return 0
+  chmod +x "$sh" "$HERE/asterisk-drain.sh" 2>/dev/null || true
+  has BACKUP_KEEP || put BACKUP_KEEP 14
+  line="0 3 * * * $sh >/dev/null 2>&1 $tag"
+  if [[ -d /etc/cron.d ]]; then
+    # cron.d exige usuario: root, que es quien puede hablar con Docker.
+    printf 'SHELL=/bin/bash\n0 3 * * * root %s >/dev/null 2>&1 %s\n' "$sh" "$tag" > /etc/cron.d/pbxng-backup 2>/dev/null \
+      && chmod 644 /etc/cron.d/pbxng-backup && { g "  respaldo programado: todos los dias 03:00 (/etc/cron.d/pbxng-backup)"; return 0; }
+  fi
+  if command -v crontab >/dev/null; then
+    cur="$(crontab -l 2>/dev/null | grep -v "$tag" || true)"
+    printf '%s\n%s\n' "$cur" "$line" | sed '/^$/d' | crontab - 2>/dev/null \
+      && { g "  respaldo programado: todos los dias 03:00 (crontab de $(id -un))"; return 0; }
+  fi
+  y "  (no pude instalar el cron del respaldo; agregalo a mano: $line)"
+}
 deploy(){
   preflight_secrets
   install_ctl
+  install_backup_cron
   c "Desplegando [$ROLE]  modulos: $CPROFILES  (compose: $CF)"
   COMPOSE_PROFILES="$CPROFILES" docker compose -f "$CF" "${UP[@]}"
   echo; c "Estado"; COMPOSE_PROFILES="$CPROFILES" docker compose -f "$CF" ps
@@ -198,7 +220,7 @@ all)
   put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"
   put TURN_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
   put_dashboard_bind "$CPROFILES"
-  put COMPOSE_PROFILES "$CPROFILES"
+  put COMPOSE_PROFILES "$CPROFILES"; put PBXNG_COMPOSE_FILE "$CF"
   deploy
   echo; g "================================================================"
   if [[ ",$CPROFILES," == *",proxy,"* ]]; then
@@ -229,7 +251,7 @@ core)
   put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
   put TURN_HOST "${TURN_IP:-$LAN}"
   put_dashboard_bind "$CPROFILES"
-  put COMPOSE_PROFILES "$CPROFILES"
+  put COMPOSE_PROFILES "$CPROFILES"; put PBXNG_COMPOSE_FILE "$CF"
   deploy
   echo; g "================================================================"
   if [[ ",$CPROFILES," == *",proxy,"* ]]; then

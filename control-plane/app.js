@@ -5,6 +5,9 @@ const http = require('http');
 const os = require('os');
 const fsx = require('fs');
 const express = require('express');
+const logger = require('./log');   // logger con niveles y JSON (LOG_LEVEL / LOG_FORMAT, docs/CONTRATOS.md §6)
+const log = logger('API');
+const { errorHttp } = require('./errores');   // traduce errores (pg → mensaje genérico) a {error} con status (docs/CONTRATOS.md §3)
 const acme = require('./acme');  // ACME/Let's Encrypt (certificados TLS sin proxy)
 const { Server } = require('socket.io');
 const { Pool } = require('pg');
@@ -45,7 +48,7 @@ const SECRET = process.env.JWT_SECRET || '';
  * Un arranque que falla con un mensaje claro es mejor que una central abierta
  * (docs/CONTRATOS.md §6: install.sh genera el valor; acá sólo se exige). */
 if (!SECRET || SECRET === '__SET_JWT_SECRET__' || SECRET.length < 16) {
-  console.error('[API] JWT_SECRET vacío, placeholder o demasiado corto (mínimo 16 caracteres). Definilo en el .env (install.sh lo genera) y volvé a arrancar.');
+  log.error('JWT_SECRET vacío, placeholder o demasiado corto (mínimo 16 caracteres). Definilo en el .env (install.sh lo genera) y volvé a arrancar.');
   process.exit(1);
 }
 
@@ -55,7 +58,7 @@ const VAPID = {
   priv: process.env.VAPID_PRIVATE || '__SET_VAPID_PRIVATE__',
   subject: process.env.VAPID_SUBJECT || 'mailto:soporte@ies.com.uy',
 };
-try { webpush.setVapidDetails(VAPID.subject, VAPID.pub, VAPID.priv); } catch (e) { console.error('[PUSH] VAPID', e.message); }
+try { webpush.setVapidDetails(VAPID.subject, VAPID.pub, VAPID.priv); } catch (e) { logger('PUSH').error('VAPID', e); }
 
 async function sendPushToExt(ext, payload) {
   if (!ext) return 0;
@@ -67,7 +70,7 @@ async function sendPushToExt(ext, payload) {
       try { await webpush.sendNotification(sub, JSON.stringify(payload)); sent++; }
       catch (err) { if (err.statusCode === 404 || err.statusCode === 410) await pool.query('DELETE FROM pbxng_push_subs WHERE endpoint=$1', [s.endpoint]); }
     }
-  } catch (e) { console.error('[PUSH] send', e.message); }
+  } catch (e) { logger('PUSH').error('send', e); }
   try { sent += await pushProviders.sendNative(ext, payload); } catch (_) {}
   return sent;
 }
@@ -100,7 +103,17 @@ async function geoLookup(ips) {
 
 const CFG = {
   port: process.env.PORT || 3000,
-  db: { host: process.env.DB_HOST || '127.0.0.1', port: +(process.env.DB_PORT || 5432), database: process.env.DB_NAME || 'pbxng', user: process.env.DB_USER || 'pbxng', password: process.env.DB_PASS || '__SET_DB_PASS__' },
+  db: {
+    host: process.env.DB_HOST || '127.0.0.1', port: +(process.env.DB_PORT || 5432), database: process.env.DB_NAME || 'pbxng', user: process.env.DB_USER || 'pbxng', password: process.env.DB_PASS || '__SET_DB_PASS__',
+    /* Límites del pool (docs/CONTRATOS.md §6). Sin `max` el pool crece hasta 10 igual,
+     * pero sin statement_timeout una consulta colgada (lock, disco lleno) retiene el
+     * cliente para siempre y con diez de esas la API deja de atender sin morir. */
+    max: +(process.env.PG_POOL_MAX || 10),
+    idleTimeoutMillis: 30000,            // un cliente ocioso se devuelve a Postgres a los 30 s
+    connectionTimeoutMillis: 5000,       // sin conexión en 5 s → error (no espera infinita)
+    statement_timeout: +(process.env.PG_STATEMENT_TIMEOUT_MS || 30000),   // lo cancela el servidor (SQLSTATE 57014)
+    query_timeout: +(process.env.PG_STATEMENT_TIMEOUT_MS || 30000) + 5000, // lo corta el cliente si el servidor no contestó ni a la cancelación
+  },
   ari: { url: process.env.ARI_URL || 'http://127.0.0.1:8088', user: process.env.ARI_USER || 'pbxng', pass: process.env.ARI_PASS || '__SET_ARI_PASS__', app: process.env.ARI_APP || 'pbxng' },
   ami: { host: process.env.AMI_HOST || '127.0.0.1', port: +(process.env.AMI_PORT || 5038), user: process.env.AMI_USER || 'pbxng-ami', pass: process.env.AMI_PASS || '__SET_AMI_PASS__' },
 };
@@ -122,7 +135,7 @@ const pool = new Pool(CFG.db);
  * conexión. Sin oyente, Node lo trata como excepción no capturada y tumba TODA la
  * API (y con ella el softphone, la presencia y el IVR) por un corte de un segundo.
  * Se loguea y se sigue: el pool descarta ese cliente y abre otro en el próximo query. */
-pool.on('error', (e) => console.error('[DB] cliente del pool con error (se descarta, el pool reconecta):', e && e.message));
+pool.on('error', (e) => logger('DB').error('cliente del pool con error (se descarta, el pool reconecta)', e));
 const diagtrunk = require('./diagtrunk');
 const backup = require('./backup');     // respaldo y restauracion del appliance
 const salud = require('./salud');       // estado REAL de los nodos (medido, no configurado)
@@ -200,12 +213,12 @@ async function connectAri() {
       if (!bid) return;
       delete pendingConf[channel.id];
       try { await channel.answer(); } catch (_) {}
-      try { await c.bridges.addChannel({ bridgeId: bid, channel: channel.id }); } catch (e) { console.error('[CONF] add', e.message); }
+      try { await c.bridges.addChannel({ bridgeId: bid, channel: channel.id }); } catch (e) { logger('CONF').error('add', e); }
     });
     const onDown = (why) => {
       if (ari !== c) return;                 // ya fue reemplazado por otra conexion
       ari = null; state.ari = false; callEngine.detach();
-      console.error('[ARI] desconectado:', why);
+      logger('ARI').warn('desconectado: ' + why);
       setTimeout(connectAri, ariBackoff); ariBackoff = Math.min(30000, ariBackoff * 2);
     };
     c.on('WebSocketClose', () => onDown('websocket cerrado'));
@@ -213,11 +226,11 @@ async function connectAri() {
     c.on('APILoadError', (e) => onDown(e && e.message));
     await c.start(CFG.ari.app, true);   // true = todos los eventos de Asterisk, no solo los de Stasis
     ari = c; state.ari = true; ariBackoff = 2000;
-    console.log('[ARI] ok (eventos de toda la central)');
+    logger('ARI').info('ok (eventos de toda la central)');
     callEngine.attach(c);
-    try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { console.error('[AI] init', e.message); }
+    try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { logger('AI').error('init', e); }
   } catch (e) {
-    console.error('[ARI] sin conexion (' + e.message + '); reintento en ' + Math.round(ariBackoff / 1000) + 's');
+    logger('ARI').warn('sin conexion (' + e.message + '); reintento en ' + Math.round(ariBackoff / 1000) + 's');
     setTimeout(connectAri, ariBackoff); ariBackoff = Math.min(30000, ariBackoff * 2);
   }
 }
@@ -233,7 +246,7 @@ async function handleAiAgent(channel, agentId) {
   let agent = null;
   try { const { rows } = await pool.query('SELECT * FROM pbxng_ai_agents WHERE id=$1', [agentId]); agent = rows[0]; } catch (_) {}
   if (!agent || agent.enabled === false) { try { await channel.answer(); await channel.play({ media: 'sound:vm-goodbye' }); } catch (_) {} setTimeout(() => { channel.hangup().catch(() => {}); }, 1200); return; }
-  console.log('[AI-IVR] llamada -> agente', agent.name, '| provider', agent.provider + '/' + agent.model);
+  logger('AI-IVR').info('llamada -> agente ' + agent.name, { provider: agent.provider + '/' + agent.model });
   return aiPipeline.startAiSession(channel, agent);
 }
 
@@ -241,7 +254,7 @@ const ami = new AsteriskManager(CFG.ami.port, CFG.ami.host, CFG.ami.user, CFG.am
 ami.keepConnected();
 ami.on('connect', () => { state.ami = true; });
 ami.on('disconnect', () => { state.ami = false; });
-ami.on('error', (e) => console.error('[AMI]', e && e.message));
+ami.on('error', (e) => logger('AMI').error(e && e.message));
 
 function amiAction(action) {
   return new Promise((resolve, reject) => {
@@ -336,8 +349,8 @@ async function upsertSbcLink(b) {
  * colgar/retener/transferir/aparcar, supervision con snoop. */
 /* Configuración SIP de la central (Configuración → SIP): NAT, RTP, timers, TLS, códecs.
  * Genera pbxng.d/{pjsip,rtp}.conf y recarga; sólo admin (rbac: no está en la tabla). */
-const sipConf = require('./sipconf')({ app, pool, amiCommand, escribir: astconf.escribir, log: (...a) => console.log('[sipconf]', ...a) });
-const callEngine = require('./callengine')({ app, auth, mismaExt, amiAction, amiCommand, broadcastSoon: (...a) => broadcastSoon(...a), appName: CFG.ari.app, log: (...a) => console.log('[calls]', ...a) });
+const sipConf = require('./sipconf')({ app, pool, amiCommand, escribir: astconf.escribir, log: (...a) => logger('sipconf').info(...a) });
+const callEngine = require('./callengine')({ app, auth, mismaExt, amiAction, amiCommand, broadcastSoon: (...a) => broadcastSoon(...a), appName: CFG.ari.app, log: (...a) => logger('calls').info(...a) });
 async function endpointStates() { return callEngine.endpointStates(); }
 // Sondeo SIP OPTIONS a una troncal (para troncales gestionadas por el SBC/kamailio)
 const _dgram = require('dgram');
@@ -472,7 +485,25 @@ async function setDialplan(client, context, exten, rows) {
   for (const r of rows) await client.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', [context, exten, r[0], r[1], r[2]]);
 }
 
-app.get('/health', async (req, res) => { let db = false; try { await pool.query('SELECT 1'); db = true; } catch (_) {} res.json({ status: 'ok', db, ari: state.ari, ami: state.ami, ts: new Date().toISOString() }); });
+/* /health: 200 si la base responde (aunque ARI/AMI estén caídos: se reportan, pero la
+ * API sirve igual el panel y la config); 503 'degraded' si la DB no contesta en 2 s.
+ * Es lo que mira el HEALTHCHECK del contenedor: sin DB no hay nada que atender y
+ * conviene que compose lo marque unhealthy. /health/ready es el mismo chequeo con el
+ * nombre que espera el healthcheck de compose. */
+async function healthCheck(req, res) {
+  let db = false;
+  const t0 = Date.now();
+  try {
+    await Promise.race([pool.query('SELECT 1'), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000))]);
+    db = true;
+  } catch (_) {}
+  // Durante el cierre el status dice 'shutting_down' (no 'degraded') y `db` sigue
+  // siendo lo medido: el panel distingue así un reinicio de una base caída.
+  const body = { status: cerrando ? 'shutting_down' : (db ? 'ok' : 'degraded'), db, db_ms: Date.now() - t0, ari: state.ari, ami: state.ami, shutting_down: cerrando, ts: new Date().toISOString() };
+  res.status(db && !cerrando ? 200 : 503).json(body);
+}
+app.get('/health', healthCheck);
+app.get('/health/ready', healthCheck);
 
 // ---------------- Autenticación ----------------
 function auth(req, res, next) {
@@ -643,7 +674,7 @@ app.post('/api/auth/login', limiteIntentos('username'), async (req, res) => {
     const token = jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext: u.ext || null }, SECRET, { expiresIn: '12h' });
     alerts.onLogin({ ok: true, username: u.username, role: u.role, ip, ua }).catch(() => {});
     res.json({ token, user: { username: u.username, name: u.name, role: u.role, ext: u.ext || null }, must_change: !!u.must_change });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.get('/api/me/sipcreds', auth, async (req, res) => {
   const ext = req.user.ext;
@@ -652,7 +683,7 @@ app.get('/api/me/sipcreds', auth, async (req, res) => {
     const { rows } = await pool.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
     if (!rows[0]) return res.status(404).json({ error: 'interno no existe' });
     res.json({ ext: String(ext), password: rows[0].password });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // Aprovisionamiento remoto de un telefono: arma la config completa (SIP + ICE + CRM)
 // para un interno y devuelve tambien el prov_url (pbxng://prov#<b64url>) listo para QR.
@@ -688,7 +719,7 @@ app.get('/api/provision', auth, async (req, res) => {
     };
     const b64url = Buffer.from(JSON.stringify(cfg), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     res.json({ ...cfg, prov_url: 'pbxng://prov#' + b64url });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // Estado de setup (publico): si el admin sigue con la clave por defecto, el login lo sugiere
 // ICE/TURN para el softphone WebRTC: se arma con el dominio y las credenciales de coturn (no hardcodear)
@@ -724,7 +755,7 @@ app.post('/api/auth/password', auth, async (req, res) => {
     }
     await pool.query('UPDATE pbxng_users SET password_hash=$1, must_change=false WHERE id=$2', [await bcrypt.hash(String(password), 10), req.user.uid]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: { username: req.user.username, name: req.user.name, role: req.user.role, ext: req.user.ext || null } }));
 
@@ -735,7 +766,7 @@ app.get('/api/agent/state', auth, async (req,res)=>{ try{
   const qs = await _agentQueues(ext);
   const paused = qs.length ? qs.every(q=>Number(q.paused)===1) : false;
   res.json({ ext, paused, inQueue: qs.length>0, queues: qs.map(q=>q.queue_name) });
-}catch(e){ res.status(500).json({error:e.message}); } });
+}catch(e){ errorHttp(res, e); } });
 app.post('/api/agent/pause', auth, async (req,res)=>{ try{
   const ext = req.user.ext; if(!ext) return res.status(400).json({error:'sin interno asignado'});
   const paused = !!(req.body && req.body.paused);
@@ -744,48 +775,34 @@ app.post('/api/agent/pause', auth, async (req,res)=>{ try{
   try { await amiAction({ Action:'QueuePause', Interface:'PJSIP/'+ext, Paused: paused?'true':'false', Reason: reason }); } catch(_){}
   try { await pool.query('UPDATE queue_members SET paused=$2 WHERE interface=$1',['PJSIP/'+ext, paused?1:0]); } catch(_){}
   res.json({ ext, paused });
-}catch(e){ res.status(500).json({error:e.message}); } });
+}catch(e){ errorHttp(res, e); } });
 
 
 // ---------------- Web Push (rutas publicas: la PWA usa credenciales SIP, no JWT) ----------------
-pool.query(`CREATE TABLE IF NOT EXISTS pbxng_push_subs (
-  id serial PRIMARY KEY, ext text NOT NULL, endpoint text UNIQUE NOT NULL,
-  p256dh text NOT NULL, auth text NOT NULL, ua text, created_at timestamptz DEFAULT now())`).catch(e => console.error('[PUSH] table', e.message));
-try { pushProviders.init(pool); } catch (e) { console.error('[PUSH] init', e.message); }
+/* ESQUEMA: las tablas y columnas viven en migrations/ (0009_schema_runtime.sql y
+ * siguientes) y las aplica `node migrate.js` desde docker-entrypoint.sh ANTES de que
+ * arranque este proceso. Acá ya no hay CREATE TABLE / ADD COLUMN: si hace falta un
+ * cambio de esquema se agrega 00NN_*.sql (nunca se edita una aplicada). Lo que queda
+ * abajo son filas semilla (datos, no esquema), idempotentes. */
+try { pushProviders.init(pool); } catch (e) { logger('PUSH').error('init', e); }
 
-// --- Bootstrap primer arranque: columna must_change + admin por defecto si no hay usuarios ---
-pool.query("ALTER TABLE pbxng_users ADD COLUMN IF NOT EXISTS ext text").catch(() => {});
-/* Roles viejos ('operator'/'viewer', de antes de 1.4.0) → los de rbac.js. Es lo mismo
- * que hace migrations/0008_roles.sql, repetido acá porque las migraciones sólo las
- * corre deploy.sh y una central actualizada a mano quedaría con usuarios que no
- * pueden entrar (el login los rechaza con 403). Idempotente. */
-pool.query("UPDATE pbxng_users SET role='supervisor' WHERE role='operator'").catch(() => {});
-pool.query("UPDATE pbxng_users SET role='agente' WHERE role='viewer'").catch(() => {});
-pool.query("ALTER TABLE pbxng_users ALTER COLUMN role SET DEFAULT 'agente'").catch(() => {});
-pool.query("ALTER TABLE pbxng_users ADD COLUMN IF NOT EXISTS must_change boolean DEFAULT false").then(async () => {
-  const { rows } = await pool.query('SELECT count(*)::int n FROM pbxng_users');
+// --- Bootstrap primer arranque: admin por defecto si no hay usuarios ---
+pool.query('SELECT count(*)::int n FROM pbxng_users').then(async ({ rows }) => {
   if (rows[0].n === 0) {
     const pass = process.env.ADMIN_DEFAULT_PASS || 'admin';
     await pool.query("INSERT INTO pbxng_users (username,password_hash,name,role,must_change) VALUES ('admin',$1,'Administrador','admin',true)", [await bcrypt.hash(pass, 10)]);
-    console.log("[BOOTSTRAP] usuario 'admin' creado (clave por defecto: '" + pass + "') - cambiala en el primer ingreso");
+    logger('BOOTSTRAP').info("usuario 'admin' creado (clave por defecto: '" + pass + "') - cambiala en el primer ingreso");
   }
-}).catch(e => console.error('[BOOTSTRAP] admin', e.message));
+}).catch(e => logger('BOOTSTRAP').error('admin', e));
 // --- Empresa (tenant) por defecto si no existe ninguna ---
 pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
   if (rows[0].n === 0) {
     const name = process.env.DEFAULT_COMPANY || 'Mi Empresa';
     await pool.query("INSERT INTO tenants (id,name,slug,context_prefix,active) VALUES (1,$1,'default','',true) ON CONFLICT (id) DO NOTHING", [name]);
     await pool.query("SELECT setval('tenants_id_seq', (SELECT GREATEST(COALESCE(MAX(id),1),1) FROM tenants))");
-    console.log('[BOOTSTRAP] empresa por defecto creada: ' + name);
+    logger('BOOTSTRAP').info('empresa por defecto creada: ' + name);
   }
-}).catch(e => console.error('[BOOTSTRAP] tenant', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_enroll (token text PRIMARY KEY, ext text, password text, label text, created_at timestamptz DEFAULT now(), expires_at timestamptz, used_at timestamptz)").catch(e => console.error('[ENROLL] table', e.message));
-// Bitacora de activacion: cuando canjearon el QR/enlace y con que aparato. Sirve para saber
-// si la persona ya configuro su telefono, y para detectar un canje desde un equipo raro.
-(async () => {
-  for (const col of ['activated_at timestamptz', 'device text', 'platform text', 'user_agent text', 'ip text', 'uses int DEFAULT 0'])
-    await pool.query('ALTER TABLE pbxng_enroll ADD COLUMN IF NOT EXISTS ' + col).catch(() => {});
-})();
+}).catch(e => logger('BOOTSTRAP').error('tenant', e));
 
 // Del User-Agent sacamos algo legible para el panel ("iPhone · Safari", "Windows · Escritorio PBX-NG").
 function parseDevice(ua) {
@@ -797,33 +814,16 @@ function parseDevice(ua) {
   if (device === 'Navegador' && nav) device = nav;
   return { device, platform };
 }
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban (jail text PRIMARY KEY, banned jsonb DEFAULT '[]', total_failed int DEFAULT 0, total_banned int DEFAULT 0, updated_at timestamptz DEFAULT now())").catch(e => console.error('[F2B] table', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_fail2ban_cmd (id serial PRIMARY KEY, cmd text, ip text, jail text, created_at timestamptz DEFAULT now(), done_at timestamptz)").catch(e => console.error('[F2B] cmd', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_recordings (id serial PRIMARY KEY, filename text UNIQUE NOT NULL, ext text, src text, dst text, started_at timestamptz, bytes bigint DEFAULT 0, duration int DEFAULT 0, storage text DEFAULT 'local', remote_url text, linkedid text, deleted boolean DEFAULT false, created_at timestamptz DEFAULT now())").catch(e => console.error('[REC] table', e.message));
-pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS transcript text").catch(()=>{});
-pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS analysis jsonb").catch(()=>{});
-pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS transcribed_at timestamptz").catch(()=>{});
-pool.query("ALTER TABLE pbxng_recordings ADD COLUMN IF NOT EXISTS peaks jsonb").catch(()=>{});
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_prompts (id serial PRIMARY KEY, name text UNIQUE NOT NULL, format text DEFAULT 'wav', bytes int DEFAULT 0, data bytea, deleted boolean DEFAULT false, updated_at timestamptz DEFAULT now(), synced_at timestamptz)").catch(e => console.error('[PROMPT] table', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_email_config (tenant_id int PRIMARY KEY, host text, port int DEFAULT 587, secure boolean DEFAULT false, username text, password text, from_addr text, enabled boolean DEFAULT false, updated_at timestamptz DEFAULT now())").catch(e => console.error('[MAIL] table', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_integrations (type text PRIMARY KEY, enabled boolean DEFAULT false, config jsonb DEFAULT '{}', updated_at timestamptz DEFAULT now())").catch(e => console.error('[INT] table', e.message));
-  pool.query("CREATE TABLE IF NOT EXISTS pbxng_ai_agents (id serial PRIMARY KEY, name text, exten text, greeting text DEFAULT 'demo-congrats', system_prompt text DEFAULT '', voice text DEFAULT 'es-ES', provider text DEFAULT 'openai', model text DEFAULT 'gpt-4o-mini', enabled boolean DEFAULT true, created_at timestamptz DEFAULT now())").catch(e => console.error('[AI] table', e.message));
-  pool.query("ALTER TABLE pbxng_ivr ADD COLUMN IF NOT EXISTS flow jsonb").catch(e => console.error('[IVR] flow col', e.message));
-pool.query("ALTER TABLE pbxng_trunks ADD COLUMN IF NOT EXISTS kind text DEFAULT 'asterisk'").catch(e => console.error('[TRK] kind', e.message));
-  pool.query("ALTER TABLE pbxng_trunks ADD COLUMN IF NOT EXISTS kam_config jsonb").catch(e => console.error('[TRK] kamcfg', e.message));
-  pool.query("CREATE TABLE IF NOT EXISTS pbxng_outbound_routes (id serial PRIMARY KEY, name text, pattern text, trunk text, strip int DEFAULT 0, prepend text, callerid text, created_at timestamptz DEFAULT now())").catch(e => console.error('[ROUT] out', e.message));
+  /* Troncal fija al SBC creada antes del modulo: se registra en pbxng_trunks para que
+   * el panel la vea (idempotente; 'sbc_link_removed' evita resucitarla si la borraron). */
   pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,do_register,tenant_id,kind,adv_config) " +
     "SELECT 'to-sbc', COALESCE((SELECT match FROM ps_endpoint_id_ips WHERE id='to-sbc'),''), 5060, false, 1, 'sbc', " +
     "'{\"sbc\":true,\"label\":\"SBC\",\"mode\":\"ip\",\"transport\":\"udp\"}'::jsonb " +
-    "WHERE EXISTS (SELECT 1 FROM ps_endpoints WHERE id='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_trunks WHERE name='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='sbc_link_removed')").catch(e => console.error('[TRK] sbc-seed', e.message));
+    "WHERE EXISTS (SELECT 1 FROM ps_endpoints WHERE id='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_trunks WHERE name='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='sbc_link_removed')").catch(e => logger('TRK').error('sbc-seed', e));
   /* Instalaciones anteriores al modulo: si ya habia una troncal al SBC, el modulo
    * "Conexion a SBC-NG" arranca encendido (misma regla que la migracion 0007). */
-  pool.query("INSERT INTO pbxng_settings(key,value) SELECT 'mod_sbc','1' WHERE EXISTS (SELECT 1 FROM pbxng_trunks WHERE kind='sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='mod_sbc') ON CONFLICT (key) DO NOTHING").catch(e => console.error('[SBC] mod-seed', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_ivr_audios (id serial PRIMARY KEY, name text UNIQUE, text text, voice text, ref text, created_at timestamptz DEFAULT now())").catch(e => console.error('[IVRA] table', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_inbound_routes (id serial PRIMARY KEY, did text, name text, dest_type text, dest_value text, created_at timestamptz DEFAULT now())").catch(e => console.error('[ROUT] in', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_directory (ext text PRIMARY KEY, name text, updated_at timestamptz DEFAULT now())").catch(e => console.error('[DIR] table', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_rec_config (id int PRIMARY KEY DEFAULT 1, backend text DEFAULT 'local', nas_path text, s3_endpoint text, s3_region text, s3_bucket text, s3_key text, s3_secret text, s3_prefix text DEFAULT 'recordings/', auto_upload boolean DEFAULT false, retain_local boolean DEFAULT true, updated_at timestamptz DEFAULT now())").then(() => pool.query("INSERT INTO pbxng_rec_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING")).catch(e => console.error('[REC] cfg', e.message));
-pool.query("ALTER TABLE pbxng_rec_config ADD COLUMN IF NOT EXISTS nas_type text DEFAULT 'mount', ADD COLUMN IF NOT EXISTS nas_server text, ADD COLUMN IF NOT EXISTS nas_share text, ADD COLUMN IF NOT EXISTS nas_user text, ADD COLUMN IF NOT EXISTS nas_pass text").catch(()=>{});
+  pool.query("INSERT INTO pbxng_settings(key,value) SELECT 'mod_sbc','1' WHERE EXISTS (SELECT 1 FROM pbxng_trunks WHERE kind='sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='mod_sbc') ON CONFLICT (key) DO NOTHING").catch(e => logger('SBC').error('mod-seed', e));
+pool.query("INSERT INTO pbxng_rec_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING").catch(e => logger('REC').error('cfg', e));
 
 // Enrollment: canje publico del token (la PWA lo usa sin JWT)
 /* Canje de credenciales SIP por un token del softphone.
@@ -847,7 +847,7 @@ app.post('/api/phone/token', limiteIntentos('ext'), async (req, res) => {
     if (!ok) return res.status(401).json({ error: 'extensión o clave incorrecta' });
     const token = jwt.sign({ scope: 'phone', ext: String(ext) }, SECRET, { expiresIn: '30d' });
     res.json({ token, ext: String(ext) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 /* El enlace/QR de enrolado es de UN solo uso: entrega la clave SIP en claro, así que
@@ -917,7 +917,7 @@ app.get('/api/enroll/:token', async (req, res) => {
     };
     const b64u = Buffer.from(JSON.stringify(prov), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     res.json({ ext: e.ext, password: e.password, server: dom, prov, prov_url: 'pbxng://prov#' + b64u });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.get('/api/recordings/:id/audio', async (req, res) => {
@@ -999,11 +999,11 @@ app.get('/api/recordings/:id/transcript', async (req, res) => {
     const { rows } = await pool.query('SELECT transcript, analysis, extract(epoch from transcribed_at)*1000 AS at FROM pbxng_recordings WHERE id=$1', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'no existe' });
     res.json({ transcript: rows[0].transcript || null, analysis: rows[0].analysis || null, at: rows[0].at || null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/recordings/:id/transcribe', async (req, res) => {
   try { const out = await doTranscribe(req.params.id); res.json(out); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 function pcmPeaks(pcm, bars) {
   bars = bars || 40; const n = Math.floor(pcm.length / 2); const per = Math.max(1, Math.floor(n / bars)); const out = []; let max = 1, rawmax = 0;
@@ -1022,7 +1022,7 @@ app.get('/api/recordings/:id/peaks', async (req, res) => {
     const out = pcmPeaks(pc.pcm, 40);
     await pool.query('UPDATE pbxng_recordings SET peaks=$1 WHERE id=$2', [JSON.stringify(out), req.params.id]);
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.get('/api/prompts/:id/audio', async (req, res) => {
@@ -1044,18 +1044,18 @@ app.post('/api/push/subscribe', async (req, res) => {
        ON CONFLICT (endpoint) DO UPDATE SET ext=EXCLUDED.ext, p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth, ua=EXCLUDED.ua`,
       [String(ext), subscription.endpoint, subscription.keys?.p256dh, subscription.keys?.auth, ua || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/push/register', async (req, res) => {
   const { ext, provider, prid, param, topic, ua } = req.body || {};
   if (!ext || !provider || !prid) return res.status(400).json({ error: 'ext, provider y prid (token) requeridos' });
   if (!['fcm', 'apns'].includes(provider)) return res.status(400).json({ error: 'provider debe ser fcm o apns (webpush usa /subscribe)' });
   try { await pushProviders.registerDevice(ext, provider, prid, param, topic, ua); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/push/unsubscribe', async (req, res) => {
   try { await pool.query('DELETE FROM pbxng_push_subs WHERE endpoint=$1', [req.body?.endpoint]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/push/test', auth, async (req, res) => {
   const ext = req.body?.ext;
@@ -1080,7 +1080,7 @@ app.post('/api/calls/record', async (req, res) => {
     if (action === 'stop') { await amiAction({ Action: 'StopMixMonitor', Channel: name }); }
     else { const file = 'pbxng-' + ext + '-' + Date.now() + '.wav'; await amiAction({ Action: 'MixMonitor', Channel: name, File: file }); }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 // Conferencia a 3: arma un bridge mixing con la llamada activa del interno + un tercero
@@ -1112,7 +1112,7 @@ app.post('/api/calls/conference', async (req, res) => {
     pendingConf[ch.id] = bridge.id;
     await ch.originate({ endpoint: 'PJSIP/' + third, app: CFG.ari.app, appArgs: 'conf', callerId: 'Conferencia <' + ext + '>', timeout: 30 });
     res.json({ ok: true, bridge: bridge.id, third });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 // Presencia (publica, para la PWA): mapa ext -> estado online/offline
@@ -1150,14 +1150,12 @@ app.get('/api/internal/wake', (req, res) => {
 // ============================================================
 //  Click-to-Call publico (WebRTC sin registro) - parte publica
 // ============================================================
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_click2call (id serial PRIMARY KEY, token text UNIQUE, name text, dest_type text DEFAULT 'extension', dest_value text, intro text, require_name boolean DEFAULT true, collect_geo boolean DEFAULT false, video boolean DEFAULT false, enabled boolean DEFAULT true, tenant_id int DEFAULT 1, created_at timestamptz DEFAULT now())").catch(e => console.error('[C2C] table', e.message));
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_c2c_sessions (id text PRIMARY KEY, link_id int, guest_ext text, dial_exten text, visitor_name text, geo text, meta text, created_at timestamptz DEFAULT now(), expires_at timestamptz)").catch(e => console.error('[C2C] sess table', e.message));
 const c2cRate = new Map();
 function c2cAllow(ip) { const now = Date.now(); const arr = (c2cRate.get(ip) || []).filter(t => now - t < 300000); arr.push(now); c2cRate.set(ip, arr); return arr.length <= 6; }
 function c2cDestRoute(type, val) { if (type === 'extension') return ['internal', val]; return ['ivr', val]; }
 app.get('/api/c2c/public/:token', async (req, res) => {
   try { const { rows } = await pool.query('SELECT name,intro,require_name,collect_geo,video,enabled FROM pbxng_click2call WHERE token=$1', [req.params.token]); if (!rows[0] || !rows[0].enabled) return res.status(404).json({ error: 'enlace no disponible' }); res.json(rows[0]); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/c2c/public/:token/session', async (req, res) => {
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -1183,7 +1181,7 @@ app.post('/api/c2c/public/:token/session', async (req, res) => {
     await c.query("INSERT INTO pbxng_c2c_sessions (id,link_id,guest_ext,dial_exten,visitor_name,geo,meta,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7, now() + interval '40 minutes')", [sid, link.id, guestExt, dialExten, vname, (b.geo ? JSON.stringify(b.geo).slice(0, 400) : null), (b.meta ? JSON.stringify(b.meta).slice(0, 400) : null)]);
     await c.query('COMMIT');
     res.json({ session: sid, ext: guestExt, pass: password, dial: dialExten, video: !!link.video });
-  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 async function c2cCleanup() {
   try { const { rows } = await pool.query("SELECT id,guest_ext,dial_exten FROM pbxng_c2c_sessions WHERE expires_at < now()");
@@ -1199,7 +1197,6 @@ setInterval(c2cCleanup, 120000);
 // ============================================================
 //  Auto-provisioning de telefonos fisicos (Yealink / Grandstream)
 // ============================================================
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_phones (id serial PRIMARY KEY, mac text UNIQUE, vendor text, model text, ext text, label text, line_label text, password text, tenant_id int DEFAULT 1, last_seen timestamptz, created_at timestamptz DEFAULT now())").catch(e => console.error('[PROV] table', e.message));
 async function createSipEndpoint(c, id, password, context = 'internal', tenant_id = 1) {
   await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,1,'no','yes','yes',60,$2) ON CONFLICT (id) DO NOTHING", [id, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
@@ -1235,7 +1232,6 @@ async function serveProv(req, res, file) {
 }
 app.get('/prov/:file', async (req, res) => { const tok = await getProvSetting('prov_token', ''); if (tok) return res.status(403).type('text/plain').send('token requerido'); return serveProv(req, res, req.params.file); });
 app.get('/prov/:token/:file', async (req, res) => { const tok = await getProvSetting('prov_token', ''); if (tok && req.params.token !== tok) return res.status(403).type('text/plain').send('forbidden'); return serveProv(req, res, req.params.file); });
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_call_geo (id serial PRIMARY KEY, ext text, number text, dir text, lat double precision, lng double precision, accuracy real, ua text, ts timestamptz DEFAULT now())").catch(e => console.error('[GEO] table', e.message));
 app.post('/api/geo/report', async (req, res) => {
   const b = req.body || {};
   const lat = parseFloat(b.lat), lng = parseFloat(b.lng);
@@ -1244,7 +1240,7 @@ app.post('/api/geo/report', async (req, res) => {
     await pool.query("INSERT INTO pbxng_call_geo (ext,number,dir,lat,lng,accuracy,ua) VALUES ($1,$2,$3,$4,$5,$6,$7)",
       [String(b.ext || '').slice(0, 32) || null, String(b.number || '').slice(0, 64) || null, b.dir === 'in' ? 'in' : 'out', lat, lng, parseFloat(b.accuracy) || null, String(req.headers['user-agent'] || '').slice(0, 200)]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // ---------------------------------------------------------------------------
 //  Buzon de voz: se lee DIRECTO del volumen compartido con Asterisk (/voicemail).
@@ -1312,7 +1308,7 @@ async function vmMarkRead(ext, id) {   // INBOX -> Old (como hace *97 al guardar
 app.get('/api/vm', async (req, res) => {
   if (!exigirExt(req, res, req.query.ext)) return;
   try { res.json(await vmList(req.query.ext || '')); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.get('/api/vm/audio', async (req, res) => {
   if (!exigirExt(req, res, req.query.ext)) return;
@@ -1322,12 +1318,12 @@ app.get('/api/vm/audio', async (req, res) => {
 app.post('/api/vm/del', async (req, res) => {
   if (!exigirExt(req, res, (req.body || {}).ext)) return;
   try { const { ext, folder, id } = req.body || {}; await vmDelete(ext, folder, id); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/vm/read', async (req, res) => {
   if (!exigirExt(req, res, (req.body || {}).ext)) return;
   try { const { ext, id } = req.body || {}; const nid = await vmMarkRead(ext, id); res.json({ ok: true, id: nid }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 // Transcripcion de un mensaje de voz (Whisper): baja el WAV del agente VM, lo pasa a PCM
 // y lo manda al servicio STT (faster-whisper). No persiste (los VM los maneja el agente).
@@ -1348,7 +1344,7 @@ app.post('/api/vm/transcribe', async (req, res) => {
     const dur = Math.round((pc.pcm.length / 2) / (pc.rate || 8000));
     const analysis = analyzeText(text, dur);
     res.json({ transcript: text, analysis });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // ============================================================================
 //  Buzon de voz -> Email  (voicemail-to-email con transcripcion)
@@ -1374,7 +1370,7 @@ async function vmTranscript(wav) {
 async function vmSendOne(smtp, brand, box, msg) {
   const wav = await vmAudio(box.mailbox, msg.folder, msg.id);
   let transcript = null;
-  if (box.email_transcribe) { try { transcript = await vmTranscript(wav); } catch (e) { console.warn('[vm-mail] stt', e.message); } }
+  if (box.email_transcribe) { try { transcript = await vmTranscript(wav); } catch (e) { logger('vm-mail').warn('stt', e); } }
   const when = new Date((msg.origtime || 0) * 1000).toLocaleString('es-UY', { timeZone: process.env.TZ || 'America/Montevideo' });
   const tx = nodemailer.createTransport({ host: smtp.host, port: smtp.port || 587, secure: !!smtp.secure, auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined });
   const { rows: dm } = await pool.query("SELECT value FROM pbxng_settings WHERE key='domain'");
@@ -1414,16 +1410,16 @@ async function vmMailTick() {
           await vmSendOne(smtp, brand, box, msg);
           await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (mailbox,mid) DO NOTHING',
             [box.mailbox, msg.id, msg.folder, msg.origtime || 0, box.email]);
-          console.log('[vm-mail] enviado', box.mailbox, msg.id, '->', box.email);
+          logger('vm-mail').info('enviado', { mailbox: box.mailbox, id: msg.id, to: box.email });
           if (box.email_delete) { try { await vmDelete(box.mailbox, msg.folder, msg.id); } catch (_) {} }
         } catch (e) {
-          console.error('[vm-mail] fallo', box.mailbox, msg.id, e.message);
+          logger('vm-mail').error('fallo', { mailbox: box.mailbox, id: msg.id }, e);
           await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok,err) VALUES ($1,$2,$3,$4,$5,false,$6) ON CONFLICT (mailbox,mid) DO UPDATE SET ok=false, err=$6',
             [box.mailbox, msg.id, msg.folder, msg.origtime || 0, box.email, String(e.message || e).slice(0, 300)]);
         }
       }
     }
-  } catch (e) { console.error('[vm-mail]', e.message); }
+  } catch (e) { logger('vm-mail').error(e); }
   finally { VM_MAIL_BUSY = false; }
 }
 setInterval(() => { vmMailTick().catch(() => {}); }, 45000);
@@ -1438,7 +1434,7 @@ app.get('/api/vm/email', async (req, res) => {
         (SELECT count(*) FROM pbxng_vm_sent s WHERE s.mailbox=v.mailbox AND s.ok) AS enviados
       FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox=v.mailbox ORDER BY v.mailbox`);
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/vm/email', async (req, res) => {
   const b = req.body || {};
@@ -1452,7 +1448,7 @@ app.post('/api/vm/email', async (req, res) => {
           email_transcribe=EXCLUDED.email_transcribe, email_delete=EXCLUDED.email_delete`,
       [String(b.mailbox), b.email || null, b.email_enabled !== false, b.email_attach !== false, b.email_transcribe !== false, !!b.email_delete]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // Forzar el envio de un mensaje puntual (boton "Enviar por correo" en el panel)
 app.post('/api/vm/email/send', async (req, res) => {
@@ -1506,16 +1502,16 @@ numbering.init(pool);
 
 // Plan de numeracion: que rangos se usan, que esta ocupado y por quien, y cual es el proximo libre
 app.get('/api/numbering/plan', async (req, res) => {
-  try { res.json(await numbering.plan()); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await numbering.plan()); } catch (e) { errorHttp(res, e); }
 });
 // Validar un numero antes de crear la extension (el panel lo llama mientras escribis)
 app.get('/api/numbering/check', async (req, res) => {
-  try { res.json(await numbering.check(req.query.ext, { ignorar: req.query.ignorar })); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await numbering.check(req.query.ext, { ignorar: req.query.ignorar })); } catch (e) { errorHttp(res, e); }
 });
 
 // Resumen: CPU, RAM, disco, interfaces y servicios de TODOS los nodos (no solo el core)
 app.get('/api/system/overview', async (req, res) => {
-  try { res.json(await sysmon.overview()); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await sysmon.overview()); } catch (e) { errorHttp(res, e); }
 });
 
 // Informe ejecutivo del historial de llamadas (HTML A4 -> imprimir / guardar como PDF)
@@ -1527,7 +1523,7 @@ app.get('/api/cdr/report', async (req, res) => {
       usuario: (req.user && (req.user.name || req.user.username)) || '',
     });
     res.type('html').send(html);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // Probar el destino de almacenamiento ANTES de confiarle las grabaciones
 app.post('/api/recordings/storage/test', async (req, res) => {
@@ -1537,9 +1533,9 @@ app.post('/api/recordings/storage/test', async (req, res) => {
 // Forzar la subida de lo pendiente (sin esperar la ronda automática)
 app.post('/api/recordings/storage/sync', async (req, res) => {
   try { await recstore.sweep(); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
-app.get('/api/recordings/storage/usage', async (req, res) => { try { res.json(await recstore.usage()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/recordings/storage/usage', async (req, res) => { try { res.json(await recstore.usage()); } catch (e) { errorHttp(res, e); } });
 app.post('/api/recordings/storage/nastest', async (req, res) => { try { res.json(await recstore.nastest(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 
 app.get('/api/alerts/rules', async (req, res) => {
@@ -1547,7 +1543,7 @@ app.get('/api/alerts/rules', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM pbxng_alert_rules ORDER BY event');
     const { rows: s } = await pool.query("SELECT value FROM pbxng_settings WHERE key='alert_to'");
     res.json({ rules: rows, default_to: (s[0] && s[0].value) || '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/alerts/rules', async (req, res) => {
   const b = req.body || {};
@@ -1558,11 +1554,11 @@ app.post('/api/alerts/rules', async (req, res) => {
         [b.event, !!b.enabled, b.recipients || null, JSON.stringify(b.params || {}), Number(b.throttle_min || 15)]);
     }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.get('/api/alerts/history', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,event,severity,title,to_addr,sent,err,created_at FROM pbxng_alerts ORDER BY created_at DESC LIMIT 50'); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 // Disparar una alerta de prueba (usa la regla real: si esta apagada o sin destinatario, avisa)
 app.post('/api/alerts/test', async (req, res) => {
@@ -1572,19 +1568,19 @@ app.post('/api/alerts/test', async (req, res) => {
       lines: [['Evento', ev], ['Origen', 'Prueba manual desde el panel'], ['Fecha', new Date().toLocaleString('es-UY')]],
       foot: 'Si recibís este correo, las alertas están funcionando. (La regla no necesita estar activa para esta prueba.)', key: 'test' + Date.now() });
     res.json(ok ? { ok: true } : { error: 'No se envió: falta destinatario (arriba) o el SMTP de la empresa no está configurado/activo.' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.get('/api/branding', async (req, res) => { try { const g = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value; }; res.json({ name: (await g('brand_name')) || 'PBX-NG', subtitle: (await g('brand_subtitle')) || 'Comunicaciones', tagline: (await g('brand_tagline')) || '', logo: (await g('brand_logo')) || '' , callcenter: (await g('mod_callcenter')) !== '0' }); } catch (e) { res.json({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' }); } });
 // auth ahora se aplica via gate deny-by-default arriba (isPublicApi)
-app.post('/api/branding', async (req, res) => { try { const b = req.body || {}; const setk = async (k, v) => { if (v === undefined) return; await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", [k, v || '']); }; await setk('brand_name', b.name); await setk('brand_subtitle', b.subtitle); await setk('brand_tagline', b.tagline); await setk('brand_logo', b.logo); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/branding', async (req, res) => { try { const b = req.body || {}; const setk = async (k, v) => { if (v === undefined) return; await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", [k, v || '']); }; await setk('brand_name', b.name); await setk('brand_subtitle', b.subtitle); await setk('brand_tagline', b.tagline); await setk('brand_logo', b.logo); res.json({ ok: true }); } catch (e) { errorHttp(res, e); } });
 app.get('/api/geo', async (req, res) => {
   const hours = Math.min(+(req.query.hours || 168), 720);
   const limit = Math.min(+(req.query.limit || 300), 1000);
   try {
     const { rows } = await pool.query("SELECT id, ext, number, dir, lat, lng, accuracy, extract(epoch from ts)::bigint AS ts FROM pbxng_call_geo WHERE ts > now() - ($1 || ' hours')::interval ORDER BY ts DESC LIMIT $2", [String(hours), limit]);
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.get('/api/metrics', async (req, res) => {
   let db_size = null; try { const r = await pool.query("SELECT pg_database_size('pbxng') AS s"); db_size = +r.rows[0].s; } catch (_) {}
@@ -1603,7 +1599,7 @@ app.get('/api/enrollments', async (req, res) => {
       estado: r.activated_at ? 'activado'
             : (r.expires_at && new Date(r.expires_at) < new Date()) ? 'vencido' : 'pendiente',
     })));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/enroll', async (req, res) => {
@@ -1621,7 +1617,7 @@ app.post('/api/enroll', async (req, res) => {
     await c.query("INSERT INTO pbxng_enroll (token,ext,password,label,expires_at) VALUES ($1,$2,$3,$4, now() + interval '24 hours')", [token, String(ext), password, label || null]);
     await c.query('COMMIT'); broadcastSoon();
     res.json({ token, ext: String(ext), password, path: '/enroll?token=' + token });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 // Seguridad: estado de Fail2Ban + geolocalizacion
@@ -1632,7 +1628,7 @@ app.get('/api/security', async (req, res) => {
     const geo = await geoLookup(ips);
     const { rows: wl } = await pool.query("SELECT ip, note, extract(epoch from created_at)::int AS created FROM pbxng_f2b_whitelist ORDER BY created_at");
     res.json({ jails: rows, geo, whitelist: wl });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // Geolocalización de IPs (para banderitas): ?ips=1.2.3.4,5.6.7.8
 app.get('/api/ipgeo', async (req, res) => {
@@ -1640,35 +1636,35 @@ app.get('/api/ipgeo', async (req, res) => {
     const ips = (req.query.ips || '').toString().split(',').map(s => s.trim()).filter(Boolean).slice(0, 200);
     if (!ips.length) return res.json({});
     res.json(await geoLookup(ips));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/security/unban', async (req, res) => {
   const { ip, jail } = req.body || {};
   if (!ip) return res.status(400).json({ error: 'ip requerida' });
   try { await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip, jail) VALUES ('unban',$1,$2)", [ip, jail || null]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/security/ban', async (req, res) => {
   const { ip, jail } = req.body || {};
   if (!ip) return res.status(400).json({ error: 'ip requerida' });
   try { await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip, jail) VALUES ('ban',$1,$2)", [ip, jail || null]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.get('/api/security/whitelist', async (req, res) => {
   try { const { rows } = await pool.query("SELECT ip, note, extract(epoch from created_at)::int AS created FROM pbxng_f2b_whitelist ORDER BY created_at"); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/security/whitelist', async (req, res) => {
   const { ip, note } = req.body || {};
   if (!ip) return res.status(400).json({ error: 'ip requerida' });
   try { await pool.query("INSERT INTO pbxng_f2b_whitelist (ip,note) VALUES ($1,$2) ON CONFLICT (ip) DO UPDATE SET note=EXCLUDED.note", [ip.trim(), note || null]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/security/whitelist/remove', async (req, res) => {
   const { ip } = req.body || {};
   if (!ip) return res.status(400).json({ error: 'ip requerida' });
   try { await pool.query("DELETE FROM pbxng_f2b_whitelist WHERE ip=$1", [ip]); await pool.query("INSERT INTO pbxng_fail2ban_cmd (cmd, ip) VALUES ('wl_del',$1)", [ip]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 
 // Email por empresa (SMTP)
@@ -1676,7 +1672,7 @@ app.get('/api/email/config', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT t.id AS tenant_id, t.name, e.host, e.port, e.secure, e.username, COALESCE(NULLIF(e.password,''),'') <> '' AS has_password, e.from_addr, e.enabled FROM tenants t LEFT JOIN pbxng_email_config e ON e.tenant_id=t.id ORDER BY t.id");
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/email/config', async (req, res) => {
   const b = req.body || {}; if (!b.tenant_id) return res.status(400).json({ error: 'tenant_id requerido' });
@@ -1685,7 +1681,7 @@ app.post('/api/email/config', async (req, res) => {
       ON CONFLICT (tenant_id) DO UPDATE SET host=$2,port=$3,secure=$4,username=$5,password=COALESCE(NULLIF($6,''), pbxng_email_config.password),from_addr=$7,enabled=$8,updated_at=now()`,
       [b.tenant_id, b.host || null, b.port || 587, !!b.secure, b.username || null, b.password || '', b.from_addr || null, !!b.enabled]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 function smtpHint(e) {
   const m = (e && e.message) || String(e); const code = (e && e.code) || '';
@@ -1712,7 +1708,7 @@ app.post('/api/email/test', async (req, res) => {
 });
 app.get('/api/prompts', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,name,format,bytes,updated_at,synced_at FROM pbxng_prompts WHERE deleted=false ORDER BY name'); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/prompts', async (req, res) => {
   const { name, format = 'wav', data } = req.body || {};
@@ -1724,11 +1720,11 @@ app.post('/api/prompts', async (req, res) => {
     await pool.query(`INSERT INTO pbxng_prompts (name,format,bytes,data,deleted,updated_at,synced_at) VALUES ($1,$2,$3,$4,false,now(),NULL)
       ON CONFLICT (name) DO UPDATE SET format=$2,bytes=$3,data=$4,deleted=false,updated_at=now(),synced_at=NULL`, [clean, format, buf.length, buf]);
     res.json({ ok: true, name: clean });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/prompts/:id', async (req, res) => {
   try { await pool.query('UPDATE pbxng_prompts SET deleted=true, updated_at=now(), synced_at=NULL WHERE id=$1', [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/enroll/email', async (req, res) => {
@@ -1763,10 +1759,10 @@ app.post('/api/enroll/email', async (req, res) => {
 });
 
 // Push (admin): dispositivos nativos + estado de proveedores
-app.get('/api/push/devices', async (req, res) => { try { const devices = await pushProviders.listDevices(); const { rows } = await pool.query('SELECT ext, count(*)::int AS n FROM pbxng_push_subs GROUP BY ext'); const status = await pushProviders.providerStatus(); res.json({ devices, webpush: rows, status, vapid: VAPID.pub }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/push/devices', async (req, res) => { try { const devices = await pushProviders.listDevices(); const { rows } = await pool.query('SELECT ext, count(*)::int AS n FROM pbxng_push_subs GROUP BY ext'); const status = await pushProviders.providerStatus(); res.json({ devices, webpush: rows, status, vapid: VAPID.pub }); } catch (e) { errorHttp(res, e); } });
 
 // Telefonos / Auto-provisioning (admin)
-app.get('/api/phones', async (req, res) => { try { const { rows } = await pool.query('SELECT id,mac,vendor,model,ext,label,line_label,last_seen,created_at FROM pbxng_phones ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/phones', async (req, res) => { try { const { rows } = await pool.query('SELECT id,mac,vendor,model,ext,label,line_label,last_seen,created_at FROM pbxng_phones ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/phones', async (req, res) => {
   const b = req.body || {}; const mac = normMac(b.mac);
   if (!mac || mac.length !== 12) return res.status(400).json({ error: 'MAC invalida (12 hex)' });
@@ -1779,10 +1775,10 @@ app.post('/api/phones', async (req, res) => {
     await createSipEndpoint(c, String(b.ext), password, 'internal', b.tenant_id || 1);
     const { rows } = await c.query("INSERT INTO pbxng_phones (mac,vendor,model,ext,label,line_label,password,tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (mac) DO UPDATE SET vendor=$2,model=$3,ext=$4,label=$5,line_label=$6,password=$7 RETURNING id", [mac, b.vendor || 'yealink', b.model || null, String(b.ext), b.label || null, b.line_label || null, password, b.tenant_id || 1]);
     await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ id: rows[0].id, mac, ext: String(b.ext) });
-  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
-app.put('/api/phones/:id', async (req, res) => { const b = req.body || {}; try { await pool.query('UPDATE pbxng_phones SET vendor=$1,model=$2,ext=$3,label=$4,line_label=$5 WHERE id=$6', [b.vendor || 'yealink', b.model || null, String(b.ext), b.label || null, b.line_label || null, req.params.id]); res.json({ updated: req.params.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.delete('/api/phones/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_phones WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.put('/api/phones/:id', async (req, res) => { const b = req.body || {}; try { await pool.query('UPDATE pbxng_phones SET vendor=$1,model=$2,ext=$3,label=$4,line_label=$5 WHERE id=$6', [b.vendor || 'yealink', b.model || null, String(b.ext), b.label || null, b.line_label || null, req.params.id]); res.json({ updated: req.params.id }); } catch (e) { errorHttp(res, e); } });
+app.delete('/api/phones/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_phones WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id }); } catch (e) { errorHttp(res, e); } });
 
 // Voz IA (servicio Piper + faster-whisper) - estado y recursos del contenedor
 app.get('/api/voz', async (req, res) => {
@@ -1797,24 +1793,24 @@ app.get('/api/voz', async (req, res) => {
 });
 async function vozBase() { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='voz_url'"); return (rows[0] && rows[0].value) || (NODES.voz ? 'http://' + NODES.voz + ':8080' : 'http://127.0.0.1:8080'); }
 async function vozFwd(method, path, body, ms) { const u = await vozBase(); const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); const r = await fetch(u + path, opt); return r; }
-app.get('/api/voz/logs', async (req, res) => { try { const r = await vozFwd('GET', '/admin/logs'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/voz/restart', async (req, res) => { try { const r = await vozFwd('POST', '/admin/restart', {}); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/voz/voices', async (req, res) => { try { const r = await vozFwd('GET', '/admin/voices'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/voz/voices/install', async (req, res) => { try { const r = await vozFwd('POST', '/admin/voices/install', req.body || {}, 240000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.delete('/api/voz/voices/:key', async (req, res) => { try { const r = await vozFwd('DELETE', '/admin/voices/' + encodeURIComponent(req.params.key)); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/voz/config', async (req, res) => { try { const r = await vozFwd('GET', '/admin/config'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/voz/config', async (req, res) => { try { const r = await vozFwd('POST', '/admin/config', req.body || {}); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/voz/test', async (req, res) => { try { const u = await vozBase(); const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: (req.body && req.body.text) || 'Hola, esta es una prueba de la voz seleccionada.', voice: req.body && req.body.voice, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(20000) }); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/voz/logs', async (req, res) => { try { const r = await vozFwd('GET', '/admin/logs'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/voz/restart', async (req, res) => { try { const r = await vozFwd('POST', '/admin/restart', {}); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.get('/api/voz/voices', async (req, res) => { try { const r = await vozFwd('GET', '/admin/voices'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/voz/voices/install', async (req, res) => { try { const r = await vozFwd('POST', '/admin/voices/install', req.body || {}, 240000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.delete('/api/voz/voices/:key', async (req, res) => { try { const r = await vozFwd('DELETE', '/admin/voices/' + encodeURIComponent(req.params.key)); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.get('/api/voz/config', async (req, res) => { try { const r = await vozFwd('GET', '/admin/config'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/voz/config', async (req, res) => { try { const r = await vozFwd('POST', '/admin/config', req.body || {}); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/voz/test', async (req, res) => { try { const u = await vozBase(); const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: (req.body && req.body.text) || 'Hola, esta es una prueba de la voz seleccionada.', voice: req.body && req.body.voice, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(20000) }); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); } catch (e) { errorHttp(res, e); } });
 
 // --- TURN / Coturn (agente CT106) ---
 const TURN_BASE = process.env.TURN_AGENT || (NODES.turn ? 'http://' + NODES.turn + ':8091' : 'http://127.0.0.1:8091');
 async function turnFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); return fetch(TURN_BASE + path, opt); }
-app.get('/api/turn', async (req, res) => { try { const r = await turnFwd('GET', '/health'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/turn/config', async (req, res) => { try { const r = await turnFwd('GET', '/config'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/turn/config', async (req, res) => { try { const r = await turnFwd('POST', '/config', req.body || {}, 15000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/turn/restart', async (req, res) => { try { const r = await turnFwd('POST', '/restart', {}, 15000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/turn/logs', async (req, res) => { try { const r = await turnFwd('GET', '/logs'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/turn/test', async (req, res) => { try { const r = await turnFwd('POST', '/test', {}, 15000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/turn', async (req, res) => { try { const r = await turnFwd('GET', '/health'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.get('/api/turn/config', async (req, res) => { try { const r = await turnFwd('GET', '/config'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/turn/config', async (req, res) => { try { const r = await turnFwd('POST', '/config', req.body || {}, 15000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/turn/restart', async (req, res) => { try { const r = await turnFwd('POST', '/restart', {}, 15000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.get('/api/turn/logs', async (req, res) => { try { const r = await turnFwd('GET', '/logs'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/turn/test', async (req, res) => { try { const r = await turnFwd('POST', '/test', {}, 15000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
 
 // --- NPM: proxy inverso + certificado TLS (gestion desde el panel) ---
 let _npmCertCache = null;
@@ -1845,7 +1841,7 @@ async function npmCertInfo() {
   _npmCertCache = { t: Date.now(), d };
   return d;
 }
-app.get('/api/npm/cert', async (req, res) => { try { res.json(await npmCertInfo()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/npm/cert', async (req, res) => { try { res.json(await npmCertInfo()); } catch (e) { errorHttp(res, e); } });
 // Probar credenciales/conexion al NPM (y bustear cache del cert)
 app.post('/api/npm/test', async (req, res) => {
   try {
@@ -1872,7 +1868,7 @@ app.get('/api/npm/hosts', async (req, res) => {
     const h = arr.find((x) => (x.domain_names || []).includes(cfg.dom)) || arr.find((x) => (x.domain_names || []).some((n) => n && cfg.dom.endsWith(n.replace(/^\*\./, '.'))));
     if (!h) return res.json({ error: 'host-not-found', host: null, domain: cfg.dom });
     res.json({ domain: cfg.dom, host: { id: h.id, domains: h.domain_names || [], forward: (h.forward_scheme || 'http') + '://' + (h.forward_host || '') + ':' + (h.forward_port || ''), ssl: !!h.certificate_id, ssl_forced: !!h.ssl_forced, enabled: h.enabled === 1 || h.enabled === true, ws: !!h.allow_websocket_upgrade } });
-  } catch (e) { res.status(500).json({ error: e.message, host: null }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 // --- Asterisk core agent (CT103) ---
@@ -1880,7 +1876,6 @@ const AST_AGENT = process.env.AST_AGENT || ('http://' + NODES.asterisk + ':8092'
 async function astFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); return fetch(AST_AGENT + path, opt); }
 
 // ===== Navaja de captura de paquetes (pcap) — SBC (agente-DB) y Asterisk (agente-HTTP) =====
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_captures (id serial PRIMARY KEY, node text, preset text, duration int, status text DEFAULT 'pending', filename text, size bigint DEFAULT 0, data bytea, error text, created_at timestamptz DEFAULT now(), started_at timestamptz, finished_at timestamptz)").catch(e => console.error('[CAP] table', e.message));
 const CAP_PRESETS = { sip: 'udp port 5060', siprtp: 'udp', all: '' }; // BPF seguros del lado server
 async function runAsteriskCapture(id, preset, duration) {
   try {
@@ -1905,11 +1900,11 @@ app.post('/api/capture/start', async (req, res) => {
     const id = rows[0].id;
     runAsteriskCapture(id, preset, duration);
     res.json({ id, node, preset, duration });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.get('/api/capture/list', async (req, res) => {
   try { const { rows } = await pool.query("SELECT id,node,preset,duration,status,filename,size,error,created_at,started_at,finished_at FROM pbxng_captures ORDER BY id DESC LIMIT 100"); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.get('/api/capture/:id/download', async (req, res) => {
   try {
@@ -1922,17 +1917,17 @@ app.get('/api/capture/:id/download', async (req, res) => {
 });
 app.post('/api/capture/:id/stop', async (req, res) => {
   try { await pool.query("UPDATE pbxng_captures SET status='stopping' WHERE id=$1 AND status IN ('pending','running')", [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/capture/:id', async (req, res) => {
   try { await pool.query("DELETE FROM pbxng_captures WHERE id=$1", [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
-app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd('GET', '/core'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/asterisk/diag', async (req, res) => { try { const r = await astFwd('POST', '/diag', req.body || {}, 46000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/asterisk/iface', async (req, res) => { try { const r = await astFwd('POST', '/iface', req.body || {}, 12000); res.json(await r.json()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/asterisk/core', async (req, res) => { try { const r = await astFwd('GET', '/core'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.get('/api/asterisk/net', async (req, res) => { try { const r = await astFwd('GET', '/net'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/asterisk/route', async (req, res) => { try { const r = await astFwd('POST', '/route', req.body || {}, 12000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/asterisk/diag', async (req, res) => { try { const r = await astFwd('POST', '/diag', req.body || {}, 46000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/asterisk/iface', async (req, res) => { try { const r = await astFwd('POST', '/iface', req.body || {}, 12000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
 
 /* ═══════════════ Modo de red del núcleo: ROUTER o SWITCH ════════════════════
  *
@@ -1946,9 +1941,7 @@ app.post('/api/asterisk/iface', async (req, res) => { try { const r = await astF
  * ==========================================================================*/
 const netmode = require('./netmode');
 
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_net (id int PRIMARY KEY DEFAULT 1, modo text DEFAULT 'router', wan_if text, lan_if text, nat boolean DEFAULT true, forward boolean DEFAULT true, bridge text DEFAULT 'br0', updated_at timestamptz DEFAULT now())")
-  .then(() => pool.query("INSERT INTO pbxng_net (id) VALUES (1) ON CONFLICT (id) DO NOTHING"))
-  .catch(e => console.error('[NET] table', e.message));
+pool.query("INSERT INTO pbxng_net (id) VALUES (1) ON CONFLICT (id) DO NOTHING").catch(e => logger('NET').error('fila semilla', e));   // esquema en migrations/
 
 const netCfg = async () => { const { rows } = await pool.query('SELECT * FROM pbxng_net WHERE id=1'); return rows[0] || { modo: 'router', bridge: 'br0', nat: true, forward: true }; };
 // Las placas se las preguntamos al agente (son las del host, no las del contenedor de la API).
@@ -1958,7 +1951,7 @@ async function netIfaces() {
 
 app.get('/api/net/mode', async (req, res) => {
   try { res.json({ cfg: await netCfg(), interfaces: await netIfaces(), pendiente: netPend ? { vence: netPend.vence } : null }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 
 app.put('/api/net/mode', async (req, res) => {
@@ -1969,7 +1962,7 @@ app.put('/api/net/mode', async (req, res) => {
       [b.modo || null, b.wan_if || null, b.lan_if || null,
        b.nat === undefined ? null : !!b.nat, b.forward === undefined ? null : !!b.forward, b.bridge || null]);
     res.json({ ok: true, pendiente: 'aplicar para que tome efecto' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 // Ver el plan ANTES de ejecutarlo (que se pueda leer es media función).
@@ -2011,8 +2004,8 @@ app.post('/api/net/mode/apply', async (req, res) => {
           await astFwd('POST', '/netmode', { pasos: pasosVuelta }, 60000);
           await pool.query('UPDATE pbxng_net SET modo=$1, wan_if=$2, lan_if=$3, nat=$4, forward=$5, bridge=$6, updated_at=now() WHERE id=1',
             [anterior.modo, anterior.wan_if, anterior.lan_if, anterior.nat, anterior.forward, anterior.bridge]);
-          console.warn('[NET] nadie confirmó el cambio de modo: se volvió a', anterior.modo);
-        } catch (e) { console.error('[NET] rollback falló:', e.message); }
+          logger('NET').warn('nadie confirmó el cambio de modo: se volvió a ' + anterior.modo);
+        } catch (e) { logger('NET').error('rollback falló', e); }
         netPend = null;
       }, segundos * 1000),
     };
@@ -2037,7 +2030,7 @@ app.post('/api/net/mode/revert', async (req, res) => {
     await pool.query('UPDATE pbxng_net SET modo=$1, wan_if=$2, lan_if=$3, nat=$4, forward=$5, bridge=$6, updated_at=now() WHERE id=1',
       [anterior.modo, anterior.wan_if, anterior.lan_if, anterior.nat, anterior.forward, anterior.bridge]);
     res.json({ ok: !!(out && out.ok), modo: anterior.modo });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 const CLI_ALLOW = /^(pjsip (show|list)|core show|dialplan show|queue show|confbridge (list|show)|module show|database (show|get)|rtp show|http show|manager show|stir_shaken show|version|uptime)\b/i;
 app.post('/api/asterisk/cli', async (req, res) => {
@@ -2062,11 +2055,11 @@ app.get('/api/sbc-link', async (req, res) => {
     if (lk.configured && lk.host) { const p = await salud.probarPuerto(lk.host, lk.port); estado = { vivo: p.vivo, ms: p.ms ?? null, motivo: p.motivo || null }; }
     const { rows: ru } = await pool.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes WHERE trunk=$1', [lk.name]).catch(() => ({ rows: [{ n: 0 }] }));
     res.json({ ...lk, estado, rutas_salientes: ru[0] ? ru[0].n : 0 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/sbc-link', async (req, res) => {
   try { const r = await upsertSbcLink(req.body || {}); broadcastSoon(); res.json({ ok: true, ruta_creada: r.ruta, link: await sbcLink(true) }); }
-  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 /* Desconectar el SBC-NG: borra la troncal fija y las rutas salientes que dependian de
  * ella (quedarian marcando a un endpoint inexistente) y apaga el modulo. La PBX sigue
@@ -2086,7 +2079,7 @@ app.delete('/api/sbc-link', async (req, res) => {
     try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
     broadcastSoon();
     res.json({ ok: true, rutas_borradas: rutas.length });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 // --- Base de datos (PostgreSQL ARA + control plane) ---
@@ -2100,15 +2093,15 @@ app.get('/api/db', async (req, res) => {
     const maxc = (await q('show max_connections'))[0].max_connections;
     const tables = await q('select schemaname as schema, relname as name, n_live_tup as rows, pg_total_relation_size(relid) as bytes, pg_size_pretty(pg_total_relation_size(relid)) as size from pg_stat_user_tables order by pg_total_relation_size(relid) desc limit 100');
     res.json({ version: ver, uptime: up.u, started: up.s, size: sz.p, size_bytes: +sz.b, conn: { total: conn.total, active: conn.active, idle: conn.idle, max: +maxc }, tables });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/db/maintenance', async (req, res) => {
   try { const t = req.body && req.body.table; if (t && /^[a-zA-Z0-9_]+$/.test(t)) await pool.query('VACUUM ANALYZE ' + t); else await pool.query('VACUUM ANALYZE'); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 
 // --- IVR: generar audio por TTS y desplegarlo a Asterisk ---
-app.get('/api/ivr/audios', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,text,voice,ref,created_at FROM pbxng_ivr_audios ORDER BY created_at DESC'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/ivr/audios', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,text,voice,ref,created_at FROM pbxng_ivr_audios ORDER BY created_at DESC'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/ivr/gen-audio', async (req, res) => {
   try {
     const b = req.body || {}; const text = (b.text || '').trim();
@@ -2122,9 +2115,9 @@ app.post('/api/ivr/gen-audio', async (req, res) => {
     if (!sr.ok) return res.status(500).json({ error: 'deploy: ' + (sr.error || '?') });
     await pool.query("INSERT INTO pbxng_ivr_audios(name,text,voice,ref) VALUES($1,$2,$3,$4) ON CONFLICT(name) DO UPDATE SET text=$2,voice=$3,ref=$4,created_at=now()", [name, text, b.voice || '', sr.ref]);
     res.json({ ok: true, ref: sr.ref, name });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
-app.delete('/api/ivr/audios/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_ivr_audios WHERE id=$1', [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.delete('/api/ivr/audios/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_ivr_audios WHERE id=$1', [req.params.id]); res.json({ ok: true }); } catch (e) { errorHttp(res, e); } });
 
 // --- Modulos (PBX modular: activar/desactivar) ---
 /* `sbc` = "Conexion a SBC-NG" (otro producto): apagado por defecto; se enciende solo
@@ -2133,7 +2126,7 @@ app.delete('/api/ivr/audios/:id', async (req, res) => { try { await pool.query('
 const MODULE_IDS = ['sbc', 'turn', 'voz', 'clicktocall', 'push', 'autoprov', 'ai', 'callcenter', 'intercom'];
 app.get('/api/modules', async (req, res) => {
   try { const out = {}; for (const id of MODULE_IDS) out[id] = await moduleEnabled(id); res.json(out); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/modules', async (req, res) => {
   const { id, enabled } = req.body || {};
@@ -2146,7 +2139,7 @@ app.post('/api/modules', async (req, res) => {
     } catch (e) { svc = { error: e.message }; }
     if (id === 'sbc') { _sbcLinkCache.v = null; broadcastSoon(); }
     res.json({ ok: true, id, enabled: !!enabled, svc });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 
@@ -2220,7 +2213,7 @@ app.get('/api/sysprompts', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT name, category, text, voice, status, updated_at, deployed_at, (audio IS NOT NULL) AS has_audio FROM pbxng_sysprompts ORDER BY category, name");
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/sysprompts/seed', async (req, res) => {
@@ -2231,7 +2224,7 @@ app.post('/api/sysprompts/seed', async (req, res) => {
       n += r.rowCount;
     }
     res.json({ ok: true, inserted: n, total: SYSPROMPT_CATALOG.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.put('/api/sysprompts/:name', async (req, res) => {
@@ -2239,7 +2232,7 @@ app.put('/api/sysprompts/:name', async (req, res) => {
     const text = (req.body && req.body.text) || '';
     await pool.query("UPDATE pbxng_sysprompts SET text=$1 WHERE name=$2", [text, req.params.name]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/sysprompts/generate', async (req, res) => {
@@ -2264,7 +2257,7 @@ app.post('/api/sysprompts/generate', async (req, res) => {
       } catch (ex) { results.push({ name, ok: false, error: ex.message }); }
     }
     res.json({ ok: true, voice, results, generated: results.filter(x => x.ok && !x.skipped).length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.get('/api/sysprompts/test/:name', async (req, res) => {
@@ -2272,7 +2265,7 @@ app.get('/api/sysprompts/test/:name', async (req, res) => {
     const { rows } = await pool.query("SELECT audio FROM pbxng_sysprompts WHERE name=$1", [req.params.name]);
     if (!rows.length || !rows[0].audio) return res.status(404).json({ error: 'sin audio' });
     res.set('Content-Type', 'audio/wav').send(rows[0].audio);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/sysprompts/revert', async (req, res) => {
@@ -2282,16 +2275,16 @@ app.post('/api/sysprompts/revert', async (req, res) => {
     if (!names.length) r = await pool.query("UPDATE pbxng_sysprompts SET revert=true, updated_at=now() WHERE deployed_at IS NOT NULL OR audio IS NOT NULL");
     else r = await pool.query("UPDATE pbxng_sysprompts SET revert=true, updated_at=now() WHERE name = ANY($1)", [names]);
     res.json({ ok: true, count: r.rowCount });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // ===== fin Audios del sistema =====
 
 
 // Click-to-Call (admin)
-app.get('/api/c2c', async (req, res) => { try { const { rows } = await pool.query('SELECT id,token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled,created_at FROM pbxng_click2call ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/c2c', async (req, res) => { const b = req.body || {}; if (!b.name || !b.dest_value) return res.status(400).json({ error: 'name y destino requeridos' }); try { const token = crypto.randomBytes(6).toString('hex'); const { rows } = await pool.query('INSERT INTO pbxng_click2call (token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,token', [token, b.name, b.dest_type || 'extension', b.dest_value, b.intro || '', b.require_name !== false, !!b.collect_geo, !!b.video, b.enabled !== false]); res.status(201).json(rows[0]); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.put('/api/c2c/:id', async (req, res) => { const b = req.body || {}; try { await pool.query('UPDATE pbxng_click2call SET name=$1,dest_type=$2,dest_value=$3,intro=$4,require_name=$5,collect_geo=$6,video=$7,enabled=$8 WHERE id=$9', [b.name, b.dest_type || 'extension', b.dest_value, b.intro || '', b.require_name !== false, !!b.collect_geo, !!b.video, b.enabled !== false, req.params.id]); res.json({ updated: req.params.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.delete('/api/c2c/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_click2call WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/c2c', async (req, res) => { try { const { rows } = await pool.query('SELECT id,token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled,created_at FROM pbxng_click2call ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
+app.post('/api/c2c', async (req, res) => { const b = req.body || {}; if (!b.name || !b.dest_value) return res.status(400).json({ error: 'name y destino requeridos' }); try { const token = crypto.randomBytes(6).toString('hex'); const { rows } = await pool.query('INSERT INTO pbxng_click2call (token,name,dest_type,dest_value,intro,require_name,collect_geo,video,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,token', [token, b.name, b.dest_type || 'extension', b.dest_value, b.intro || '', b.require_name !== false, !!b.collect_geo, !!b.video, b.enabled !== false]); res.status(201).json(rows[0]); } catch (e) { errorHttp(res, e); } });
+app.put('/api/c2c/:id', async (req, res) => { const b = req.body || {}; try { await pool.query('UPDATE pbxng_click2call SET name=$1,dest_type=$2,dest_value=$3,intro=$4,require_name=$5,collect_geo=$6,video=$7,enabled=$8 WHERE id=$9', [b.name, b.dest_type || 'extension', b.dest_value, b.intro || '', b.require_name !== false, !!b.collect_geo, !!b.video, b.enabled !== false, req.params.id]); res.json({ updated: req.params.id }); } catch (e) { errorHttp(res, e); } });
+app.delete('/api/c2c/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_click2call WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id }); } catch (e) { errorHttp(res, e); } });
 
 // Grabaciones (admin)
 // Match de grabación para un diálogo SIP (por from/to y proximidad temporal)
@@ -2313,19 +2306,19 @@ app.get('/api/recordings/match', async (req, res) => {
        ORDER BY ($3::bigint <> 0)::int * abs(extract(epoch from started_at)*1000 - $3::bigint) ASC, id DESC
        LIMIT 1`, [a, b, ts]);
     res.json(rows[0] || {});
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.get('/api/recordings', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id, filename, ext, src, dst, started_at, bytes, duration, storage, remote_url FROM pbxng_recordings WHERE deleted=false ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 500'); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/recordings/:id', async (req, res) => {
   try { await pool.query('UPDATE pbxng_recordings SET deleted=true WHERE id=$1', [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.get('/api/recordings/config', async (req, res) => {
   try { const { rows } = await pool.query("SELECT id, backend, nas_path, s3_endpoint, s3_region, s3_bucket, s3_key, COALESCE(NULLIF(s3_secret,''),'') <> '' AS has_secret, s3_prefix, auto_upload, retain_local, nas_type, nas_server, nas_share, nas_user, COALESCE(NULLIF(nas_pass,''),'') <> '' AS has_nas_pass FROM pbxng_rec_config WHERE id=1"); res.json(rows[0] || {}); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/recordings/config', async (req, res) => {
   const b = req.body || {};
@@ -2333,13 +2326,13 @@ app.post('/api/recordings/config', async (req, res) => {
     await pool.query(`UPDATE pbxng_rec_config SET backend=COALESCE($1,backend), nas_path=$2, s3_endpoint=$3, s3_region=$4, s3_bucket=$5, s3_key=$6, s3_secret=COALESCE(NULLIF($7,''), s3_secret), s3_prefix=COALESCE($8,s3_prefix), auto_upload=COALESCE($9,auto_upload), retain_local=COALESCE($10,retain_local), nas_type=COALESCE($11,nas_type), nas_server=$12, nas_share=$13, nas_user=$14, nas_pass=COALESCE(NULLIF($15,''),nas_pass), updated_at=now() WHERE id=1`,
       [b.backend || null, b.nas_path || null, b.s3_endpoint || null, b.s3_region || null, b.s3_bucket || null, b.s3_key || null, b.s3_secret || '', b.s3_prefix || null, b.auto_upload, b.retain_local, b.nas_type || null, b.nas_server || null, b.nas_share || null, b.nas_user || null, b.nas_pass || '']);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 // ---------------- Usuarios ----------------
 app.get('/api/users', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,username,name,role,ext,created_at FROM pbxng_users ORDER BY id'); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 /* Toda la familia /api/users es sólo admin (rbac.js: no figura en la tabla). */
 app.post('/api/users', async (req, res) => {
@@ -2361,7 +2354,7 @@ app.post('/api/users/:id/password', async (req, res) => {
     const r = await pool.query('UPDATE pbxng_users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(String(password), 10), req.params.id]);
     if (!r.rowCount) return res.status(404).json({ error: 'usuario inexistente' });
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/users/:id', async (req, res) => {
   try {
@@ -2375,7 +2368,7 @@ app.delete('/api/users/:id', async (req, res) => {
       if (n[0].n <= 1) return res.status(400).json({ error: 'no se puede borrar el último administrador' });
     }
     await pool.query('DELETE FROM pbxng_users WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 /* ─────────────── ACME / Let's Encrypt ───────────────
@@ -2387,7 +2380,7 @@ function soloAdminAcme(req, res, next) {
 }
 app.get('/api/acme', soloAdminAcme, async (req, res) => {
   try { res.json({ config: acme.configPublica(), cert: await acme.estadoCert() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/acme/config', soloAdminAcme, async (req, res) => {
   const { domain, email, method, dns_provider, dns_creds } = req.body || {};
@@ -2398,14 +2391,14 @@ app.post('/api/acme/config', soloAdminAcme, async (req, res) => {
   if (dns_provider !== undefined) cfg.dns_provider = String(dns_provider || '');
   if (dns_creds && typeof dns_creds === 'object') cfg.dns_creds = dns_creds;
   try { acme.guardarCfg(cfg); res.json({ ok: true, config: acme.configPublica() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/acme/issue', soloAdminAcme, async (req, res) => {
   try { const r = await acme.emitir(); res.status(r.ok ? 200 : 400).json(r); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/acme/renew', soloAdminAcme, async (req, res) => {
-  try { res.json(await acme.renovar()); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await acme.renovar()); } catch (e) { errorHttp(res, e); }
 });
 // Auto-renovación diaria (acme.sh no renueva si aún falta mucho).
 setInterval(() => { acme.estadoCert().then((st) => { if (st.emitido) acme.renovar().catch(() => {}); }).catch(() => {}); }, 24 * 3600 * 1000);
@@ -2484,10 +2477,10 @@ app.get('/api/topology', async (req, res) => {
   }
 });
 
-app.get('/api/extensions', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/extensions/record-all', async (req, res) => { try { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); res.json({ enabled: !!(rows[0] && rows[0].value === '1') }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/extensions/record-all', async (req, res) => { try { const on = !!(req.body && req.body.enabled); await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('record_all',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [on ? '1' : '0']); await setRecAll(on); res.json({ ok: true, enabled: on }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/endpoints', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/extensions', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { errorHttp(res, e); } });
+app.get('/api/extensions/record-all', async (req, res) => { try { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); res.json({ enabled: !!(rows[0] && rows[0].value === '1') }); } catch (e) { errorHttp(res, e); } });
+app.post('/api/extensions/record-all', async (req, res) => { try { const on = !!(req.body && req.body.enabled); await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('record_all',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [on ? '1' : '0']); await setRecAll(on); res.json({ ok: true, enabled: on }); } catch (e) { errorHttp(res, e); } });
+app.get('/api/endpoints', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { errorHttp(res, e); } });
 /* Modos de DTMF válidos (Asterisk chan_pjsip). Importa de verdad en porteros/frentes de
  * calle: muchos (Dahua, Hikvision) mandan el dígito de apertura por SIP INFO (RFC 2976)
  * en vez de RTP (RFC 4733). Si el modo no coincide, la puerta NO abre.
@@ -2530,7 +2523,7 @@ app.post('/api/endpoints', async (req, res) => {
     }
     if (req.body && req.body.name) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
     await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.status(201).json({ created: id, webrtc, video });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params;
@@ -2551,19 +2544,19 @@ app.put('/api/endpoints/:id', async (req, res) => {
     }
     if (req.body && req.body.name !== undefined) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
     await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.json({ updated: id, webrtc, video });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params; const c = await pool.connect();
   try { await c.query('BEGIN'); await c.query('DELETE FROM ps_endpoints WHERE id=$1', [id]); await c.query('DELETE FROM ps_auths WHERE id=$1', [id]); await c.query('DELETE FROM ps_aors WHERE id=$1', [id]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: id }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 // ---------------- Rutas SALIENTES ----------------
 function outExten(p) { return p && p[0] === '_' ? p : '_' + p; }
 app.get('/api/routes/outbound', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,name,pattern,trunk,strip,prepend,callerid FROM pbxng_outbound_routes ORDER BY id'); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 // Troncal de salida por defecto. Con el modulo "Conexion a SBC-NG" activo y la troncal
 // to-sbc configurada, el saliente va por el SBC; si no, sale directo por la primera
@@ -2591,7 +2584,7 @@ app.post('/api/routes/outbound', async (req, res) => {
     rows.push([p++, 'Hangup', '']);
     await setDialplan(c, 'internal', outExten(pattern), rows);
     await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: pattern, trunk: tk });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/routes/outbound/:id', async (req, res) => {
   const c = await pool.connect();
@@ -2601,7 +2594,7 @@ app.delete('/api/routes/outbound/:id', async (req, res) => {
     if (rows[0]) await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [outExten(rows[0].pattern)]);
     await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
     await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 // ---------------- Rutas ENTRANTES (DID) ----------------
@@ -2613,7 +2606,7 @@ function inboundRows(dest_type, v) {
 }
 app.get('/api/routes/inbound', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,did,name,dest_type,dest_value FROM pbxng_inbound_routes ORDER BY id'); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/routes/inbound', async (req, res) => {
   const { did, name, dest_type = 'interno', dest_value } = req.body || {};
@@ -2624,7 +2617,7 @@ app.post('/api/routes/inbound', async (req, res) => {
     await c.query('INSERT INTO pbxng_inbound_routes (did,name,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [did, name || did, dest_type, dest_value]);
     await setDialplan(c, 'from-trunk', did, inboundRows(dest_type, dest_value));
     await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: did });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/routes/inbound/:id', async (req, res) => {
   const c = await pool.connect();
@@ -2634,7 +2627,7 @@ app.delete('/api/routes/inbound/:id', async (req, res) => {
     if (rows[0]) await c.query("DELETE FROM extensions WHERE context='from-trunk' AND exten=$1", [rows[0].did]);
     await c.query('DELETE FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
     await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 // ---------------- Troncales SIP (avanzado) ----------------
@@ -2691,7 +2684,7 @@ app.get('/api/trunks', async (req, res) => {
     const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config,adv_config FROM pbxng_trunks ORDER BY id");
     const st = await trunkStatuses(rows);
     res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), link: ((t.kind === 'webrtc' || t.kind === 'webrtc-client') && kam_config && (kam_config.link || kam_config.remote_url)) || null, target: ((t.kind === 'webrtc' || t.kind === 'webrtc-client') && kam_config) ? (((String(kam_config.remote_url || kam_config.link || '').match(/wss?:\/\/([^/:]+)/) || [])[1]) || t.provider_host || '') : null, adv: adv_config || ((kam_config && kam_config.logo) ? { logo: kam_config.logo } : null), logo: (adv_config && adv_config.logo) || (kam_config && kam_config.logo) || null, rtt: (st[t.name] || {}).rtt != null ? (st[t.name] || {}).rtt : null, dids: (adv_config && adv_config.dids) || (kam_config && kam_config.dids) || [], channels: (adv_config && adv_config.channels) || (kam_config && kam_config.channels) || 0, gateway: (adv_config && adv_config.gateway) || (kam_config && kam_config.gateway) || '', mode: (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? t.kind : ((adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip')), transport: (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'wss' : ((adv_config && adv_config.transport) || 'udp') })));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.get('/api/trunks/:name/detail', async (req, res) => {
@@ -2702,7 +2695,7 @@ app.get('/api/trunks/:name/detail', async (req, res) => {
     const { rows: au } = await pool.query("SELECT 1 FROM ps_auths WHERE id=$1", [req.params.name]);
     const kc = t.kam_config || {};
     res.json({ name: t.name, kind: t.kind, has_password: !!au[0], username: t.username || kc.username || '', link: (t.kind === 'webrtc') ? (kc.link || ('wss://' + (NODES.domain || '') + '/ws')) : null, remote_url: (t.kind === 'webrtc-client') ? (kc.remote_url || '') : null, adv: trunkDefaults(t.adv_config || t.kam_config || { provider_host: t.provider_host, provider_port: t.provider_port, username: t.username, mode: t.do_register ? 'register' : 'ip' }) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/trunks', async (req, res) => {
@@ -2723,13 +2716,13 @@ app.post('/api/trunks', async (req, res) => {
       await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,5060,$3,false,$4,'webrtc',$5) ON CONFLICT (name) DO UPDATE SET kind='webrtc',username=$3,kam_config=$5", [name, (NODES.domain || ''), uname, tenant_id, JSON.stringify(kam)]);
       await c.query('COMMIT'); broadcastSoon();
       return res.status(201).json({ created: name, kind: 'webrtc', link, username: uname });
-    } catch (e) { await c.query('ROLLBACK'); return res.status(500).json({ error: e.message }); } finally { c.release(); }
+    } catch (e) { await c.query('ROLLBACK'); return errorHttp(res, e); } finally { c.release(); }
   }
   // Troncales que vivian en el SBC embebido: hoy se administran en SBC-NG (otro producto).
   if (kind === 'webrtc-client' || kind === 'kamailio') return res.status(400).json({ error: 'Las troncales vía SBC se administran en el panel de SBC-NG. En PBX-NG solo se configura la conexión al SBC (Configuración → SBC-NG).' });
   if (kind === 'sbc') {
     try { const r = await upsertSbcLink({ host: b.provider_host, port: b.provider_port, transport: b.transport, context: b.context, codecs: b.codecs, tenant_id }); broadcastSoon(); return res.status(201).json({ created: SBC_TRUNK, kind: 'sbc', ruta_creada: r.ruta }); }
-    catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+    catch (e) { return errorHttp(res, e); }
   }
   if (!name || !b.provider_host) return res.status(400).json({ error: 'name y provider_host son obligatorios' });
   const a = trunkDefaults(b);
@@ -2740,7 +2733,7 @@ app.post('/api/trunks', async (req, res) => {
     await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ($1,$2,$3,$4,$5,$6,'asterisk',$7)", [name, a.provider_host, a.provider_port, a.username || null, a.mode === 'register', tenant_id, JSON.stringify(a)]);
     await writeAsteriskTrunk(c, name, a, password, tenant_id);
     await c.query('COMMIT'); res.status(201).json({ created: name, mode: a.mode });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 app.put('/api/trunks/:name', async (req, res) => {
@@ -2763,7 +2756,7 @@ app.put('/api/trunks/:name', async (req, res) => {
       const kam = { kind: 'webrtc', username: uname, wss_path: '/ws', link, note: b.note || '' };
       await c.query("UPDATE pbxng_trunks SET username=$2, kind='webrtc', kam_config=$3, adv_config=NULL WHERE name=$1", [name, uname, JSON.stringify(kam)]);
       await c.query('COMMIT'); return res.json({ updated: name, kind: 'webrtc', link, username: uname });
-    } catch (e) { await c.query('ROLLBACK'); return res.status(500).json({ error: e.message }); } finally { c.release(); }
+    } catch (e) { await c.query('ROLLBACK'); return errorHttp(res, e); } finally { c.release(); }
   }
   if (kind === 'webrtc-client') {
     if (!b.remote_url || !b.username) return res.status(400).json({ error: 'remote_url y username son obligatorios' });
@@ -2777,7 +2770,7 @@ app.put('/api/trunks/:name', async (req, res) => {
       const kam = { kind: 'webrtc-client', remote_url: b.remote_url, username: b.username, password: pass, note: b.note || '' };
       await pool.query("UPDATE pbxng_trunks SET provider_host=$2, username=$3, do_register=true, kind='webrtc-client', kam_config=$4, adv_config=NULL WHERE name=$1", [name, rhost, b.username, JSON.stringify(kam)]);
       return res.json({ updated: name, kind: 'webrtc-client' });
-    } catch (e) { return res.status(500).json({ error: e.message }); }
+    } catch (e) { return errorHttp(res, e); }
   }
   if (!b.provider_host) return res.status(400).json({ error: 'provider_host es obligatorio' });
   const c = await pool.connect();
@@ -2801,17 +2794,17 @@ app.put('/api/trunks/:name', async (req, res) => {
     await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='asterisk', kam_config=NULL, adv_config=$5 WHERE name=$6", [a.provider_host, a.provider_port, a.username || null, a.mode === 'register', JSON.stringify(a), name]);
     await writeAsteriskTrunk(c, name, a, pass, tenant_id);
     await c.query('COMMIT'); res.json({ updated: name, mode: a.mode });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 app.delete('/api/trunks/:name', async (req, res) => {
   const { name } = req.params; const c = await pool.connect();
   try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); if (name === SBC_TRUNK) { await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'"); _sbcLinkCache.v = null; } await c.query('COMMIT'); res.json({ deleted: name }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
-app.post('/api/trunks/diagnose', async (req, res) => { try { res.json(await diagtrunk.diagnosticar(req.body || {})); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/registrations', async (req, res) => { try { res.json({ output: await amiCommand('pjsip show registrations') }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/trunks/diagnose', async (req, res) => { try { res.json(await diagtrunk.diagnosticar(req.body || {})); } catch (e) { errorHttp(res, e); } });
+app.get('/api/registrations', async (req, res) => { try { res.json({ output: await amiCommand('pjsip show registrations') }); } catch (e) { errorHttp(res, e); } });
 
 // ---------------- Integraciones (Telegram / WhatsApp) ----------------
 async function sendTelegram(cfg, text) {
@@ -2839,9 +2832,9 @@ async function notifyIntegrations(text) {
     const { rows } = await pool.query('SELECT type, config FROM pbxng_integrations WHERE enabled=true');
     for (const r of rows) {
       try { if (r.type === 'telegram') await sendTelegram(r.config, text); else if (r.type === 'whatsapp') await sendWhatsapp(r.config, text); }
-      catch (e) { console.error('[INT] envío ' + r.type, e.message); }
+      catch (e) { logger('INT').error('envío ' + r.type, e); }
     }
-  } catch (e) { console.error('[INT] notify', e.message); }
+  } catch (e) { logger('INT').error('notify', e); }
 }
 function publicIntegration(type, row) {
   const c = (row && row.config) || {};
@@ -2853,7 +2846,7 @@ app.get('/api/integrations', async (req, res) => {
     const { rows } = await pool.query("SELECT type, enabled, config FROM pbxng_integrations");
     const map = {}; rows.forEach(r => map[r.type] = r);
     res.json([publicIntegration('telegram', map.telegram), publicIntegration('whatsapp', map.whatsapp)]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.put('/api/integrations/:type', async (req, res) => {
   const type = req.params.type; if (!['telegram', 'whatsapp'].includes(type)) return res.status(400).json({ error: 'tipo inválido' });
@@ -2866,7 +2859,7 @@ app.put('/api/integrations/:type', async (req, res) => {
     const enabled = b.enabled !== undefined ? !!b.enabled : (rows[0] ? undefined : false);
     await pool.query("INSERT INTO pbxng_integrations (type,enabled,config,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (type) DO UPDATE SET enabled=COALESCE($2,pbxng_integrations.enabled), config=$3, updated_at=now()", [type, enabled, cfg]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/integrations/:type/test', async (req, res) => {
   const type = req.params.type;
@@ -2887,16 +2880,16 @@ function aiAgentDialplan(exten, id) {
 }
 app.get('/api/settings', async (req, res) => {
   try { const { rows } = await pool.query('SELECT key,value FROM pbxng_settings'); const o = {}; for (const r of rows) { o[r.key] = /key|secret|token|pass|account|credential|p8|private/i.test(r.key) ? (r.value ? '__SET__' : '') : r.value; } res.json(o); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/settings', async (req, res) => {
   const b = req.body || {};
   try { for (const [k, v] of Object.entries(b)) { if (v === '__SET__') continue; await pool.query('INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [k, String(v == null ? '' : v)]); } res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.get('/api/ai-agents', async (req, res) => {
   try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/ai-agents', async (req, res) => {
   const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
@@ -2908,7 +2901,7 @@ app.post('/api/ai-agents', async (req, res) => {
     await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
     for (const r of aiAgentDialplan(exten, rows[0].id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
     await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: rows[0].id, exten });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/ai-agents/:id', async (req, res) => {
   const { id } = req.params;
@@ -2923,7 +2916,7 @@ app.put('/api/ai-agents/:id', async (req, res) => {
     if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
     for (const r of aiAgentDialplan(exten, id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
     await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/ai-agents/:id', async (req, res) => {
   const c = await pool.connect();
@@ -2933,12 +2926,12 @@ app.delete('/api/ai-agents/:id', async (req, res) => {
     if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]);
     await c.query('DELETE FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
     await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 app.get('/api/ivr', async (req, res) => {
   try { const { rows: ivrs } = await pool.query('SELECT id,name,exten,greeting,timeout,tenant_id,flow FROM pbxng_ivr ORDER BY id'); for (const iv of ivrs) { const { rows: o } = await pool.query('SELECT digit,dest_type,dest_value FROM pbxng_ivr_options WHERE ivr_id=$1 ORDER BY digit', [iv.id]); iv.options = o; } res.json(ivrs); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 function buildIvrDialplan(exten, greeting, timeout, options) {
   const rows = [['ivr', exten, 1, 'Answer', ''], ['ivr', exten, 2, 'Read', `SEL,${greeting},1,,1,${timeout}`]];
@@ -2968,7 +2961,7 @@ app.post('/api/ivr', async (req, res) => {
     await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
     for (const r of buildIvrDialplan(exten, greeting, timeout, options)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
     await c.query('COMMIT'); res.status(201).json({ created: id, exten });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/ivr/:id', async (req, res) => {
   const { id } = req.params;
@@ -2986,13 +2979,13 @@ app.put('/api/ivr/:id', async (req, res) => {
     if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
     for (const r of buildIvrDialplan(exten, greeting, timeout, options)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
     await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 app.delete('/api/ivr/:id', async (req, res) => {
   const { id } = req.params; const c = await pool.connect();
   try { await c.query('BEGIN'); const { rows } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]); await c.query('DELETE FROM pbxng_ivr WHERE id=$1', [id]); await c.query('COMMIT'); res.json({ deleted: id }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
 // ---------------------------------------------------------------------------
@@ -3051,7 +3044,7 @@ app.get('/api/queues', async (req, res) => {
         (SELECT count(*) FROM queue_members m WHERE m.queue_name = pq.name) AS members
       FROM pbxng_queues pq LEFT JOIN queues q ON q.name = pq.name ORDER BY pq.name`);
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 function qNative(b) {
   const out = {};
@@ -3106,11 +3099,11 @@ async function saveQueue(b, creating) {
 }
 app.post('/api/queues', async (req, res) => {
   try { res.status(201).json(await saveQueue(req.body || {}, true)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.put('/api/queues/:name', async (req, res) => {
   try { res.json(await saveQueue({ ...(req.body || {}), name: req.params.name }, false)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 // Escuchar un anuncio antes de guardarlo (devuelve el WAV, no lo despliega)
 app.post('/api/queues/preview-announce', async (req, res) => {
@@ -3123,21 +3116,21 @@ app.post('/api/queues/preview-announce', async (req, res) => {
     const buf = Buffer.from(await r.arrayBuffer());
     if (!buf.length) return res.status(500).json({ error: 'el TTS devolvió audio vacío' });
     res.set('Content-Type', 'audio/wav').send(buf);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/queues/:name', async (req, res) => {
   const { name } = req.params; const c = await pool.connect();
   try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_queues WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM queue_members WHERE queue_name=$1', [name]); await c.query('DELETE FROM queues WHERE name=$1', [name]); await c.query('DELETE FROM pbxng_queues WHERE name=$1', [name]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: name }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.post('/api/queues/:name/members', async (req, res) => {
   const { name } = req.params; const { ext } = req.body || {};
   if (!ext) return res.status(400).json({ error: 'ext es obligatorio' });
   try { await pool.query(`INSERT INTO queue_members (queue_name,interface,membername,state_interface,penalty,paused,uniqueid) VALUES ($1,$2,$3,$2,0,0,(SELECT COALESCE(MAX(uniqueid),0)+1 FROM queue_members)) ON CONFLICT (queue_name,interface) DO NOTHING`, [name, 'PJSIP/' + ext, ext]); broadcastSoon(); res.status(201).json({ added: ext }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
-app.delete('/api/queues/:name/members/:ext', async (req, res) => { const { name, ext } = req.params; try { await pool.query('DELETE FROM queue_members WHERE queue_name=$1 AND interface=$2', [name, 'PJSIP/' + ext]); broadcastSoon(); res.json({ removed: ext }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/queues/:name/live', async (req, res) => { try { res.json({ output: await amiCommand('queue show ' + req.params.name) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.delete('/api/queues/:name/members/:ext', async (req, res) => { const { name, ext } = req.params; try { await pool.query('DELETE FROM queue_members WHERE queue_name=$1 AND interface=$2', [name, 'PJSIP/' + ext]); broadcastSoon(); res.json({ removed: ext }); } catch (e) { errorHttp(res, e); } });
+app.get('/api/queues/:name/live', async (req, res) => { try { res.json({ output: await amiCommand('queue show ' + req.params.name) }); } catch (e) { errorHttp(res, e); } });
 
 app.get('/api/wallboard', async (req, res) => {
   const out = { today: {}, queues: [] };
@@ -3158,49 +3151,49 @@ app.get('/api/wallboard', async (req, res) => {
 
 /* Historial: admin y supervisor ven todo (con ?ext= filtran); agente y token de softphone
  * SIEMPRE ven sólo su interno, se ignore lo que manden en ?ext=. */
-app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); const propio = extPropia(req); const ext = propio ? propio : (req.query.ext ? String(req.query.ext) : null); if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' }); try { const q = ext ? await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr WHERE src=$2 OR dst=$2 ORDER BY start DESC LIMIT $1", [limit, ext]) : await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(q.rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); const propio = extPropia(req); const ext = propio ? propio : (req.query.ext ? String(req.query.ext) : null); if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' }); try { const q = ext ? await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr WHERE src=$2 OR dst=$2 ORDER BY start DESC LIMIT $1", [limit, ext]) : await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(q.rows); } catch (e) { errorHttp(res, e); } });
 
-app.get('/api/conferences', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,pin FROM pbxng_conferences ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/conferences', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,pin FROM pbxng_conferences ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/conferences', async (req, res) => {
   const { name, label, access_exten, pin } = req.body || {};
   if (!name || !access_exten) return res.status(400).json({ error: 'name y access_exten son obligatorios' });
   const c = await pool.connect();
   try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_conferences (name,label,access_exten,pin) VALUES ($1,$2,$3,$4)', [name, label || name, access_exten, pin || null]); const rows = [[1, 'Answer', '']]; let p = 2; if (pin) rows.push([p++, 'Authenticate', String(pin)]); rows.push([p++, 'ConfBridge', name]); rows.push([p++, 'Hangup', '']); await setDialplan(c, 'ivr', access_exten, rows); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name, access_exten }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
-app.delete('/api/conferences/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_conferences WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_conferences WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); } });
+app.delete('/api/conferences/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_conferences WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_conferences WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 
-app.get('/api/ringgroups', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members,strategy,ring_time FROM pbxng_ringgroups ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/ringgroups', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members,strategy,ring_time FROM pbxng_ringgroups ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/ringgroups', async (req, res) => {
   const { name, label, access_exten, members, strategy = 'ringall', ring_time = 25 } = req.body || {};
   if (!name || !access_exten || !members) return res.status(400).json({ error: 'name, access_exten y members son obligatorios' });
   const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const dialStr = list.map(e => 'PJSIP/' + e).join('&');
   const c = await pool.connect();
   try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_ringgroups (name,label,access_exten,members,strategy,ring_time) VALUES ($1,$2,$3,$4,$5,$6)', [name, label || name, access_exten, list.join(','), strategy, ring_time]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Ring group ' + name], [2, 'Dial', dialStr + ',' + ring_time], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
-app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); } });
+app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 
-app.get('/api/paging', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members FROM pbxng_paging ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/paging', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members FROM pbxng_paging ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/paging', async (req, res) => {
   const { name, label, access_exten, members } = req.body || {};
   if (!name || !access_exten || !members) return res.status(400).json({ error: 'name, access_exten y members son obligatorios' });
   const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const pageStr = list.map(e => 'PJSIP/' + e).join('&');
   const c = await pool.connect();
   try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_paging (name,label,access_exten,members) VALUES ($1,$2,$3,$4)', [name, label || name, access_exten, list.join(',')]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Paging ' + name], [2, 'Page', pageStr + ',i'], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
-app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); } });
+app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 
-app.get('/api/mailboxes', async (req, res) => { try { const { rows } = await pool.query("SELECT mailbox,fullname,email FROM pbxng_mailboxes ORDER BY mailbox"); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/mailboxes', async (req, res) => { try { const { rows } = await pool.query("SELECT mailbox,fullname,email FROM pbxng_mailboxes ORDER BY mailbox"); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/mailboxes', async (req, res) => {
   const { mailbox, password, fullname, email, context = 'default' } = req.body || {};
   if (!mailbox || !password) return res.status(400).json({ error: 'mailbox y password son obligatorios' });
   const c = await pool.connect();
   try { await c.query('BEGIN'); await c.query("INSERT INTO voicemail (mailbox,context,password,fullname,email) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [mailbox, context, String(password), fullname || mailbox, email || null]); await c.query("INSERT INTO pbxng_mailboxes (mailbox,fullname,email) VALUES ($1,$2,$3) ON CONFLICT (mailbox) DO UPDATE SET fullname=EXCLUDED.fullname,email=EXCLUDED.email", [mailbox, fullname || mailbox, email || null]); await c.query('COMMIT'); res.status(201).json({ created: mailbox }); }
-  catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
-app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); } });
+app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 
 const FEATURE_CODES = [
   { code: '*43', name: 'Prueba de eco', desc: 'Repite tu voz para probar audio', rows: [[1, 'Answer', ''], [2, 'Echo', ''], [3, 'Hangup', '']] },
@@ -3213,7 +3206,7 @@ app.get('/api/featurecodes', async (req, res) => {
     const { rows } = await pool.query("SELECT exten FROM extensions WHERE context='internal' AND exten = ANY($1)", [FEATURE_CODES.map(f => f.code)]);
     const installed = new Set(rows.map(r => r.exten));
     res.json(FEATURE_CODES.map(f => ({ code: f.code, name: f.name, desc: f.desc, installed: installed.has(f.code) })));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/featurecodes/install', async (req, res) => {
   const c = await pool.connect();
@@ -3221,19 +3214,17 @@ app.post('/api/featurecodes/install', async (req, res) => {
     await c.query('BEGIN');
     for (const f of FEATURE_CODES) await setDialplan(c, 'internal', f.code, f.rows);
     await c.query('COMMIT'); broadcastSoon(); res.json({ ok: true, count: FEATURE_CODES.length });
-  } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.post('/api/featurecodes/uninstall', async (req, res) => {
   try { await pool.query("DELETE FROM extensions WHERE context='internal' AND exten = ANY($1)", [FEATURE_CODES.map(f => f.code)]); broadcastSoon(); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 /* ═══════════════ Aparcado, captura y música en espera ═══════════════════════
  *
  * Estas tres NO viven en la base (Asterisk las lee de archivos), así que el panel
  * genera su config en el volumen compartido y recarga por AMI. Ver astconf.js.
  * ==========================================================================*/
-pool.query("CREATE TABLE IF NOT EXISTS pbxng_moh_classes (nombre text PRIMARY KEY, descripcion text, sort text DEFAULT 'alpha', announcement text, created_at timestamptz DEFAULT now())")
-  .catch(e => console.error('[MOH] table', e.message));
 
 const setGet = async (k, def) => { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value != null ? rows[0].value : def; } catch (_) { return def; } };
 const setPut = (k, v) => pool.query("INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2", [k, String(v)]);
@@ -3248,7 +3239,7 @@ app.get('/api/parking', async (req, res) => {
       parkingtime: parseInt(await setGet('park_time', '300'), 10),
       comebacktoorigin: (await setGet('park_comeback', '1')) === '1',
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.put('/api/parking', async (req, res) => {
   const b = req.body || {};
@@ -3259,7 +3250,7 @@ app.put('/api/parking', async (req, res) => {
     if (b.parkingtime) await setPut('park_time', Math.max(10, parseInt(b.parkingtime, 10) || 300));
     if (b.comebacktoorigin !== undefined) await setPut('park_comeback', b.comebacktoorigin ? '1' : '0');
     res.json({ ok: true, pendiente: 'aplicar para que Asterisk lo tome' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/parking/apply', async (req, res) => {
   try {
@@ -3273,7 +3264,7 @@ app.post('/api/parking/apply', async (req, res) => {
     astconf.parking(cfg);
     const out = await amiCommand('module reload res_parking.so');
     res.json({ ok: true, cfg, salida: String(out || '').slice(0, 400) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 /* Plazas del aparcado, ESTRUCTURADAS: devolvemos el rango completo y cuáles están
  * ocupadas, para que el panel dibuje una tabla de verdad y no un volcado de texto.
@@ -3310,7 +3301,7 @@ app.get('/api/parking/lots', async (req, res) => {
       plazas.push(mapa[n] ? { plaza: n, libre: false, ...mapa[n] } : { plaza: n, libre: true });
     }
     res.json({ plazas, ocupadas: ocupadas.length, total: plazas.length, parkingtime: tiempo });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 // --- Captura de llamada: grupo por interno (ps_endpoints) ---
@@ -3318,7 +3309,7 @@ app.get('/api/pickup-groups', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT id AS ext, named_pickup_group, named_call_group FROM ps_endpoints ORDER BY id");
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.put('/api/pickup-groups/:ext', async (req, res) => {
   const g = String((req.body || {}).grupo || '').replace(/[^\w.\-]/g, '').slice(0, 40) || null;
@@ -3328,7 +3319,7 @@ app.put('/api/pickup-groups/:ext', async (req, res) => {
     await pool.query('UPDATE ps_endpoints SET named_call_group=$1, named_pickup_group=$1 WHERE id=$2', [g, req.params.ext]);
     await amiCommand('module reload res_pjsip.so');
     res.json({ ok: true, ext: req.params.ext, grupo: g });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 // --- Música en espera ---
@@ -3336,7 +3327,7 @@ app.get('/api/moh', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM pbxng_moh_classes ORDER BY nombre');
     res.json(rows.map((c) => ({ ...c, archivos: astconf.mohArchivos(c.nombre) })));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/moh', async (req, res) => {
   const b = req.body || {};
@@ -3348,14 +3339,14 @@ app.post('/api/moh', async (req, res) => {
       [nombre, b.descripcion || null, ['alpha', 'random', 'randstart'].includes(b.sort) ? b.sort : 'alpha', b.announcement || null]);
     astconf.mohCarpeta(nombre);
     res.json({ ok: true, nombre });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/moh/:nombre', async (req, res) => {
   try {
     await pool.query('DELETE FROM pbxng_moh_classes WHERE nombre=$1', [req.params.nombre]);
     astconf.mohBorrarCarpeta(req.params.nombre);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 // Subir un audio a una clase (base64, como el resto de las subidas del panel)
 app.post('/api/moh/:nombre/audio', async (req, res) => {
@@ -3371,14 +3362,14 @@ app.post('/api/moh/:nombre/audio', async (req, res) => {
     const dir = astconf.mohCarpeta(nombre);
     require('fs').writeFileSync(require('path').join(dir, file), buf);
     res.json({ ok: true, archivo: file, bytes: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/moh/:nombre/audio/:file', async (req, res) => {
   try {
     const dir = astconf.mohCarpeta(String(req.params.nombre).replace(/[^\w.\-]/g, ''));
     require('fs').rmSync(require('path').join(dir, String(req.params.file).replace(/[^\w.\-]/g, '')), { force: true });
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.post('/api/moh/apply', async (req, res) => {
   try {
@@ -3386,7 +3377,7 @@ app.post('/api/moh/apply', async (req, res) => {
     astconf.moh(rows);
     const out = await amiCommand('moh reload');
     res.json({ ok: true, clases: rows.length, salida: String(out || '').slice(0, 400) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 /* ── Manuales: subir/ver/borrar las capturas desde el propio panel ─────────── */
@@ -3416,27 +3407,104 @@ app.post('/api/manuales/img/:name', (req, res) => {
     _fsm.mkdirSync(MAN_IMG_DIR, { recursive: true });
     _fsm.writeFileSync(_pathm.join(MAN_IMG_DIR, name), buf);
     res.json({ ok: true, name, bytes: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.delete('/api/manuales/img/:name', (req, res) => {
   const name = req.params.name;
   if (!IMG_OK.test(name)) return res.status(400).json({ error: 'nombre inválido' });
   try { _fsm.rmSync(_pathm.join(MAN_IMG_DIR, name), { force: true }); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 // ---------------- Respaldo y restauración ----------------
 // El respaldo NO lleva contraseñas: ver la explicación al principio de backup.js.
 app.get('/api/backup', async (req, res) => {
   try { res.json({ respaldos: await backup.listar(), partes: backup.PARTES.map(p => ({ id: p.id, desc: p.desc, opcional: !!p.opcional })) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/backup', async (req, res) => {
   try {
     const r = await backup.crear({ grabaciones: !!(req.body && req.body.grabaciones), nota: (req.body && req.body.nota) || '' });
     res.status(201).json(r);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
+
+/* ── Respaldo programado (docs/CONTRATOS.md §3 `backup/schedule`) ──────────────
+ * Planificador INTERNO de la API: un respaldo por día, sin grabaciones, a la hora
+ * elegida en el panel, con retención sobre los programados. Va adentro de la API y
+ * no sólo en el cron del host porque hay instalaciones donde nadie toca el host
+ * (CT de Proxmox entregado llave en mano): si dependiera del cron, "activar" desde
+ * el panel no haría nada. El cron (docker/backup-cron.sh → backup-cli.js) sigue
+ * siendo válido y usa la misma función; los dos anotan backup_last_run al EMPEZAR,
+ * y el planificador no arranca si hoy ya hay una marca, así que no se pisan.
+ * La hora se compara con el reloj local del contenedor (TZ del compose). */
+const BK = { enabled: 'backup_enabled', hour: 'backup_hour', keep: 'backup_keep', run: 'backup_last_run', ok: 'backup_last_ok', err: 'backup_last_error', nombre: 'backup_last_nombre' };
+const BK_DEF = { enabled: '1', hour: 3, keep: +(process.env.BACKUP_KEEP || 14) || 14 };
+async function bkSchedule() {
+  const g = async (k, d) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value != null && rows[0].value !== '' ? rows[0].value : d; };
+  const hour = parseInt(await g(BK.hour, BK_DEF.hour), 10), keep = parseInt(await g(BK.keep, BK_DEF.keep), 10);
+  const ok = await g(BK.ok, '');
+  return {
+    enabled: (await g(BK.enabled, BK_DEF.enabled)) === '1',
+    hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : BK_DEF.hour,
+    keep: Number.isInteger(keep) && keep >= 1 ? keep : BK_DEF.keep,
+    last_run: (await g(BK.run, '')) || null,
+    last_ok: ok === '' ? null : ok === '1',
+    last_error: (await g(BK.err, '')) || null,
+    last_nombre: (await g(BK.nombre, '')) || null,
+    running: bkCorriendo,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+  };
+}
+app.get('/api/backup/schedule', async (req, res) => { try { res.json(await bkSchedule()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/backup/schedule', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const put = (k, v) => pool.query('INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [k, String(v)]);
+    if (b.hour !== undefined) {
+      if (!Number.isInteger(b.hour) || b.hour < 0 || b.hour > 23) return res.status(400).json({ error: 'la hora tiene que ser un entero entre 0 y 23' });
+      await put(BK.hour, b.hour);
+    }
+    if (b.keep !== undefined) {
+      if (!Number.isInteger(b.keep) || b.keep < 1 || b.keep > 3650) return res.status(400).json({ error: 'la cantidad a conservar tiene que ser un entero de 1 o más' });
+      await put(BK.keep, b.keep);
+    }
+    if (b.enabled !== undefined) {
+      if (typeof b.enabled !== 'boolean') return res.status(400).json({ error: 'enabled tiene que ser true o false' });
+      await put(BK.enabled, b.enabled ? '1' : '0');
+    }
+    res.json(await bkSchedule());
+  } catch (e) { errorHttp(res, e); }
+});
+
+let bkCorriendo = false;
+const bkLog = logger('BACKUP');
+const bkDia = (d) => { const z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`; };
+async function bkTick() {
+  if (cerrando || bkCorriendo) return;
+  let cfg;
+  try { cfg = await bkSchedule(); } catch (e) { return; }   // sin DB no hay respaldo posible; el próximo minuto se reintenta
+  if (!cfg.enabled) return;
+  const ahora = new Date();
+  if (ahora.getHours() !== cfg.hour) return;
+  // "no corrió hoy": la marca se compara en el día local del contenedor, igual que la hora.
+  if (cfg.last_run && bkDia(new Date(cfg.last_run)) === bkDia(ahora)) return;
+  bkCorriendo = true;
+  const put = (k, v) => pool.query('INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [k, String(v)]).catch((e) => bkLog.warn('no pude anotar ' + k, e));
+  try {
+    // Marca de inicio ANTES de crear: es lo que evita que el cron del host y este
+    // planificador hagan dos respaldos a la misma hora (ver backup-cli.js).
+    await put(BK.run, ahora.toISOString());
+    bkLog.info('respaldo programado: inicio', { hour: cfg.hour, keep: cfg.keep });
+    const r = await backup.programado({ grabaciones: false, keep: cfg.keep, nota: 'programado' });
+    await put(BK.ok, '1'); await put(BK.err, ''); await put(BK.nombre, r.nombre);
+    bkLog.info('respaldo programado: OK', { nombre: r.nombre, bytes: r.bytes, borrados: r.retencion.borrados });
+  } catch (e) {
+    await put(BK.ok, '0'); await put(BK.err, String(e && e.message || e).slice(0, 300));
+    bkLog.error('respaldo programado: falló', e);
+  } finally { bkCorriendo = false; }
+}
+setInterval(() => bkTick().catch((e) => bkLog.error('planificador', e)), 60000).unref();
 
 // Descarga por streaming: un respaldo con grabaciones puede pesar cientos de MB y no
 // tiene por qué pasar por memoria.
@@ -3466,7 +3534,7 @@ app.post('/api/backup/subir/:nombre', express.raw({ type: '*/*', limit: '2gb' })
     const m = await backup.inspeccionar(req.params.nombre).catch((e) => ({ error: e.message }));
     if (m && m.error) { try { require('fs').unlinkSync(f); } catch (_) {} return res.status(400).json({ error: m.error }); }
     res.status(201).json({ subido: req.params.nombre, manifiesto: m });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
 app.post('/api/backup/:nombre/restaurar', async (req, res) => {
@@ -3483,24 +3551,23 @@ app.get('/api/manuales/img-list', (req, res) => {
   try {
     const files = _fsm.existsSync(MAN_IMG_DIR) ? _fsm.readdirSync(MAN_IMG_DIR).filter((f) => IMG_OK.test(f)) : [];
     res.json({ cargadas: files });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 
-app.get('/api/dialplan', async (req, res) => { const ctx = req.query.context; try { res.json({ output: await amiCommand('dialplan show' + (ctx ? ' ' + ctx : '')) }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/channels', async (req, res) => { try { res.json(await getChannels()); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/tenants', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,slug,context_prefix,active FROM tenants ORDER BY id'); res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/dialplan', async (req, res) => { const ctx = req.query.context; try { res.json({ output: await amiCommand('dialplan show' + (ctx ? ' ' + ctx : '')) }); } catch (e) { errorHttp(res, e); } });
+app.get('/api/channels', async (req, res) => { try { res.json(await getChannels()); } catch (e) { errorHttp(res, e); } });
+app.get('/api/tenants', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,slug,context_prefix,active FROM tenants ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 
 app.get('/api/sip/messages', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 500, 2000);
   try {
-    await pool.query("CREATE TABLE IF NOT EXISTS pbxng_sip_capture (id bigserial PRIMARY KEY, ts timestamptz DEFAULT now(), host text, src text, dst text, method text, status int, callid text, cseq text, from_uri text, to_uri text, ruri text, raw text)");
     const { rows } = await pool.query("SELECT id, extract(epoch from ts)*1000 AS t, host, src, dst, method, status, callid, cseq, from_uri, to_uri, ruri FROM (SELECT * FROM pbxng_sip_capture ORDER BY id DESC LIMIT $1) q ORDER BY id ASC", [limit]);
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { errorHttp(res, e); }
 });
 app.get('/api/sip/raw/:id', async (req, res) => {
   try { const { rows } = await pool.query("SELECT raw FROM pbxng_sip_capture WHERE id=$1", [req.params.id]); res.json({ raw: rows[0] ? rows[0].raw : '' }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.get('/api/sip/state', async (req, res) => {
   try {
@@ -3512,14 +3579,44 @@ app.get('/api/sip/state', async (req, res) => {
 app.post('/api/sip/toggle', async (req, res) => {
   const on = !!(req.body && req.body.on);
   try { await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('sip_capture_on',$1) ON CONFLICT (key) DO UPDATE SET value=$1", [on ? '1' : '0']); res.json({ ok: true, on }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 app.post('/api/sip/clear', async (req, res) => {
   try { await pool.query("DELETE FROM pbxng_sip_capture"); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { errorHttp(res, e); }
 });
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+/* Origen del socket: antes `origin: '*'`. El panel llega SIEMPRE por el proxy
+ * (dashboard/server.js), sin cabecera Origin cruzada, así que lo normal es que el
+ * pedido no traiga Origin o traiga el propio host. Un Origin de otro sitio (una web
+ * ajena intentando abrir el socket con un token robado del navegador) se rechaza.
+ * CORS_ORIGINS (coma) suma orígenes explícitos, p. ej. el panel en desarrollo. */
+const CORS_ORIGINS = String(process.env.CORS_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/+$/, '')).filter(Boolean);
+function origenPermitido(origin, req) {
+  if (!origin) return true;                       // sin Origin: proxy, curl, softphone nativo
+  const o = String(origin).replace(/\/+$/, '');
+  if (CORS_ORIGINS.includes(o)) return true;
+  // mismo origen: el host del Origin coincide con el Host con el que nos llamaron
+  // (o el que reenvió el proxy). Se compara host:puerto, sin el esquema.
+  let host = ''; try { host = new URL(o).host; } catch (_) { return false; }
+  const hdr = req && req.headers ? req.headers : {};
+  const fwd = String(hdr['x-forwarded-host'] || '').split(',')[0].trim();
+  if (!host) return false;
+  if (host === hdr.host || host === fwd) return true;
+  // Detrás de un proxy en puerto no estándar (https://pbx:8443) el Host que reenvía NPM
+  // viene sin puerto: si el Host no trae puerto, alcanza con que coincida el hostname.
+  const hn = host.split(':')[0];
+  const sinPuerto = (h) => h && !h.includes(':') && h === hn;
+  return sinPuerto(hdr.host) || sinPuerto(fwd);
+}
+const io = new Server(server, {
+  cors: { origin: true, credentials: true },     // el filtro real es allowRequest (mira Host y X-Forwarded-Host)
+  allowRequest: (req, cb) => {
+    if (origenPermitido(req.headers.origin, req)) return cb(null, true);
+    logger('SOCKET').warn('origen rechazado', { origin: req.headers.origin, host: req.headers.host });
+    cb('origen no permitido', false);
+  },
+});
 let busy = false, deb = null;
 async function broadcast() { if (busy) return; busy = true; try { io.to('state').emit('snapshot', await snapshot()); } catch (e) {} finally { busy = false; } }
 function broadcastSoon() { clearTimeout(deb); deb = setTimeout(broadcast, 300); }
@@ -3597,29 +3694,9 @@ ami.on('managerevent', (e) => {
 
 
 // ==================== CRM / Intercom / Encuestas ====================
+// Esquema en migrations/0009_schema_runtime.sql; acá sólo los campos de encuesta por defecto.
 (async () => {
   try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_clients (
-      id serial PRIMARY KEY, name text NOT NULL, doc text, address text, notes text,
-      phones text[] DEFAULT '{}', created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())`);
-    // Ubicacion del cliente en el mapa (se geocodifica desde la direccion, una sola vez)
-    await pool.query("ALTER TABLE pbxng_clients ADD COLUMN IF NOT EXISTS lat double precision").catch(()=>{});
-    await pool.query("ALTER TABLE pbxng_clients ADD COLUMN IF NOT EXISTS lon double precision").catch(()=>{});
-    await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_client_persons (
-      id serial PRIMARY KEY, client_id int REFERENCES pbxng_clients(id) ON DELETE CASCADE,
-      name text NOT NULL, doc text, relation text, valid_until date, notes text, created_at timestamptz DEFAULT now())`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_client_spaces (
-      id serial PRIMARY KEY, client_id int REFERENCES pbxng_clients(id) ON DELETE CASCADE,
-      name text NOT NULL, kind text, notes text, created_at timestamptz DEFAULT now())`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_client_devices (
-      id serial PRIMARY KEY, client_id int REFERENCES pbxng_clients(id) ON DELETE CASCADE,
-      label text NOT NULL, type text DEFAULT 'camera', rtsp_url text, go2rtc_src text, enabled boolean DEFAULT true, created_at timestamptz DEFAULT now())`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_survey_fields (
-      id serial PRIMARY KEY, ord int DEFAULT 0, label text NOT NULL, ftype text DEFAULT 'text',
-      options jsonb DEFAULT '[]', required boolean DEFAULT false, active boolean DEFAULT true)`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS pbxng_call_surveys (
-      id serial PRIMARY KEY, ext text, client_id int, caller text, uniqueid text,
-      answers jsonb DEFAULT '{}', created_at timestamptz DEFAULT now())`);
     const { rows: sf } = await pool.query('SELECT count(*)::int AS n FROM pbxng_survey_fields');
     if (sf[0].n === 0) {
       await pool.query(`INSERT INTO pbxng_survey_fields (ord,label,ftype,options,required) VALUES
@@ -3628,9 +3705,9 @@ ami.on('managerevent', (e) => {
         (3,'Satisfaccion','rating','[]',false),
         (4,'Requiere seguimiento','bool','[]',false),
         (5,'Nota','text','[]',false)`);
+      logger('CRM').info('campos de encuesta por defecto creados');
     }
-    console.log('[CRM] schema listo');
-  } catch (e) { console.error('[CRM] schema', e.message); }
+  } catch (e) { logger('CRM').error('semilla de encuesta', e); }
 })();
 
 let CRMGO2RTC = process.env.GO2RTC_URL || '';
@@ -3639,9 +3716,9 @@ async function _g2refresh(){ try{ const q=await pool.query("SELECT value FROM pb
 _g2refresh(); setInterval(_g2refresh, 30000);
 async function syncGo2rtc(){ try{ const q=await pool.query("SELECT go2rtc_src, rtsp_url FROM pbxng_client_devices WHERE enabled AND rtsp_url IS NOT NULL AND rtsp_url<>''"); for(const d of q.rows){ try{ await fetch(GO2RTC_MGMT+'/api/streams?name='+encodeURIComponent(d.go2rtc_src)+'&src='+encodeURIComponent(d.rtsp_url),{method:'PUT'}); }catch(e){} } }catch(e){} }
 setTimeout(syncGo2rtc, 10000); setInterval(syncGo2rtc, 60000);
-app.get('/api/intercom/config', async (req,res)=>{ try{ const q=await pool.query("SELECT value FROM pbxng_settings WHERE key='go2rtc_url'"); res.json({ go2rtc_url: (q.rows[0]&&q.rows[0].value)||'', mgmt: GO2RTC_MGMT }); }catch(e){ res.status(500).json({error:e.message}); } });
-app.post('/api/intercom/config', async (req,res)=>{ const u=(req.body&&req.body.go2rtc_url)||''; try{ const up=await pool.query("UPDATE pbxng_settings SET value=$1 WHERE key='go2rtc_url'",[u]); if(up.rowCount===0) await pool.query("INSERT INTO pbxng_settings(key,value) VALUES('go2rtc_url',$1)",[u]); CRMGO2RTC=u; syncGo2rtc(); res.json({ok:true}); }catch(e){ res.status(500).json({error:e.message}); } });
-app.post('/api/intercom/sync', async (req,res)=>{ try{ await syncGo2rtc(); res.json({ok:true}); }catch(e){ res.status(500).json({error:e.message}); } });
+app.get('/api/intercom/config', async (req,res)=>{ try{ const q=await pool.query("SELECT value FROM pbxng_settings WHERE key='go2rtc_url'"); res.json({ go2rtc_url: (q.rows[0]&&q.rows[0].value)||'', mgmt: GO2RTC_MGMT }); }catch(e){ errorHttp(res, e); } });
+app.post('/api/intercom/config', async (req,res)=>{ const u=(req.body&&req.body.go2rtc_url)||''; try{ const up=await pool.query("UPDATE pbxng_settings SET value=$1 WHERE key='go2rtc_url'",[u]); if(up.rowCount===0) await pool.query("INSERT INTO pbxng_settings(key,value) VALUES('go2rtc_url',$1)",[u]); CRMGO2RTC=u; syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
+app.post('/api/intercom/sync', async (req,res)=>{ try{ await syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
 function crmNormNum(s){ return String(s||'').replace(/[^0-9]/g,''); }
 
 // Escribir en el CRM (clientes, personas autorizadas, espacios, dispositivos) queda reservado a
@@ -3661,7 +3738,7 @@ app.get('/api/clients', async (req,res)=>{ try{
     (SELECT count(*)::int FROM pbxng_client_devices d WHERE d.client_id=c.id AND d.type='intercom') AS intercoms,
     (SELECT count(*)::int FROM pbxng_client_devices d WHERE d.client_id=c.id AND d.type='camera') AS cameras
     FROM pbxng_clients c ORDER BY c.name`); res.json(rows);
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 
 app.get('/api/clients/lookup', async (req,res)=>{ try{
   const num = crmNormNum(req.query.number);
@@ -3676,7 +3753,7 @@ app.get('/api/clients/lookup', async (req,res)=>{ try{
   c.devices = (await pool.query('SELECT id,label,type,go2rtc_src FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[c.id])).rows
     .map(d=>({ id:d.id, label:d.label, type:d.type, base:CRMGO2RTC, src:d.go2rtc_src }));
   res.json(c);
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 
 app.get('/api/clients/:id', async (req,res)=>{ try{
   const { rows } = await pool.query('SELECT * FROM pbxng_clients WHERE id=$1',[req.params.id]);
@@ -3686,7 +3763,7 @@ app.get('/api/clients/:id', async (req,res)=>{ try{
   c.spaces = (await pool.query('SELECT * FROM pbxng_client_spaces WHERE client_id=$1 ORDER BY name',[c.id])).rows;
   c.devices = (await pool.query('SELECT * FROM pbxng_client_devices WHERE client_id=$1 ORDER BY label',[c.id])).rows;
   res.json(c);
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 
 // --- Ficha del cliente: llamadas, intervenciones y ubicacion -------------------
 
@@ -3703,7 +3780,7 @@ app.get('/api/clients/:id/calls', async (req,res)=>{ try{
          OR regexp_replace(dst,'[^0-9]','','g') = ANY($1)
       ORDER BY start DESC LIMIT 200`, [phones]);
   res.json(rows);
-}catch(e){ res.status(500).json({error:e.message}); } });
+}catch(e){ errorHttp(res, e); } });
 
 // Intervenciones: la encuesta que completa el agente al cortar (motivo, resultado, notas).
 app.get('/api/clients/:id/interventions', async (req,res)=>{ try{
@@ -3712,7 +3789,7 @@ app.get('/api/clients/:id/interventions', async (req,res)=>{ try{
     [req.params.id]);
   const { rows: fields } = await pool.query('SELECT id,label,ftype,ord FROM pbxng_survey_fields WHERE active ORDER BY ord, id');
   res.json({ items: rows, fields });
-}catch(e){ res.status(500).json({error:e.message}); } });
+}catch(e){ errorHttp(res, e); } });
 
 // Ubicacion: geocodifica la direccion con Nominatim (OSM) y la deja guardada.
 app.post('/api/clients/:id/geocode', crmWrite, async (req,res)=>{ try{
@@ -3727,14 +3804,14 @@ app.post('/api/clients/:id/geocode', crmWrite, async (req,res)=>{ try{
   const lat = parseFloat(d[0].lat), lon = parseFloat(d[0].lon);
   await pool.query('UPDATE pbxng_clients SET lat=$2, lon=$3 WHERE id=$1',[req.params.id, lat, lon]);
   res.json({ lat, lon, display: d[0].display_name });
-}catch(e){ res.status(500).json({error:e.message}); } });
+}catch(e){ errorHttp(res, e); } });
 
 app.post('/api/clients', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const phones = Array.isArray(b.phones)? b.phones : (b.phones? String(b.phones).split(',').map(x=>x.trim()).filter(Boolean):[]);
   const { rows } = await pool.query('INSERT INTO pbxng_clients (name,doc,address,notes,phones) VALUES ($1,$2,$3,$4,$5) RETURNING *',
     [b.name, b.doc||null, b.address||null, b.notes||null, phones]);
   res.status(201).json(rows[0]);
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 
 app.put('/api/clients/:id', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const phones = Array.isArray(b.phones)? b.phones : (b.phones!==undefined && b.phones!==null ? String(b.phones).split(',').map(x=>x.trim()).filter(Boolean): null);
@@ -3742,39 +3819,39 @@ app.put('/api/clients/:id', crmWrite, async (req,res)=>{ const b=req.body||{}; t
     phones=COALESCE($6,phones), updated_at=now() WHERE id=$1 RETURNING *`,
     [req.params.id, b.name||null, b.doc||null, b.address||null, b.notes||null, phones]);
   res.json(rows[0]||{});
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 
-app.delete('/api/clients/:id', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_clients WHERE id=$1',[req.params.id]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+app.delete('/api/clients/:id', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_clients WHERE id=$1',[req.params.id]); res.json({ok:true}); }catch(e){errorHttp(res, e);} });
 
 app.post('/api/clients/:id/persons', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const { rows } = await pool.query('INSERT INTO pbxng_client_persons (client_id,name,doc,relation,valid_until,notes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
     [req.params.id,b.name,b.doc||null,b.relation||null,b.valid_until||null,b.notes||null]); res.status(201).json(rows[0]);
-}catch(e){res.status(500).json({error:e.message});} });
-app.delete('/api/persons/:pid', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_persons WHERE id=$1',[req.params.pid]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
+app.delete('/api/persons/:pid', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_persons WHERE id=$1',[req.params.pid]); res.json({ok:true}); }catch(e){errorHttp(res, e);} });
 
 app.post('/api/clients/:id/spaces', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const { rows } = await pool.query('INSERT INTO pbxng_client_spaces (client_id,name,kind,notes) VALUES ($1,$2,$3,$4) RETURNING *',
     [req.params.id,b.name,b.kind||null,b.notes||null]); res.status(201).json(rows[0]);
-}catch(e){res.status(500).json({error:e.message});} });
-app.delete('/api/spaces/:sid', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_spaces WHERE id=$1',[req.params.sid]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
+app.delete('/api/spaces/:sid', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_spaces WHERE id=$1',[req.params.sid]); res.json({ok:true}); }catch(e){errorHttp(res, e);} });
 
 app.post('/api/clients/:id/devices', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const src = b.go2rtc_src || ('cli'+req.params.id+'_'+Date.now().toString(36));
   const { rows } = await pool.query('INSERT INTO pbxng_client_devices (client_id,label,type,rtsp_url,go2rtc_src,enabled) VALUES ($1,$2,$3,$4,$5,COALESCE($6,true)) RETURNING *',
     [req.params.id,b.label,b.type||'camera',b.rtsp_url||null,src,b.enabled]); res.status(201).json(rows[0]);
-}catch(e){res.status(500).json({error:e.message});} });
-app.delete('/api/devices/:did', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_devices WHERE id=$1',[req.params.did]); res.json({ok:true}); }catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
+app.delete('/api/devices/:did', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_devices WHERE id=$1',[req.params.did]); res.json({ok:true}); }catch(e){errorHttp(res, e);} });
 
 app.get('/api/intercom/clients', async (req,res)=>{ try{
   const { rows } = await pool.query(`SELECT DISTINCT c.id, c.name FROM pbxng_clients c JOIN pbxng_client_devices d ON d.client_id=c.id WHERE d.enabled ORDER BY c.name`); res.json(rows);
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 app.get('/api/intercom/streams', async (req,res)=>{ try{
   const cid = req.query.client;
   const { rows } = await pool.query('SELECT id,label,type,go2rtc_src FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[cid]);
   res.json(rows.map(d=>({ id:d.id, label:d.label, type:d.type, base:CRMGO2RTC, src:d.go2rtc_src })));
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 
-app.get('/api/survey/fields', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_survey_fields WHERE active ORDER BY ord, id'); res.json(rows); }catch(e){res.status(500).json({error:e.message});} });
+app.get('/api/survey/fields', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_survey_fields WHERE active ORDER BY ord, id'); res.json(rows); }catch(e){errorHttp(res, e);} });
 app.put('/api/survey/fields', crmWrite, async (req,res)=>{ const arr=Array.isArray(req.body)?req.body:((req.body&&req.body.fields)||[]); try{
   await pool.query('UPDATE pbxng_survey_fields SET active=false');
   for(let i=0;i<arr.length;i++){ const f=arr[i];
@@ -3782,12 +3859,12 @@ app.put('/api/survey/fields', crmWrite, async (req,res)=>{ const arr=Array.isArr
     else { await pool.query('INSERT INTO pbxng_survey_fields (ord,label,ftype,options,required,active) VALUES ($1,$2,$3,$4,$5,true)',[i,f.label,f.ftype||'text',JSON.stringify(f.options||[]),!!f.required]); }
   }
   res.json({ok:true});
-}catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
 app.post('/api/survey', async (req,res)=>{ const b=req.body||{}; try{
   await pool.query('INSERT INTO pbxng_call_surveys (ext,client_id,caller,uniqueid,answers) VALUES ($1,$2,$3,$4,$5)',
     [b.ext||null,b.client_id||null,b.caller||null,b.uniqueid||null,JSON.stringify(b.answers||{})]); res.status(201).json({ok:true});
-}catch(e){res.status(500).json({error:e.message});} });
-app.get('/api/survey', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_call_surveys ORDER BY created_at DESC LIMIT 200'); res.json(rows); }catch(e){res.status(500).json({error:e.message});} });
+}catch(e){errorHttp(res, e);} });
+app.get('/api/survey', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_call_surveys ORDER BY created_at DESC LIMIT 200'); res.json(rows); }catch(e){errorHttp(res, e);} });
 // ==================== fin CRM ====================
 
 // ==================== Indexador de grabaciones (MixMonitor -> pbxng_recordings) ====================
@@ -3824,4 +3901,53 @@ app.get('/api/survey', async (req,res)=>{ try{ const { rows } = await pool.query
   let _hangIdxT = null; try { ami.on('managerevent', (e) => { const ev = ((e && (e.event || e.Event)) || '').toLowerCase(); if (ev === 'hangup') { clearTimeout(_hangIdxT); _hangIdxT = setTimeout(indexRecordings, 4000); } }); } catch (e) {}
 })();
 // ==================== fin indexador ====================
-server.listen(CFG.port, '0.0.0.0', () => console.log('[API] PBX-NG (socket.io) en :%d', CFG.port));
+/* ── Cierre de la cadena de Express: 404 JSON de /api y manejador de errores final ──
+ * Van al final a propósito: Express resuelve en orden de registro y estos dos tienen
+ * que quedar detrás de TODAS las rutas (incluidas las que registran los módulos). */
+app.use('/api', (req, res) => res.status(404).json({ error: 'ruta inexistente' }));
+app.use(require('./errores').middlewareFinal);
+
+/* ── Cierre ordenado (SIGTERM de compose / SIGINT en consola) ─────────────────────
+ * Sin esto, `docker stop` mataba el proceso con lo que hubiera a medias: consultas
+ * en vuelo, supervisiones (snoop) colgadas en Asterisk, sesiones de IA con el
+ * AudioSocket abierto. Orden: dejar de aceptar → avisar a los sockets → cortar
+ * espías → ARI/AMI → AudioSocket → esperar la DB (hasta 10 s) → salir 0.
+ * Si algo se traba, a los 15 s se sale con 1: mejor un reinicio sucio que un
+ * contenedor que no termina nunca. */
+let cerrando = false;
+async function cerrarOrdenado(senal) {
+  if (cerrando) return;
+  cerrando = true;
+  const t0 = Date.now();
+  const paso = (m, extra) => log.info('cierre: ' + m, Object.assign({ ms: Date.now() - t0 }, extra || {}));
+  const duro = setTimeout(() => { log.error('cierre: no terminó en 15 s, salida forzada'); process.exit(1); }, 15000);
+  duro.unref();
+  paso('señal ' + senal + ', dejo de aceptar conexiones');
+  try { server.close(() => paso('servidor HTTP cerrado')); } catch (e) { log.warn('cierre: server.close', e); }
+  try { if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections(); } catch (_) {}
+  try { io.close(); paso('socket.io cerrado'); } catch (e) { log.warn('cierre: socket.io', e); }
+  try {
+    const ids = Array.from(callEngine.spies.keys());
+    for (const id of ids) await callEngine.stopSpy(id).catch(() => {});
+    paso('supervisiones cortadas', { spies: ids.length });
+  } catch (e) { log.warn('cierre: supervisiones', e); }
+  try { if (ari) { const c = ari; ari = null; state.ari = false; callEngine.detach(); await Promise.resolve(c.stop && c.stop()).catch(() => {}); } paso('ARI cerrado'); } catch (e) { log.warn('cierre: ARI', e); }
+  try { ami.disconnect && ami.disconnect(); paso('AMI cerrado'); } catch (e) { log.warn('cierre: AMI', e); }
+  try { await Promise.race([aiPipeline.close(), new Promise((ok) => setTimeout(ok, 2000))]); paso('AudioSocket cerrado'); } catch (e) { log.warn('cierre: AudioSocket', e); }
+  try {
+    await Promise.race([pool.end(), new Promise((_, rej) => setTimeout(() => rej(new Error('la DB no soltó las consultas en 10 s')), 10000))]);
+    paso('pool de PostgreSQL cerrado');
+  } catch (e) { log.warn('cierre: pool', e); }
+  paso('listo, salgo con 0');
+  clearTimeout(duro);
+  process.exit(0);
+}
+process.on('SIGTERM', () => cerrarOrdenado('SIGTERM'));
+process.on('SIGINT', () => cerrarOrdenado('SIGINT'));
+/* Una promesa rechazada sin catch tumbaría el proceso entero (Node ≥15) por un error
+ * de un módulo secundario. Se loguea con stack y se sigue; las excepciones sincrónicas
+ * sin atrapar sí terminan el proceso (el estado ya no es confiable), pero logueadas. */
+process.on('unhandledRejection', (e) => log.error('promesa rechazada sin catch', e));
+process.on('uncaughtException', (e) => { log.error('excepción no atrapada, salgo con 1', e); setTimeout(() => process.exit(1), 200); });
+
+server.listen(CFG.port, '0.0.0.0', () => log.info('PBX-NG (socket.io) escuchando', { port: +CFG.port }));

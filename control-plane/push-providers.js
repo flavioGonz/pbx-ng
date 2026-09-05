@@ -6,11 +6,11 @@
 // ============================================================
 const crypto = require('crypto');
 const http2 = require('http2');
+const log = require('./log')('PUSH');
 
 let POOL = null;
 function init(pool) {
-  POOL = pool;
-  pool.query("CREATE TABLE IF NOT EXISTS pbxng_push_devices (id serial PRIMARY KEY, ext text, provider text, prid text, param text, topic text, ua text, updated_at timestamptz DEFAULT now(), UNIQUE(provider,prid))").catch(e => console.error('[PUSH] devices table', e.message));
+  POOL = pool;   // esquema (pbxng_push_devices): migrations/0009_schema_runtime.sql
 }
 async function getSetting(k) { try { const { rows } = await POOL.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value || ''; } catch (_) { return ''; } }
 const b64url = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
@@ -30,7 +30,7 @@ async function fcmAccessToken(sa) {
 async function fcmSend(devices, payload) {
   const raw = await getSetting('fcm_service_account'); if (!raw) return 0;
   let sa; try { sa = JSON.parse(raw); } catch (_) { return 0; }
-  let token; try { token = await fcmAccessToken(sa); } catch (e) { console.error('[PUSH] fcm auth', e.message); return 0; }
+  let token; try { token = await fcmAccessToken(sa); } catch (e) { log.error('fcm auth', e); return 0; }
   let sent = 0;
   for (const d of devices) {
     try {
@@ -102,7 +102,7 @@ async function sendNative(ext, payload) {
     if (fcm.length) n += await fcmSend(fcm, payload);
     if (apns.length) n += await apnsSend(apns, payload);
     return n;
-  } catch (e) { console.error('[PUSH] native', e.message); return 0; }
+  } catch (e) { log.error('native', e); return 0; }
 }
 async function registerDevice(ext, provider, prid, param, topic, ua) {
   if (!ext || !provider || !prid) throw new Error('faltan datos');

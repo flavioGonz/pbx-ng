@@ -107,7 +107,7 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
       </div>
       <div class="metatable">
         <div><span>Dirigido a</span><b>Técnico / integrador</b></div>
-        <div><span>Versión del producto</span><b>1.4.0</b></div>
+        <div><span>Versión del producto</span><b>1.5.0</b></div>
         <div><span>Actualizado</span><b>05/09/2026</b></div>
         <div><span>Documento</span><b>INSTALACION</b></div>
       </div>
@@ -252,12 +252,18 @@ pbxng-ctl disable intercom    # lo destruye</code></pre>
 export PBXNG_VERSION=X.Y.Z
 ./deploy.sh                    # o ./deploy.sh --images=pbxng-X.Y.Z-images.tar.gz (sin internet)</code></pre>
 <p><code>deploy.sh</code> baja las imágenes, corre las <strong>migraciones de base de datos</strong> y levanta todo. Para volver atrás, desplegá la versión anterior. El detalle está en <code>RELEASE.md</code>.</p>
+<p>Desde 1.5.0:</p>
+<ul><li><strong>Si una migración falla, no se actualiza nada</strong>: <code>deploy.sh</code> corta ahí con el error a la</li></ul>
+<p>  vista, y la API tampoco arranca con un esquema viejo (su contenedor sale con error hasta que   se corrija). Es a propósito: una central a medio migrar es peor que una parada.</p>
+<ul><li><strong>Si Asterisk tiene que recrearse</strong> (cambió su imagen), <code>deploy.sh</code> primero <strong>drena</strong>: cuenta</li></ul>
+<p>  las llamadas activas, te pide confirmación, deja de aceptar llamadas nuevas y espera hasta   60 s a que cuelguen las que están. Con <code>./deploy.sh --yes</code> no pregunta (para actualizar de   madrugada por script). Si la imagen de Asterisk no cambió, no toca las llamadas.</p>
+<ul><li>Lo mismo hace <code>pbxng-ctl up|enable|down</code> (y <code>pbxng-ctl drain</code> a mano).</li></ul>
 <hr />
 <div class="chapter"><span class="num">Capítulo 8</span><h2 id="8-si-algo-no-funciona">Si algo no funciona</h2></div>
 <div class="nav"><span class="navk">Cómo llegar</span><b>Panel</b> <span class="sep">›</span> <b>Telefonía</b> <span class="sep">›</span> <b>Monitoreo</b></div>
-<div class="tw"><table><thead><tr><th>Síntoma</th><th>Dónde mirar</th></tr></thead><tbody><tr><td>El teléfono registra pero <strong>no hay audio</strong></td><td>Firewall: rango de relay del TURN y <code>30000-40000/UDP</code>. Corré <code>check-turn.py</code>.</td></tr><tr><td>El softphone web no conecta</td><td>El proxy debe permitir <strong>WebSocket</strong> en <code>/ws</code> (y con HTTP/2 <strong>desactivado</strong>).</td></tr><tr><td>El panel no carga datos</td><td>Contenedor <code>api</code>: <code>docker compose logs api</code>.</td></tr><tr><td>No entran llamadas</td><td>Estado de la troncal en <strong>Monitoreo</strong>. Activá la alerta de <em>troncal caída</em>.</td></tr></tbody></table></div>
+<div class="tw"><table><thead><tr><th>Síntoma</th><th>Dónde mirar</th></tr></thead><tbody><tr><td>El teléfono registra pero <strong>no hay audio</strong></td><td>Firewall: rango de relay del TURN y <code>30000-40000/UDP</code>. Corré <code>check-turn.py</code>.</td></tr><tr><td>El softphone web no conecta</td><td>El proxy debe permitir <strong>WebSocket</strong> en <code>/ws</code> (y con HTTP/2 <strong>desactivado</strong>).</td></tr><tr><td>El panel no carga datos</td><td>Contenedor <code>api</code>: <code>docker compose logs api</code>. Los logs son una línea JSON por evento; <code>jq -c 'select(.level=="error")'</code> filtra los errores.</td></tr><tr><td>El panel muestra <strong>«Base de datos sin respuesta»</strong></td><td>Postgres no contesta: <code>docker compose ps</code> muestra <code>api</code> como <code>unhealthy</code> y <code>postgres</code> caído o <code>unhealthy</code>. <code>docker compose logs postgres</code>. Las llamadas siguen; el panel no guarda hasta que vuelva.</td></tr><tr><td>Un contenedor se reinicia en bucle</td><td><code>docker compose ps</code> lo muestra reiniciando; <code>docker inspect &lt;contenedor&gt; --format '{{.State.OOMKilled}}'</code> en <code>true</code> = pasó su límite de memoria (<code>MEM_*</code> en <code>.env</code>, subilo y <code>pbxng-ctl up</code>). Si es <code>api</code>, mirá si las migraciones fallaron (<code>docker compose logs api</code>, primeras líneas).</td></tr><tr><td>No se hacen los respaldos automáticos</td><td>Sistema → Respaldos → «Respaldo programado»: fijate en «Última corrida» si falló y por qué. Si además instalaste el cron del host, <code>/var/log/pbxng-backup.log</code>.</td></tr><tr><td>No entran llamadas</td><td>Estado de la troncal en <strong>Monitoreo</strong>. Activá la alerta de <em>troncal caída</em>.</td></tr></tbody></table></div>
 <figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/inst-07-monitor.png" alt="Panel de monitoreo con el estado de los componentes" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 13</span>Panel de monitoreo con el estado de los componentes<span class="fn">inst-07-monitor.png</span></figcaption></figure></main>
-  <footer>PBX-NG · Manual de Instalación · versión 1.4.0 · 05/09/2026</footer>
+  <footer>PBX-NG · Manual de Instalación · versión 1.5.0 · 05/09/2026</footer>
 </div>
 <button class="top" onclick="window.print()">Descargar PDF</button>
 <script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>

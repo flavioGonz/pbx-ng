@@ -8,7 +8,14 @@
 #  pbxng-ctl disable <modulo>       DESTRUYE los contenedores del modulo y saca el perfil
 #  pbxng-ctl up | down | ps         aplica el COMPOSE_PROFILES actual
 #  pbxng-ctl reconcile              sincroniza contenedores <-> COMPOSE_PROFILES del .env
+#  pbxng-ctl backup [args]          respaldo ahora (backup-cli.js en la API; --keep=N, etc.)
+#  pbxng-ctl drain [--yes]          drena Asterisk (sin llamadas nuevas, espera a las activas) y lo para
 #  Modulos: core(siempre) turn ai intercom proxy   (el SBC es otro producto: SBC-NG)
+#
+#  Flags: --yes  (no preguntar antes de cortar llamadas al recrear Asterisk)
+#  Antes de un up/enable/reconcile que RECREE asterisk se drena (asterisk-drain.sh):
+#  recrearlo con llamadas activas las corta. `reconcile` corre desde un timer sin
+#  terminal, asi que drena sin preguntar (espera acotada) en vez de quedarse trabado.
 # ============================================================================
 set -euo pipefail
 DIR="${PBXNG_DIR:-/opt/pbx-ng/docker}"
@@ -16,6 +23,26 @@ DIR="${PBXNG_DIR:-/opt/pbx-ng/docker}"
 cd "$DIR"
 ENVF="$DIR/.env"
 MODULES="core turn ai intercom proxy"   # el SBC es otro producto (SBC-NG), no un modulo de la central
+# Que compose usa esta instalacion (install.sh --release deja docker-compose.release.yml).
+CF="$(grep -E '^PBXNG_COMPOSE_FILE=' "$ENVF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ')"
+CF="${CF:-docker-compose.yml}"
+dc(){ docker compose -f "$CF" "$@"; }
+YES=0; ARGS=()
+for a in "$@"; do case "$a" in --yes|-y) YES=1;; *) ARGS+=("$a");; esac; done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
+# Drena Asterisk solo si el `up -d` que viene lo va a recrear (segun --dry-run de
+# compose). Si el dry-run no esta disponible, se drena igual: es gratis sin llamadas.
+# $1 = perfiles, $2 = 1 para no preguntar.
+drain_if_recreate(){
+  [ -x "$DIR/asterisk-drain.sh" ] || return 0
+  local plan
+  if plan="$(COMPOSE_PROFILES="$1" dc --dry-run up -d 2>&1)"; then
+    echo "$plan" | grep -Eqi 'asterisk.*(recreat|creat)' || return 0
+  fi
+  local y=(); [ "${2:-0}" = 1 ] && y=(--yes)
+  "$DIR/asterisk-drain.sh" -f "$CF" "${y[@]+"${y[@]}"}"
+}
 
 svcs_of(){ case "$1" in
   core)     echo "postgres asterisk api dashboard" ;;
@@ -38,29 +65,42 @@ cmd="${1:-status}"; mod="${2:-}"
 case "$cmd" in
   status)
     echo "COMPOSE_PROFILES=$(get_profiles)"
-    COMPOSE_PROFILES="$(get_profiles)" docker compose ps 2>/dev/null || true ;;
+    COMPOSE_PROFILES="$(get_profiles)" dc ps 2>/dev/null || true ;;
   enable)
     [ -n "$mod" ] && valid "$mod" || { echo "modulo invalido. usa: $MODULES"; exit 1; }
     new="$(add "$(get_profiles)" "$mod")"; set_profiles "$new"
     echo "→ activando '$mod' (perfiles: $new)"
-    COMPOSE_PROFILES="$new" docker compose up -d ;;
+    drain_if_recreate "$new" "$YES"
+    COMPOSE_PROFILES="$new" dc up -d ;;
   disable)
     [ -n "$mod" ] && valid "$mod" || { echo "modulo invalido. usa: $MODULES"; exit 1; }
     [ "$mod" = core ] && { echo "core no se puede desactivar"; exit 1; }
     echo "→ desactivando '$mod' (destruyo: $(svcs_of "$mod"))"
-    for s in $(svcs_of "$mod"); do docker compose --profile "$mod" rm -sf "$s" 2>/dev/null || true; done
+    for s in $(svcs_of "$mod"); do dc --profile "$mod" rm -sf "$s" 2>/dev/null || true; done
     new="$(del "$(get_profiles)" "$mod")"; set_profiles "$new" ;;
-  up)   COMPOSE_PROFILES="$(get_profiles)" docker compose up -d ;;
-  down) COMPOSE_PROFILES="$(get_profiles)" docker compose down ;;
-  ps)   COMPOSE_PROFILES="$(get_profiles)" docker compose ps ;;
+  up)   drain_if_recreate "$(get_profiles)" "$YES"; COMPOSE_PROFILES="$(get_profiles)" dc up -d ;;
+  down) # down tambien corta llamadas: mismo drenado que al recrear.
+        [ -x "$DIR/asterisk-drain.sh" ] && "$DIR/asterisk-drain.sh" -f "$CF" $([ "$YES" = 1 ] && echo --yes)
+        COMPOSE_PROFILES="$(get_profiles)" dc down ;;
+  ps)   COMPOSE_PROFILES="$(get_profiles)" dc ps ;;
   reconcile)
     active="$(get_profiles)"
-    COMPOSE_PROFILES="$active" docker compose up -d
+    drain_if_recreate "$active" 1
+    COMPOSE_PROFILES="$active" dc up -d
     for m in $MODULES; do
       [ "$m" = core ] && continue
       if ! has "$active" "$m"; then
-        for s in $(svcs_of "$m"); do docker compose --profile "$m" rm -sf "$s" 2>/dev/null || true; done
+        for s in $(svcs_of "$m"); do dc --profile "$m" rm -sf "$s" 2>/dev/null || true; done
       fi
     done ;;
-  *) echo "uso: pbxng-ctl {status|enable <m>|disable <m>|up|down|ps|reconcile}  ·  modulos: $MODULES"; exit 1 ;;
+  backup)
+    # Mismo camino que el cron (backup-cron.sh): backup-cli.js dentro de la API.
+    # Sin args: crea uno y aplica la retencion BACKUP_KEEP del .env (default 14).
+    shift || true
+    keep="$(grep -E '^BACKUP_KEEP=' "$ENVF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ')"
+    COMPOSE_PROFILES="$(get_profiles)" dc exec -T -e "BACKUP_KEEP=${keep:-14}" api node backup-cli.js "$@" ;;
+  drain)
+    [ -x "$DIR/asterisk-drain.sh" ] || { echo "falta $DIR/asterisk-drain.sh"; exit 1; }
+    "$DIR/asterisk-drain.sh" -f "$CF" $([ "$YES" = 1 ] && echo --yes) ;;
+  *) echo "uso: pbxng-ctl {status|enable <m>|disable <m>|up|down|ps|reconcile|backup [args]|drain} [--yes]  ·  modulos: $MODULES"; exit 1 ;;
 esac

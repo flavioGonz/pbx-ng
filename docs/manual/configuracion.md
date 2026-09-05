@@ -1559,6 +1559,57 @@ configuración diaria.
 
 ![Base de datos](img/cfg-50-basedatos.png)
 
+### 31.1 Respaldos y respaldo programado
+
+» Menú lateral → Sistema → Respaldos
+
+Un respaldo de PBX-NG es un `.tar.gz` con la base completa (`pg_dump`), la configuración
+generada de Asterisk, los certificados, los audios y los buzones. Las grabaciones se incluyen sólo
+si lo pedís (pesan). El botón **Crear un respaldo nuevo** lo hace en el momento; la lista de abajo
+permite bajarlos, restaurarlos o borrarlos.
+
+Desde 1.5.0 la central se respalda **sola**. La tarjeta **Respaldo programado** tiene un
+interruptor «Hacer un respaldo todos los días», la **hora** (0–23) y cuántos **conservar**. Viene
+**activa a las 03:00** en toda instalación nueva, sin que nadie tenga que configurar nada; la
+línea «Última corrida» muestra cuándo fue el último y si salió bien o falló.
+
+| Campo | Qué hace | Por defecto |
+|---|---|---|
+| **Hacer un respaldo todos los días** | Prende o apaga el planificador. | Activo |
+| **Hora** | Hora del servidor a la que se hace. Es la hora del contenedor de la API, que puede no ser la de tu reloj (el técnico la fija con `TZ`); si ves que corre a otra hora que la que pusiste, es eso. | 3 |
+| **Conservar** | Cuántos respaldos automáticos quedan; al pasar ese número se borra el más viejo. | 14 |
+
+> **La retención borra sólo los automáticos.** Se reconocen por el nombre (`pbxng-auto-…`). Un
+> respaldo que hiciste vos a mano antes de un cambio grande no desaparece nunca por sí solo:
+> lo borrás vos o no lo borra nadie. Y si una noche el respaldo falla, tampoco se borra ninguno
+> de los anteriores.
+
+> **Un respaldo en el mismo disco no es un respaldo.** Los archivos quedan en el servidor de la
+> central. Bajalos desde esta pantalla o pedile al técnico que los copie a otro lado (NAS,
+> rsync) todas las noches: el día que se muera el disco, eso es lo único que te devuelve la
+> central.
+
+Si en esta tarjeta ves «No disponible en esta versión», la API es anterior a 1.5.0: el panel se
+actualizó antes que el resto. No es un error de configuración.
+
+![Respaldo programado](img/cfg-55-respaldo-programado.png)
+
+### 31.2 Cuando la base de datos no responde
+
+Si PostgreSQL deja de contestar, el panel lo avisa con un cartel rojo arriba del contenido en
+todas las pantallas: **«Base de datos sin respuesta — La central sigue atendiendo llamadas pero el
+panel no puede guardar cambios.»** Es exactamente eso: Asterisk sigue cursando lo que ya tiene
+cargado, pero cualquier cambio que intentes guardar (un interno, una cola, una ruta) va a fallar
+hasta que la base vuelva. El cartel desaparece solo cuando vuelve a responder.
+
+> No confundir con el indicador **Offline** del pie del menú: ese dice que el panel perdió el
+> contacto con la API (o con la red), no que la base esté caída. Si ves Offline y no el cartel
+> rojo, el problema está antes de la base.
+
+Mientras el panel está en ese estado, la propia central se reporta como degradada: el técnico ve
+`unhealthy` en el contenedor `api` y la alerta «Servicio caído» (capítulo 14) se dispara si la
+tenés activa.
+
 ---
 
 ## 32. Los paneles de agente y supervisor

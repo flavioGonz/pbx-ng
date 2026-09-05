@@ -55,7 +55,9 @@ if [ "$BUNDLE" = 1 ]; then
   gzip -f "$ROOT/dist/pbxng-$VERSION-images.tar"
   tar -czf "$ROOT/dist/pbxng-$VERSION.tar.gz" -C "$ROOT" \
     VERSION docker/docker-compose.release.yml docker/deploy.sh docker/.env.example \
-    docker/pbxng-ctl docker/install.sh docker/config control-plane/migrate.js control-plane/migrations 2>/dev/null || true
+    docker/pbxng-ctl docker/install.sh docker/asterisk-drain.sh docker/backup-cron.sh docker/check-compose-parity.sh \
+    docker/pbxng-reconciler.sh docker/pbxng-reconciler.service docker/pbxng-reconciler.timer \
+    docker/config control-plane/migrate.js control-plane/migrations 2>/dev/null || true
   echo "  -> dist/pbxng-$VERSION-images.tar.gz   (docker load)"
   echo "  -> dist/pbxng-$VERSION.tar.gz          (compose + scripts + config)"
 fi

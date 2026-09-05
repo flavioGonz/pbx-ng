@@ -2,15 +2,48 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider } from '@mantine/core';
+import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider, Alert } from '@mantine/core';
 import {
   IconSitemap, IconServer2, IconDatabase, IconRouteAltLeft, IconDatabaseExport, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk,
-  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook} from '@tabler/icons-react';
+  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
 import PbxLogo from './PbxLogo';
+import ErrorBoundary from './ErrorBoundary';
+
+/* Cada cuánto se consulta /backend/health cuando el socket está caído. Con el socket
+ * vivo no hace falta: el snapshot ya trae health.db y llega cada 15 s como mucho. */
+const HEALTH_POLL_MS = 30000;
+
+/* ¿La base de datos está sin responder? Fuente única para el banner del shell:
+ *  - socket conectado → lo dice el último snapshot (`health.db`), sin pedir nada más;
+ *  - socket caído → se pregunta a GET /backend/health (503 o `db:false` = caída).
+ * Si la API no contesta en absoluto no se cambia el estado: eso ya lo cuenta el
+ * indicador OFFLINE, y "base caída" sería un diagnóstico inventado. */
+function useDbCaida(snap, connected) {
+  const [caida, setCaida] = useState(false);
+  useEffect(() => {
+    if (!connected || !snap || !snap.health) return;
+    setCaida(snap.health.db === false);
+  }, [snap, connected]);
+  useEffect(() => {
+    if (connected) return;
+    let vivo = true;
+    const consultar = () => fetch('/backend/health', { cache: 'no-store' })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null);
+        if (!vivo) return;
+        setCaida(r.status === 503 || !!(j && j.db === false));
+      })
+      .catch(() => {});
+    consultar();
+    const iv = setInterval(consultar, HEALTH_POLL_MS);
+    return () => { vivo = false; clearInterval(iv); };
+  }, [connected]);
+  return caida;
+}
 
 function Logo({ logo, name }) {
   if (logo) return <img src={logo} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 8 }} />;
@@ -105,7 +138,8 @@ export default function Shell({ children }) {
   // Hooks SIEMPRE antes de cualquier return (Rules of Hooks): con el early-return de abajo
   // dejandolos afuera en /phone,/agente,etc. el conteo de hooks cambiaba entre renders
   // (React #300) y rompia la hidratacion (#418/#423). Ahora se llaman incondicionalmente.
-  const { connected } = useLive();
+  const { snap, connected } = useLive();
+  const dbCaida = useDbCaida(snap, connected);
   const { setColorScheme } = useMantineColorScheme();
   /* El esquema real (claro/oscuro) vive en localStorage y solo se conoce en el
    * navegador: en el HTML del servidor siempre es 'dark'. Si el boton de tema se
@@ -182,7 +216,19 @@ export default function Shell({ children }) {
           </Box>
         </div>
       </AppShell.Navbar>
-      <AppShell.Main><div className="pbx-anim" key={path}>{children}</div></AppShell.Main>
+      <AppShell.Main>
+        {/* Estado degradado: Asterisk sigue cursando llamadas (realtime con caché y el
+          * dialplan cargado), pero todo lo que el panel guarda pasa por Postgres. Se
+          * avisa arriba del contenido y no por toast para que no se pierda a los 5 s. */}
+        {dbCaida && (
+          <Alert color="red" variant="light" radius="md" mb="md" icon={<IconDatabaseOff size={18} />}
+            title="Base de datos sin respuesta">
+            La central sigue atendiendo llamadas pero el panel no puede guardar cambios.
+          </Alert>
+        )}
+        {/* La barrera va DENTRO de Main: si una pantalla revienta, el menú queda en pie. */}
+        <ErrorBoundary resetKey={path}><div className="pbx-anim" key={path}>{children}</div></ErrorBoundary>
+      </AppShell.Main>
     </AppShell>
   );
 }

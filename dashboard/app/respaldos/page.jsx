@@ -10,10 +10,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Stack, Card, Group, Text, Button, Badge, Table, ThemeIcon, Alert, Modal,
   Checkbox, TextInput, ActionIcon, Tooltip, Divider, Code, List, Loader, FileButton,
+  Switch, NumberInput,
 } from '@mantine/core';
 import {
   IconDatabaseExport, IconDownload, IconTrash, IconUpload, IconAlertTriangle,
   IconRestore, IconShieldLock, IconClock, IconFileZip, IconCheck, IconInfoCircle,
+  IconCalendarClock, IconX,
 } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast, toastPromise } from '../notify';
@@ -36,6 +38,102 @@ const peso = (b) => {
   return `${n.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
 };
 const fecha = (s) => { try { return new Date(s).toLocaleString('es-UY', { dateStyle: 'short', timeStyle: 'short' }); } catch (_) { return s; } };
+
+/* Respaldo programado. Lee y escribe GET/POST /api/backup/schedule
+ * ({enabled, hour, keep, last_run, last_ok}; el POST lleva {enabled, hour, keep}).
+ * Una API anterior a ese endpoint responde 404: en vez de un toast rojo en cada
+ * carga de la página, se muestra que la función no existe en esta versión. */
+function RespaldoProgramado() {
+  const [estado, setEstado] = useState('cargando');   // cargando | ok | noDisponible | error
+  const [remoto, setRemoto] = useState(null);           // lo que dijo la API (para last_run/last_ok)
+  const [form, setForm] = useState({ enabled: false, hour: 3, keep: 14 });
+  const [guardando, setGuardando] = useState(false);
+
+  const cargar = useCallback(async () => {
+    try {
+      const r = await fetch('/backend/api/backup/schedule');
+      if (r.status === 404) { setEstado('noDisponible'); return; }
+      const j = await r.json().catch(() => null);
+      if (!r.ok || (j && j.error)) throw new Error((j && j.error) || ('El servidor respondió ' + r.status + '.'));
+      setRemoto(j || {});
+      setForm({
+        enabled: !!(j && j.enabled),
+        hour: Number.isInteger(j && j.hour) ? j.hour : 3,
+        keep: Number.isInteger(j && j.keep) ? j.keep : 14,
+      });
+      setEstado('ok');
+    } catch (e) { setEstado('error'); toast(e.message, 'bad'); }
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await toastPromise(
+        api('/backup/schedule', { method: 'POST', body: { enabled: form.enabled, hour: form.hour, keep: form.keep } })
+          .then((r) => { cargar(); return r; }),
+        { loading: 'Guardando programación…',
+          success: form.enabled ? `Respaldo programado todos los días a las ${String(form.hour).padStart(2, '0')}:00` : 'Respaldo programado desactivado',
+          error: (e) => e.message || 'No se pudo guardar' });
+    } catch (_) {} finally { setGuardando(false); }
+  };
+
+  const cambiado = remoto && (form.enabled !== !!remoto.enabled || form.hour !== remoto.hour || form.keep !== remoto.keep);
+  const ultimo = remoto && remoto.last_run;
+
+  return (
+    <Card withBorder radius="md" p="md">
+      <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
+        <Stack gap={8} style={{ flex: 1, minWidth: 280 }}>
+          <Group gap={8}>
+            <ThemeIcon size={26} radius="sm" variant="light" color="pbx"><IconCalendarClock size={15} /></ThemeIcon>
+            <Text fw={600} fz="sm">Respaldo programado</Text>
+            {estado === 'ok' && <Badge size="sm" variant="light" color={form.enabled ? 'teal' : 'gray'}>{form.enabled ? 'Activo' : 'Apagado'}</Badge>}
+          </Group>
+          {estado === 'cargando' && <Group gap={8}><Loader size="xs" /><Text fz="xs" c="dimmed">Consultando…</Text></Group>}
+          {estado === 'noDisponible' && <Text fz="xs" c="dimmed">No disponible en esta versión.</Text>}
+          {estado === 'error' && <Text fz="xs" c="red">No se pudo leer la programación. <Text span fz="xs" c="pbx" style={{ cursor: 'pointer' }} onClick={cargar}>Reintentar</Text></Text>}
+          {estado === 'ok' && (
+            <>
+              <Text fz="xs" c="dimmed">
+                Un respaldo automático por día, sin grabaciones, guardado en este mismo servidor.
+                Igual conviene bajar uno cada tanto y guardarlo afuera.
+              </Text>
+              <Switch size="xs" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.currentTarget.checked })}
+                label="Hacer un respaldo todos los días" />
+              <Group gap="md" align="flex-end">
+                <NumberInput size="xs" label="Hora" description="Hora local del servidor (0–23)" w={150}
+                  min={0} max={23} step={1} allowDecimal={false} clampBehavior="strict" suffix=":00"
+                  value={form.hour} onChange={(v) => setForm({ ...form, hour: Number.isInteger(v) ? v : form.hour })} disabled={!form.enabled} />
+                <NumberInput size="xs" label="Conservar" description="Cuántos respaldos programados quedan" w={150}
+                  min={1} max={365} step={1} allowDecimal={false} clampBehavior="strict"
+                  value={form.keep} onChange={(v) => setForm({ ...form, keep: Number.isInteger(v) ? v : form.keep })} />
+              </Group>
+              <Group gap={6}>
+                <IconClock size={13} opacity={0.5} />
+                {ultimo ? (
+                  <Text fz="xs" c="dimmed">
+                    Última corrida: {fecha(ultimo)} ·{' '}
+                    {remoto.last_ok === false
+                      ? <Text span fz="xs" c="red"><IconX size={11} style={{ verticalAlign: -1 }} /> falló</Text>
+                      : remoto.last_ok === true
+                        ? <Text span fz="xs" c="teal"><IconCheck size={11} style={{ verticalAlign: -1 }} /> correcta</Text>
+                        : <Text span fz="xs" c="dimmed">sin resultado</Text>}
+                  </Text>
+                ) : <Text fz="xs" c="dimmed">Todavía no corrió ninguno.</Text>}
+              </Group>
+            </>
+          )}
+        </Stack>
+        {estado === 'ok' && (
+          <Button leftSection={<IconCalendarClock size={16} />} loading={guardando} disabled={!cambiado} onClick={guardar}>
+            Guardar programación
+          </Button>
+        )}
+      </Group>
+    </Card>
+  );
+}
 
 export default function Respaldos() {
   const [data, setData] = useState(null);
@@ -142,6 +240,8 @@ export default function Respaldos() {
           </Group>
         </Group>
       </Card>
+
+      <RespaldoProgramado />
 
       <Card withBorder radius="md" p={0}>
         {!data ? <Group justify="center" p="xl"><Loader size="sm" /></Group>

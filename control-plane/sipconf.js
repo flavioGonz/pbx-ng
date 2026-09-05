@@ -21,6 +21,7 @@
  * ==========================================================================*/
 'use strict';
 
+const { errorHttp } = require('./errores');   // errores de pg → mensaje genérico (docs/CONTRATOS.md §3)
 const KEY = 'sipconf';
 
 /* Defaults = lo que hoy trae la imagen, para que activar el módulo no cambie nada. */
@@ -42,7 +43,7 @@ const cidr = (v) => { const s = String(v || '').trim(); return /^\d{1,3}(\.\d{1,
 
 module.exports = function initSipConf(deps) {
   const { app, pool, amiCommand, escribir, log } = deps;
-  const L = log || ((...a) => console.log('[sipconf]', ...a));
+  const L = log || ((...a) => require('./log')('sipconf').info(...a));
 
   /* ---------- persistencia ---------- */
   async function load() {
@@ -181,7 +182,7 @@ module.exports = function initSipConf(deps) {
   }
 
   /* ---------- rutas (sólo admin por rbac.js) ---------- */
-  const wrap = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); } };
+  const wrap = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { errorHttp(res, e); } };
 
   app.get('/api/sipconf', wrap(async () => {
     const cfg = await load();

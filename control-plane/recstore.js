@@ -16,15 +16,16 @@ const path = require('path');
 const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
+const log = require('./log')('recstore');
 
 const REC_DIR = process.env.REC_DIR || '/recordings';
 let pool;
 
 function init(_pool) {
   pool = _pool;
-  setInterval(() => { sweep().catch((e) => console.error('[recstore]', e.message)); }, 120000);
+  setInterval(() => { sweep().catch((e) => log.error('sweep', e)); }, 120000);
   setTimeout(() => { sweep().catch(() => {}); }, 45000);
-  console.log('[recstore] almacenamiento de grabaciones activo');
+  log.info('almacenamiento de grabaciones activo');
 }
 
 async function config() {
@@ -129,9 +130,9 @@ async function sweep() {
       if (cfg.retain_local === false) {
         try { await fsp.unlink(path.join(REC_DIR, path.basename(rec.filename))); } catch (_) {}
       }
-      console.log('[recstore]', rec.filename, '->', r.storage);
+      log.info('subida', { filename: rec.filename, storage: r.storage });
     } catch (e) {
-      console.error('[recstore] fallo', rec.filename, e.message);
+      log.error('fallo', { filename: rec.filename }, e);
     }
   }
 }

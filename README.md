@@ -187,7 +187,11 @@ pbxng-ctl status                 # perfiles activos + contenedores
 pbxng-ctl enable  intercom       # agrega el perfil y CREA go2rtc
 pbxng-ctl disable intercom       # DESTRUYE go2rtc y saca el perfil
 pbxng-ctl reconcile              # sincroniza contenedores <-> COMPOSE_PROFILES
+pbxng-ctl backup [--keep=N]      # respaldo ahora (mismo camino que el cron y el planificador)
+pbxng-ctl drain [--yes]          # drena Asterisk antes de tocarlo (no corta llamadas activas)
 ```
+
+Desde 1.5.0 el stack se cuida solo: healthcheck en los 8 servicios (`docker compose ps` dice `healthy` de verdad; el de la API pega a `/health/ready`, que responde 503 sin base), límite de memoria por contenedor (`MEM_*` en `.env`), rotación de logs, cierre ordenado de la API por `SIGTERM`, migraciones que corren al arrancar el contenedor de la API (si fallan, no arranca) y drenado de Asterisk antes de recrearlo (`pbxng-ctl`/`deploy.sh` piden confirmación si hay llamadas, salvo `--yes`). Respaldo diario automático a las 03:00 desde la propia API (Sistema → Respaldos), con cron del host opcional. Detalle en [`docs/PACKAGING.md`](docs/PACKAGING.md) y [`docker/README.md`](docker/README.md).
 
 Desde el **panel** (Módulos), el toggle escribe `pbxng_settings.mod_<id>` y un reconciliador (systemd timer, cada 20 s) llama a `pbxng-ctl` para que el contenedor exista solo si el módulo está activo. El instalador deja `pbxng-ctl` y el reconciliador instalados.
 
@@ -278,6 +282,7 @@ npm run dist       # instalador Windows en release/
 - **Secretos**: nunca se versionan. El instalador genera `.env` con contraseñas y JWT aleatorios. Claves de OpenAI (IVR IA), FCM/APNs (push nativo) y SMTP se cargan **cifradas desde el panel** (no en `.env`).
 - **Variables clave** (`.env`): `DOMAIN`, `DB_PASS`, `JWT_SECRET`, `PUBLIC_IP`, `VAPID_*`. Ver [`.env.example`](.env.example).
 - **Primer acceso**: el dashboard corre en `:3001`; publicá el dominio con TLS/WSS vía Nginx Proxy Manager (`:81`). Con el perfil `proxy` en el mismo compose el instalador ata `:3001` a `127.0.0.1` (`DASHBOARD_BIND`) y se entra por 443; si el proxy está en otro host, `DASHBOARD_TRUST_PROXY=1` y restringí `:3001` a su IP por firewall. La API **no arranca** con `JWT_SECRET` vacío, placeholder o de menos de 16 caracteres.
+- **Diagnóstico**: la API loguea en JSON (`{ts, level, mod, msg}`); `LOG_LEVEL=debug` para ver más, `LOG_FORMAT=text` para leer a mano. `GET /health` responde `503 {status:'degraded', db:false}` cuando Postgres no contesta (los monitores externos deben esperar eso). Variables y contrato en [`docs/CONTRATOS.md`](docs/CONTRATOS.md) §3 y §6.
 - **Roles** (desde 1.4.0): `admin` (todo), `supervisor` (operación y call center, sin configuración del sistema) y `agente` (su panel y su extensión). El rol por defecto al crear usuarios es `agente`; contraseñas de 8+ caracteres. Tabla completa de permisos en [`docs/CONTRATOS.md`](docs/CONTRATOS.md) §2.
 
 ## Estructura del repositorio

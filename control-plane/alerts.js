@@ -12,15 +12,16 @@
 'use strict';
 const nodemailer = require('nodemailer');
 const emails = require('./emails');
+const log = require('./log')('alerts');
 
 let pool, deps = {};
 const nowMin = () => Math.floor(Date.now() / 60000);
 
 function init(_pool, _deps) {
   pool = _pool; deps = _deps || {};
-  setInterval(() => { tick().catch((e) => console.error('[alerts]', e.message)); }, 60000);
+  setInterval(() => { tick().catch((e) => log.error('tick', e)); }, 60000);
   setTimeout(() => { tick().catch(() => {}); }, 30000);
-  console.log('[alerts] motor activo');
+  log.info('motor activo');
 }
 
 // ---------------------------------------------------------------- infra
@@ -91,10 +92,10 @@ async function raise(event, { severity = 'warn', title, lines = [], foot = '', k
     if (th > 0) await setState(tk, { at: nowMin() });
     await pool.query('INSERT INTO pbxng_alerts (event,severity,title,detail,to_addr,sent) VALUES ($1,$2,$3,$4,$5,true)',
       [event, severity, title, JSON.stringify(Object.fromEntries(lines)), to]);
-    console.log('[alerts]', event, '->', to);
+    log.info('alerta enviada', { event, to });
     return true;
   } catch (e) {
-    console.error('[alerts] fallo', event, e.message);
+    log.error('fallo', { event }, e);
     try { await pool.query('INSERT INTO pbxng_alerts (event,severity,title,detail,sent,err) VALUES ($1,$2,$3,$4,false,$5)', [event, severity, title || event, JSON.stringify({}), String(e.message).slice(0, 300)]); } catch (_) {}
     return false;
   }
@@ -140,7 +141,7 @@ async function onLogin({ ok, username, ip, ua, role }) {
         key: k,
       });
     }
-  } catch (e) { console.error('[alerts] onLogin', e.message); }
+  } catch (e) { log.error('onLogin', e); }
 }
 
 async function geo(ip) {
