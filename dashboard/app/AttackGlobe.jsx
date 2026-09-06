@@ -187,8 +187,15 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
         @keyframes agIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
       `}</style>
 
+      {/* Disco oscuro detrás del globo. cobe dibuja el planeta con el "océano"
+          transparente: sin un fondo oscuro, la esfera se pierde contra la página clara
+          y sólo flotan los puntos. Este disco radial le devuelve el cuerpo a la esfera
+          y se desvanece en los bordes, así que NO es un recuadro: es un orbe que flota. */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
+        background: 'radial-gradient(circle at 50% 47%, #0a1826 0%, #0a1826 34%, rgba(10,24,38,.55) 52%, rgba(10,24,38,0) 68%)' }} />
+
       {/* el globo, sin recuadro: se funde con el fondo del panel */}
-      <div ref={wrapRef} style={{ position: 'absolute', inset: 0 }}>
+      <div ref={wrapRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
         <canvas
           ref={canvasRef}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={soltar} onPointerLeave={soltar}
