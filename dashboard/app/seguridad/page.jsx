@@ -803,7 +803,7 @@ export default function Seguridad() {
       {/* Registro en vivo (izquierda) + mapa de ataques en vivo (derecha) */}
       <Grid gutter="lg" align="stretch">
         <Grid.Col span={{ base: 12, lg: 8 }}><LiveLog /></Grid.Col>
-        <Grid.Col span={{ base: 12, lg: 4 }}><AttackGlobe paises={(data && data.top_paises) || []} kpis={k} /></Grid.Col>
+        <Grid.Col span={{ base: 12, lg: 4 }}><AttackGlobe paises={(data && data.top_paises) || []} bloqueos={(data && data.bloqueos) || []} kpis={k} /></Grid.Col>
       </Grid>
       <Tabs defaultValue="soc" variant="pills" radius="md" keepMounted={false}>
         <Tabs.List mb="md">

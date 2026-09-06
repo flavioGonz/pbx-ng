@@ -1,29 +1,31 @@
 'use client';
 /* ============================================================================
- *  Mapa de ataques — globo 3D (cobe).
+ *  Mapa de ataques — globo 3D (cobe) con arcos e "feed" en vivo.
  *
- *  Reemplaza el mapa plano equirectangular por un globo WebGL que gira, con un
- *  punto encendido por cada país que está atacando (tamaño según cuántos golpes
- *  metió) y un punto propio, en verde, sobre el servidor. Mismos datos que el
- *  mapa viejo (`top_paises` de /api/security, ya geolocalizado) y los mismos
- *  overlays (título, "en vivo", KPIs) montados encima.
+ *  El globo WebGL gira, con un punto encendido por país atacante (tamaño según
+ *  golpes) y un punto propio en verde sobre el servidor. De cada país sale un ARCO
+ *  animado hacia nosotros: se lee de una que todo el fuego converge acá.
  *
- *  Se puede arrastrar con el mouse para girarlo; suelto, sigue rotando solo.
+ *  Al costado, un feed de los últimos bloqueos: bandera del país + ícono del TIPO
+ *  de intento (fuerza bruta, escáner, flood, país vetado…), que van entrando con
+ *  una animación. Los tipos y sus íconos son los mismos que usa el resto del SOC.
  *
- *  cobe (github.com/shuding/cobe) es ~5 kB y sin dependencias de red: el mapa del
- *  planeta lo trae el propio shader, así que —igual que el mapa plano— la pantalla
- *  no depende de internet ni le cuenta a un tercero que el cliente mira su SOC.
+ *  Sin recuadro ni tarjeta: el globo ocupa todo el bloque y se funde con el fondo
+ *  oscuro del panel. Los datos van montados encima como overlay.
  *
- *  Si el navegador no tiene WebGL, cae al mapa plano de siempre (AttackMap): un
- *  SOC no se puede quedar sin su mapa por un tema de video.
+ *  Sin dependencias de red: el planeta lo dibuja el shader de cobe, así que la
+ *  pantalla no depende de internet ni le cuenta a un tercero que el cliente mira su
+ *  SOC. Si el navegador no tiene WebGL, cae al mapa plano de siempre (AttackMap).
  * ==========================================================================*/
 import { useEffect, useRef, useState } from 'react';
-import { Group, Text, Badge } from '@mantine/core';
-import { IconWorldBolt, IconBan, IconFlame, IconWorld, IconShieldCheck, IconLockOff } from '@tabler/icons-react';
+import { Group, Text, Badge, ThemeIcon } from '@mantine/core';
+import {
+  IconWorldBolt, IconBan, IconFlame, IconWorld, IconShieldCheck, IconLockOff,
+  IconWaveSine, IconRadar2, IconKey, IconUserOff, IconHandStop, IconLock, IconAlertTriangle,
+} from '@tabler/icons-react';
 import AttackMap from './AttackMap';
 
-/* Centroide aproximado (lat, lon) de los países que solemos ver atacando.
- * cobe usa marcadores [lat, lon], así que esta tabla entra tal cual. */
+/* Centroide aproximado (lat, lon) por país. cobe usa [lat, lon] tal cual. */
 const LL = {
   US: [38, -97], CA: [56, -106], BR: [-10, -55], DE: [51, 10], NL: [52, 5], GB: [54, -2],
   FR: [46, 2], RU: [61, 100], CN: [35, 105], IN: [21, 78], UA: [49, 32], TR: [39, 35],
@@ -42,27 +44,43 @@ const LL = {
   MM: [20, 96], KH: [12, 105], LA: [18, 104], MN: [46, 105], UZ: [41, 64], GE: [42, 43], AM: [40, 45], AZ: [40, 47],
 };
 const flagUrl = (cc) => `https://flagcdn.com/${String(cc).toLowerCase()}.svg`;
+const HOME = [-34.9, -56.2];   // Uruguay: el blanco de los ataques
 
-/* Dónde estamos nosotros: el punto que recibe los golpes. Uruguay. */
-const HOME = [-34.9, -56.2];
+/* Tipo de intento -> ícono + color. Mismos criterios que el SOC (MOTIVOS de la
+ * pantalla de seguridad): el ícono le dice al operador QUÉ intentaron, de un vistazo. */
+const TIPOS = [
+  { re: /flood|avalancha|rate|too many|session ?limit|load|carga/i, key: 'flood',  color: '#f04438', Icon: IconWaveSine, label: 'Flood / abuso' },
+  { re: /scan|escáner|escaner|friendly|sipvicious|sipcli|vicious|sonda/i, key: 'escaner', color: '#c084fc', Icon: IconRadar2, label: 'Escáner' },
+  { re: /clave|password|auth|cred|nonce|challenge|bruta/i, key: 'auth', color: '#f7b955', Icon: IconKey, label: 'Fuerza bruta' },
+  { re: /cuenta|account|inexistente/i, key: 'cuenta', color: '#f79009', Icon: IconUserOff, label: 'Cuenta inexistente' },
+  { re: /\bacl\b|no permitid|not allowed|transporte|transport/i, key: 'acl', color: '#5b8def', Icon: IconHandStop, label: 'Rechazado (ACL)' },
+  { re: /geo|país|pais|country|vetado/i, key: 'geo', color: '#38bdf8', Icon: IconWorld, label: 'País vetado' },
+  { re: /lista negra|manual/i, key: 'manual', color: '#94a3b8', Icon: IconLock, label: 'Bloqueo manual' },
+];
+const tipoDe = (reason) => TIPOS.find((t) => t.re.test(String(reason || ''))) || { key: 'otro', color: '#ff6a5e', Icon: IconAlertTriangle, label: 'Intento bloqueado' };
+const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 
-export default function AttackGlobe({ paises = [], kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
+export default function AttackGlobe({ paises = [], bloqueos = [], kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const globeRef = useRef(null);
   const phiRef = useRef(0);
   const thetaRef = useRef(0.25);
-  const dragRef = useRef(null);      // { x, phi } mientras se arrastra
+  const dragRef = useRef(null);
   const [webglRoto, setWebglRoto] = useState(false);
 
-  // Marcadores: los países atacantes (rojo, tamaño según golpes) + nosotros (verde).
   const pts = (paises || [])
     .map((p) => { const ll = LL[String(p.cc || '').toUpperCase()]; return ll ? { ...p, lat: ll[0], lon: ll[1] } : null; })
     .filter(Boolean);
   const maxN = Math.max(1, ...pts.map((p) => p.n || 1));
 
-  // Firma de los datos: si no cambió, no recreamos el globo (evita el parpadeo del
-  // socket, que refresca seguido). Ordenada para que el mismo conjunto de una firma igual.
+  // Feed: los últimos bloqueos con país y tipo. Se ordenan por fecha (lo más nuevo arriba).
+  const feed = (bloqueos || [])
+    .filter((b) => b && (b.cc || b.country))
+    .slice(0, 8)
+    .map((b) => ({ ip: b.ip, cc: b.cc, pais: b.country, tipo: tipoDe(b.reason), reason: b.reason, at: b.blocked_at }));
+
+  // Firma: sólo recreamos el globo cuando cambia el conjunto (evita el parpadeo del socket).
   const firma = pts.map((p) => `${p.cc}:${p.n}`).sort().join('|');
 
   useEffect(() => {
@@ -85,15 +103,14 @@ export default function AttackGlobe({ paises = [], kpis = {}, titulo = 'Mapa de 
       medir();
 
       const markers = [
-        // nosotros, el blanco de todo esto
-        { location: HOME, size: 0.06, color: [0.16, 0.86, 0.62] },
-        // cada país atacante
-        ...pts.map((p) => ({
-          location: [p.lat, p.lon],
-          size: 0.035 + ((p.n || 1) / maxN) * 0.075,
-          color: [1, 0.3, 0.24],
-        })),
+        { location: HOME, size: 0.07, color: [0.16, 0.86, 0.62] },
+        ...pts.map((p) => ({ location: [p.lat, p.lon], size: 0.035 + ((p.n || 1) / maxN) * 0.075, color: [1, 0.3, 0.24] })),
       ];
+      // Un arco por país atacante hacia nosotros, con el color del tipo dominante.
+      const arcs = pts.map((p) => {
+        const b = (bloqueos || []).find((x) => (x.cc || '').toUpperCase() === String(p.cc).toUpperCase());
+        return { from: [p.lat, p.lon], to: HOME, color: b ? rgb(tipoDe(b.reason).color) : [1, 0.3, 0.24] };
+      });
 
       let globo;
       try {
@@ -107,13 +124,15 @@ export default function AttackGlobe({ paises = [], kpis = {}, titulo = 'Mapa de 
           diffuse: 1.2,
           mapSamples: 16000,
           mapBrightness: 5,
-          baseColor: [0.24, 0.33, 0.46],       // continentes: azul acero, en tono con el panel
-          markerColor: [1, 0.3, 0.24],         // rojo ataque por defecto
-          glowColor: [0.13, 0.2, 0.32],        // halo tenue, oscuro
+          baseColor: [0.24, 0.33, 0.46],
+          markerColor: [1, 0.3, 0.24],
+          glowColor: [0.13, 0.2, 0.32],
           markers,
+          arcs,                 // cobe 2.x: los arcos se animan solos (se dibujan y desvanecen)
+          arcColor: [1, 0.42, 0.32],
+          arcWidth: 0.35,
+          arcHeight: 0.42,
           onRender: (state) => {
-            // Gira solo; si el usuario arrastra, manda su gesto. Un pelín más lento
-            // que el default para que no maree en una pantalla que se mira todo el día.
             if (!dragRef.current) phiRef.current += 0.0035;
             state.phi = phiRef.current;
             state.theta = thetaRef.current;
@@ -126,26 +145,17 @@ export default function AttackGlobe({ paises = [], kpis = {}, titulo = 'Mapa de 
 
       const ro = new ResizeObserver(() => { if (vivo) medir(); });
       if (wrapRef.current) ro.observe(wrapRef.current);
-
-      // limpieza local del efecto
       cleanup = () => { ro.disconnect(); try { globo.destroy(); } catch (_) {} globeRef.current = null; };
     })();
 
     return () => { vivo = false; if (cleanup) cleanup(); else { try { globeRef.current?.destroy(); } catch (_) {} } };
-    // Recrea el globo sólo cuando cambia el CONJUNTO de marcadores, no en cada render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firma]);
 
-  // Arrastrar para girar.
   const onDown = (e) => { dragRef.current = { x: e.clientX, phi: phiRef.current }; };
-  const onMove = (e) => {
-    if (!dragRef.current) return;
-    const dx = e.clientX - dragRef.current.x;
-    phiRef.current = dragRef.current.phi + dx / 200;
-  };
+  const onMove = (e) => { if (!dragRef.current) return; phiRef.current = dragRef.current.phi + (e.clientX - dragRef.current.x) / 200; };
   const soltar = () => { dragRef.current = null; };
 
-  // Si WebGL no está, no dejamos al SOC sin mapa: cae al plano de siempre.
   if (webglRoto) return <AttackMap paises={paises} kpis={kpis} titulo={titulo} />;
 
   const k = kpis || {};
@@ -158,30 +168,23 @@ export default function AttackGlobe({ paises = [], kpis = {}, titulo = 'Mapa de 
   ];
 
   return (
-    <div className="pbx-fade-in" style={{
-      position: 'relative', width: '100%', height: '100%', minHeight: 380, borderRadius: 14, overflow: 'hidden',
-      background: 'radial-gradient(120% 120% at 50% 15%, #0e2036 0%, #0a1524 55%, #060b14 100%)',
-      boxShadow: 'inset 0 0 60px rgba(0,0,0,.45)',
-    }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 440 }}>
       <style jsx>{`
         @keyframes agLive { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+        @keyframes agIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      {/* el globo ocupa todo el bloque */}
+      {/* el globo, sin recuadro: se funde con el fondo del panel */}
       <div ref={wrapRef} style={{ position: 'absolute', inset: 0 }}>
         <canvas
           ref={canvasRef}
-          onPointerDown={onDown}
-          onPointerMove={onMove}
-          onPointerUp={soltar}
-          onPointerLeave={soltar}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={soltar} onPointerLeave={soltar}
           style={{ width: '100%', height: '100%', cursor: 'grab', touchAction: 'none' }}
         />
       </div>
 
-      {/* ── OVERLAY: título + estado en vivo ─────────────────────────────── */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '14px 16px', zIndex: 4,
-                    background: 'linear-gradient(180deg, rgba(6,11,20,.82) 0%, rgba(6,11,20,0) 100%)', pointerEvents: 'none' }}>
+      {/* título + estado en vivo */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '6px 4px 14px', zIndex: 4, pointerEvents: 'none' }}>
         <Group gap={9} wrap="nowrap">
           <IconWorldBolt size={20} color="#ff6a5e" style={{ filter: 'drop-shadow(0 0 6px rgba(240,68,56,.6))' }} />
           <Text fw={700} c="#eaf1ff" style={{ textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>{titulo}</Text>
@@ -192,15 +195,14 @@ export default function AttackGlobe({ paises = [], kpis = {}, titulo = 'Mapa de 
         </Group>
       </div>
 
-      {/* ── OVERLAY: KPIs en vertical ────────────────────────────────────── */}
-      <div style={{ position: 'absolute', top: 50, right: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 5, width: 138 }}>
+      {/* KPIs verticales (arriba-derecha) */}
+      <div style={{ position: 'absolute', top: 44, right: 2, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 5, width: 138 }}>
         {KPIS.map((it) => {
           const Ic = it.Icon;
           return (
             <div key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 9px', borderRadius: 9,
-              background: 'rgba(9,16,28,.62)', border: '1px solid rgba(255,255,255,.1)', backdropFilter: 'blur(3px)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7,
-                            background: `${it.color}22`, flex: '0 0 24px' }}>
+              background: 'rgba(9,16,28,.55)', border: '1px solid rgba(255,255,255,.08)', backdropFilter: 'blur(3px)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7, background: `${it.color}22`, flex: '0 0 24px' }}>
                 <Ic size={14} color={it.color} />
               </div>
               <div style={{ lineHeight: 1.1, minWidth: 0 }}>
@@ -212,21 +214,32 @@ export default function AttackGlobe({ paises = [], kpis = {}, titulo = 'Mapa de 
         })}
       </div>
 
-      {/* ── OVERLAY: top de orígenes con bandera (abajo-izquierda) ─────────── */}
-      {pts.length > 0 && (
-        <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '55%' }}>
-          {[...pts].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 5).map((p) => (
-            <div key={p.cc} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 8px', borderRadius: 8,
-              background: 'rgba(9,16,28,.62)', border: '1px solid rgba(255,255,255,.08)', backdropFilter: 'blur(3px)' }}>
-              <img src={flagUrl(p.cc)} alt="" width={17} height={12} style={{ borderRadius: 2, objectFit: 'cover', flex: '0 0 17px' }} />
-              <Text c="#dbe6fb" style={{ fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.pais || p.cc}</Text>
-              <Text c="#ff8a80" fw={700} style={{ fontSize: 11.5, marginLeft: 'auto' }}>{p.n || 1}</Text>
-            </div>
-          ))}
+      {/* feed de intentos: bandera + ícono de tipo, entrando animado (abajo-izquierda) */}
+      {feed.length > 0 && (
+        <div style={{ position: 'absolute', bottom: 8, left: 2, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '62%' }}>
+          {feed.map((a, i) => {
+            const Ic = a.tipo.Icon;
+            return (
+              <div key={(a.ip || '') + i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 9px', borderRadius: 9,
+                background: 'rgba(9,16,28,.6)', border: '1px solid rgba(255,255,255,.08)', backdropFilter: 'blur(3px)',
+                animation: `agIn .45s ease ${i * 0.05}s both` }}>
+                <img src={flagUrl(a.cc)} alt="" width={18} height={13} style={{ borderRadius: 2, objectFit: 'cover', flex: '0 0 18px' }} />
+                <ThemeIcon size={18} radius="sm" variant="light" style={{ background: `${a.tipo.color}22`, flex: '0 0 18px' }}>
+                  <Ic size={12} color={a.tipo.color} />
+                </ThemeIcon>
+                <div style={{ lineHeight: 1.15, minWidth: 0 }}>
+                  <Text c="#dbe6fb" style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {a.pais || a.cc}<Text span c="#7f93b5" style={{ fontWeight: 400 }}> · {a.ip}</Text>
+                  </Text>
+                  <Text style={{ fontSize: 9.5, color: a.tipo.color, whiteSpace: 'nowrap' }}>{a.tipo.label}</Text>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {pts.length === 0 && (
+      {pts.length === 0 && feed.length === 0 && (
         <Group justify="center" style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}>
           <Text size="sm" c="#7f93b5">Sin ataques localizados todavía.</Text>
         </Group>

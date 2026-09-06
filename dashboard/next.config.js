@@ -11,6 +11,7 @@ const SECURITY_HEADERS = [
 ];
 const nextConfig = {
   reactStrictMode: true,
+  transpilePackages: ['cobe'],
   output: 'standalone',               // imagen Docker chica: solo server.js + .next/static + public (antes ~1.4 GB)
   skipTrailingSlashRedirect: true,   // por si un /socket.io/ llega a Next (no debería: lo toma server.js antes)
   async headers() {
