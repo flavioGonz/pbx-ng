@@ -8,12 +8,11 @@
  *    - Subir a cobe 2.x (por los arcos) + `transpilePackages: ['cobe']` dejó de
  *      dibujar el mapa de puntos del planeta: sólo salían los marcadores. Los
  *      shaders GLSL viajan como strings y no les sienta bien que los transpilen.
- *    - Sacarle el fondo oscuro al panel también lo borra: cobe dibuja el océano
- *      TRANSPARENTE, así que sin un fondo oscuro detrás la esfera no existe.
- *
- *  O sea: el panel oscuro NO es decoración, es lo que le da cuerpo al planeta.
- *  Es además la convención de cualquier consola de seguridad, así que se ve bien
- *  tanto con el panel en claro como en oscuro.
+ *    - Ponerle fondo claro al panel DEJANDO el globo en modo oscuro también lo
+ *      borra: cobe dibuja el océano transparente, así que la esfera se pierde.
+ *      La solución no es forzar fondo oscuro, es usar el parámetro `dark` de cobe:
+ *      con dark:0 rinde un globo pensado para fondos claros (halo blanco que le
+ *      dibuja el borde). Por eso el panel SÍ acompaña al tema.
  *
  *  Qué muestra:
  *    · un punto rojo por país que está atacando, del tamaño de los golpes que metió
@@ -76,24 +75,37 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   const dragRef = useRef(null);
   const [webglRoto, setWebglRoto] = useState(false);
 
-  /* Tema del panel. OJO con qué se adapta y qué no:
-   *   - El panel del mapa va SIEMPRE oscuro en los dos temas. No es un capricho:
-   *     cobe dibuja el océano transparente, así que ese fondo es lo que le da
-   *     cuerpo a la esfera. Ponerlo claro hace desaparecer el planeta.
-   *   - Lo que sí cambia: el tono del panel y cómo se apoya en la página (en claro
-   *     lleva borde y sombra para leerse como una consola embebida; en oscuro se
-   *     funde), y el brillo del planeta, un punto más alto en claro. */
+  /* Tema completo del mapa: panel, planeta, textos y chips.
+   *
+   * El planeta se adapta con el parámetro `dark` de cobe, que existe justo para
+   * esto: en claro rinde un globo con halo blanco que se recorta contra el fondo
+   * claro (es el modo del demo oficial de cobe, que va sobre blanco), y en oscuro
+   * el globo de siempre. Así el panel puede ser CLARO en tema claro sin que la
+   * esfera desaparezca — que era lo que me pasaba cuando le sacaba el fondo oscuro
+   * dejando el globo en modo oscuro. */
   const { colorScheme } = useMantineColorScheme();
   const dark = colorScheme === 'dark';
   const TEMA = dark
-    ? { fondo: 'radial-gradient(120% 120% at 50% 15%, #0e2036 0%, #0a1524 55%, #060b14 100%)',
+    ? {
+        fondo: 'radial-gradient(120% 120% at 50% 15%, #0e2036 0%, #0a1524 55%, #060b14 100%)',
         borde: '1px solid rgba(255,255,255,.06)',
         sombra: 'inset 0 0 60px rgba(0,0,0,.45)',
-        base: [0.24, 0.33, 0.46], glow: [0.13, 0.2, 0.32], brillo: 5 }
-    : { fondo: 'radial-gradient(120% 120% at 50% 15%, #16293f 0%, #101f33 55%, #0a1524 100%)',
-        borde: '1px solid rgba(15,23,42,.10)',
-        sombra: 'inset 0 0 50px rgba(0,0,0,.35), 0 10px 28px rgba(15,23,42,.16)',
-        base: [0.30, 0.40, 0.54], glow: [0.20, 0.30, 0.46], brillo: 6 };
+        velo: 'linear-gradient(180deg, rgba(6,11,20,.82) 0%, rgba(6,11,20,0) 100%)',
+        txt: '#eaf1ff', txt2: '#9fb2d4', txtSombra: '0 1px 3px rgba(0,0,0,.6)',
+        chip: 'rgba(9,16,28,.62)', chipBorde: '1px solid rgba(255,255,255,.1)',
+        globoDark: 1, base: [0.24, 0.33, 0.46], glow: [0.13, 0.2, 0.32], brillo: 5,
+      }
+    : {
+        fondo: 'radial-gradient(120% 120% at 50% 12%, #ffffff 0%, #f5f8fd 55%, #eaf0f9 100%)',
+        borde: '1px solid rgba(15,23,42,.08)',
+        sombra: '0 8px 26px rgba(15,23,42,.07)',
+        velo: 'linear-gradient(180deg, rgba(255,255,255,.9) 0%, rgba(255,255,255,0) 100%)',
+        txt: '#101f33', txt2: '#5b6b85', txtSombra: 'none',
+        chip: 'rgba(255,255,255,.86)', chipBorde: '1px solid rgba(15,23,42,.09)',
+        // dark:0 = el modo claro de cobe. Halo blanco: es lo que le dibuja el borde
+        // a la esfera contra un fondo claro.
+        globoDark: 0, base: [0.32, 0.42, 0.56], glow: [1, 1, 1], brillo: 6,
+      };
 
   // Países que están atacando (de top_paises, ya geolocalizado por la API).
   const pts = (paises || [])
@@ -158,7 +170,7 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           height: alto * dpr,
           phi: 0,
           theta: 0.25,
-          dark: 1,
+          dark: TEMA.globoDark,
           diffuse: 1.2,
           mapSamples: 16000,
           mapBrightness: TEMA.brillo,
@@ -201,9 +213,9 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   ];
 
   return (
-    /* El panel oscuro es lo que le da cuerpo a la esfera (el océano de cobe es
-       transparente). Va siempre oscuro, como cualquier consola de seguridad, y por
-       eso se ve igual de bien con el panel en claro o en oscuro. */
+    /* Panel, planeta y textos siguen el tema. El planeta cambia con el `dark` de
+       cobe, no con el fondo: por eso en claro puede ir panel claro sin perder la
+       esfera. */
     <div className="pbx-fade-in" style={{
       position: 'relative', width: '100%', height: '100%', minHeight: 400, borderRadius: 14, overflow: 'hidden',
       background: TEMA.fondo, border: TEMA.borde, boxShadow: TEMA.sombra,
@@ -223,10 +235,10 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
 
       {/* título + estado en vivo */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '14px 16px', zIndex: 4,
-                    background: 'linear-gradient(180deg, rgba(6,11,20,.82) 0%, rgba(6,11,20,0) 100%)', pointerEvents: 'none' }}>
+                    background: TEMA.velo, pointerEvents: 'none' }}>
         <Group gap={9} wrap="nowrap">
           <IconWorldBolt size={20} color="#ff6a5e" style={{ filter: 'drop-shadow(0 0 6px rgba(240,68,56,.6))' }} />
-          <Text fw={700} c="#eaf1ff" style={{ textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>{titulo}</Text>
+          <Text fw={700} c={TEMA.txt} style={{ textShadow: TEMA.txtSombra }}>{titulo}</Text>
           <Badge size="sm" variant="filled" color="red" ml="auto" style={{ pointerEvents: 'auto' }}
             leftSection={<span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#fff', animation: 'agLive 1.4s ease-in-out infinite' }} />}>
             {pts.length} orígenes
@@ -240,13 +252,13 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           const Ic = it.Icon;
           return (
             <div key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 9px', borderRadius: 9,
-              background: 'rgba(9,16,28,.62)', border: '1px solid rgba(255,255,255,.1)', backdropFilter: 'blur(3px)' }}>
+              background: TEMA.chip, border: TEMA.chipBorde, backdropFilter: 'blur(3px)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7, background: `${it.color}22`, flex: '0 0 24px' }}>
                 <Ic size={14} color={it.color} />
               </div>
               <div style={{ lineHeight: 1.1, minWidth: 0 }}>
-                <Text fw={800} c="#eaf1ff" style={{ fontSize: 16 }}>{it.value}</Text>
-                <Text c="#9fb2d4" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: .3, whiteSpace: 'nowrap' }}>{it.label}</Text>
+                <Text fw={800} c={TEMA.txt} style={{ fontSize: 16 }}>{it.value}</Text>
+                <Text c={TEMA.txt2} style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: .3, whiteSpace: 'nowrap' }}>{it.label}</Text>
               </div>
             </div>
           );
@@ -260,15 +272,15 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
             const Ic = a.tipo.Icon;
             return (
               <div key={(a.ip || '') + i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 9px', borderRadius: 9,
-                background: 'rgba(9,16,28,.6)', border: '1px solid rgba(255,255,255,.08)', backdropFilter: 'blur(3px)',
+                background: TEMA.chip, border: TEMA.chipBorde, backdropFilter: 'blur(3px)',
                 animation: `agIn .45s ease ${i * 0.05}s both` }}>
                 <img src={flagUrl(a.cc)} alt="" width={18} height={13} style={{ borderRadius: 2, objectFit: 'cover', flex: '0 0 18px' }} />
                 <ThemeIcon size={18} radius="sm" variant="light" style={{ background: `${a.tipo.color}22`, flex: '0 0 18px' }}>
                   <Ic size={12} color={a.tipo.color} />
                 </ThemeIcon>
                 <div style={{ lineHeight: 1.15, minWidth: 0 }}>
-                  <Text c="#dbe6fb" style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {a.pais || a.cc}<Text span c="#7f93b5" style={{ fontWeight: 400 }}> · {a.ip}</Text>
+                  <Text c={TEMA.txt} style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {a.pais || a.cc}<Text span c={TEMA.txt2} style={{ fontWeight: 400 }}> · {a.ip}</Text>
                   </Text>
                   <Text style={{ fontSize: 9.5, color: a.tipo.color, whiteSpace: 'nowrap' }}>{a.tipo.label}</Text>
                 </div>
@@ -281,9 +293,9 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
       {/* leyenda del filtro por país */}
       {geoPts.length > 0 && (
         <div style={{ position: 'absolute', bottom: 10, right: 12, zIndex: 5, display: 'flex', alignItems: 'center', gap: 7,
-          padding: '4px 10px', borderRadius: 9, background: 'rgba(9,16,28,.6)', border: '1px solid rgba(255,255,255,.08)', backdropFilter: 'blur(3px)' }}>
+          padding: '4px 10px', borderRadius: 9, background: TEMA.chip, border: TEMA.chipBorde, backdropFilter: 'blur(3px)' }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', background: geoHex, boxShadow: `0 0 7px ${geoHex}`, flex: '0 0 9px' }} />
-          <Text style={{ fontSize: 11, color: '#c8d6ee', whiteSpace: 'nowrap' }}>
+          <Text style={{ fontSize: 11, color: TEMA.txt, whiteSpace: 'nowrap' }}>
             {geoPts.length} {modoGeo === 'permitir' ? 'permitidos' : 'vetados'}
           </Text>
         </div>
@@ -291,7 +303,7 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
 
       {pts.length === 0 && feed.length === 0 && (
         <Group justify="center" style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}>
-          <Text size="sm" c="#7f93b5">{geoPts.length > 0 ? 'Sin ataques en curso.' : 'Sin ataques localizados todavía.'}</Text>
+          <Text size="sm" c={TEMA.txt2}>{geoPts.length > 0 ? 'Sin ataques en curso.' : 'Sin ataques localizados todavía.'}</Text>
         </Group>
       )}
     </div>
