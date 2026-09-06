@@ -19,18 +19,16 @@
  *    · un punto verde sobre el servidor: el blanco de todo esto
  *    · los países del filtro geográfico (ámbar si están vetados, cian si son los
  *      únicos permitidos): son un muro puesto a propósito, no un ataque
- *    · abajo, los últimos bloqueos con bandera + ícono del TIPO de intento
+ *  Encima del globo va lo mínimo: título, contador y KPIs chicos. El detalle de
+ *  los intentos vive en las tarjetas de abajo, no tapando el planeta.
  *
  *  El planeta lo dibuja el shader: sin imagen externa, no depende de internet ni
  *  le cuenta a un tercero que el cliente está mirando su SOC. Si el navegador no
  *  tiene WebGL, cae al mapa plano de siempre (AttackMap).
  * ==========================================================================*/
 import { useEffect, useRef, useState } from 'react';
-import { Group, Text, Badge, ThemeIcon, useMantineColorScheme } from '@mantine/core';
-import {
-  IconWorldBolt, IconBan, IconFlame, IconWorld, IconShieldCheck, IconLockOff,
-  IconWaveSine, IconRadar2, IconKey, IconUserOff, IconHandStop, IconLock, IconAlertTriangle,
-} from '@tabler/icons-react';
+import { Group, Text, Badge, useMantineColorScheme } from '@mantine/core';
+import { IconWorldBolt, IconBan, IconFlame, IconWorld, IconShieldCheck, IconLockOff } from '@tabler/icons-react';
 import AttackMap from './AttackMap';
 
 /* Centroide aproximado (lat, lon) por país. cobe usa [lat, lon] tal cual. */
@@ -51,21 +49,7 @@ const LL = {
   DZ: [28, 2], TN: [34, 9], IQ: [33, 44], SY: [35, 38], JO: [31, 36], LK: [7, 81], NP: [28, 84],
   MM: [20, 96], KH: [12, 105], LA: [18, 104], MN: [46, 105], UZ: [41, 64], GE: [42, 43], AM: [40, 45], AZ: [40, 47],
 };
-const flagUrl = (cc) => `https://flagcdn.com/${String(cc).toLowerCase()}.svg`;
 const HOME = [-34.9, -56.2];   // Uruguay: el blanco de los ataques
-
-/* Tipo de intento -> ícono + color. Mismos criterios que el resto del SOC: el
- * ícono le dice al operador QUÉ intentaron, de un vistazo. */
-const TIPOS = [
-  { re: /flood|avalancha|rate|too many|session ?limit|load|carga/i, key: 'flood', color: '#f04438', Icon: IconWaveSine, label: 'Flood / abuso' },
-  { re: /scan|escáner|escaner|friendly|sipvicious|sipcli|vicious|sonda/i, key: 'escaner', color: '#c084fc', Icon: IconRadar2, label: 'Escáner' },
-  { re: /clave|password|auth|cred|nonce|challenge|bruta/i, key: 'auth', color: '#f7b955', Icon: IconKey, label: 'Fuerza bruta' },
-  { re: /cuenta|account|inexistente/i, key: 'cuenta', color: '#f79009', Icon: IconUserOff, label: 'Cuenta inexistente' },
-  { re: /\bacl\b|no permitid|not allowed|transporte|transport/i, key: 'acl', color: '#5b8def', Icon: IconHandStop, label: 'Rechazado (ACL)' },
-  { re: /geo|país|pais|country|vetado/i, key: 'geo', color: '#38bdf8', Icon: IconWorld, label: 'País vetado' },
-  { re: /lista negra|manual/i, key: 'manual', color: '#94a3b8', Icon: IconLock, label: 'Bloqueo manual' },
-];
-const tipoDe = (reason) => TIPOS.find((t) => t.re.test(String(reason || ''))) || { key: 'otro', color: '#ff6a5e', Icon: IconAlertTriangle, label: 'Intento bloqueado' };
 
 export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = null, kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
   const canvasRef = useRef(null);
@@ -120,12 +104,6 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
     .filter(Boolean);
   const geoColor = modoGeo === 'permitir' ? [0.3, 0.72, 1] : [1, 0.6, 0.15];
   const geoHex = modoGeo === 'permitir' ? '#4db8ff' : '#f79009';
-
-  // Últimos bloqueos, con su tipo, para el feed de abajo.
-  const feed = (bloqueos || [])
-    .filter((b) => b && (b.cc || b.country))
-    .slice(0, 6)
-    .map((b) => ({ ip: b.ip, cc: b.cc, pais: b.country, tipo: tipoDe(b.reason) }));
 
   // Recreamos el globo sólo cuando cambia el conjunto de puntos (el socket refresca
   // seguido y no queremos reconstruir el planeta en cada tick).
@@ -234,11 +212,11 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
       </div>
 
       {/* título + estado en vivo */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '14px 16px', zIndex: 4,
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 12px', zIndex: 4,
                     background: TEMA.velo, pointerEvents: 'none' }}>
         <Group gap={9} wrap="nowrap">
-          <IconWorldBolt size={20} color="#ff6a5e" style={{ filter: 'drop-shadow(0 0 6px rgba(240,68,56,.6))' }} />
-          <Text fw={700} c={TEMA.txt} style={{ textShadow: TEMA.txtSombra }}>{titulo}</Text>
+          <IconWorldBolt size={17} color="#ff6a5e" style={{ filter: 'drop-shadow(0 0 6px rgba(240,68,56,.6))' }} />
+          <Text fw={700} c={TEMA.txt} style={{ textShadow: TEMA.txtSombra, fontSize: 13.5 }}>{titulo}</Text>
           <Badge size="sm" variant="filled" color="red" ml="auto" style={{ pointerEvents: 'auto' }}
             leftSection={<span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#fff', animation: 'agLive 1.4s ease-in-out infinite' }} />}>
             {pts.length} orígenes
@@ -247,48 +225,27 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
       </div>
 
       {/* KPIs verticales */}
-      <div style={{ position: 'absolute', top: 50, right: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 5, width: 138 }}>
+      <div style={{ position: 'absolute', top: 44, right: 10, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 4, width: 108 }}>
         {KPIS.map((it) => {
           const Ic = it.Icon;
           return (
-            <div key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 9px', borderRadius: 9,
+            <div key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 7px', borderRadius: 8,
               background: TEMA.chip, border: TEMA.chipBorde, backdropFilter: 'blur(3px)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7, background: `${it.color}22`, flex: '0 0 24px' }}>
-                <Ic size={14} color={it.color} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 19, height: 19, borderRadius: 6, background: `${it.color}22`, flex: '0 0 19px' }}>
+                <Ic size={11} color={it.color} />
               </div>
               <div style={{ lineHeight: 1.1, minWidth: 0 }}>
-                <Text fw={800} c={TEMA.txt} style={{ fontSize: 16 }}>{it.value}</Text>
-                <Text c={TEMA.txt2} style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: .3, whiteSpace: 'nowrap' }}>{it.label}</Text>
+                <Text fw={800} c={TEMA.txt} style={{ fontSize: 12.5, lineHeight: 1.15 }}>{it.value}</Text>
+                <Text c={TEMA.txt2} style={{ fontSize: 7.5, textTransform: 'uppercase', letterSpacing: .2, whiteSpace: 'nowrap' }}>{it.label}</Text>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* feed: bandera + ícono del tipo de intento */}
-      {feed.length > 0 && (
-        <div style={{ position: 'absolute', bottom: 10, left: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '58%' }}>
-          {feed.map((a, i) => {
-            const Ic = a.tipo.Icon;
-            return (
-              <div key={(a.ip || '') + i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 9px', borderRadius: 9,
-                background: TEMA.chip, border: TEMA.chipBorde, backdropFilter: 'blur(3px)',
-                animation: `agIn .45s ease ${i * 0.05}s both` }}>
-                <img src={flagUrl(a.cc)} alt="" width={18} height={13} style={{ borderRadius: 2, objectFit: 'cover', flex: '0 0 18px' }} />
-                <ThemeIcon size={18} radius="sm" variant="light" style={{ background: `${a.tipo.color}22`, flex: '0 0 18px' }}>
-                  <Ic size={12} color={a.tipo.color} />
-                </ThemeIcon>
-                <div style={{ lineHeight: 1.15, minWidth: 0 }}>
-                  <Text c={TEMA.txt} style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {a.pais || a.cc}<Text span c={TEMA.txt2} style={{ fontWeight: 400 }}> · {a.ip}</Text>
-                  </Text>
-                  <Text style={{ fontSize: 9.5, color: a.tipo.color, whiteSpace: 'nowrap' }}>{a.tipo.label}</Text>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* Sin feed encima del globo: los intentos ya se listan completos abajo
+          ("De dónde vienen los ataques" y "Los más insistentes"). Taparle el planeta
+          para repetir esa info era ruido. */}
 
       {/* leyenda del filtro por país */}
       {geoPts.length > 0 && (
@@ -301,7 +258,7 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
         </div>
       )}
 
-      {pts.length === 0 && feed.length === 0 && (
+      {pts.length === 0 && (
         <Group justify="center" style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}>
           <Text size="sm" c={TEMA.txt2}>{geoPts.length > 0 ? 'Sin ataques en curso.' : 'Sin ataques localizados todavía.'}</Text>
         </Group>

@@ -14,7 +14,19 @@ const nextConfig = {
   output: 'standalone',               // imagen Docker chica: solo server.js + .next/static + public (antes ~1.4 GB)
   skipTrailingSlashRedirect: true,   // por si un /socket.io/ llega a Next (no debería: lo toma server.js antes)
   async headers() {
-    return [{ source: '/:path*', headers: SECURITY_HEADERS }];
+    return [
+      { source: '/:path*', headers: SECURITY_HEADERS },
+      /* El panel es una app con login: su HTML NO debe quedar en cachés compartidas.
+       * Next marca las páginas prerenderizadas con s-maxage de un año, así que un
+       * proxy delante se queda con el HTML viejo y sigue sirviendo los chunks de
+       * la build anterior — cada deploy "no aparece" hasta que caduque. Se excluyen
+       * los assets de /_next/static, que SÍ conviene cachear: llevan hash en el
+       * nombre, así que un deploy nuevo genera nombres nuevos. */
+      {
+        source: '/((?!_next/static|_next/image|favicon.ico).*)',
+        headers: [{ key: 'Cache-Control', value: 'no-store, must-revalidate' }],
+      },
+    ];
   },
 };
 module.exports = nextConfig;
