@@ -174,26 +174,41 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
             state.width = ancho * dpr;
             state.height = alto * dpr;
 
-            /* Banderas encima de su punto. cobe pinta en WebGL y no admite HTML sobre
-             * la esfera, asi que proyectamos nosotros lat/lon -> x,y de pantalla con la
-             * rotacion actual y movemos los nodos. La formula sale de la que usa cobe
-             * para centrar una posicion: phi0 = PI - (lon*PI/180 - PI/2). */
-            const R = Math.min(ancho, alto) / 2;
+            /* Banderas encima de su punto.
+             *
+             * cobe pinta en WebGL y no admite HTML sobre la esfera, así que proyectamos
+             * nosotros. La fórmula NO es inventada: sale de leer el shader de cobe 0.6.3.
+             *
+             *   1. El marcador se convierte igual que su función interna:
+             *        m = (cos(lat)·cos(lon), sin(lat), −cos(lat)·sin(lon))
+             *   2. El shader NO rota el marcador: rota el RAYO de la cámara y lo compara
+             *      en ese espacio (`ray · M`, vector-fila por matriz). Para ir al revés
+             *      hay que aplicar la TRANSPUESTA: ray = m · Mᵀ.
+             *   3. El radio sale de que la esfera vive en |b| ≤ 0.8 con b.y normalizado
+             *      por la ALTURA: radio real = 0.4 · alto (no min(ancho,alto)/2).
+             *
+             * Antes tenía el marcador mal armado y el radio 25 % grande: la bandera
+             * orbitaba a la velocidad correcta pero caía en el lugar equivocado. */
+            const th = 0.25;                       // theta con el que se creó el globo
+            const cT = Math.cos(th), sT = Math.sin(th);
+            const cP = Math.cos(phiRef.current), sP = Math.sin(phiRef.current);
+            const R = 0.4 * alto;
             const cx = ancho / 2, cy = alto / 2;
-            const th = 0.25;
-            flagRefs.current.forEach((el, key) => {
+            flagRefs.current.forEach((el) => {
               if (!el) return;
               const [la, lo] = el.dataset.ll.split(',').map(Number);
-              const lam = (la * Math.PI) / 180;
-              const phi0 = Math.PI - ((lo * Math.PI) / 180 - Math.PI / 2);
-              const d = phi0 - phiRef.current;
-              const x = Math.cos(lam) * Math.sin(d);
-              const yt = Math.sin(lam), zt = Math.cos(lam) * Math.cos(d);
-              const y = yt * Math.cos(th) - zt * Math.sin(th);
-              const z = yt * Math.sin(th) + zt * Math.cos(th);
-              // z>0 = cara visible del globo; del otro lado se esconde
-              el.style.opacity = z > 0.06 ? '1' : '0';
-              el.style.transform = `translate(-50%,-100%) translate(${cx + x * R}px, ${cy - y * R - 6}px)`;
+              const rad = Math.PI / 180;
+              const ca = Math.cos(la * rad);
+              const mx = ca * Math.cos(lo * rad);
+              const my = Math.sin(la * rad);
+              const mz = -ca * Math.sin(lo * rad);
+              // ray = m · Mᵀ
+              const rx = mx * cP + mz * sP;
+              const ry = mx * (sP * sT) + my * cT + mz * (-cP * sT);
+              const rz = mx * (-sP * cT) + my * sT + mz * (cP * cT);
+              // rz > 0 = cara visible; del otro lado se esconde
+              el.style.opacity = rz > 0.05 ? '1' : '0';
+              el.style.transform = `translate(-50%,-100%) translate(${cx + R * rx}px, ${cy - R * ry - 5}px)`;
             });
           },
         });
