@@ -136,7 +136,7 @@ async function overview() {
     {
       id: 'core', name: 'Núcleo · API y base', role: 'core',
       host: NODES.asterisk || os.hostname(),
-      services: ['api', 'postgres', 'redis', 'dashboard'],
+      services: ['api', 'postgres', 'dashboard'],
       ...nodeLocal(),
     },
   ];

@@ -16,6 +16,34 @@ acá no se puede asumir.
 | Documentación | `README.md`, `CHANGELOG.md`, `docs/`, manuales | `docs` |
 | Revisión | (no escribe producto) | `revisor` |
 
+### 1.1 Archivos de la API por dominio (`control-plane/`)
+
+`app.js` (≈2.200 líneas) arma Express, el gate de auth + RBAC, ARI/AMI, socket.io y lo que
+todavía no se partió (internos, push, click-to-call, teléfonos físicos, red, respaldos, CRM,
+wallboard, conferencias, pickup-groups). El resto vive en módulos con el patrón
+`module.exports = function init(deps) { …registra rutas en deps.app…; return {…} }`: reciben
+TODO por `deps` (nada global) y **se registran en `app.js` después del gate de auth y de
+`rbac.middleware`** (Express resuelve en orden: un módulo registrado antes queda sin token ni
+rol). Orden efectivo hoy: gate → `auth.js` → `sipconf.js` → `callengine.js` → `recordings.js`
+→ `apps.js` → `trunks.js` → `guard.js` → 404 JSON + `errores.js`.
+
+| Archivo | Dominio (rutas `/api/…`) | Devuelve a `app.js` |
+|---|---|---|
+| `auth.js` | JWT de panel y token `phone`, `PUBLIC_API`, `FONO_PERMITIDO`, alcance por extensión, rate limit de login; `auth/*`, `users/*`, `phone/token`, `me/sipcreds`, `provision`, `enroll*`; bootstrap del usuario `admin` | `auth`, `isPublicApi`, `PUBLIC_API`, `FONO_PERMITIDO`, `mismaExt`, `exigirExt`, `extPropia`, `clientIp`, `limiteIntentos`, `ROLES` |
+| `sipconf.js` | SIP de la central (`pbxng.d/pjsip.conf`, `rtp.conf`, transportes) | — |
+| `callengine.js` | motor ARI: `calls/*` (dial, hangup, live, spy…) | — |
+| `recordings.js` | `recordings/*`, `cdr`, `cdr/report`, `calls/record`, `extensions/record-all`; marca `rec/<ext>` en la AstDB, indexador de `/recordings`, transcripción y picos; inicializa `recstore.js` y `report.js` | `setRecFlag`, `setRecAll`, `syncRecFlags`, `wavToPcm`, `analyzeText`, `indexRecordings` |
+| `apps.js` | `queues/*`, `ringgroups/*`, `paging/*`, `ivr/*` (+ `ivr/audios`, `ivr/gen-audio`), `ai-agents/*`, `featurecodes/*`, `parking/*`, `moh/*`, `mailboxes/*`, `vm/*` (volumen `/voicemail`, transcripción, poller buzón → correo) | `aiAgentDialplan`, `buildIvrDialplan`, `vmList` |
+| `trunks.js` | `trunks/*`, `routes/inbound|outbound`, `sbc-link`, `registrations`; sondeo OPTIONS, semillas `to-sbc` / `mod_sbc` | `sbcLink`, `upsertSbcLink`, `invalidarSbcLink`, `trunkStatuses`, `defaultOutTrunk`, `SBC_TRUNK` |
+| `guard.js` | centro de seguridad: `security/*`, `ipgeo`, eventos AMI `security`, nftables vía el agente | (ver §3, familia `security`) |
+| `rbac.js` | tabla deny-by-default método+ruta → rol | `middleware` |
+
+Auxiliares sin rutas propias: `astconf.js`, `salud.js`, `sysmon.js`, `alerts.js`, `backup.js`,
+`acme.js`, `recstore.js`, `report.js`, `diagtrunk.js`, `emails.js`, `log.js`, `errores.js`,
+`numbering.js`, `netmode.js`, `push-providers.js`, `ai-pipeline.js`, `migrate.js` +
+`migrations/`. El detalle de qué recibe cada módulo por `deps` está en el JSDoc de cabecera
+de cada archivo y en `.claude/agents/api.md`.
+
 ## 2. Autenticación y roles
 
 - Sesión de panel: `POST /api/auth/login` → JWT (`{uid, username, role, name, ext}`, 12 h). El
@@ -39,7 +67,11 @@ acá no se puede asumir.
 - Roles: `admin` (todo), `supervisor` (operación + call center, sin configuración de sistema),
   `agente` (solo su panel de agente y su extensión). **Regla desde 1.4.0:** el middleware de
   `control-plane/rbac.js` (montado en `/api` justo después del gate de auth) decide por
-  método+ruta qué roles pasan; lo que no está en la tabla es `admin` por defecto. Rechazo:
+  método+ruta qué roles pasan. Desde sprint1-seguridad el dominio de autenticación vive en
+  `control-plane/auth.js` (mismo patrón que `callengine.js`: `require('./auth')(deps)` registra
+  las rutas de sesión, usuarios, `phone/token`, `provision`, `enroll*` y devuelve `auth`,
+  `isPublicApi`, `PUBLIC_API`, `FONO_PERMITIDO`, `mismaExt`, `exigirExt`, `extPropia`,
+  `clientIp`, `limiteIntentos`, `ROLES`); `app.js` sigue montando el gate ANTES de ese init; lo que no está en la tabla es `admin` por defecto. Rechazo:
   `403 {error:'no tenés permiso para esta acción'}`. La tabla `PERMISOS` se recorre en orden y
   gana la primera coincidencia (las reglas específicas van antes que las generales). Transcripción
   por familia (`TODOS` = admin+supervisor+agente; `SUP` = admin+supervisor; el resto = `admin`):
@@ -96,7 +128,7 @@ acá no se puede asumir.
   el socket está desconectado. El menú del shell se
   filtra por rol (`app/shell.jsx`, `SUP_OK`) como espejo de `rbac.js`.
 - Token de softphone: `POST /api/phone/token` → JWT `{scope:'phone', ext}` (30 d). Mismo rate
-  limit que el login (por IP+ext). Solo puede lo que lista `FONO_PERMITIDO` en `app.js`, y
+  limit que el login (por IP+ext). Solo puede lo que lista `FONO_PERMITIDO` en `control-plane/auth.js`, y
   siempre sobre su propia extensión (`mismaExt`): `vm*`, `directory`, `presence`, `ice`,
   `branding`, `calls/record|conference`, `push/subscribe|register|unsubscribe|test` (POST), `cdr` (forzado a su ext) y `clients/lookup`.
   El RBAC por rol no aplica a estos tokens.
@@ -107,7 +139,7 @@ acá no se puede asumir.
   para el `apiToken` de `GET /api/provision`.
 - Cabeceras: `helmet` con CSP apagada y `Cross-Origin-Resource-Policy: cross-origin` (el panel,
   `/softphone/` y los audios se sirven a través del proxy).
-- Rutas públicas (sin token) = exactamente `PUBLIC_API` en `app.js`. Hoy: `auth/login`,
+- Rutas públicas (sin token) = exactamente `PUBLIC_API` en `control-plane/auth.js`. Hoy: `auth/login`,
   `phone/token`, `auth/setup`, `ice`, `branding`, `enroll/:token`, `prompts/:id/audio`,
   `push/vapid`, `push/(subscribe|register|unsubscribe)`, `internal/wake`, `c2c/public/*`,
   `softphone/latest`, `geo/report`, `manuales/img/*`.
@@ -120,17 +152,17 @@ acá no se puede asumir.
 |---|---|---|
 | `auth`, `users`, `me` | sesión, usuarios, cambio de clave | `/login`, `/usuarios` |
 | `extensions`, `endpoints`, `directory`, `presence` | internos y presencia | `/internos` |
-| `trunks`, `routes`, `sbc-link` | troncales, rutas entrantes/salientes, conexión a SBC-NG | `/troncales`, `/rutas`, `/sbc` |
-| `queues`, `ringgroups`, `paging`, `ivr`, `ai-agents`, `featurecodes`, `parking`, `moh`, `mailboxes`, `vm` | aplicaciones | `/aplicaciones/*`, `/funciones`, `/ivr` |
+| `trunks`, `routes`, `sbc-link`, `registrations` | troncales, rutas entrantes/salientes, conexión a SBC-NG, diagnóstico de troncal (`control-plane/trunks.js`, mismo patrón `init(deps)` que `auth.js`; `sbcLink()` es lo único que el resto de la API mira para saber si hay SBC adelante) | `/troncales`, `/rutas`, `/sbc` |
+| `queues`, `ringgroups`, `paging`, `ivr`, `ai-agents`, `featurecodes`, `parking`, `moh`, `mailboxes`, `vm` | aplicaciones: colas (tabla realtime `queues` + `pbxng_queues`), grupos de timbrado, paging, IVR clásico y con IA (`Stasis pbxng,ai,<id>` → `ai-pipeline.js`), códigos de función, aparcado y música en espera (archivos vía `astconf.js`), buzones y buzón → correo (`control-plane/apps.js`, mismo patrón `init(deps)` que `auth.js`/`trunks.js`/`recordings.js`; devuelve `aiAgentDialplan`, `buildIvrDialplan`, `vmList`; `wallboard`, `conferences` y `pickup-groups` siguen en `app.js`) | `/aplicaciones/*`, `/funciones`, `/ivr`, `/voz` |
 | `calls` | control de llamadas (dial, hangup, hold, transfer, park, spy, live) | agente, supervisor, monitor |
-| `recordings`, `cdr` | grabaciones e historial | `/grabaciones`, `/cdr` |
+| `recordings`, `cdr`, `calls/record`, `extensions/record-all` | grabaciones e historial: marca de grabación (AstDB `rec`), grabar en vivo, indexador de `/recordings`, audio/transcripción/picos, almacenamiento remoto (`recstore.js`) e informe (`report.js`) (`control-plane/recordings.js`, mismo patrón `init(deps)` que `auth.js`/`trunks.js`; devuelve `setRecFlag`, `setRecAll`, `syncRecFlags`, `wavToPcm`, `analyzeText`, `indexRecordings`) | `/grabaciones`, `/cdr` |
 | `clients`, `survey` | CRM propio | `/clientes` |
 | `asterisk`, `net`, `sip`, `capture`, `system`, `topology`, `metrics` | núcleo, red, diagnóstico | `/asterisk`, `/red`, `/topologia`, `/` |
 | `sipconf` | ajustes SIP de la central (NAT, RTP, timers, TLS, códecs por defecto; sólo admin) | Configuración → SIP |
 | `turn`, `ice`, `acme`, `npm` | WebRTC/TURN, certificados, proxy | Configuración |
 | `modules`, `settings`, `branding`, `integrations`, `alerts`, `email` | configuración | `/configuracion` |
 | `backup` | respaldo y restauración; `backup/schedule` (GET → `{enabled, hour, keep, last_run, last_ok, last_error, last_nombre, running, tz}`, POST `{enabled, hour, keep}` con `hour` entero 0–23, `keep` entero ≥ 1, `enabled` booleano, cada campo opcional, `400 {error}` si no valida; devuelve el estado nuevo. Se guarda en `pbxng_settings` (`backup_enabled` default `1`, `backup_hour` default 3, `backup_keep` default `BACKUP_KEEP`/14, `backup_last_run|ok|error|nombre`). Un planificador interno de la API revisa cada minuto: si está activo, es esa hora (reloj local del contenedor, `tz`) y hoy no hay marca `backup_last_run`, corre `backup.programado()` (crear sin grabaciones + retención). El cron del host (`backup-cli.js`) escribe las mismas claves, así que ninguno repite el del otro. El panel tolera 404 en versiones sin el endpoint) | `/respaldos` |
-| `push`, `c2c`, `enroll`, `phones`, `provision` | PWA, click-to-call, aprovisionamiento | varios |
+| `push`, `c2c`, `enroll`, `phones`, `provision` | PWA, click-to-call, aprovisionamiento. `GET /api/push/vapid` → `{key}` con la pública VAPID vigente (`''` mientras la API no tenga un par que firme: el panel muestra «Servidor sin clave VAPID»). El par sale, en este orden, de `VAPID_PUBLIC`/`VAPID_PRIVATE` del `.env` si web-push lo acepta, de `pbxng_settings` (`vapid_public`/`vapid_private`) o, si ninguno sirve, la API genera uno al arrancar, lo guarda en `pbxng_settings` y lo avisa con un `warn` (las suscripciones hechas con otra pública fallan al enviar y se limpian solas con 404/410) | varios |
 | `voz`, `prompts`, `sysprompts` | TTS/STT y audios | `/voz`, `/ia-voz` |
 | `softphone` | instalador y feed OTA del softphone | login |
 | `manuales` | manuales in-panel | `/manuales` |
@@ -269,6 +301,12 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   motor de llamadas; `Stasis(pbxng,ai,<agentId>)` para IVR con IA; `spysnoop,<id>` /
   `spyjoin,<id>` para supervisión. AMI (`:5038`): acciones (Originate, Redirect, MixMonitor,
   QueuePause, Command…) y eventos. AudioSocket: la API escucha en `:9092`.
+- Dialplan estático (`extensions.conf`): el paso `wake` de los internos pide
+  `GET /api/internal/wake?ext=&from=` con `URIENCODE()` en los dos valores (`modules.conf` tiene
+  `require = func_curl.so` y `func_uriencode.so`: un build sin ellos no arranca). Buzón de voz:
+  `*97` usa `VoiceMailMain(${CHANNEL(endpoint)}@default,s)` sólo en canales PJSIP (la identidad
+  es el endpoint que autenticó, no el `CALLERID(num)` que manda el teléfono); otros canales y
+  `*98` (buzón ajeno) piden clave, nunca llevan `s`. Mailbox = id del endpoint = interno.
 - Config generada por el panel: `pbxng.d/{parking,features,moh,pjsip,rtp,pjsip-security}.conf`
   (volumen `asterisk_conf`) incluida por `#include` desde los `.conf` base. Dialplan de
   aplicaciones: tabla realtime `extensions`. Contextos: `from-trunk` (entrantes), `internal`
@@ -296,11 +334,19 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   `escaner`; `SessionLimit` / `MemoryLimit` / `LoadAverageLimit` → `flood` (crit);
   `SuccessfulAuth` → `ok` (no cuenta como fallo y resetea el contador de la IP);
   `ChallengeSent` se ignora. Sólo `IPV4/...` se procesa (nftables del módulo es IPv4).
-- Firewall del módulo `/seguridad` (agente de Asterisk `:8092`, `docker/images/asterisk/
-  pbxng-ast-agent.py`; la API le habla con `astFwd()`). Sólo las rutas `/fw/*` exigen
-  `X-PBXNG-Token` = `/etc/pbxng/agent.token` (volumen `certs`, montado en Asterisk como
-  `/etc/pbxng` ro; también `PBXNG_AGENT_TOKEN` por entorno); si no hay token configurado
-  se aceptan sólo pedidos desde redes privadas/loopback (de ahí llega la API por el bridge).
+- Agente de Asterisk `:8092` (`docker/images/asterisk/pbxng-ast-agent.py`; la API le habla
+  con `astFwd()` y `sysmon.js` con `get()`, ambos mandan `X-PBXNG-Token`). **Autenticación**:
+  todo `POST` (`/fw/*`, `/route`, `/iface`, `/netmode`, `/diag`, `/sound`, `/reload`) y los
+  `GET` que describen el host (`/net`, `/route`, `/fw/bans`) exigen `X-PBXNG-Token` =
+  `/etc/pbxng/agent.token` (volumen `certs`, montado en Asterisk como `/etc/pbxng` ro; también
+  `PBXNG_AGENT_TOKEN` por entorno) → `401 {error:'token inválido'}`; si no hay token
+  configurado (instalación vieja) se aceptan sólo pedidos desde redes privadas/loopback (de
+  ahí llega la API por el bridge). `GET /core` y `GET /metrics` quedan abiertos: versión,
+  contadores, carga y memoria, sin secretos ni IPs. `GET /route` → `{managed:[{id,dest,gw,
+  dev,note}]}`; `POST /route {action:'add',dest,gw?,dev?,note?}` valida `dest` (red CIDR o
+  `default`), `gw` (IP) y `dev` (nombre de placa) → `400 {error}` si no; `ip route` se
+  invoca siempre con argv, nunca por shell.
+  - Firewall del módulo `/seguridad`:
   - `POST /fw/ban {ip, seconds}` (`seconds` 0 = permanente, tope 10 años) →
     `200 {ok, ip, seconds, enabled:true}`.
   - `POST /fw/unban {ip}` → `200 {ok, ip, enabled:true}` (idempotente: no estar en el set no es error).
@@ -318,6 +364,19 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
     y sigue), el agente al arrancar y cada `/fw/*`. Los bloqueos viven en el kernel del host:
     sobreviven a reinicios del contenedor; la API debe llamar a `/fw/sync` al arrancar para
     reconciliar con `pbxng_blocked`.
+  - **Reglas de gestión** (`docs/FIREWALL.md` §1.2): en la misma chain, `ensure_fw()` mantiene
+    tres reglas con `comment "pbxng-mgmt"` que aceptan `tcp dport {8088, 5038}` (ARI/HTTP+WS de
+    PJSIP y AMI) sólo desde los sets `mgmt_allow` (`127/8, 10/8, 172.16/12, 192.168/16`;
+    incluye la subred bridge de docker) y `mgmt_allow6` (`::1, fc00::/7, fe80::/10`) y dropean
+    el resto. `http.conf` sigue con `bindaddr=0.0.0.0` porque la API llega por `ASTERISK_HOST`
+    (IP LAN del host). Configurable con `/etc/pbxng/fw.json` (opcional, lo escribe el
+    administrador; `PBXNG_FW_CONFIG` cambia la ruta): `{"ari_public": true}` no pone las reglas
+    (y las borra por handle si estaban), `"mgmt_allow": ["cidr", ...]` suma redes (v4 o v6;
+    lo inválido se ignora). Los sets se reconcilian (flush + add) en cada `ensure_fw()`; las
+    reglas se agregan una sola vez (se detectan por el comment). `ensure_fw()` devuelve además
+    `mgmt:bool` (y `motivo` si la parte de gestión falló sin deshabilitar los baneos).
+    `pbxng-ast-agent.py --print-fw` imprime el ruleset declarativo equivalente (para
+    `nft -c -f`), no se aplica con `nft -f`.
 
 ## 6. Variables de entorno (`.env` del compose)
 
@@ -325,7 +384,10 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
 `ARI_USER ARI_PASS AMI_USER AMI_PASS JWT_SECRET ADMIN_DEFAULT_PASS` · `ASTERISK_HOST MEDIA_HOST
 TURN_HOST VOZ_HOST NPM_HOST AST_AGENT TURN_AGENT` · `TURN_USER TURN_PASS TURN_CLI_PASS
 TURN_REALM` · `API_URL` (el dashboard lo lee al arrancar, `server.js`; ya no se fija en el build) · `SOFTPHONE_DIR` (opcional) ·
-`COMPOSE_PROFILES` (módulos activos) · `GO2RTC_MGMT` (intercom, default `http://go2rtc:1984`)
+`COMPOSE_PROFILES` (módulos activos) · `VAPID_PUBLIC VAPID_PRIVATE VAPID_SUBJECT` (Web Push;
+opcionales: si el par falta o no firma —placeholder, largo incorrecto— la API genera uno y lo
+guarda en `pbxng_settings.vapid_*`, §3 familia `push`; `VAPID_SUBJECT` default
+`mailto:soporte@example.com`) · `GO2RTC_MGMT` (intercom, default `http://go2rtc:1984`)
 · `ENROLL_REUSE_SECONDS` (opcional, default 120) · `LOG_LEVEL` (`debug|info|warn|error`,
 default `info`; **ojo:** `LOG_LEVEL`, `LOG_FORMAT`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`,
 `CORS_ORIGINS` y `TZ` los lee la API de su entorno, pero en 1.5.0 ningún compose los reenvía
@@ -345,7 +407,11 @@ como `--keep=N`) · `TZ` (opcional; la hora del respaldo programado interno se c
 reloj del contenedor de la API, que sin `TZ` es UTC: el campo `tz` de `backup/schedule` dice
 cuál está usando) ·
 `PBXNG_COMPOSE_FILE` (qué compose usa la instalación, lo fija `install.sh`; lo leen
-`pbxng-ctl` y `backup-cron.sh`, no los contenedores) · `DASHBOARD_BIND` (interfaz del host
+`pbxng-ctl` y `backup-cron.sh`, no los contenedores) · `CONF_DIR` (directorio de
+configuración persistente de la API, default `/etc/pbxng`; el compose lo fija ahí: ACME,
+imágenes de los manuales y `agent.token` viven adentro — fuera del contenedor, p. ej. en las
+pruebas de integración, apunta a un temporal para no escribir en el `/etc` del host) ·
+`DASHBOARD_BIND` (interfaz del host
 donde se publica `:3001`, ver §8) · `DASHBOARD_TRUST_PROXY` (opcional:
 cantidad de reverse proxies delante del panel; el compose lo pasa como `TRUST_PROXY` al
 dashboard junto con `COMPOSE_PROFILES`, y si está vacío el panel usa 1 con el perfil `proxy`
@@ -402,14 +468,21 @@ network), `5060/5061 + 10000-20000/UDP` (Asterisk, host network), `8080` (voz, s
 (Postgres) y `3000` (API). Existen únicamente porque Asterisk corre en host network y necesita
 la DB (realtime/CDR) y la API (`/api/internal/wake`); nunca pasarlos a `0.0.0.0`. Para usar la
 DB desde otra máquina en desarrollo: túnel ssh (`ssh -L 5432:127.0.0.1:5432 host`).
-**No** se publican `6379` (Redis ya no existe), `5038`, `8088` (Asterisk en host network expone
-8088: la API ARI debe atarse a `127.0.0.1` o protegerse por firewall — pendiente, ver
-evaluación). Pendiente: AudioSocket de la IA (`:9092` de la API) tampoco está publicado, así
+**No** se publican `6379` (Redis ya no existe), `5038`, `8088`. Asterisk corre en host network,
+así que `8088` (ARI + WS de PJSIP) y `5038` (AMI) escuchan en `0.0.0.0` del host — no pueden ir
+a `127.0.0.1` porque la API llega por `ASTERISK_HOST` — y los protege nftables en el kernel del
+host: sólo redes privadas (reglas `pbxng-mgmt` de la tabla `inet pbxng`, §5 y
+`docs/FIREWALL.md` §1.2; se desactiva con `{"ari_public": true}` en `/etc/pbxng/fw.json`). El
+AMI además tiene su propio `permit=` (`AMI_PERMIT`). Pendiente: AudioSocket de la IA (`:9092` de la API) tampoco está publicado, así
 que Asterisk no llega al pipeline de voz desde compose (ver evaluación).
 
 ## 9. Versionado
 
-`VERSION` + `CHANGELOG.md` (SemVer). Tag `vX.Y.Z` → imágenes a GHCR. Tag `softphone-vX.Y.Z` →
+`VERSION` + `CHANGELOG.md` (SemVer). Tag `vX.Y.Z` → imágenes a GHCR, **sólo si la CI pasa**:
+desde 1.7.0 `release.yml` corre primero `ci.yml` (`images: needs: ci`; lint + `npm test` de la
+API contra Postgres efímero, lint + `next build` del panel, paridad y `config -q` de los compose,
+`bash -n`/`py_compile`), sin entrada para saltearla; qué corre cada job y cómo reproducirlo a
+mano está en §10 y en `docs/PACKAGING.md` §CI. Tag `softphone-vX.Y.Z` →
 release del softphone. Cambios de esquema = `control-plane/migrations/000N_*.sql` (nunca se
 edita una aplicada; se agrega otra). **Las corre el arranque de la API**:
 `control-plane/docker-entrypoint.sh` espera a Postgres (60 s; si no aparece, sale con 1), corre
@@ -430,3 +503,50 @@ el código son filas semilla (admin, empresa, `pbxng_rec_config` id=1, `pbxng_ne
 de encuesta), idempotentes. Instalación sin Docker (`infra/systemd/pbxng-api.service`,
 `ExecStart=node app.js`): hay que correr `node migrate.js` antes (p. ej. `ExecStartPre`); hoy
 no rompe porque las tablas ya existen, pero la próxima migración no se aplicaría sola.
+
+## 10. Red de seguridad de desarrollo
+
+- `control-plane/`: `npm test` (`node --test test/*.test.js`, < 90 s) y `npm run lint` (`eslint .`,
+  flat config en `eslint.config.js`, ESLint 10 + `@eslint/js` + `globals` como devDependencies).
+  Hay dos clases de prueba en `test/`:
+  - **unitarias con mocks** (`guard.test.js`): sin base ni Asterisk, corren siempre.
+  - **de integración** (`auth`, `rbac`, `users`, `trunks`, `sbc-link`, `calls` `.test.js`):
+    levantan la API REAL (`app.js` como proceso hijo en un puerto libre, `JWT_SECRET` de
+    prueba, `ADMIN_DEFAULT_PASS=admin`, ARI/AMI/agente apuntando a puertos cerrados de
+    loopback, `CONF_DIR`/`REC_DIR`/`VM_DIR`/`BACKUP_DIR` en un temporal) contra un
+    **PostgreSQL efímero** con el esquema de una instalación nueva (`01-schema.sql` +
+    `node migrate.js`, el mismo camino que `docker-entrypoint.sh`). El ayudante es
+    `test/helpers/db.js` (`entorno(t)` → `{db, api, cerrar}`; `api.api(método, ruta,
+    {body, token})`, `api.login(usuario, clave)`, `db.query(sql, params)`). De dónde sale
+    la base, en este orden: (1) `PGURL` o `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASS`/`DB_NAME`
+    del entorno (la CI; también un desarrollador con Postgres a mano) → crea una base
+    `pbxng_t_<azar>` por archivo de prueba en ese servidor y la borra al final (el usuario
+    necesita `CREATEDB`; si no se llama `pbxng`, el `OWNER TO pbxng` del dump se reescribe
+    a ese usuario); (2) sin nada en el entorno, `initdb`/`pg_ctl` locales
+    (`/usr/lib/postgresql/<v>/bin`, Homebrew, `PATH` o `PG_BIN=/ruta/bin`) → clúster
+    propio en un temporal, puerto al azar, usuario `pbxng` con `trust`, apagado y borrado
+    al terminar; como root se baja a `postgres`/`nobody` con `setpriv`/`runuser`/`su`
+    (initdb no corre como root); (3) nada de eso → el archivo se marca **skip** con el
+    motivo (nunca falla por falta de infraestructura). Cada archivo tiene su propia base y
+    su propia API, así que `node --test` puede correrlos en paralelo. Depuración:
+    `TEST_API_VERBOSE=1` vuelca el log de la API hija; `TEST_API_LOG_LEVEL=debug` sube su
+    nivel. Instalación local: `apt install postgresql-16` (Debian/Ubuntu) o `brew install
+    postgresql@16`; no hace falta que el servicio esté corriendo.
+  El lint sólo corta por errores reales (`no-undef`, `no-dupe-keys`, `no-unreachable`,
+  `no-cond-assign` sin paréntesis…); `no-unused-vars`, `no-empty` y `no-useless-assignment`
+  son avisos y el estilo no se lintea. Todo cambio en `control-plane/*.js` debe dejar
+  `npm run lint` en 0 errores. ESLint 10 exige Node `^20.19 || ^22.13 || >=24` (la CI usa 22;
+  con un Node 18 o 20.x viejo el lint no arranca, `npm test` y `npm start` sí).
+- `dashboard/`: `npm run lint` (`next lint`, `.eslintrc.json` con `next/core-web-vitals`;
+  Next 14 no acepta flat config). `next build` corre ese lint y falla con errores
+  (`react/jsx-no-undef`, `react-hooks/rules-of-hooks`…); los `react-hooks/exhaustive-deps`
+  quedan como avisos.
+- CI (`.github/workflows/ci.yml`, dueño `empaquetado`): en push a `main`, en PR y como primer
+  job de `release.yml` (`needs: ci`, un tag con la CI roja no publica). Jobs: `api` (Node 22,
+  `npm ci`, lint, `npm test` contra `postgres:16-alpine` efímero con `DB_HOST=127.0.0.1
+  DB_PORT=5432 DB_USER=pbxng DB_PASS=pbxng_test DB_NAME=pbxng_test`, `PGURL` equivalente y
+  `JWT_SECRET` de prueba; el test de integración aplica `01-schema.sql` + `node migrate.js`
+  él mismo), `dashboard` (`npm ci`, lint, `next build` con `API_URL` de relleno), `compose`
+  (`check-compose-parity.sh` + `docker compose config -q` de ambos), `shell` (`bash -n` de
+  todos los `.sh` y `pbxng-ctl`, `py_compile` de los agentes). Detalle en `docs/PACKAGING.md`
+  §CI.

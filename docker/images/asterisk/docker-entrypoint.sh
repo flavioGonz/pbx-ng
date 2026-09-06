@@ -88,7 +88,9 @@ sed -i "s|@@API_URL@@|${API_URL:-127.0.0.1:3000}|g" /etc/asterisk/extensions.con
 
 # --- firewall del módulo /seguridad (nftables en el kernel del host) ---
 # Idempotente: crea tabla inet pbxng + set banned + regla drop sólo si faltan, y nunca
-# borra los bloqueos vigentes. Si el kernel no trae nf_tables o falta NET_ADMIN, avisa
+# borra los bloqueos vigentes. También deja 8088 (ARI/WS) y 5038 (AMI) sólo para redes
+# privadas, salvo {"ari_public": true} en /etc/pbxng/fw.json (ver docs/FIREWALL.md §1.2).
+# Si el kernel no trae nf_tables o falta NET_ADMIN, avisa
 # y sigue: la central tiene que arrancar igual (el panel mostrará enforcement.nft=false).
 if command -v nft >/dev/null 2>&1; then
   python3 /usr/local/bin/pbxng-ast-agent.py --ensure-fw 2>&1 || echo "aviso: no se pudo preparar nftables (se sigue sin bloqueo de IPs)"
@@ -97,8 +99,9 @@ else
 fi
 
 # --- agente HTTP PBX-NG (:8092) en background ---
-# Sólo /fw/* valida X-PBXNG-Token (/etc/pbxng/agent.token, mismo volumen que la API);
-# el resto de rutas sigue sin token como hasta ahora.
+# Todo POST y los GET de configuración (/net, /route, /fw/bans) validan X-PBXNG-Token
+# (/etc/pbxng/agent.token, mismo volumen que la API); sin token configurado acepta sólo
+# desde redes privadas. /core y /metrics quedan abiertos (no exponen secretos).
 # Se arranca antes de Asterisk; las llamadas a "asterisk -rx" responderan vacio
 # hasta que el core este arriba, sin romper el arranque.
 python3 /usr/local/bin/pbxng-ast-agent.py &

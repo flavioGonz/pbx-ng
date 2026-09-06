@@ -93,6 +93,46 @@ Variables que la API lee pero que **el compose todavía no reenvía** desde el `
 `LOG_FORMAT`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `CORS_ORIGINS`, `TZ`. Ver
 `docs/CONTRATOS.md` §6.
 
+## CI (`.github/workflows/ci.yml`)
+
+Red de seguridad de desarrollo (EVALUACION §5, bloque 5). Corre en cada **push a `main`**, en
+cada **pull request** y a mano (`workflow_dispatch`); `release.yml` la invoca como primer job
+(`workflow_call` + `needs: ci`), así **un tag `vX.Y.Z` con la CI roja no publica imágenes** y
+no gasta los 40 min del build de Asterisk. Cuatro jobs en paralelo, cada uno señala su área:
+
+| Job | Qué corre | Falla si |
+|---|---|---|
+| `api` | Node 22, `npm ci` en `control-plane`, `npm run lint --if-present`, `npm test` con un **`postgres:16-alpine` efímero** (`services:`) | eslint con errores (CONTRATOS §10), un test rojo, o el Postgres no levanta en 30 s |
+| `dashboard` | Node 22, `npm ci` en `dashboard`, `npm run lint --if-present`, `npm run build` con `API_URL` de relleno (se lee al arrancar, no en el build) | `next build` falla (incluye su lint con errores) |
+| `compose` | `docker/check-compose-parity.sh` + `docker compose config -q` de **ambos** compose con un `.env` de prueba y todos los perfiles | los compose divergen en algo que no sea `build:`/`image:`, o alguno no resuelve (`${VAR:?}`, sintaxis, perfiles) |
+| `shell` | `bash -n` de todos los `.sh` del repo (y `docker/pbxng-ctl`); `python3 -m py_compile` de los agentes de las imágenes (`pbxng-ast-agent.py`, `pbxng-turn-agent.py`) | un script no parsea |
+
+Entorno que el job `api` le da a los tests (el test de integración lee `PGURL` o `DB_*`,
+aplica `docker/config/initdb/01-schema.sql` y corre `node migrate.js`, igual que una
+instalación nueva): `DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=pbxng DB_PASS=pbxng_test
+DB_NAME=pbxng_test`, `PGURL=postgres://pbxng:pbxng_test@127.0.0.1:5432/pbxng_test`,
+`JWT_SECRET` de prueba (≥ 16 caracteres, la API aborta con menos), `LOG_FORMAT=text`,
+`LOG_LEVEL=warn`, `NODE_ENV=test`. El servicio publica `5432` en el runner, por eso el host es
+loopback y no `postgres`. Para reproducir el job a mano con un Postgres 16 local:
+
+```
+initdb -D /tmp/pgci -U pbxng --pwfile=<(echo pbxng_test) -A md5
+pg_ctl -D /tmp/pgci -o '-p 5432' start
+psql -h 127.0.0.1 -U pbxng -d postgres -c 'CREATE DATABASE pbxng_test'
+psql -h 127.0.0.1 -U pbxng -d pbxng_test -v ON_ERROR_STOP=1 -f docker/config/initdb/01-schema.sql
+cd control-plane && DB_HOST=127.0.0.1 DB_USER=pbxng DB_PASS=pbxng_test DB_NAME=pbxng_test \
+  JWT_SECRET=ci-jwt-secret-solo-para-tests-0123456789 npm test
+```
+
+Los otros tres jobs se reproducen tal cual desde la raíz del repo: `bash
+docker/check-compose-parity.sh`, `cd dashboard && API_URL=http://127.0.0.1:3000 npm run build`,
+`find . -name '*.sh' -not -path '*/node_modules/*' -exec bash -n {} \;` (un archivo por invocación: `bash -n a b` sólo revisa `a`).
+
+Un push nuevo sobre el mismo PR cancela la corrida anterior (`concurrency`); en `main` y en
+los tags no se cancela nada. No hay input para saltear la CI en un release a propósito: si hay
+que publicar con un test rojo, se arregla o se marca el test, no se puentea el job. YAML
+validado con PyYAML (`python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`).
+
 ## Firewall del centro de seguridad (1.6.0)
 
 El bloqueo de IPs de **Sistema → Seguridad** lo aplica el contenedor de Asterisk en
@@ -108,11 +148,31 @@ el contenedor (`pbxng-ctl up` drena antes); la migración `0010_soc.sql` corre s
 la API y borra `pbxng_fail2ban` / `pbxng_fail2ban_cmd`. Después de instalar, tocar una vez
 **Aplicar** en Seguridad → Ajustes de la central (`CHANGELOG.md` 1.6.0, «Known issues»).
 
-Token del agente: `/fw/*` valida `X-PBXNG-Token` contra `/etc/pbxng/agent.token` si el archivo
-existe. **Hoy ninguna instalación lo genera** (ni `install.sh` ni la API), así que el agente
-acepta esos pedidos sólo desde redes privadas/loopback. Para habilitarlo a mano, en el host:
-`docker compose exec api sh -c 'head -c 32 /dev/urandom | base64 > /etc/pbxng/agent.token && chmod 600 /etc/pbxng/agent.token'`
-y reiniciar la API (lee el archivo al arrancar; el agente lo lee en cada pedido `/fw/*`).
+Token del agente: el agente valida `X-PBXNG-Token` contra `/etc/pbxng/agent.token` si el
+archivo existe. **La API lo genera sola al arrancar** si falta (`CONF_DIR/agent.token`, 32 bytes
+hex, modo 600, en el volumen `certs` que Asterisk monta ro) y lo manda en todos sus pedidos; el
+agente lo lee en cada request, así que no hay que reiniciar Asterisk. Sin el archivo (p. ej. el
+volumen `certs` no montado en la API) el agente acepta sólo desde redes privadas/loopback.
+
+## Endurecimiento de Asterisk (1.7.0)
+
+Al actualizar desde 1.6.0: **la imagen de Asterisk cambia otra vez** (agente, dialplan y
+`modules.conf` nuevos) y hay que recrear el contenedor; no hay migraciones. Dos cambios de
+comportamiento que el empaquetado tiene que conocer (`docs/FIREWALL.md` §1.2):
+
+- **`8088` (ARI/HTTP) y `5038` (AMI) dejan de contestar desde IPs no privadas**: el agente
+  mantiene en `inet pbxng` los sets `mgmt_allow`/`mgmt_allow6` (RFC 1918, loopback, ULA,
+  link-local) y tres reglas `pbxng-mgmt`. En el caso normal (API en el bridge de Docker, NPM en
+  la LAN o en el compose, all-in-one, CTs de Proxmox en la LAN) no hay nada que hacer. Si el
+  proxy o la API llegan desde una IP pública (VPS con el core y el proxy en hosts distintos) o
+  el admin entra por Tailscale/CGNAT (`100.64.0.0/10`) o una VPN con rango público, escribir
+  **antes** de actualizar `/etc/pbxng/fw.json` en el volumen `certs`:
+  `{"mgmt_allow": ["100.64.0.0/10"]}` o, si se acepta el riesgo, `{"ari_public": true}`.
+  `install.sh`/`pbxng-proxmox.sh` todavía no lo preguntan (pendiente); validar un ruleset con
+  `docker compose exec asterisk python3 /usr/local/bin/pbxng-ast-agent.py --print-fw | nft -c -f -`.
+- **El token del agente se exige en todo `POST` y en `GET /net`, `/route`, `/fw/bans`** (antes
+  sólo `/fw/*`). La API ya lo mandaba en todos sus pedidos; cualquier script propio que
+  hablara al agente sin token deja de funcionar. `install.sh` no cambia.
 
 ## Respaldo programado
 

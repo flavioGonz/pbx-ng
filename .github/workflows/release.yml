@@ -15,7 +15,18 @@ on:
         default: '1.0.0'
 
 jobs:
+  # Misma red de seguridad que main/PR (ci.yml: lint, tests con Postgres efímero, build
+  # del panel, paridad de compose, sintaxis de shell). Se corre ANTES del build de
+  # imágenes: un tag con tests rotos no publica nada y no gasta 40 min de runner.
+  # Para publicar igual (emergencia, con la deuda anotada) hay que arreglar o
+  # marcar el test, no saltear este job: no hay input para omitirlo a propósito.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   images:
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:

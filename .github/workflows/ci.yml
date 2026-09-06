@@ -1,0 +1,187 @@
+name: ci
+
+# Red de seguridad de desarrollo (EVALUACION §5 bloque 5): lo que rompe acá no llega ni a
+# main ni a un release. Corre en cada push a main y en cada PR; release.yml lo invoca
+# (workflow_call) antes de gastar 40 min de build, así un tag con tests rotos no publica.
+# Cuatro jobs independientes para que un fallo señale su área (api / panel / compose / shell)
+# y para que corran en paralelo: el más lento (dashboard, next build) manda en el total.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+# Un push nuevo sobre la misma rama/PR cancela la corrida anterior (no tiene sentido
+# terminar de testear código que ya fue reemplazado). En release.yml no se cancela nunca.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # API: lint + tests unitarios (mocks) + integración contra un Postgres efímero.
+  # El test de integración (control-plane/test/*, dueño api) lee PGURL o DB_* del
+  # entorno, aplica docker/config/initdb/01-schema.sql y corre `node migrate.js`
+  # sobre esa base, igual que una instalación nueva. Por eso se le da la base
+  # vacía y con el usuario/nombre que espera (pbxng_test), nunca la de producción.
+  # ---------------------------------------------------------------------------
+  api:
+    name: api (lint + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pbxng
+          POSTGRES_PASSWORD: pbxng_test
+          POSTGRES_DB: pbxng_test
+        ports:
+          - 5432:5432
+        # Sin esto el job arranca antes de que Postgres acepte conexiones y el
+        # primer test falla por "connection refused" de forma intermitente.
+        options: >-
+          --health-cmd "pg_isready -U pbxng -d pbxng_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # El servicio publica 5432 en el runner; el job NO corre en contenedor, así que
+      # se llega por loopback (no por el nombre "postgres" del compose).
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_USER: pbxng
+      DB_PASS: pbxng_test
+      DB_NAME: pbxng_test
+      PGURL: postgres://pbxng:pbxng_test@127.0.0.1:5432/pbxng_test
+      # La API aborta con JWT_SECRET vacío, placeholder o < 16 caracteres (CONTRATOS §6):
+      # este es de prueba y sólo vive en la CI.
+      JWT_SECRET: ci-jwt-secret-solo-para-tests-0123456789
+      LOG_FORMAT: text
+      LOG_LEVEL: warn
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: control-plane/package-lock.json
+      - name: Instalar dependencias (npm ci, del lock)
+        run: npm ci --no-audit --no-fund
+      # `--if-present`: si el script no existe npm no falla; CONTRATOS §10 exige 0 errores
+      # de eslint en control-plane (los warnings no cortan).
+      - name: Lint
+        run: npm run lint --if-present
+      # El healthcheck del service mira dentro del contenedor; esto confirma que el
+      # puerto publicado ya acepta conexiones desde el job (sin depender de psql).
+      - name: Esperar a Postgres desde el job
+        run: |
+          for i in $(seq 1 30); do
+            (exec 3<>"/dev/tcp/$DB_HOST/$DB_PORT") 2>/dev/null && { echo "Postgres listo"; exit 0; }
+            sleep 1
+          done
+          echo "Postgres no respondió en 30 s" >&2; exit 1
+      - name: Tests (unitarios + integración)
+        run: npm test
+
+  # ---------------------------------------------------------------------------
+  # Panel: `next build` corre su propio lint y falla con errores (CONTRATOS §10).
+  # API_URL se lee al ARRANCAR server.js, no en el build, así que acá va un valor
+  # cualquiera sólo por si algún componente lo consulta en tiempo de compilación.
+  # ---------------------------------------------------------------------------
+  dashboard:
+    name: dashboard (lint + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      API_URL: http://127.0.0.1:3000
+      NEXT_TELEMETRY_DISABLED: '1'
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Instalar dependencias (npm ci, del lock)
+        run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Compose: el release tiene que ser espejo del canónico (ya pasó que divergieron y
+  # el cliente perdió volúmenes) y los dos tienen que resolver con un .env mínimo.
+  # `config -q` valida sintaxis, interpolación (${VAR:?}) y perfiles sin levantar nada.
+  # ---------------------------------------------------------------------------
+  compose:
+    name: compose (paridad + config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Paridad docker-compose.yml == docker-compose.release.yml
+        run: bash docker/check-compose-parity.sh
+      - name: Validar ambos compose con un .env de prueba
+        working-directory: docker
+        run: |
+          # Secretos de mentira sólo para que ${VAR:?} no corte el config; todos los
+          # perfiles activos para que se validen los 8 servicios, no sólo el core.
+          cat > .env.ci <<'ENV'
+          DB_PASS=ci
+          ARI_PASS=ci
+          AMI_PASS=ci
+          JWT_SECRET=ci-jwt-secret-solo-para-tests-0123456789
+          TURN_PASS=ci
+          TURN_CLI_PASS=ci
+          COMPOSE_PROFILES=core,turn,ai,intercom,proxy
+          PBXNG_REGISTRY=ghcr.io/example/pbx-ng
+          PBXNG_VERSION=0.0.0-ci
+          ENV
+          docker compose --env-file .env.ci -f docker-compose.yml         config -q
+          docker compose --env-file .env.ci -f docker-compose.release.yml config -q
+          rm -f .env.ci
+
+  # ---------------------------------------------------------------------------
+  # Shell/Python: sintaxis de todo .sh del repo y de los agentes que viajan en las
+  # imágenes. No corre shellcheck (demasiado ruido heredado); esto sólo evita subir
+  # un script que ni parsea (instalador, pbxng-ctl, entrypoints).
+  # ---------------------------------------------------------------------------
+  shell:
+    name: shell + python (sintaxis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n de todos los .sh
+        run: |
+          set -eu
+          fail=0
+          while IFS= read -r -d '' f; do
+            if bash -n "$f"; then echo "ok   $f"; else echo "FAIL $f"; fail=1; fi
+          done < <(find . -type f -name '*.sh' -not -path '*/node_modules/*' -not -path './.git/*' -print0)
+          # pbxng-ctl no tiene extensión pero es bash y lo instala install.sh en /usr/local/bin
+          for f in docker/pbxng-ctl; do
+            [ -f "$f" ] || continue
+            if bash -n "$f"; then echo "ok   $f"; else echo "FAIL $f"; fail=1; fi
+          done
+          exit $fail
+      - name: py_compile de los agentes de las imágenes
+        run: |
+          python3 -m py_compile \
+            docker/images/asterisk/pbxng-ast-agent.py \
+            docker/images/coturn/pbxng-turn-agent.py
+          echo "ok agentes"

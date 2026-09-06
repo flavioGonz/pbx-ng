@@ -314,7 +314,11 @@ lo primero que se rompe.
 
 `5432` (base de datos) y `3000` (API) escuchan sólo en `127.0.0.1` del host; `3001` (panel) va
 detrás del proxy — con el proxy en el mismo equipo el instalador lo deja también en `127.0.0.1` y se
-entra por 443 —; `5038` (AMI), `8088` (ARI), `81` (admin del proxy). No hay Redis.
+entra por 443 —; `5038` (AMI) y `8088` (ARI) — además, desde 1.7.0 el propio contenedor de Asterisk los
+restringe con nftables a redes privadas (LAN, loopback, la red de Docker); si un administrador entra por
+Tailscale o una VPN con rango no privado, hay que sumar esa red en `/etc/pbxng/fw.json`
+(`{"mgmt_allow": ["100.64.0.0/10"]}`, en el volumen `certs`) antes de actualizar —; `81` (admin del
+proxy). No hay Redis.
 
 ### 5.3 Verificarlo de verdad
 

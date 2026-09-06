@@ -116,7 +116,10 @@ porque corre el compose de desarrollo.
 **3.5 Superficie de red del appliance.** Parcial en 1.4.0: ✅ Redis retirado del stack, ✅ 5432
 y 3000 sólo en `127.0.0.1` del host, ✅ `scratch` atado a un JWT válido, ✅ `:3001` en loopback
 cuando NPM corre en el mismo compose. ✅ 1.5.0 `origin:'*'` del socket reemplazado por mismo
-origen / `CORS_ORIGINS`. Pendiente: ARI/WS en `0.0.0.0:8088`. · `http.conf` expone ARI y el WebSocket SIP en HTTP plano
+origen / `CORS_ORIGINS`. ✅ 1.7.0 ARI/AMI (`8088`/`5038`) sólo desde redes privadas por nftables
+(`pbxng-mgmt` en `inet pbxng`, ajustable con `/etc/pbxng/fw.json`; `bindaddr` sigue en `0.0.0.0`
+porque la API llega por el bridge de Docker) y token del agente en todo POST y en los GET de
+configuración. Lo que sigue describe el estado previo. · `http.conf` expone ARI y el WebSocket SIP en HTTP plano
 sobre `0.0.0.0:8088` del host (Asterisk va en `network_mode: host`): las credenciales ARI viajan
 en Basic Auth sin cifrar y ARI es control total de la central. Redis se publica en `6379` sin
 `requirepass` en el compose de desarrollo y **la API no lo usa** (única mención: un nombre en
@@ -135,8 +138,11 @@ jaulas de un fail2ban que ninguna imagen instala (`images/asterisk/Dockerfile`: 
 referencias). `acl.conf` está vacío y `pjsip.conf` no define `unidentified_request_count`. La
 central no tiene protección real contra fuerza bruta SIP mientras el panel transmite lo contrario.
 
-**3.7 Sin pruebas, sin lint, sin tipos.** (Desde 1.6.0 hay una: `control-plane/test/guard.test.js`,
-`npm test`; el resto del párrafo sigue vigente.) Cero tests en todo el repositorio (control-plane,
+**3.7 Sin pruebas, sin lint, sin tipos.** ✅ resuelto en 1.7.0 en lo esencial (bloque 5 de §5): ESLint en
+API y panel, 36 pruebas (`guard.test.js` con mocks desde 1.6.0 + integración contra Postgres
+efímero), CI en GitHub Actions como puerta del release, y `app.js` partido en `auth.js`, `trunks.js`,
+`recordings.js`, `apps.js` (≈2.200 líneas quedan). Siguen: sin tipos, sin Prettier, sin e2e del
+panel, los `catch` vacíos. Lo que sigue describe el estado previo. Cero tests en todo el repositorio (control-plane,
 dashboard, softphone). Cero ESLint/Prettier. `app.js` tiene 3.668 líneas (54 % del backend) con
 líneas de hasta 1.322 caracteres y 262 endpoints; `app.js.orig` está commiteado. 97 `catch` vacíos
 en el backend y 237 en el panel: los errores se tragan sin avisar. El panel no tiene ningún
@@ -200,7 +206,9 @@ Como producto, hay pocas funciones de central que no tenga. Lo que falta está e
   alimentados por los mismos eventos. Es la etapa 2 del motor de llamadas ya empezado.
 - **Opus** en la imagen y en los endpoints WebRTC; **TLS para SIP** con certificado provisto (el
   transporte 5061 apunta a un certificado que nada aprovisiona) y **HTTPS/WSS en ARI** o, al
-  menos, ARI atado a `127.0.0.1`.
+  menos, ARI atado a `127.0.0.1` (1.7.0: loopback no alcanza porque la API está en bridge; se
+  optó por restringir `8088`/`5038` a redes privadas con nftables. HTTPS/WSS en ARI sigue
+  pendiente).
 - **Auditoría**: quién cambió una troncal, quién descargó una grabación, quién escuchó una
   llamada. Hoy no queda registro.
 - **Respaldo programado** con retención y verificación de restauración, y **métricas Prometheus**
@@ -243,24 +251,41 @@ para Asterisk ✅ 1.5.0 (60 s; api 20 s) y drenado antes de recrear ✅ 1.5.0 (`
 entrypoint y retirar los `CREATE TABLE` del módulo) ✅ 1.5.0 (`docker-entrypoint.sh` + `0009_schema_runtime.sql`; cero DDL en runtime), middleware de error de Express que no filtre
 mensajes de Postgres ✅ 1.5.0 (`errores.js`; quedan 8 `catch` con `status(400).json({error:e.message})` en rutas admin/supervisor, menor), logger con niveles y formato JSON ✅ 1.5.0 (`log.js`, `LOG_LEVEL`/`LOG_FORMAT`).
 
-**Bloque 4 — fail2ban de verdad y endurecimiento de Asterisk.** Parcial en 1.6.0. Instalar fail2ban en la imagen (o
+**Bloque 4 — fail2ban de verdad y endurecimiento de Asterisk.** ✅ 1.7.0 (todo salvo STUN y la
+clave del buzón). Instalar fail2ban en la imagen (o
 un vigía propio sobre el canal `security` que ya se emite) y que el panel muestre lo que existe
 ✅ 1.6.0 (vigía propio: `guard.js` sobre los eventos de seguridad del AMI + nftables en el host
 por el agente de Asterisk; el panel `/seguridad` muestra sólo lo que existe, incluido si el
 firewall está aplicando o no);
 `unidentified_request_*` en `pjsip.conf` ✅ 1.6.0 (`pbxng.d/pjsip-security.conf`, editable desde
-Seguridad → Ajustes de la central). Pendiente: `*98` sin buzón abierto; `URIENCODE` en el `CURL` del
-wake; ARI en loopback o con TLS; STUN configurable (no Google); generar `/etc/pbxng/agent.token`
-en alguna instalación (hoy `/fw/*` acepta sin token desde redes privadas) y poner token al resto
-de rutas del agente (`/route`, `/iface`, `/netmode`).
+Seguridad → Ajustes de la central). `*97` con `CHANNEL(endpoint)` y
+`*98` siempre con clave ✅ 1.7.0; `URIENCODE` en el `CURL` del wake ✅ 1.7.0 (+ `require` de
+`func_curl`/`func_uriencode` en `modules.conf`); ARI/AMI (`8088`/`5038`) sólo desde
+redes privadas por nftables (`pbxng-mgmt`, `fw.json`) ✅ 1.7.0, ya que loopback no sirve con la API en
+bridge y TLS no tiene certificado; token en todo POST y en los GET de configuración del agente
+(`/net`, `/route`, `/fw/bans`) + validación de `/route` sin shell ✅ 1.7.0. Pendiente: STUN configurable
+(no Google); la clave del buzón nace igual al interno (`voicemail.password = mailbox`) y nadie
+obliga a cambiarla — corresponde a `api`; sumar `8092` (agente) a `pbxng-mgmt` (`GET /core`
+queda abierto a cualquiera que llegue al host).
 
-**Bloque 5 — red de seguridad de desarrollo.** Primer paso en 1.6.0: `control-plane/test/guard.test.js`
-(`npm test`, `node --test`, con mocks) es la primera prueba automatizada del repo. Sigue pendiente
-el resto: ESLint + Prettier, pruebas de integración de los
-endpoints críticos (auth, roles, troncales, rutas, sbc-link, calls) contra un Postgres efímero en
-CI, y una prueba e2e de humo del panel (login → topología → troncales) con Playwright. Partir
-`app.js` por dominio (auth, trunks, routes, recordings, provisioning, backup…) siguiendo el
-patrón de `callengine.js`.
+**Bloque 5 — red de seguridad de desarrollo.** Casi completo en 1.7.0. Primer paso en 1.6.0: `control-plane/test/guard.test.js`
+(`npm test`, `node --test`, con mocks) fue la primera prueba automatizada del repo. ESLint ✅ 1.7.0
+(`control-plane/eslint.config.js` flat + `dashboard/.eslintrc.json` con `next/core-web-vitals`;
+`npm run lint` en ambos, `next build` corta por errores de lint; de paso salieron un
+`ReferenceError` en `POST /api/sbc-link` y dos íconos sin importar en `/internos` y `/phone`);
+Prettier pendiente. Pruebas de integración de los endpoints críticos (auth, roles, usuarios,
+troncales, rutas, sbc-link, calls) contra un Postgres efímero ✅ 1.7.0 (`test/{auth,rbac,users,
+trunks,sbc-link,calls}.test.js` + `test/helpers/db.js`; 36 pruebas en ~20 s; sin Postgres a mano
+se marcan `skip`, ver `docs/CONTRATOS.md` §10). CI ✅ 1.7.0 (`.github/workflows/ci.yml`: jobs
+`api` con `postgres:16-alpine`, `dashboard`, `compose`, `shell`; `release.yml` depende de ella,
+un tag con la CI roja no publica). Partir `app.js` por dominio siguiendo el patrón de
+`callengine.js` ✅ 1.7.0 para `auth`, `trunks` (incluye `routes` y `sbc-link`), `recordings`
+(incluye `cdr`) y `apps` (colas, IVR, ring groups, paging, buzones, MOH, aparcado, códigos,
+agentes IA): 3.980 → ≈2.200 líneas, código movido sin reescribir (285 rutas antes y después).
+Quedan en `app.js` internos/endpoints, push/click-to-call, teléfonos físicos (`prov`, `phones`),
+red/TURN/NPM/captura, `backup`, CRM/encuesta, wallboard, conferencias y pickup-groups. Sigue
+pendiente: Prettier y la prueba e2e de humo del panel (login → topología → troncales) con
+Playwright.
 
 **Bloque 6 — panel.** Una capa `api.js` (un solo lugar para URL base, token, `r.ok`, errores y
 reintento) y reemplazar los 265 fetch; `error.jsx`/`loading.jsx`; JWT en cookie `HttpOnly`;

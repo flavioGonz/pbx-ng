@@ -240,8 +240,10 @@ necesita LAN hacia él: no se publican 5060/5061 ni 10000-20000.
 
 Nunca se publican a Internet: `5432` (Postgres) y `3000` (API) escuchan **solo en `127.0.0.1` del host**
 (los necesita Asterisk, que corre en host network; desde 1.4.0 no hay Redis en el stack), `3001` (panel: va
-detrás del proxy; con NPM en el mismo compose queda en loopback), `5038` (AMI), `8088` (ARI),
-`8091`/`8092` (agentes), `81` (admin del proxy).
+detrás del proxy; con NPM en el mismo compose queda en loopback), `5038` (AMI) y `8088` (ARI) —desde
+1.7.0 el propio agente de Asterisk los **restringe a redes privadas con nftables** (`pbxng-mgmt`; si un
+admin llega por Tailscale/VPN con rango no RFC 1918, `/etc/pbxng/fw.json` con `mgmt_allow`, ver
+[`docs/FIREWALL.md`](docs/FIREWALL.md) §1.2)—, `8091`/`8092` (agentes), `81` (admin del proxy).
 
 El instalador **imprime la lista exacta** según los módulos activos y al terminar **verifica el
 TURN de verdad** (STUN Binding → Allocate 401 → Allocate firmado → candidato relay):
@@ -296,7 +298,7 @@ docker/            docker-compose, install.sh multi-rol, release.sh/deploy.sh, p
 deploy/            orquestador de despliegue en Proxmox (pbxng-proxmox.sh)
 docs/              FIREWALL.md · TOPOLOGY.md · PACKAGING.md · schema de referencia
 scripts/           check-turn.py (sonda TURN real), verify-pbxng.sh, gen-sounds.py (audios es-UY)
-.github/workflows/ release.yml (imágenes a GHCR por tag v*) · softphone.yml (instalador Windows)
+.github/workflows/ ci.yml (lint + tests + build en PR/main) · release.yml (imágenes a GHCR por tag v*, depende de ci) · softphone.yml (instalador Windows)
 VERSION · CHANGELOG.md · RELEASE.md · ROADMAP.md
 ```
 
@@ -304,7 +306,7 @@ Los videos de fondo del login (`*.mp4`) **no se versionan** (viven en disco / en
 
 ## Desarrollo
 
-Requisitos: **Node 20+** (las imágenes usan `node:20-slim`), Docker para el stack completo, Python 3 para `voice-service/` y los scripts.
+Requisitos: **Node 20+** (las imágenes usan `node:20-slim`; `npm run lint` de la API pide Node ^20.19 / ^22.13 / 24+ por ESLint 10, la CI usa 22), Docker para el stack completo, Python 3 para `voice-service/` y los scripts. Para las pruebas de integración de la API, un PostgreSQL 16 instalado (`apt install postgresql-16` o `brew install postgresql@16`; no hace falta que el servicio corra) o `PGURL` apuntando a un servidor con permiso `CREATEDB`.
 
 ```bash
 # API (control plane) — necesita un Postgres y un Asterisk alcanzables (ver .env.example)
@@ -318,6 +320,24 @@ npm run build                                           # verifica que compila a
 # Softphone de escritorio
 cd softphone-app && npm ci && npm run dev
 ```
+
+Red de seguridad (desde 1.7.0; contrato en [`docs/CONTRATOS.md`](docs/CONTRATOS.md) §10):
+
+```bash
+# API: lint (0 errores obligatorio) y pruebas
+cd control-plane && npm run lint && npm test
+#   npm test = node --test test/*.test.js, ~20 s: guard.test.js (mocks) + auth/rbac/users/trunks/sbc-link/calls
+#   (integración: levantan la API real contra un Postgres efímero con 01-schema.sql + migrate.js; sin Postgres
+#   a mano se marcan skip con el motivo). TEST_API_VERBOSE=1 vuelca el log de la API hija.
+
+# Panel: lint y build (next build corre el lint y corta por errores; los exhaustive-deps son avisos)
+cd dashboard && npm run lint && npm run build
+```
+
+La CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre eso mismo en cada PR y push a `main` —jobs `api`
+(con `postgres:16-alpine`), `dashboard`, `compose` (paridad y `config -q` de ambos compose) y `shell` (`bash -n`,
+`py_compile`)— y es la puerta de `release.yml`: un tag con la CI roja no construye ni publica imágenes. Cómo
+reproducir cada job a mano: [`docs/PACKAGING.md`](docs/PACKAGING.md) §CI.
 
 Reglas de la casa:
 
@@ -352,10 +372,10 @@ Defensa en capas:
 
 - **API**: autenticación **deny-by-default** (todo `/api` requiere JWT salvo una allowlist pública explícita) y **RBAC por método+ruta** (`control-plane/rbac.js`, lo que no figura es solo `admin`; un agente solo opera su propia extensión). Rate limit en login y token de softphone (10 fallos/10 min por IP+usuario y 50 por IP, con la IP real que arma el proxy del panel), `helmet`, bcrypt asíncrono, arranque abortado sin `JWT_SECRET` real.
 - **Enrolamiento y softphone**: el enlace/QR es de un solo uso (2 min de gracia) y entrega un token de alcance `phone` (nunca una sesión de panel); el socket.io exige JWT (panel o softphone) también para la pizarra.
-- **Red**: Postgres y API solo en loopback del host; el panel en loopback cuando NPM corre en el mismo compose. Sin Redis.
+- **Red**: Postgres y API solo en loopback del host; el panel en loopback cuando NPM corre en el mismo compose. Sin Redis. ARI (`8088`) y AMI (`5038`) sólo desde redes privadas (nftables, desde 1.7.0).
 - **Borde**: TLS (5061) y DTLS-SRTP los termina Asterisk. Anti-flood, listas de bloqueo, auto-ban y ocultamiento de topología en el perímetro los aporta SBC-NG, si se lo pone adelante.
 - **Anti fuerza bruta SIP real** (`control-plane/guard.js`, desde 1.6.0): los eventos de seguridad de Asterisk (`res_security_log`, por AMI) alimentan un contador por IP; el bloqueo lo aplica **nftables en el host** (tabla `inet pbxng`, `docs/FIREWALL.md` §1.1) a través del agente del contenedor de Asterisk. Lista blanca por IP/CIDR, geo-bloqueo por país, `unidentified_request_*` de PJSIP desde el panel, y la pantalla dice si el firewall está aplicando de verdad.
-- **Agentes internos** protegidos por token compartido; comandos de sistema con validación (sin `shell=True`).
+- **Agentes internos** protegidos por token compartido (`X-PBXNG-Token`; desde 1.7.0 en todo `POST` y en los `GET` de configuración del agente de Asterisk, sólo `/core` y `/metrics` quedan abiertos); comandos de sistema con validación (`ip route`, `nft` por `argv`, sin `shell=True`). El buzón propio (`*97`) se identifica por el endpoint PJSIP que autenticó, no por el caller ID que manda el teléfono.
 - **Recomendado en producción**: rotar todos los secretos, activar TLS en teléfonos, y no exponer `:3001` sin proxy fuera de la LAN (el aislamiento multi-tenant real sigue pendiente, ver `docs/EVALUACION-2026-09.md` 3.10).
 
 ## Productos relacionados

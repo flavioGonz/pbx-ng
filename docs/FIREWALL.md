@@ -45,9 +45,9 @@ Solo estos. Nada más.
 | `5432` | PostgreSQL | solo el core: escucha en `127.0.0.1` del host (lo necesita Asterisk, host network); no se comparte con nadie, tampoco con SBC-NG |
 | `3000` | API control-plane | solo `127.0.0.1` del host (Asterisk) y el panel por la red interna; nadie más |
 | `3001` | Dashboard | el proxy (con NPM en el mismo compose queda en `127.0.0.1`); si el proxy está en otro host, solo la IP del proxy (`DASHBOARD_TRUST_PROXY=1`) |
-| `5038` | Asterisk AMI | solo el core |
-| `8088` | Asterisk ARI/WS | solo el core y el proxy (para `/ws`) |
-| `8091` / `8092` | Agentes internos (turn-agent, ast-agent) | solo la API, con token (en `8092` hoy sólo `/fw/*` lo valida; sin `agent.token` acepta desde redes privadas, ver §1.1) |
+| `5038` | Asterisk AMI | solo la API. nftables lo deja pasar **sólo desde redes privadas** (§1.2) |
+| `8088` | Asterisk ARI/WS | solo la API y el proxy (para `/ws`). nftables lo deja pasar **sólo desde redes privadas** (§1.2); el proxy tiene IP privada, así que WebRTC sigue andando |
+| `8091` / `8092` | Agentes internos (turn-agent, ast-agent) | solo la API, con token (`8092`: todo `POST` y los `GET` `/net`, `/route`, `/fw/bans`; `/core` y `/metrics` abiertos porque no exponen secretos; sin `agent.token` acepta desde redes privadas, ver §1.1) |
 | `81` | Nginx Proxy Manager (admin) | solo LAN / VPN |
 
 ### 1.1 La tabla `inet pbxng` de nftables (bloqueo de IPs del módulo Seguridad)
@@ -101,8 +101,63 @@ Ver cómo está:
 ```bash
 nft list table inet pbxng                 # tabla completa
 nft list set inet pbxng banned            # IPs bloqueadas con el tiempo que les queda
-nft list chain inet pbxng input           # tiene que haber UNA sola línea "ip saddr @banned drop"
+nft list chain inet pbxng input           # UNA sola línea "ip saddr @banned drop" + las 3 de gestión (§1.2)
 ```
+
+### 1.2 ARI/WS `8088` y AMI `5038`: sólo desde redes privadas (reglas `pbxng-mgmt`)
+
+Asterisk corre en `network_mode: host` y `http.conf` tiene `bindaddr=0.0.0.0` **a la
+fuerza**: la API vive en un contenedor bridge y llega al ARI por la IP LAN del host
+(`ASTERISK_HOST`), así que atarlo a `127.0.0.1` la dejaría afuera; y ponerle TLS sin un
+certificado real no protege nada (el WSS del softphone lo termina el proxy). ARI (`ari.conf`,
+`http.conf`) no tiene ACL propia como el AMI. Lo que sí se puede hacer es decidir en el kernel
+quién llega al puerto: el mismo agente que administra `inet pbxng` agrega en la chain `input`
+tres reglas marcadas con `comment "pbxng-mgmt"`:
+
+```
+set mgmt_allow  { type ipv4_addr; flags interval; elements = { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } }
+set mgmt_allow6 { type ipv6_addr; flags interval; elements = { ::1, fc00::/7, fe80::/10 } }
+chain input {
+    ...
+    ip saddr @mgmt_allow  tcp dport { 8088, 5038 } accept comment "pbxng-mgmt"
+    ip6 saddr @mgmt_allow6 tcp dport { 8088, 5038 } accept comment "pbxng-mgmt"
+    tcp dport { 8088, 5038 } drop comment "pbxng-mgmt"
+}
+```
+
+- **Qué sigue andando**: la API (bridge de docker, `172.17-31.x`, dentro de `172.16/12`),
+  un proxy NPM en otra máquina de la LAN, el SBC-NG si hiciera falta, cualquier VPN con
+  direccionamiento privado. Los navegadores WebRTC entran a `8088` **siempre** a través del
+  proxy (`443 → /ws`), y el proxy tiene IP privada: no se corta ninguna llamada.
+- **Qué se corta**: publicar `8088` o `5038` crudos a internet (por error o por un
+  port-forward viejo). Aunque alguien lo haga, el ARI con usuario/clave y el AMI no quedan al
+  alcance de cualquiera.
+- **Es configurable** con `/etc/pbxng/fw.json` (volumen `certs`, lo escribe el administrador
+  a mano; opcional, sin el archivo aplican los valores de arriba):
+
+  ```json
+  { "ari_public": false, "mgmt_allow": ["100.64.0.0/10", "2001:db8:1::/48"] }
+  ```
+
+  `ari_public: true` **no pone** las reglas (y las saca si estaban, en el próximo arranque o
+  `/fw/*`); `mgmt_allow` **suma** redes a los sets (CGNAT, un rango público propio, una VPN
+  con IPv6). Un valor que no parsea se ignora. Los sets se reconcilian en cada `ensure_fw()`
+  (flush + add en una transacción), así que editar el archivo y reiniciar el contenedor (o
+  esperar el próximo `/fw/sync` de la API, cada 5 min) alcanza.
+- `python3 pbxng-ast-agent.py --print-fw` imprime el ruleset declarativo equivalente (sirve
+  para `nft -c -f` y para comparar con `nft list table inet pbxng`); no se aplica con `nft -f`
+  porque duplicaría reglas en cada arranque, el agente las agrega sólo si faltan.
+- Si tu proxy o tu API llegan desde una IP **pública** (rol `core` con proxy en un VPS, por
+  ejemplo), agregá esa red en `mgmt_allow` o poné `ari_public: true` **y** restringí `8088`
+  en tu propio firewall; el panel no se entera de esta configuración, la lee sólo el agente.
+- **Cambio de comportamiento al actualizar a 1.7.0**: las redes CGNAT/VPN que no son RFC 1918
+  —Tailscale y similares usan `100.64.0.0/10`; WireGuard u OpenVPN con un rango público
+  propio— **no** están en el set base. Un administrador que hoy llega a ARI (`8088`) o al AMI
+  (`5038`) por esa vía queda afuera en cuanto arranca la imagen nueva, hasta que escriba esa
+  red en `mgmt_allow` de `fw.json` (y reinicie el contenedor o espere el próximo `/fw/sync`).
+  Conviene dejar el archivo escrito **antes** de actualizar. El agente (`8092`) no está en
+  esta regla: `GET /core` sigue abierto desde cualquier origen que llegue al host; restringilo
+  en el firewall del host si el host tiene IP pública.
 
 ### Interno (LAN): core ↔ SBC-NG
 
@@ -119,6 +174,8 @@ el core, así que el core también tiene que poder salir hacia el SIP del SBC-NG
 
 Si el TURN y el proxy viven en otro host (rol `core` + `--turn-ip=`), el proxy necesita
 llegar al core por `3000`, `3001` y `8088` (WSS `/ws`); el coturn no necesita nada del core.
+Si ese proxy no tiene IP privada, sumá su red en `mgmt_allow` de `/etc/pbxng/fw.json` (§1.2), si no
+nftables le corta el `8088`.
 
 ---
 
@@ -269,7 +326,7 @@ internas andando es lo normal, no un síntoma.
 - [ ] `5060` (+`5061`) y `10000-20000/UDP` a Asterisk, **solo** si hay troncales del operador o teléfonos remotos directos a la central. Con SBC-NG adelante, eso se publica en el SBC-NG.
 - [ ] `PUBLIC_IP` correcta en `.env` → `external-ip=<publica>/<privada>` en coturn.
 - [ ] `TURN_PASS` rotada (no `pbxng-turn-changeme`) y, si el coturn corre en otro host, **la misma** en los dos `.env`.
-- [ ] Postgres `5432`, AMI `5038` y ARI `8088` sin publicar (ni al SBC-NG).
+- [ ] Postgres `5432`, AMI `5038` y ARI `8088` sin publicar (ni al SBC-NG). `nft list chain inet pbxng input` muestra las tres reglas `pbxng-mgmt` (o hay un `fw.json` con `ari_public: true` a propósito, §1.2).
 - [ ] `nft list table inet pbxng` existe en el host y **Sistema → Seguridad** muestra «firewall activo · nftables» (si no, revisá `nf_tables` / `NET_ADMIN`, §1.1).
 - [ ] Con SBC-NG: desde su IP, permitido `5060` y `10000-20000/UDP` hacia el core.
 - [ ] `scripts/check-turn.py` da **ALLOCATE 200 · relay = …** desde fuera de la LAN.

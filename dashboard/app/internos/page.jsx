@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader, Alert, Select } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useLive } from '../useLive';
 import { toast } from '../notify';

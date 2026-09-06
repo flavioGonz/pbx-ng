@@ -6,7 +6,7 @@ if (typeof window !== 'undefined' && !window.__vibInit) {
   window.addEventListener('keydown', _mk, { once: true });
 }
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { IconRefresh } from '@tabler/icons-react';
+import { IconRefresh, IconTrash } from '@tabler/icons-react';
 import { useSoftphone } from '../useSoftphone';
 import Scratchpad from '../Scratchpad';
 import { pushSupported, pushStatus, enablePush, disablePush, testPush } from '../push';

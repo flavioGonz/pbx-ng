@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "NODE_ENV=development node server.js",
     "build": "next build",
-    "start": "NODE_ENV=production node server.js"
+    "start": "NODE_ENV=production node server.js",
+    "lint": "next lint"
   },
   "dependencies": {
     "@mantine/core": "^7.17.8",
@@ -23,5 +24,9 @@
     "sip.js": "^0.21.2",
     "slot-text": "^0.3.4",
     "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35"
   }
 }

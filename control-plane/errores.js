@@ -70,7 +70,7 @@ function errorHttp(res, e, extra) {
 /* Middleware final de Express: lo que ninguna ruta atrapó (throw sincrónico, next(err),
  * async sin try). Se monta DESPUÉS de todas las rutas y del 404 de /api. Nunca se
  * devuelve e.message crudo: a esta altura no sabemos de dónde viene. */
-function middlewareFinal(err, req, res, next) {   // eslint-disable-line no-unused-vars
+function middlewareFinal(err, req, res, next) {
   const ctx = { method: req.method, path: req.originalUrl || req.url, ip: req.ip };
   if (esErrorPg(err)) {
     log.error('error de PostgreSQL sin atrapar', Object.assign(ctx, { code: err && err.code }), err);

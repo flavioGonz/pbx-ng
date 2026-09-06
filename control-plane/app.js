@@ -14,19 +14,15 @@ const { Pool } = require('pg');
 const AriClient = require('ari-client');
 const aiPipeline = require('./ai-pipeline');
 const AsteriskManager = require('asterisk-manager');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');   // sólo para el handshake del socket; las sesiones HTTP las firma/verifica auth.js
 const helmet = require('helmet');
-const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const rbac = require('./rbac');         // tabla de permisos por rol (docs/CONTRATOS.md §2)
 const webpush = require('web-push');
 const pushProviders = require('./push-providers');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const alerts = require('./alerts');
-const recstore = require('./recstore');
 const emails = require('./emails');
-const report = require('./report');
 const sysmon = require('./sysmon');
 const astconf = require('./astconf');   // aparcado, captura y música en espera (config generada)
 
@@ -41,7 +37,6 @@ const MAN_IMG_DIR = _pathm.join(process.env.CONF_DIR || '/etc/pbxng', 'manuales-
 const IMG_OK = /^[a-z0-9][a-z0-9._-]{1,80}\.(png|jpe?g|webp|gif|svg)$/i;
 const IMG_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml' };
 const numbering = require('./numbering');
-const QRCode = require('qrcode');
 const SECRET = process.env.JWT_SECRET || '';
 /* Sin secreto real la API NO arranca. Antes caía al placeholder '__SET_JWT_SECRET__'
  * y seguía andando: cualquiera que leyera el repo podía firmarse una sesión de admin.
@@ -53,12 +48,46 @@ if (!SECRET || SECRET === '__SET_JWT_SECRET__' || SECRET.length < 16) {
 }
 
 // ---------------- Web Push (VAPID) ----------------
+/* El par VAPID sale del .env (VAPID_PUBLIC/VAPID_PRIVATE) si es válido; si no, de
+ * pbxng_settings (vapid_public/vapid_private); y si tampoco hay nada usable la API genera
+ * uno nuevo y lo guarda en pbxng_settings (asegurarVapid, al arrancar). Antes había una
+ * pública hardcodeada y un placeholder de privada: web-push tiraba "should be 32 bytes" en
+ * cada envío y /api/push/vapid entregaba una clave que nunca iba a poder firmar nada. La
+ * pública se rellena recién cuando hay un par que firma: hasta entonces `pub` queda vacío y
+ * el panel dice "Servidor sin clave VAPID" en vez de suscribir contra una clave inútil. */
 const VAPID = {
-  pub: process.env.VAPID_PUBLIC || 'BBtIRLI74nPUZiMAgghpMSb7iraI89_sH_PhpEOIz5gZDmEtiIFzXuZNFKNhkkl3-wOX3mx9k59NgCWijYleNXA',
-  priv: process.env.VAPID_PRIVATE || '__SET_VAPID_PRIVATE__',
-  subject: process.env.VAPID_SUBJECT || 'mailto:soporte@ies.com.uy',
+  pub: '',
+  priv: '',
+  subject: process.env.VAPID_SUBJECT || 'mailto:soporte@example.com',
+  origen: '',   // 'env' | 'db' | 'generado' — para el log y para diagnosticar
 };
-try { webpush.setVapidDetails(VAPID.subject, VAPID.pub, VAPID.priv); } catch (e) { logger('PUSH').error('VAPID', e); }
+// Devuelve true si el par firma (web-push valida largo y formato al fijar los detalles).
+function vapidValido(pub, priv) {
+  if (!pub || !priv) return false;
+  try { webpush.setVapidDetails(VAPID.subject, pub, priv); return true; } catch (_) { return false; }
+}
+async function asegurarVapid() {
+  const plog = logger('PUSH');
+  const envPub = process.env.VAPID_PUBLIC || '', envPriv = process.env.VAPID_PRIVATE || '';
+  if (vapidValido(envPub, envPriv)) { Object.assign(VAPID, { pub: envPub, priv: envPriv, origen: 'env' }); return; }
+  if (envPub || envPriv) plog.warn('VAPID_PUBLIC/VAPID_PRIVATE del .env inválidos (web-push no puede firmar con ese par); se ignoran');
+  let dbPub = '', dbPriv = '';
+  try {
+    const { rows } = await pool.query("SELECT key, value FROM pbxng_settings WHERE key IN ('vapid_public','vapid_private')");
+    for (const r of rows) { if (r.key === 'vapid_public') dbPub = r.value || ''; else dbPriv = r.value || ''; }
+  } catch (e) { plog.error('leyendo VAPID de pbxng_settings', e); return; }
+  if (vapidValido(dbPub, dbPriv)) { Object.assign(VAPID, { pub: dbPub, priv: dbPriv, origen: 'db' }); return; }
+  // Nada usable: par nuevo. Las suscripciones viejas (hechas con otra pública) van a fallar al
+  // enviar y se van a limpiar solas (410/404 en sendPushToExt); el panel vuelve a suscribir.
+  const par = webpush.generateVAPIDKeys();
+  try {
+    await pool.query("INSERT INTO pbxng_settings(key,value) VALUES('vapid_public',$1),('vapid_private',$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", [par.publicKey, par.privateKey]);
+  } catch (e) { plog.error('guardando el par VAPID nuevo en pbxng_settings', e); return; }
+  if (!vapidValido(par.publicKey, par.privateKey)) { plog.error('el par VAPID recién generado no valida (¿web-push roto?)'); return; }
+  Object.assign(VAPID, { pub: par.publicKey, priv: par.privateKey, origen: 'generado' });
+  plog.warn((dbPub || dbPriv) ? 'par VAPID guardado inválido: se generó uno nuevo y se guardó en pbxng_settings; los navegadores suscriptos tienen que volver a suscribirse'
+                              : 'sin par VAPID válido (ni .env ni base): se generó uno nuevo y se guardó en pbxng_settings (vapid_public/vapid_private)');
+}
 
 async function sendPushToExt(ext, payload) {
   if (!ext) return 0;
@@ -68,7 +97,7 @@ async function sendPushToExt(ext, payload) {
     for (const s of rows) {
       const sub = { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } };
       try { await webpush.sendNotification(sub, JSON.stringify(payload)); sent++; }
-      catch (err) { if (err.statusCode === 404 || err.statusCode === 410) await pool.query('DELETE FROM pbxng_push_subs WHERE endpoint=$1', [s.endpoint]); }
+      catch (err) { if (err.statusCode === 404 || err.statusCode === 410 || err.statusCode === 403) await pool.query('DELETE FROM pbxng_push_subs WHERE endpoint=$1', [s.endpoint]); }   // 403 = suscripción firmada con otra clave VAPID (VapidPkHashMismatch): también muerta
     }
   } catch (e) { logger('PUSH').error('send', e); }
   try { sent += await pushProviders.sendNative(ext, payload); } catch (_) {}
@@ -156,9 +185,12 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { poli
  * agente lo lee del mismo archivo. Sin él, el agente de Asterisk sólo acepta /fw/* desde
  * redes privadas, o sea cualquiera de la LAN podría vaciar el set de baneados. */
 const AGENT_TOKEN = (() => {
-  const fs = require('fs'); const f = '/etc/pbxng/agent.token';
+  /* Mismo CONF_DIR que acme.js y las imágenes de los manuales: en el contenedor es
+   * /etc/pbxng; fuera de él (pruebas de integración, desarrollo) apunta a un
+   * directorio temporal y la API no escribe en el /etc del host. */
+  const fs = require('fs'); const dir = process.env.CONF_DIR || '/etc/pbxng'; const f = _pathm.join(dir, 'agent.token');
   try { const t = fs.readFileSync(f, 'utf8').trim(); if (t) return t; } catch (_) {}
-  try { const t = crypto.randomBytes(32).toString('hex'); fs.mkdirSync('/etc/pbxng', { recursive: true }); fs.writeFileSync(f, t + '\n', { mode: 0o600 }); return t; }
+  try { const t = crypto.randomBytes(32).toString('hex'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, t + '\n', { mode: 0o600 }); return t; }
   catch (e) { console.error('[agent] no se pudo generar ' + f + ': ' + e.message); return ''; }
 })();
 /* Las capturas de los manuales viajan como data URL dentro del JSON: una captura de
@@ -183,8 +215,8 @@ app.use((err, req, res, next) => {
  *  Express resuelve en orden de registro: un módulo que registra sus rutas
  *  antes de estas tres líneas (pasó con callengine.js) queda
  *  fuera del gate y responde sin token ni rol. Por eso van acá, pegadas al
- *  parser del body, y no más abajo junto a PUBLIC_API. Las funciones y
- *  constantes que usan (auth, isPublicApi, PUBLIC_API, FONO_PERMITIDO, rbac)
+ *  parser del body, y no más abajo junto a los módulos. Las funciones que usan
+ *  (auth, isPublicApi — vienen de auth.js, que se inicializa más abajo; rbac)
  *  se evalúan recién en tiempo de request, cuando el módulo ya cargó entero.
  * ============================================================ */
 /* Nada de lo que sale de /api puede quedar guardado en un intermediario. El proxy
@@ -296,79 +328,22 @@ function amiCommand(command) {
     });
   });
 }
-/* ============================================================
- *  Enlace con SBC-NG (modulo "Conexion a SBC-NG").
- *  SBC-NG es OTRO producto. PBX-NG funciona completo sin el; cuando hay uno
- *  adelante, se lo conecta como una troncal fija ('to-sbc') y el modulo `sbc`
- *  decide si el panel lo muestra y si el ruteo saliente lo usa por defecto.
- *  Nada mas de la PBX debe suponer que existe un SBC.
- * ============================================================ */
-const SBC_TRUNK = 'to-sbc';
+/* Módulos opcionales (Configuración → Módulos): `mod_<id>` en pbxng_settings; el de SBC
+ * arranca apagado (trunks.js lo enciende al conectar un SBC-NG). */
 const MODULE_DEFAULT_OFF = new Set(['sbc']);
 async function moduleEnabled(id) {
   try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', ['mod_' + id]); return rows[0] ? rows[0].value !== '0' : !MODULE_DEFAULT_OFF.has(id); }
   catch (_) { return !MODULE_DEFAULT_OFF.has(id); }
 }
-let _sbcLinkCache = { t: 0, v: null };
-async function sbcLink(fresh) {
-  if (!fresh && _sbcLinkCache.v && Date.now() - _sbcLinkCache.t < 5000) return _sbcLinkCache.v;
-  const out = { enabled: false, configured: false, name: SBC_TRUNK, host: '', port: 5060, transport: 'udp', context: 'from-trunk', codecs: ['ulaw', 'alaw', 'g722'], panel_url: '' };
-  try {
-    out.enabled = await moduleEnabled('sbc');
-    const { rows } = await pool.query("SELECT name, provider_host, provider_port, adv_config FROM pbxng_trunks WHERE kind='sbc' ORDER BY (name=$1) DESC, id LIMIT 1", [SBC_TRUNK]);
-    if (rows[0]) {
-      const a = rows[0].adv_config || {};
-      out.configured = true; out.name = rows[0].name; out.host = rows[0].provider_host || ''; out.port = +rows[0].provider_port || 5060;
-      out.transport = a.transport || 'udp'; out.context = a.context || 'from-trunk'; if (Array.isArray(a.codecs) && a.codecs.length) out.codecs = a.codecs;
-    }
-    const { rows: pu } = await pool.query("SELECT value FROM pbxng_settings WHERE key='sbc_panel_url'"); out.panel_url = (pu[0] && pu[0].value) || '';
-  } catch (_) {}
-  /* activo = modulo encendido Y troncal configurada: es lo unico que el resto del
-   * codigo debe mirar para decidir "hay SBC adelante" */
-  out.active = out.enabled && out.configured;
-  _sbcLinkCache = { t: Date.now(), v: out };
-  return out;
-}
-/* Crea o actualiza la troncal fija hacia el SBC-NG (endpoint pjsip 'to-sbc' identificado
- * por IP) y, si la central todavia no tiene rutas salientes, una ruta "marca 0" que
- * sale por el SBC. Enciende el modulo. Usado por /api/sbc-link y por
- * POST /api/trunks kind=sbc (compatibilidad). */
-async function upsertSbcLink(b) {
-  const ip = String(b.host || '').trim();
-  if (!ip) { const e = new Error('la dirección IP del SBC-NG es obligatoria'); e.status = 400; throw e; }
-  const port = +b.port || 5060;
-  const transport = ['udp', 'tcp', 'tls'].includes(b.transport) ? b.transport : 'udp';
-  const ctx = (b.context || 'from-trunk').trim();
-  const codecs = (Array.isArray(b.codecs) && b.codecs.length) ? b.codecs.join(',') : 'ulaw,alaw,g722';
-  const tenant_id = +b.tenant_id || 1;
-  const contact = 'sip:' + ip + ':' + port + (transport !== 'udp' ? ';transport=' + transport : '');
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    await c.query("INSERT INTO ps_aors(id,contact,qualify_frequency) VALUES($1,$2,30) ON CONFLICT(id) DO UPDATE SET contact=$2,qualify_frequency=30", [SBC_TRUNK, contact]);
-    await c.query("INSERT INTO ps_endpoints(id,transport,aors,context,disallow,allow,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) VALUES($1,$2,$1,$3,'all',$4,'no','yes','yes','yes','ip',$5,'trunk') ON CONFLICT(id) DO UPDATE SET context=$3,allow=$4,transport=$2,aors=$1,identify_by='ip',direct_media='no'", [SBC_TRUNK, 'transport-' + transport, ctx, codecs, tenant_id]);
-    await c.query("INSERT INTO ps_endpoint_id_ips(id,endpoint,match) VALUES($1,$1,$2) ON CONFLICT(id) DO UPDATE SET match=$2,endpoint=$1", [SBC_TRUNK, ip]);
-    const adv = { sbc: true, label: 'SBC-NG', provider_host: ip, provider_port: port, context: ctx, codecs: codecs.split(','), mode: 'ip', transport };
-    await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ($1,$2,$3,NULL,false,$4,'sbc',$5) ON CONFLICT (name) DO UPDATE SET kind='sbc',provider_host=$2,provider_port=$3,adv_config=$5", [SBC_TRUNK, ip, port, tenant_id, JSON.stringify(adv)]);
-    await c.query("DELETE FROM pbxng_settings WHERE key='sbc_link_removed'");
-    await c.query("INSERT INTO pbxng_settings(key,value) VALUES('mod_sbc','1') ON CONFLICT(key) DO UPDATE SET value='1'");
-    if (b.panel_url !== undefined) await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_panel_url',$1) ON CONFLICT(key) DO UPDATE SET value=$1", [String(b.panel_url || '').trim()]);
-    let ruta = null;
-    if (b.create_route !== false) {
-      const rc = await c.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes');
-      if (!rc.rows[0] || rc.rows[0].n === 0) {
-        const pat = '0X.'; const strip = 1;
-        await c.query("INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ('Salida por el SBC-NG (marca 0)',$1,$2,$3,NULL,NULL)", [pat, SBC_TRUNK, strip]);
-        await setDialplan(c, 'internal', outExten(pat), [[1, 'Dial', 'PJSIP/${EXTEN:' + strip + '}@' + SBC_TRUNK + ',60'], [2, 'Hangup', '']]);
-        ruta = pat;
-      }
-    }
-    await c.query('COMMIT');
-  } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
-  _sbcLinkCache.v = null;
-  try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
-  return { ruta };
-}
+/* Autenticación y usuarios (auth.js): auth() y la allowlist pública que usa el gate de
+ * arriba (en tiempo de request), el alcance por extensión (mismaExt/exigirExt/extPropia),
+ * el freno a la fuerza bruta y las rutas de sesión, usuarios, enrolado y provisión.
+ * Va ANTES de callengine.js porque ese módulo recibe `auth` y `mismaExt` al inicializarse. */
+const { auth, isPublicApi, mismaExt, exigirExt, extPropia } = require('./auth')({
+  app, pool, SECRET, NODES, alerts,
+  sbcLink: (...a) => sbcLink(...a), broadcastSoon: (...a) => broadcastSoon(...a),
+  createWebrtcEndpoint: (...a) => createWebrtcEndpoint(...a), smtpHint: (...a) => smtpHint(...a),
+});
 /* Motor de llamadas sobre ARI (callengine.js): cache por eventos, click-to-dial,
  * colgar/retener/transferir/aparcar, supervision con snoop. */
 /* Configuración SIP de la central (Configuración → SIP): NAT, RTP, timers, TLS, códecs.
@@ -376,84 +351,6 @@ async function upsertSbcLink(b) {
 const sipConf = require('./sipconf')({ app, pool, amiCommand, escribir: astconf.escribir, log: (...a) => logger('sipconf').info(...a) });
 const callEngine = require('./callengine')({ app, auth, mismaExt, amiAction, amiCommand, broadcastSoon: (...a) => broadcastSoon(...a), appName: CFG.ari.app, log: (...a) => logger('calls').info(...a) });
 async function endpointStates() { return callEngine.endpointStates(); }
-// Sondeo SIP OPTIONS a una troncal (para troncales gestionadas por el SBC/kamailio)
-const _dgram = require('dgram');
-const _sipProbeCache = {};
-function sipOptionsProbe(host, port, timeout) {
-  port = +port || 5060; timeout = timeout || 1500;
-  return new Promise((resolve) => {
-    let done = false; const sock = _dgram.createSocket('udp4');
-    const rnd = () => Math.random().toString(36).slice(2, 10);
-    const msg = [
-      `OPTIONS sip:${host}:${port} SIP/2.0`,
-      `Via: SIP/2.0/UDP pbxng-probe;branch=z9hG4bK${rnd()};rport`,
-      'Max-Forwards: 70',
-      `From: <sip:pbxng@pbxng>;tag=${rnd()}`,
-      `To: <sip:${host}:${port}>`,
-      `Call-ID: ${rnd()}${rnd()}@pbxng`,
-      'CSeq: 1 OPTIONS',
-      'Contact: <sip:pbxng@pbxng>',
-      'Content-Length: 0', '', ''
-    ].join('\r\n');
-    const finish = (ok) => { if (done) return; done = true; clearTimeout(timer); try { sock.close(); } catch (_) {} resolve(ok); };
-    const timer = setTimeout(() => finish(false), timeout);
-    sock.on('message', () => finish(true));
-    sock.on('error', () => finish(false));
-    try { sock.send(Buffer.from(msg), port, host, (err) => { if (err) finish(false); }); } catch (_) { finish(false); }
-  });
-}
-async function sipProbeCached(host, port) {
-  const key = host + ':' + (port || 5060); const c = _sipProbeCache[key];
-  if (c && Date.now() - c.t < 15000) return c.ok;
-  const ok = await sipOptionsProbe(host, port, 1500);
-  _sipProbeCache[key] = { t: Date.now(), ok }; return ok;
-}
-// Estado real de troncales: registro saliente (pjsip show registrations) + alcanzabilidad
-async function trunkStatuses(trunks) {
-  let reg = '';
-  try { reg = await amiCommand('pjsip show registrations'); } catch (_) {}
-  const eps = await endpointStates();
-  const lines = String(reg).split('\n');
-  const out = {};
-  const rttMap = {};
-  try { const co = await amiCommand('pjsip show contacts'); for (const line of String(co).split('\n')) { if (!line.includes('Contact:') || !line.includes('sip:')) continue; const aorM = /Contact:\s*([^/]+)\//.exec(line); const toks = line.trim().split(/\s+/); const last = toks[toks.length - 1]; const rtt = /^[0-9.]+$/.test(last) ? parseFloat(last) : null; if (aorM) rttMap[aorM[1].trim()] = rtt; } } catch (_) {}
-  for (const t of trunks) {
-    if (t.kind === 'webrtc-client') {
-      /* El bridge cliente-WSS vivia en el SBC embebido, que ya no forma parte de
-       * PBX-NG. Estas troncales se administran en SBC-NG. */
-      out[t.name] = { status: 'offline', detail: 'Requiere SBC-NG (troncal WebRTC cliente)' };
-      continue;
-    }
-    if (t.kind === 'webrtc') {
-      const ep = eps[t.name];
-      out[t.name] = (ep && ep.state === 'online') ? { status: 'online', detail: 'Conectada (WebRTC/WSS)' } : { status: 'offline', detail: 'Esperando registro WSS' };
-      continue;
-    }
-    if (t.kind === 'kamailio') {
-      const up = await sipProbeCached(t.provider_host, t.provider_port);
-      out[t.name] = up ? { status: 'online', detail: 'Alcanzable (OPTIONS) · vía SBC-NG' } : { status: 'offline', detail: 'No responde · vía SBC-NG' };
-      continue;
-    }
-    const ep = eps[t.name]; const reachable = ep && ep.state === 'online';
-    if (t.do_register) {
-      const rx = new RegExp('^\\s*' + t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/');
-      const line = lines.find(l => rx.test(l)) || '';
-      if (/Registered/i.test(line)) out[t.name] = { status: 'online', detail: 'Registrada' + ((line.match(/exp\.?\s*(\d+)/i) || [])[1] ? ' (exp ' + line.match(/exp\.?\s*(\d+)/i)[1] + 's)' : '') };
-      else if (/Rejected/i.test(line)) out[t.name] = { status: 'offline', detail: 'Rechazada por el proveedor' };
-      else if (/Auth/i.test(line)) out[t.name] = { status: 'offline', detail: 'Autenticando…' };
-      else if (line) out[t.name] = { status: 'offline', detail: 'Sin registrar' };
-      else out[t.name] = { status: reachable ? 'online' : 'offline', detail: reachable ? 'Alcanzable' : 'Sin registro' };
-    } else {
-      out[t.name] = { status: reachable ? 'online' : 'offline', detail: reachable ? 'Alcanzable (qualify)' : 'No responde' };
-    }
-  }
-  for (const t of trunks) { if (out[t.name] && rttMap[t.name] != null) out[t.name].rtt = rttMap[t.name]; }
-  return out;
-}
-async function setRecFlag(ext, on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: String(ext), Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: String(ext) }); } catch (_) {} }
-async function setRecAll(on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: '_ALL_', Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: '_ALL_' }); } catch (_) {} }
-async function syncRecFlags() { try { const { rows } = await pool.query("SELECT id FROM ps_endpoints WHERE pbxng_record=true"); for (const r of rows) await setRecFlag(r.id, true); const { rows: s } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); await setRecAll(!!(s[0] && s[0].value === '1')); } catch (_) {} }
-setTimeout(() => { syncRecFlags().catch(() => {}); }, 9000);
 setTimeout(() => { sipConf.ensure().then(() => amiCommand('module reload res_pjsip.so').catch(() => {})).catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados antes de que el panel toque nada
 
 async function getExtensions() {
@@ -529,97 +426,6 @@ async function healthCheck(req, res) {
 app.get('/health', healthCheck);
 app.get('/health/ready', healthCheck);
 
-// ---------------- Autenticación ----------------
-function auth(req, res, next) {
-  const h = req.headers.authorization || '';
-  const t = h.startsWith('Bearer ') ? h.slice(7) : null;
-  if (!t) return res.status(401).json({ error: 'no autenticado' });
-  try { req.user = jwt.verify(t, SECRET); } catch (e) { return res.status(401).json({ error: 'sesión inválida' }); }
-
-  /* Un token de softphone (scope 'phone') NO es una sesión de panel. Lo emite quien
-   * demuestra tener las credenciales SIP de una extensión, así que sólo puede tocar
-   * lo de ESA extensión — nunca la configuración de la central. Sin esta barrera,
-   * cerrar el buzón habría abierto algo peor: cualquiera con una clave SIP entrando
-   * al panel. La lista es explícita a propósito: lo que no está acá, no se puede. */
-  if (req.user && req.user.scope === 'phone') {
-    // El middleware va montado en '/api', así que req.path acá es '/vm', no '/api/vm'.
-    // Hay que rearmar la ruta completa igual que isPublicApi, o no matchea nada.
-    const full = (req.baseUrl || '') + req.path;
-    const permitido = FONO_PERMITIDO.some(([m, rx]) => (m === req.method || m === '*') && rx.test(full));
-    if (!permitido) return res.status(403).json({ error: 'este token sólo sirve para el softphone' });
-  }
-  next();
-}
-
-/* Lo único que un token de softphone puede pedir. Las rutas con extensión además
- * verifican, adentro, que la extensión sea la suya (ver mismaExt). */
-const FONO_PERMITIDO = [
-  ['GET',  /^\/api\/vm$/],
-  ['GET',  /^\/api\/vm\/audio$/],
-  ['POST', /^\/api\/vm\/(del|read|transcribe)$/],
-  ['GET',  /^\/api\/directory$/],
-  ['GET',  /^\/api\/presence$/],
-  ['GET',  /^\/api\/ice$/],
-  ['GET',  /^\/api\/branding$/],
-  ['POST', /^\/api\/calls\/(record|conference)$/],
-  // Sólo lo que necesita el propio aparato para sus notificaciones: el comodín push/*
-  // dejaba leer GET push/devices (inventario push de todas las extensiones, sólo admin).
-  ['POST', /^\/api\/push\/(subscribe|register|unsubscribe|test)$/],
-  // Desde 1.4.0 el enrolado entrega un token phone (no una sesión de panel): para que
-  // el softphone conserve el historial propio y el screen-pop, se abren estas dos
-  // lecturas. /api/cdr fuerza ext = la del token (ver la ruta).
-  ['GET',  /^\/api\/cdr$/],
-  ['GET',  /^\/api\/clients\/lookup$/],
-];
-
-/* ¿El que pide puede meterse con la extensión `ext`?
- *   - token de softphone  -> sólo la suya
- *   - sesión de panel     -> admin y supervisor ven todo; el resto, la suya
- * Antes esto no existía: alcanzaba con mandar ?ext=NNNN y te daban el buzón ajeno. */
-function mismaExt(req, ext) {
-  const u = req.user || {};
-  const e = String(ext || '');
-  if (!e) return false;
-  if (u.scope === 'phone') return String(u.ext) === e;
-  if (u.role === 'admin' || u.role === 'supervisor') return true;
-  return String(u.ext || '') === e;
-}
-function exigirExt(req, res, ext) {
-  if (mismaExt(req, ext)) return true;
-  res.status(403).json({ error: 'no podés acceder a los datos de otra extensión' });
-  return false;
-}
-/* ¿A qué extensión queda ACOTADO el que pide?
- *   null  -> a ninguna: admin/supervisor ven todo
- *   'NNN' -> sólo esa (agente o token de softphone)
- *   ''    -> agente sin interno asignado: no puede ver nada de nadie */
-function extPropia(req) {
-  const u = req.user || {};
-  if (u.scope === 'phone') return String(u.ext || '');
-  if (u.role === 'admin' || u.role === 'supervisor') return null;
-  return String(u.ext || '');
-}
-// --- Gate de autenticacion deny-by-default: TODA /api requiere JWT salvo la allowlist publica explicita ---
-const PUBLIC_API = [
-  ['POST', /^\/api\/auth\/login$/],
-  ['POST', /^\/api\/phone\/token$/],
-  ['GET',  /^\/api\/auth\/setup$/],
-  ['GET',  /^\/api\/ice$/],
-  ['GET',  /^\/api\/branding$/],
-  ['GET',  /^\/api\/enroll\/[^/]+$/],
-  ['GET',  /^\/api\/prompts\/[^/]+\/audio$/],
-  ['GET',  /^\/api\/push\/vapid$/],
-  ['POST', /^\/api\/push\/(subscribe|register|unsubscribe)$/],
-  ['GET',  /^\/api\/internal\/wake$/],
-  ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
-  ['GET',  /^\/api\/softphone\/latest$/],       // el login muestra la version descargable sin sesion
-  ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
-  ['POST', /^\/api\/geo\/report$/],
-  // Las capturas de los manuales se piden con <img src>, que NO manda el token.
-  // Sólo la LECTURA es pública (subir y borrar siguen pidiendo sesión).
-  ['GET',  /^\/api\/manuales\/img\/[A-Za-z0-9._-]+$/],
-];
-function isPublicApi(req) { const full = (req.baseUrl || '') + req.path; return PUBLIC_API.some(([m, re]) => m === req.method && re.test(full)); }
 
 /* ============================================================
  *  Softphone de escritorio: cada central sirve SU instalador y el feed OTA.
@@ -642,110 +448,6 @@ function softphoneLatest() {
   } catch (_) { return { available: false }; }
 }
 app.get('/api/softphone/latest', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(softphoneLatest()); });
-/* IP del cliente = req.ip: Express ya aplicó `trust proxy = 1`, así que es la que
- * agregó el proxy al FINAL de X-Forwarded-For. Antes se leía el PRIMER elemento del
- * header, que lo escribe el propio cliente: alcanzaba con rotar ese valor para
- * saltear el rate limit del login y falsear la IP de la bitácora y del enrolado. */
-function clientIp(req) {
-  return req.ip || (req.socket && req.socket.remoteAddress) || '';
-}
-/* Freno a la fuerza bruta en las dos puertas que validan contraseñas sin sesión.
- * Dos límites encadenados, ambos sobre req.ip (ver clientIp):
- *   - por IP + usuario (o IP + interno), 10 fallos / 10 min: quien rota IPs contra
- *     un usuario no puede bloquear al usuario legítimo desde otra red (sólo se
- *     cuenta SU par IP+usuario).
- *   - por IP sola, 50 fallos / 10 min: la clave IP+usuario NO frena a quien rota
- *     usuarios desde una misma IP (password spraying); este segundo tope sí.
- * Sólo cuentan los intentos fallidos: un login correcto no consume cupo. */
-const MSG_429 = 'Demasiados intentos. Esperá 10 minutos y volvé a probar.';
-function limiteIntentos(campo) {
-  const porIp = rateLimit({
-    windowMs: 10 * 60 * 1000, limit: 50,
-    standardHeaders: 'draft-7', legacyHeaders: false,
-    skipSuccessfulRequests: true,
-    keyGenerator: (req) => ipKeyGenerator(clientIp(req)),
-    handler: (req, res) => res.status(429).json({ error: MSG_429 }),
-  });
-  const porIpUsuario = rateLimit({
-    windowMs: 10 * 60 * 1000, limit: 10,
-    standardHeaders: 'draft-7', legacyHeaders: false,
-    skipSuccessfulRequests: true,
-    keyGenerator: (req) => ipKeyGenerator(clientIp(req)) + ':' + String((req.body || {})[campo] || '').toLowerCase().slice(0, 64),
-    handler: (req, res) => res.status(429).json({ error: MSG_429 }),
-  });
-  return [porIp, porIpUsuario];
-}
-/* Roles que la API entiende. Un usuario con otro rol (p.ej. 'operator'/'viewer', que
- * el panel ofrecía antes de 1.4.0) no debe recibir sesión: la migración 0008 (y el
- * bootstrap de más abajo) los convierte, pero si alguno quedara, el RBAC le daría 403
- * hasta en /api/auth/me y el panel lo dejaría en un bucle login → 403 → login. */
-const ROLES = ['admin', 'supervisor', 'agente'];
-app.post('/api/auth/login', limiteIntentos('username'), async (req, res) => {
-  const { username, password } = req.body || {};
-  const ip = clientIp(req), ua = String(req.headers['user-agent'] || '').slice(0, 120);
-  try {
-    const { rows } = await pool.query('SELECT id,username,name,role,ext,password_hash,must_change FROM pbxng_users WHERE username=$1', [username]);
-    const u = rows[0];
-    /* bcrypt async: compareSync bloquea el event loop ~100 ms por intento, y con el
-     * socket.io, el ARI y el AudioSocket de la IA en el mismo proceso eso se nota. */
-    if (!u || !(await bcrypt.compare(String(password || ''), u.password_hash))) {
-      alerts.onLogin({ ok: false, username, ip, ua }).catch(() => {});   // no bloquea la respuesta
-      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
-    }
-    if (!ROLES.includes(u.role)) {
-      return res.status(403).json({ error: 'Tu usuario tiene un rol no soportado (' + String(u.role) + '). Pedile al administrador que lo corrija desde Usuarios.' });
-    }
-    const token = jwt.sign({ uid: u.id, username: u.username, role: u.role, name: u.name, ext: u.ext || null }, SECRET, { expiresIn: '12h' });
-    alerts.onLogin({ ok: true, username: u.username, role: u.role, ip, ua }).catch(() => {});
-    res.json({ token, user: { username: u.username, name: u.name, role: u.role, ext: u.ext || null }, must_change: !!u.must_change });
-  } catch (e) { errorHttp(res, e); }
-});
-app.get('/api/me/sipcreds', auth, async (req, res) => {
-  const ext = req.user.ext;
-  if (!ext) return res.status(400).json({ error: 'usuario sin interno asignado' });
-  try {
-    const { rows } = await pool.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
-    if (!rows[0]) return res.status(404).json({ error: 'interno no existe' });
-    res.json({ ext: String(ext), password: rows[0].password });
-  } catch (e) { errorHttp(res, e); }
-});
-// Aprovisionamiento remoto de un telefono: arma la config completa (SIP + ICE + CRM)
-// para un interno y devuelve tambien el prov_url (pbxng://prov#<b64url>) listo para QR.
-// Solo admin/supervisor. Expone el secret del interno + un token del telefono: uso interno.
-app.get('/api/provision', auth, async (req, res) => {
-  if (!['admin', 'supervisor'].includes(req.user.role)) return res.status(403).json({ error: 'no autorizado' });
-  const ext = String(req.query.ext || '').trim();
-  if (!ext) return res.status(400).json({ error: 'falta ext' });
-  try {
-    const { rows: au } = await pool.query('SELECT password FROM ps_auths WHERE id=$1', [ext]);
-    if (!au[0]) return res.status(404).json({ error: 'interno no existe' });
-    const getS = async (k) => { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] ? rows[0].value : ''; };
-    const wss = await getS('wss');
-    const domain = (await getS('domain')) || NODES.domain || process.env.DOMAIN || '';
-    const { rows: us } = await pool.query('SELECT id, username, name, role FROM pbxng_users WHERE ext=$1 LIMIT 1', [ext]);
-    const u = us[0] || null;
-    const name = (u && u.name) || ext;
-    const pub = process.env.PUBLIC_IP || process.env.DOMAIN || domain || '';
-    const tuser = process.env.TURN_USER || 'pbxng';
-    const tpass = process.env.TURN_PASS || '';
-    const stun = process.env.STUN_URL || 'stun:stun.l.google.com:19302';
-    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
-    const host = req.headers['x-forwarded-host'] || req.get('host') || '';
-    const apiBase = (await getS('public_base')) || (host ? (proto + '://' + host) : '');
-    const useTurn = !!(pub && tpass);
-    const cfg = {
-      transport: 'webrtc', name, domain, ext, pass: au[0].password, wss,
-      stun, turn: useTurn ? ('turn:' + pub + ':3478') : '', turnUser: useTurn ? tuser : '', turnPass: useTurn ? tpass : '',
-      apiBase,
-      /* Token de softphone (scope 'phone'), no una sesión de panel: si no, un supervisor
-       * pidiendo la config del interno de un admin se llevaba una sesión de admin por 30 días. */
-      apiToken: jwt.sign({ scope: 'phone', ext }, SECRET, { expiresIn: '30d' }),
-    };
-    const b64url = Buffer.from(JSON.stringify(cfg), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    res.json({ ...cfg, prov_url: 'pbxng://prov#' + b64url });
-  } catch (e) { errorHttp(res, e); }
-});
-// Estado de setup (publico): si el admin sigue con la clave por defecto, el login lo sugiere
 // ICE/TURN para el softphone WebRTC: se arma con el dominio y las credenciales de coturn (no hardcodear)
 app.get('/api/ice', (req, res) => {
   const domain = process.env.PUBLIC_IP || process.env.DOMAIN || '';
@@ -759,29 +461,6 @@ app.get('/api/ice', (req, res) => {
   }
   res.json({ iceServers: ice });
 });
-app.get('/api/auth/setup', async (req, res) => {
-  try { const { rows } = await pool.query("SELECT must_change FROM pbxng_users WHERE username='admin'"); res.json({ defaultAdmin: !!(rows[0] && rows[0].must_change), user: 'admin' }); }
-  catch (e) { res.json({ defaultAdmin: false }); }
-});
-// Cambio de contrasena propia (autenticado); limpia el flag must_change
-/* Pide la clave ACTUAL (`current`): una sesión robada del localStorage no debe alcanzar
- * para cambiar la contraseña y dejar afuera al dueño. La única excepción es el primer
- * ingreso (must_change=true), donde la clave actual es la que estamos obligando a cambiar. */
-app.post('/api/auth/password', auth, async (req, res) => {
-  const { password, current } = req.body || {};
-  if (!password || String(password).length < 8) return res.status(400).json({ error: 'la contraseña nueva debe tener al menos 8 caracteres' });
-  try {
-    const { rows } = await pool.query('SELECT password_hash, must_change FROM pbxng_users WHERE id=$1', [req.user.uid]);
-    if (!rows[0]) return res.status(404).json({ error: 'usuario inexistente' });
-    if (!rows[0].must_change) {
-      if (!current) return res.status(400).json({ error: 'indicá tu contraseña actual' });
-      if (!(await bcrypt.compare(String(current), rows[0].password_hash))) return res.status(403).json({ error: 'la contraseña actual no es correcta' });
-    }
-    await pool.query('UPDATE pbxng_users SET password_hash=$1, must_change=false WHERE id=$2', [await bcrypt.hash(String(password), 10), req.user.uid]);
-    res.json({ ok: true });
-  } catch (e) { errorHttp(res, e); }
-});
-app.get('/api/auth/me', auth, (req, res) => res.json({ user: { username: req.user.username, name: req.user.name, role: req.user.role, ext: req.user.ext || null } }));
 
 // ==================== Agente: disponibilidad / pausa en cola ====================
 async function _agentQueues(ext){ const { rows } = await pool.query('SELECT queue_name, COALESCE(paused,0) AS paused FROM queue_members WHERE interface=$1',['PJSIP/'+ext]); return rows; }
@@ -810,14 +489,6 @@ app.post('/api/agent/pause', auth, async (req,res)=>{ try{
  * abajo son filas semilla (datos, no esquema), idempotentes. */
 try { pushProviders.init(pool); } catch (e) { logger('PUSH').error('init', e); }
 
-// --- Bootstrap primer arranque: admin por defecto si no hay usuarios ---
-pool.query('SELECT count(*)::int n FROM pbxng_users').then(async ({ rows }) => {
-  if (rows[0].n === 0) {
-    const pass = process.env.ADMIN_DEFAULT_PASS || 'admin';
-    await pool.query("INSERT INTO pbxng_users (username,password_hash,name,role,must_change) VALUES ('admin',$1,'Administrador','admin',true)", [await bcrypt.hash(pass, 10)]);
-    logger('BOOTSTRAP').info("usuario 'admin' creado (clave por defecto: '" + pass + "') - cambiala en el primer ingreso");
-  }
-}).catch(e => logger('BOOTSTRAP').error('admin', e));
 // --- Empresa (tenant) por defecto si no existe ninguna ---
 pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
   if (rows[0].n === 0) {
@@ -828,225 +499,14 @@ pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
   }
 }).catch(e => logger('BOOTSTRAP').error('tenant', e));
 
-// Del User-Agent sacamos algo legible para el panel ("iPhone · Safari", "Windows · Escritorio PBX-NG").
-function parseDevice(ua) {
-  const u = String(ua || '');
-  if (/PBXNG-Desktop|Electron/i.test(u)) return { device: 'App de escritorio', platform: /Windows/i.test(u) ? 'Windows' : /Mac/i.test(u) ? 'macOS' : 'Escritorio' };
-  let platform = /iPhone|iPad/i.test(u) ? 'iOS' : /Android/i.test(u) ? 'Android' : /Windows/i.test(u) ? 'Windows' : /Mac OS X|Macintosh/i.test(u) ? 'macOS' : /Linux/i.test(u) ? 'Linux' : 'Desconocida';
-  let device = /iPhone/i.test(u) ? 'iPhone' : /iPad/i.test(u) ? 'iPad' : /Android/i.test(u) ? 'Celular Android' : 'Navegador';
-  const nav = /Edg\//i.test(u) ? 'Edge' : /Chrome\//i.test(u) ? 'Chrome' : /Firefox\//i.test(u) ? 'Firefox' : /Safari\//i.test(u) ? 'Safari' : '';
-  if (device === 'Navegador' && nav) device = nav;
-  return { device, platform };
-}
-  /* Troncal fija al SBC creada antes del modulo: se registra en pbxng_trunks para que
-   * el panel la vea (idempotente; 'sbc_link_removed' evita resucitarla si la borraron). */
-  pool.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,do_register,tenant_id,kind,adv_config) " +
-    "SELECT 'to-sbc', COALESCE((SELECT match FROM ps_endpoint_id_ips WHERE id='to-sbc'),''), 5060, false, 1, 'sbc', " +
-    "'{\"sbc\":true,\"label\":\"SBC\",\"mode\":\"ip\",\"transport\":\"udp\"}'::jsonb " +
-    "WHERE EXISTS (SELECT 1 FROM ps_endpoints WHERE id='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_trunks WHERE name='to-sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='sbc_link_removed')").catch(e => logger('TRK').error('sbc-seed', e));
-  /* Instalaciones anteriores al modulo: si ya habia una troncal al SBC, el modulo
-   * "Conexion a SBC-NG" arranca encendido (misma regla que la migracion 0007). */
-  pool.query("INSERT INTO pbxng_settings(key,value) SELECT 'mod_sbc','1' WHERE EXISTS (SELECT 1 FROM pbxng_trunks WHERE kind='sbc') AND NOT EXISTS (SELECT 1 FROM pbxng_settings WHERE key='mod_sbc') ON CONFLICT (key) DO NOTHING").catch(e => logger('SBC').error('mod-seed', e));
-pool.query("INSERT INTO pbxng_rec_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING").catch(e => logger('REC').error('cfg', e));
 
-// Enrollment: canje publico del token (la PWA lo usa sin JWT)
-/* Canje de credenciales SIP por un token del softphone.
- *
- * El softphone tiene la extensión y su clave SIP (con eso se registra), pero no una
- * sesión de panel. Antes, el buzón de voz confiaba en el parámetro ?ext= que mandaba
- * el cliente: cualquiera en internet podía pedir —y borrar— los mensajes de otro.
- * Ahora prueba que tiene la clave de ESA extensión y recibe un token atado a ella.
- *
- * No hace falta volver a enrolar ningún teléfono: el softphone ya guarda ext y clave,
- * así que canjea solo la primera vez que arranca. */
-/* Freno contra la fuerza bruta (mismo limitador que el login: 10 fallos / 10 min por
- * IP + interno). Las claves SIP son largas y generadas, pero un endpoint que valida
- * contraseñas sin límite es una invitación. */
-app.post('/api/phone/token', limiteIntentos('ext'), async (req, res) => {
-  const { ext, password } = req.body || {};
-  if (!ext || !password) return res.status(400).json({ error: 'ext y password son obligatorios' });
-  try {
-    const { rows } = await pool.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
-    const ok = rows[0] && String(rows[0].password) === String(password);
-    if (!ok) return res.status(401).json({ error: 'extensión o clave incorrecta' });
-    const token = jwt.sign({ scope: 'phone', ext: String(ext) }, SECRET, { expiresIn: '30d' });
-    res.json({ token, ext: String(ext) });
-  } catch (e) { errorHttp(res, e); }
-});
 
-/* El enlace/QR de enrolado es de UN solo uso: entrega la clave SIP en claro, así que
- * un link reenviado o un QR fotografiado no puede seguir canjeándose días después.
- * Ventana de gracia (ENROLL_REUSE_SECONDS, 120 s): el mismo aparato suele canjearlo
- * dos veces seguidas (la PWA abre el link y el softphone de escritorio lo toma por
- * pbxng://), y un reintento por red lenta no debe dejar al usuario sin teléfono. */
-const ENROLL_REUSE_MS = Math.max(0, +(process.env.ENROLL_REUSE_SECONDS || 120)) * 1000;
-app.get('/api/enroll/:token', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT token,ext,password,expires_at,used_at FROM pbxng_enroll WHERE token=$1', [req.params.token]);
-    const e = rows[0];
-    if (!e) return res.status(404).json({ error: 'token invalido' });
-    if (e.expires_at && new Date(e.expires_at) < new Date()) return res.status(410).json({ error: 'token expirado' });
-    if (e.used_at && (Date.now() - new Date(e.used_at).getTime()) > ENROLL_REUSE_MS) return res.status(410).json({ error: 'token ya usado' });
-    const ua = req.headers['user-agent'] || '';
-    const dv = parseDevice(ua);
-    await pool.query(
-      `UPDATE pbxng_enroll SET used_at = COALESCE(used_at, now()), activated_at = COALESCE(activated_at, now()),
-              device = COALESCE(device, $2), platform = COALESCE(platform, $3), user_agent = COALESCE(user_agent, $4),
-              ip = COALESCE(ip, $5), uses = COALESCE(uses, 0) + 1
-         WHERE token = $1`,
-      [req.params.token, dv.device, dv.platform, ua.slice(0, 400), clientIp(req)]);
-    // Config completa de aprovisionamiento. El MISMO link/QR sirve para la PWA, el softphone de
-    // escritorio y el celular; y el transporte se deduce del ENDPOINT REAL (no se asume WebRTC):
-    // un interno con transport-ws/wss es WebRTC; uno con udp/tcp/tls es SIP nativo. Mezclarlos
-    // autentica pero deja la llamada sin audio (el endpoint WebRTC exige DTLS-SRTP).
-    const gS = async (k) => { const { rows: r2 } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return r2[0] ? r2[0].value : ''; };
-    const dom = (await gS('domain')) || NODES.domain || process.env.DOMAIN || '';
-    const wssU = (await gS('wss')) || (dom ? ('wss://' + dom + '/ws') : '');
-    const { rows: epr } = await pool.query("SELECT transport, media_encryption, COALESCE(webrtc,'no') AS webrtc FROM ps_endpoints WHERE id=$1", [String(e.ext)]);
-    const ep = epr[0] || {};
-    const tr = String(ep.transport || '');
-    const isWeb = ep.webrtc === 'yes' || /ws/i.test(tr);
-    const sipTransport = /tls/i.test(tr) ? 'tls' : /tcp/i.test(tr) ? 'tcp' : 'udp';
-    const sipPort = sipTransport === 'tls' ? '5061' : '5060';
-    const _lk = await sbcLink();
-    const sipHost = (await gS('sip_host')) || (_lk.active ? _lk.host : '') || NODES.asterisk || dom;
-    const { rows: un } = await pool.query('SELECT id, username, name, role FROM pbxng_users WHERE ext=$1 LIMIT 1', [String(e.ext)]);
-    const u = un[0] || null;
-    const pubIp = process.env.PUBLIC_IP || process.env.DOMAIN || dom || '';
-    const tU = process.env.TURN_USER || 'pbxng', tP = process.env.TURN_PASS || '';
-    const withTurn = !!(pubIp && tP);
-    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
-    const host = req.headers['x-forwarded-host'] || req.get('host') || '';
-    const apiBase = (await gS('public_base')) || (dom ? 'https://' + dom : (host ? proto + '://' + host : ''));
-    const prov = {
-      transport: isWeb ? 'webrtc' : 'sip',
-      name: (u && u.name) || String(e.ext),
-      domain: dom, ext: String(e.ext), pass: e.password,
-      // WebRTC
-      wss: isWeb ? wssU : '',
-      stun: process.env.STUN_URL || 'stun:stun.l.google.com:19302',
-      turn: (isWeb && withTurn) ? ('turn:' + pubIp + ':3478') : '',
-      turnUser: (isWeb && withTurn) ? tU : '', turnPass: (isWeb && withTurn) ? tP : '',
-      // SIP nativo
-      sipServer: isWeb ? '' : sipHost, sipPort: isWeb ? '' : sipPort,
-      sipTransport: isWeb ? '' : sipTransport,
-      sipSrtp: (!isWeb && String(ep.media_encryption || '') === 'sdes') ? 'sdes' : 'none',
-      /* Token de SOFTPHONE (scope 'phone', 30 d), igual al que da POST /api/phone/token:
-       * sólo lo que lista FONO_PERMITIDO y sólo sobre esta extensión. Antes salía una
-       * sesión de panel con el rol del usuario: quien tuviera el QR de un admin tenía
-       * la central entera por 30 días. Para el CRM completo o supervisar, el softphone
-       * inicia sesión con usuario y contraseña (POST /api/auth/login). */
-      apiBase,
-      apiToken: jwt.sign({ scope: 'phone', ext: String(e.ext) }, SECRET, { expiresIn: '30d' }),
-    };
-    const b64u = Buffer.from(JSON.stringify(prov), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    res.json({ ext: e.ext, password: e.password, server: dom, prov, prov_url: 'pbxng://prov#' + b64u });
-  } catch (e) { errorHttp(res, e); }
-});
-
-app.get('/api/recordings/:id/audio', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT filename, ext, src, dst FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
-    if (!rows[0]) return res.status(404).end();
-    // Un agente escucha sólo las llamadas en las que estuvo su interno; el resto es de supervisión.
-    const propio = extPropia(req);
-    if (propio !== null && ![rows[0].ext, rows[0].src, rows[0].dst].map(v => String(v || '')).includes(propio)) return res.status(403).json({ error: 'no podés acceder a las grabaciones de otra extensión' });
-    const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
-    if (!r.ok) return res.status(502).end();
-    res.set('Content-Type', 'audio/wav');
-    res.set('Content-Disposition', 'inline; filename="' + rows[0].filename + '"');
-    const buf = Buffer.from(await r.arrayBuffer());
-    res.send(buf);
-  } catch (e) { res.status(500).end(); }
-});
-
-// ---------- Transcripcion + analisis de grabaciones ----------
-function wavToPcm(buf) {
-  if (buf.length < 44 || buf.slice(0, 4).toString() !== 'RIFF') return null;
-  let pos = 12, rate = 8000, ch = 1, bits = 16, dataOff = -1, dataLen = 0;
-  while (pos + 8 <= buf.length) {
-    const cid = buf.slice(pos, pos + 4).toString('latin1'); const sz = buf.readUInt32LE(pos + 4);
-    if (cid === 'fmt ') { ch = buf.readUInt16LE(pos + 10); rate = buf.readUInt32LE(pos + 12); bits = buf.readUInt16LE(pos + 22); }
-    else if (cid === 'data') { dataOff = pos + 8; dataLen = Math.min(sz, buf.length - pos - 8); break; }
-    pos += 8 + sz + (sz & 1);
-  }
-  if (dataOff < 0 || bits !== 16) return null;
-  let pcm = buf.slice(dataOff, dataOff + dataLen);
-  if (ch === 2) {
-    const n = Math.floor(pcm.length / 4); const mono = Buffer.alloc(n * 2);
-    for (let i = 0; i < n; i++) { const l = pcm.readInt16LE(i * 4), rr = pcm.readInt16LE(i * 4 + 2); mono.writeInt16LE(Math.max(-32768, Math.min(32767, (l + rr) >> 1)), i * 2); }
-    pcm = mono;
-  }
-  return { pcm, rate };
-}
-const STOP_ES = new Set('de la que el en y a los las un una por con no se su para es al lo como mas pero sus le ya o este si porque esta entre cuando muy sin sobre tambien me hasta hay donde quien desde todo nos durante todos uno les ni contra otros ese eso ante ellos e esto mi antes algunos que unos yo otro otras otra el tanto esa estos mucho quienes nada muchos cual poco ella estar estas algunas algo nosotros mi mis tu te ti tu tus ellas nosotras vosostros vosostras os mio mia mios mias tuyo tuya suyo suya nuestro nuestra vuestro vuestra esos esas estoy esta soy son fue ser hola si claro bueno ok dale gracias buenas buenos dias tardes noches'.split(' '));
-const NEG_W = ['molesto','enojado','enojada','reclamo','queja','quejar','cancelar','cancelacion','pesimo','pesima','horrible','terrible','inaceptable','gerente','supervisor','demanda','furioso','indignado','estafa','robo','mentira','nunca','jamas','harto','cansado','problema','problemas','mal','mala','peor','no funciona','no sirve','desastre','verguenza','urgente','grosero'];
-const POS_W = ['gracias','excelente','perfecto','genial','resuelto','solucionado','amable','satisfecho','contento','contenta','buenisimo','barbaro','joya','agradezco','felicito','rapido','eficiente'];
-function analyzeText(text, durSec) {
-  const t = (text || '').toLowerCase();
-  const words = t.replace(/[^a-zaeiouunu0-9\s]/gi, ' ').split(/\s+/).filter(Boolean);
-  let neg = 0, pos = 0; const flags = [];
-  for (const w of NEG_W) { if (t.includes(w)) { neg++; flags.push(w); } }
-  for (const w of POS_W) { if (t.includes(w)) pos++; }
-  let sentiment = 'neutral';
-  if (neg >= 2 && neg > pos) sentiment = 'negativo';
-  else if (neg > pos) sentiment = 'tension';
-  else if (pos >= 2 && pos > neg) sentiment = 'positivo';
-  const conflict = neg >= 2;
-  const freq = {};
-  for (const w of words) { if (w.length > 3 && !STOP_ES.has(w) && !/^[0-9]+$/.test(w)) freq[w] = (freq[w] || 0) + 1; }
-  const keywords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k]) => k);
-  const wc = words.length;
-  const wpm = durSec ? Math.round(wc / (durSec / 60)) : 0;
-  const summary = (text || '').trim().slice(0, 220) + ((text || '').length > 220 ? '…' : '');
-  return { sentiment, conflict, neg, pos, flags: [...new Set(flags)].slice(0, 10), keywords, words: wc, wpm, summary };
-}
-async function doTranscribe(id) {
-  const { rows } = await pool.query('SELECT filename, duration FROM pbxng_recordings WHERE id=$1 AND deleted=false', [id]);
-  if (!rows[0]) throw new Error('grabacion no existe');
-  const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
-  if (!r.ok) throw new Error('audio no disponible');
-  const wav = Buffer.from(await r.arrayBuffer());
-  const pc = wavToPcm(wav);
-  if (!pc) throw new Error('formato WAV no soportado (se requiere PCM 16-bit)');
-  const base = await vozBase();
-  const sr = await fetch(base + '/stt?rate=' + pc.rate, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pc.pcm, signal: AbortSignal.timeout(180000) });
-  if (!sr.ok) throw new Error('STT fallo (' + sr.status + ')');
-  const sd = await sr.json();
-  const text = (sd.text || '').trim();
-  const analysis = analyzeText(text, rows[0].duration || 0);
-  await pool.query('UPDATE pbxng_recordings SET transcript=$1, analysis=$2, transcribed_at=now() WHERE id=$3', [text, JSON.stringify(analysis), id]);
-  return { transcript: text, analysis };
-}
-app.get('/api/recordings/:id/transcript', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT transcript, analysis, extract(epoch from transcribed_at)*1000 AS at FROM pbxng_recordings WHERE id=$1', [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'no existe' });
-    res.json({ transcript: rows[0].transcript || null, analysis: rows[0].analysis || null, at: rows[0].at || null });
-  } catch (e) { errorHttp(res, e); }
-});
-app.post('/api/recordings/:id/transcribe', async (req, res) => {
-  try { const out = await doTranscribe(req.params.id); res.json(out); }
-  catch (e) { errorHttp(res, e); }
-});
-function pcmPeaks(pcm, bars) {
-  bars = bars || 40; const n = Math.floor(pcm.length / 2); const per = Math.max(1, Math.floor(n / bars)); const out = []; let max = 1, rawmax = 0;
-  for (let b = 0; b < bars; b++) { let sum = 0, cnt = 0; for (let i = b * per; i < (b + 1) * per && i < n; i++) { const v = pcm.readInt16LE(i * 2); sum += v * v; cnt++; if (Math.abs(v) > rawmax) rawmax = Math.abs(v); } const rms = cnt ? Math.sqrt(sum / cnt) : 0; out.push(rms); if (rms > max) max = rms; }
-  return { peaks: out.map((v) => Math.round((v / max) * 100)), silent: rawmax < 180 };
-}
-app.get('/api/recordings/:id/peaks', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT filename, peaks FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'no existe' });
-    if (rows[0].peaks) return res.json(rows[0].peaks);
-    const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
-    if (!r.ok) return res.json({ peaks: [], silent: true });
-    const pc = wavToPcm(Buffer.from(await r.arrayBuffer()));
-    if (!pc) return res.json({ peaks: [], silent: true });
-    const out = pcmPeaks(pc.pcm, 40);
-    await pool.query('UPDATE pbxng_recordings SET peaks=$1 WHERE id=$2', [JSON.stringify(out), req.params.id]);
-    res.json(out);
-  } catch (e) { errorHttp(res, e); }
+/* Grabaciones y CDR (recordings.js): marca de grabación en la AstDB, grabar en vivo,
+ * indexador de /recordings, audio/transcripción/picos, almacenamiento remoto (recstore),
+ * historial e informe. Sus rutas se registran acá, DESPUÉS del gate de auth + RBAC;
+ * `setRecFlag` lo usan las rutas de internos y `wavToPcm`/`analyzeText` el buzón de voz. */
+const { setRecFlag, wavToPcm, analyzeText } = require('./recordings')({
+  app, pool, ami, amiAction, amiCommand, getAri: () => ari, state, extPropia, exigirExt, vozBase, errorHttp, logger,
 });
 
 app.get('/api/prompts/:id/audio', async (req, res) => {
@@ -1088,24 +548,6 @@ app.post('/api/push/test', auth, async (req, res) => {
   res.json({ ok: true, sent });
 });
 
-// Control de llamada en vivo: grabacion (MixMonitor) - publica para la PWA
-app.post('/api/calls/record', async (req, res) => {
-  const { ext, action } = req.body || {};
-  if (!ext) return res.status(400).json({ error: 'ext requerido' });
-  if (!exigirExt(req, res, ext)) return;    // agente y token phone: sólo su propia llamada
-  try {
-    let name = null;
-    if (ari) { try { const chans = await ari.channels.list(); const ch = chans.find(c => c.name && c.name.startsWith('PJSIP/' + ext + '-')); name = ch && ch.name; } catch (_) {} }
-    if (!name && state.ami) {
-      /* ARI caido o sin respuesta: el nombre del canal tambien sale por AMI */
-      try { const out = await amiCommand('core show channels concise'); const line = String(out).split('\n').find((l) => l.startsWith('PJSIP/' + ext + '-')); if (line) name = line.split('!')[0]; } catch (_) {}
-    }
-    if (!name) return res.status(404).json({ error: (ari || state.ami) ? 'sin canal activo' : 'Asterisk no disponible (ARI/AMI desconectados)' });
-    if (action === 'stop') { await amiAction({ Action: 'StopMixMonitor', Channel: name }); }
-    else { const file = 'pbxng-' + ext + '-' + Date.now() + '.wav'; await amiAction({ Action: 'MixMonitor', Channel: name, File: file }); }
-    res.json({ ok: true });
-  } catch (e) { errorHttp(res, e); }
-});
 
 // Conferencia a 3: arma un bridge mixing con la llamada activa del interno + un tercero
 /* /api/calls/spy vive en callengine.js (snoopChannel con sesion; AMI+ChanSpy solo sin ARI) */
@@ -1266,235 +708,16 @@ app.post('/api/geo/report', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { errorHttp(res, e); }
 });
-// ---------------------------------------------------------------------------
-//  Buzon de voz: se lee DIRECTO del volumen compartido con Asterisk (/voicemail).
-//  Antes esto dependia de un agente HTTP (:8089) que dejo de correr cuando pasamos
-//  a "grabaciones por volumen compartido" -> el buzon visual quedo mudo. Sin agente,
-//  sin token, sin red de por medio.
-// ---------------------------------------------------------------------------
-const VM_DIR = process.env.VM_DIR || '/voicemail';
-const VM_CTX = process.env.VM_CONTEXT || 'default';
-const _fsp = require('fs').promises;
-const _path = require('path');
-const vmSafe = (x) => String(x || '').replace(/[^A-Za-z0-9_-]/g, '');
-const vmFolder = (f) => (['INBOX', 'Old', 'Urgent', 'Work', 'Family', 'Friends'].includes(f) ? f : 'INBOX');
-const vmBase = (ext, folder) => _path.join(VM_DIR, VM_CTX, vmSafe(ext), vmFolder(folder));
-async function vmMeta(file) {
-  const d = {};
-  try {
-    const txt = await _fsp.readFile(file, 'utf8');
-    for (const line of txt.split('\n')) { const i = line.indexOf('='); if (i > 0) d[line.slice(0, i).trim()] = line.slice(i + 1).trim(); }
-  } catch (_) {}
-  return d;
-}
-async function vmList(ext) {
-  const out = [];
-  for (const folder of ['INBOX', 'Old']) {
-    const base = vmBase(ext, folder);
-    let files = [];
-    try { files = await _fsp.readdir(base); } catch (_) { continue; }
-    for (const f of files) {
-      if (!f.endsWith('.txt')) continue;
-      const id = f.slice(0, -4);
-      const m = await vmMeta(_path.join(base, f));
-      out.push({ id, folder, callerid: m.callerid || '', origtime: Number(m.origtime || 0), duration: Number(m.duration || 0), new: folder === 'INBOX' });
-    }
-  }
-  out.sort((a, b) => b.origtime - a.origtime);
-  return out;
-}
-async function vmAudio(ext, folder, id) {
-  const base = vmBase(ext, folder);
-  for (const e of ['.wav', '.WAV', '.gsm']) {
-    try { return await _fsp.readFile(_path.join(base, vmSafe(id) + e)); } catch (_) {}
-  }
-  throw new Error('audio no disponible');
-}
-async function vmDelete(ext, folder, id) {
-  const base = vmBase(ext, folder);
-  for (const f of await _fsp.readdir(base).catch(() => [])) {
-    if (f.startsWith(vmSafe(id) + '.')) { try { await _fsp.unlink(_path.join(base, f)); } catch (_) {} }
-  }
-}
-async function vmMarkRead(ext, id) {   // INBOX -> Old (como hace *97 al guardar)
-  const from = vmBase(ext, 'INBOX'), to = vmBase(ext, 'Old');
-  await _fsp.mkdir(to, { recursive: true }).catch(() => {});
-  const used = (await _fsp.readdir(to).catch(() => [])).filter((f) => f.endsWith('.txt')).map((f) => f.slice(3, -4));
-  let n = 0; while (used.includes(String(n).padStart(4, '0'))) n++;
-  const nid = 'msg' + String(n).padStart(4, '0');
-  for (const f of await _fsp.readdir(from).catch(() => [])) {
-    if (!f.startsWith(vmSafe(id) + '.')) continue;
-    const ext2 = f.slice(f.indexOf('.'));
-    try { await _fsp.rename(_path.join(from, f), _path.join(to, nid + ext2)); } catch (_) {}
-  }
-  return nid;
-}
-app.get('/api/vm', async (req, res) => {
-  if (!exigirExt(req, res, req.query.ext)) return;
-  try { res.json(await vmList(req.query.ext || '')); }
-  catch (e) { errorHttp(res, e); }
-});
-app.get('/api/vm/audio', async (req, res) => {
-  if (!exigirExt(req, res, req.query.ext)) return;
-  try { const buf = await vmAudio(req.query.ext, req.query.folder, req.query.id); res.set('Content-Type', 'audio/wav').send(buf); }
-  catch (e) { res.status(404).end(); }
-});
-app.post('/api/vm/del', async (req, res) => {
-  if (!exigirExt(req, res, (req.body || {}).ext)) return;
-  try { const { ext, folder, id } = req.body || {}; await vmDelete(ext, folder, id); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
-app.post('/api/vm/read', async (req, res) => {
-  if (!exigirExt(req, res, (req.body || {}).ext)) return;
-  try { const { ext, id } = req.body || {}; const nid = await vmMarkRead(ext, id); res.json({ ok: true, id: nid }); }
-  catch (e) { errorHttp(res, e); }
-});
-// Transcripcion de un mensaje de voz (Whisper): baja el WAV del agente VM, lo pasa a PCM
-// y lo manda al servicio STT (faster-whisper). No persiste (los VM los maneja el agente).
-app.post('/api/vm/transcribe', async (req, res) => {
-  if (!exigirExt(req, res, (req.body || {}).ext)) return;
-  try {
-    const { ext, folder, id } = req.body || {};
-    if (!ext || id == null || id === '') return res.status(400).json({ error: 'faltan ext/id' });
-    let wav;
-    try { wav = await vmAudio(ext, folder, id); } catch (_) { return res.status(404).json({ error: 'audio no disponible' }); }
-    const pc = wavToPcm(wav);
-    if (!pc) return res.status(422).json({ error: 'formato WAV no soportado (se requiere PCM 16-bit)' });
-    const base = await vozBase();
-    const sr = await fetch(base + '/stt?rate=' + pc.rate, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pc.pcm, signal: AbortSignal.timeout(180000) });
-    if (!sr.ok) return res.status(502).json({ error: 'STT fallo (' + sr.status + ')' });
-    const sd = await sr.json();
-    const text = (sd.text || '').trim();
-    const dur = Math.round((pc.pcm.length / 2) / (pc.rate || 8000));
-    const analysis = analyzeText(text, dur);
-    res.json({ transcript: text, analysis });
-  } catch (e) { errorHttp(res, e); }
-});
-// ============================================================================
-//  Buzon de voz -> Email  (voicemail-to-email con transcripcion)
-//  Poller: cada 45 s revisa los INBOX de los buzones con email configurado, y de
-//  cada mensaje NUEVO manda un correo con: quien llamo, cuando, cuanto duro, la
-//  transcripcion (Whisper) y el WAV adjunto. Lo enviado se registra en
-//  pbxng_vm_sent (idempotente: no se manda dos veces el mismo mensaje).
-// ============================================================================
-async function smtpFor(tenantId = 1) {
-  const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenantId]);
-  const c = rows[0];
-  return (c && c.enabled && c.host) ? c : null;
-}
-async function vmTranscript(wav) {
-  const pc = wavToPcm(wav);
-  if (!pc) return null;
-  const base = await vozBase();
-  const sr = await fetch(base + '/stt?rate=' + pc.rate, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pc.pcm, signal: AbortSignal.timeout(180000) });
-  if (!sr.ok) return null;
-  const sd = await sr.json();
-  return (sd.text || '').trim() || null;
-}
-async function vmSendOne(smtp, brand, box, msg) {
-  const wav = await vmAudio(box.mailbox, msg.folder, msg.id);
-  let transcript = null;
-  if (box.email_transcribe) { try { transcript = await vmTranscript(wav); } catch (e) { logger('vm-mail').warn('stt', e); } }
-  const when = new Date((msg.origtime || 0) * 1000).toLocaleString('es-UY', { timeZone: process.env.TZ || 'America/Montevideo' });
-  const tx = nodemailer.createTransport({ host: smtp.host, port: smtp.port || 587, secure: !!smtp.secure, auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined });
-  const { rows: dm } = await pool.query("SELECT value FROM pbxng_settings WHERE key='domain'");
-  const dom = (dm[0] && dm[0].value) || process.env.DOMAIN || '';
-  await tx.sendMail({
-    from: smtp.from_addr || smtp.username,
-    to: box.email,
-    subject: `Mensaje de voz de ${msg.callerid || 'desconocido'} · interno ${box.mailbox}`,
-    html: emails.voicemailEmail({ brand, mailbox: box.mailbox, fullname: box.fullname, from: msg.callerid,
-      when, duration: msg.duration || 0, transcript, hasAudio: !!box.email_attach,
-      panelUrl: dom ? 'https://' + dom + '/voz' : '' }),
-    text: `Nuevo mensaje de voz para el interno ${box.mailbox}\nDe: ${msg.callerid || 'desconocido'}\nFecha: ${when}\nDuración: ${msg.duration || 0}s\n` + (transcript ? `\nTranscripción:\n${transcript}\n` : ''),
-    attachments: box.email_attach ? [{ filename: `mensaje-${box.mailbox}-${msg.id}.wav`, content: wav }] : [],
-  });
-}
-let VM_MAIL_BUSY = false;
-async function vmMailTick() {
-  if (VM_MAIL_BUSY) return; VM_MAIL_BUSY = true;
-  try {
-    const { rows: boxes } = await pool.query(`SELECT v.mailbox, v.fullname, COALESCE(NULLIF(v.email,''), m.email) AS email,
-        COALESCE(m.email_enabled,true) AS email_enabled, COALESCE(m.email_attach,true) AS email_attach,
-        COALESCE(m.email_transcribe,true) AS email_transcribe, COALESCE(m.email_delete,false) AS email_delete
-      FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox = v.mailbox
-      WHERE COALESCE(NULLIF(v.email,''), m.email, '') <> '' AND COALESCE(m.email_enabled,true)`);
-    if (!boxes.length) return;
-    const smtp = await smtpFor(1);
-    if (!smtp) return;
-    const { rows: br } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
-    const brand = (br[0] && br[0].value) || 'PBX-NG';
-    for (const box of boxes) {
-      let list = [];
-      try { list = await vmList(box.mailbox); } catch (e) { continue; }
-      for (const msg of (Array.isArray(list) ? list : []).filter((m) => m.folder === 'INBOX')) {
-        const { rowCount } = await pool.query('SELECT 1 FROM pbxng_vm_sent WHERE mailbox=$1 AND mid=$2', [box.mailbox, msg.id]);
-        if (rowCount) continue;
-        try {
-          await vmSendOne(smtp, brand, box, msg);
-          await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (mailbox,mid) DO NOTHING',
-            [box.mailbox, msg.id, msg.folder, msg.origtime || 0, box.email]);
-          logger('vm-mail').info('enviado', { mailbox: box.mailbox, id: msg.id, to: box.email });
-          if (box.email_delete) { try { await vmDelete(box.mailbox, msg.folder, msg.id); } catch (_) {} }
-        } catch (e) {
-          logger('vm-mail').error('fallo', { mailbox: box.mailbox, id: msg.id }, e);
-          await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok,err) VALUES ($1,$2,$3,$4,$5,false,$6) ON CONFLICT (mailbox,mid) DO UPDATE SET ok=false, err=$6',
-            [box.mailbox, msg.id, msg.folder, msg.origtime || 0, box.email, String(e.message || e).slice(0, 300)]);
-        }
-      }
-    }
-  } catch (e) { logger('vm-mail').error(e); }
-  finally { VM_MAIL_BUSY = false; }
-}
-setInterval(() => { vmMailTick().catch(() => {}); }, 45000);
-setTimeout(() => { vmMailTick().catch(() => {}); }, 20000);
 
-// Config de "buzon -> email" por buzon
-app.get('/api/vm/email', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`SELECT v.mailbox, v.fullname, COALESCE(NULLIF(v.email,''), m.email, '') AS email,
-        COALESCE(m.email_enabled,true) AS email_enabled, COALESCE(m.email_attach,true) AS email_attach,
-        COALESCE(m.email_transcribe,true) AS email_transcribe, COALESCE(m.email_delete,false) AS email_delete,
-        (SELECT count(*) FROM pbxng_vm_sent s WHERE s.mailbox=v.mailbox AND s.ok) AS enviados
-      FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox=v.mailbox ORDER BY v.mailbox`);
-    res.json(rows);
-  } catch (e) { errorHttp(res, e); }
-});
-app.post('/api/vm/email', async (req, res) => {
-  const b = req.body || {};
-  if (!b.mailbox) return res.status(400).json({ error: 'falta mailbox' });
-  try {
-    if (b.email !== undefined) await pool.query('UPDATE voicemail SET email=$2 WHERE mailbox=$1', [String(b.mailbox), b.email || null]);
-    await pool.query(`INSERT INTO pbxng_mailboxes (mailbox, email, email_enabled, email_attach, email_transcribe, email_delete)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT (mailbox) DO UPDATE SET email=COALESCE(EXCLUDED.email, pbxng_mailboxes.email),
-          email_enabled=EXCLUDED.email_enabled, email_attach=EXCLUDED.email_attach,
-          email_transcribe=EXCLUDED.email_transcribe, email_delete=EXCLUDED.email_delete`,
-      [String(b.mailbox), b.email || null, b.email_enabled !== false, b.email_attach !== false, b.email_transcribe !== false, !!b.email_delete]);
-    res.json({ ok: true });
-  } catch (e) { errorHttp(res, e); }
-});
-// Forzar el envio de un mensaje puntual (boton "Enviar por correo" en el panel)
-app.post('/api/vm/email/send', async (req, res) => {
-  const { mailbox, id, folder } = req.body || {};
-  if (!mailbox || !id) return res.status(400).json({ error: 'faltan mailbox/id' });
-  try {
-    const smtp = await smtpFor(1);
-    if (!smtp) return res.status(400).json({ error: 'sin configuración SMTP activa' });
-    const { rows } = await pool.query(`SELECT v.mailbox, v.fullname, COALESCE(NULLIF(v.email,''), m.email, '') AS email,
-        COALESCE(m.email_attach,true) AS email_attach, COALESCE(m.email_transcribe,true) AS email_transcribe
-      FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox=v.mailbox WHERE v.mailbox=$1`, [String(mailbox)]);
-    const box = rows[0];
-    if (!box || !box.email) return res.status(400).json({ error: 'el buzón no tiene email configurado' });
-    let list = [];
-    try { list = await vmList(mailbox); } catch (_) {}
-    const msg = (Array.isArray(list) ? list : []).find((m) => String(m.id) === String(id)) || { id, folder: folder || 'INBOX', callerid: '', origtime: Math.floor(Date.now() / 1000), duration: 0 };
-    const { rows: br } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
-    await vmSendOne(smtp, (br[0] && br[0].value) || 'PBX-NG', box, msg);
-    await pool.query('INSERT INTO pbxng_vm_sent (mailbox,mid,folder,origtime,to_addr,ok) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (mailbox,mid) DO UPDATE SET ok=true, err=NULL, sent_at=now()',
-      [String(mailbox), String(id), msg.folder || 'INBOX', msg.origtime || 0, box.email]);
-    res.json({ ok: true, to: box.email });
-  } catch (e) { res.status(500).json({ error: smtpHint(e) }); }
+/* Aplicaciones de la central (apps.js): colas, grupos de timbrado, paging, IVR (clásico
+ * y con IA), buzones (voicemail + buzón → correo), códigos de función, aparcado y música
+ * en espera. Sus rutas se registran acá, DESPUÉS del gate de auth + RBAC. Va después de
+ * auth.js (exigirExt) y de recordings.js (wavToPcm/analyzeText para transcribir el buzón);
+ * astFwd/vozBase/setDialplan/smtpHint son declaraciones de función (izadas), así que
+ * pueden definirse más abajo sin TDZ. */
+require('./apps')({   // devuelve { aiAgentDialplan, buildIvrDialplan, vmList }; app.js hoy no usa ninguno
+  app, pool, amiAction, amiCommand, astFwd, vozBase, setDialplan, astconf, exigirExt, wavToPcm, analyzeText,
+  smtpHint, errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), logger,
 });
 
 // ---------------------------------------------------------------------------
@@ -1519,8 +742,6 @@ alerts.init(pool, {
   },
 });
 
-recstore.init(pool);
-report.init(pool);
 sysmon.init(pool, { nodes: NODES, state, token: AGENT_TOKEN });
 numbering.init(pool);
 
@@ -1538,29 +759,6 @@ app.get('/api/system/overview', async (req, res) => {
   try { res.json(await sysmon.overview()); } catch (e) { errorHttp(res, e); }
 });
 
-// Informe ejecutivo del historial de llamadas (HTML A4 -> imprimir / guardar como PDF)
-app.get('/api/cdr/report', async (req, res) => {
-  try {
-    const html = await report.build({
-      from: req.query.from, to: req.query.to,
-      tipo: req.query.tipo, q: req.query.q,
-      usuario: (req.user && (req.user.name || req.user.username)) || '',
-    });
-    res.type('html').send(html);
-  } catch (e) { errorHttp(res, e); }
-});
-// Probar el destino de almacenamiento ANTES de confiarle las grabaciones
-app.post('/api/recordings/storage/test', async (req, res) => {
-  try { res.json(await recstore.test()); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
-// Forzar la subida de lo pendiente (sin esperar la ronda automática)
-app.post('/api/recordings/storage/sync', async (req, res) => {
-  try { await recstore.sweep(); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
-app.get('/api/recordings/storage/usage', async (req, res) => { try { res.json(await recstore.usage()); } catch (e) { errorHttp(res, e); } });
-app.post('/api/recordings/storage/nastest', async (req, res) => { try { res.json(await recstore.nastest(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 
 app.get('/api/alerts/rules', async (req, res) => {
   try {
@@ -1611,38 +809,6 @@ app.get('/api/metrics', async (req, res) => {
   res.json({ ...hostMetrics(), db_size, ts: Date.now() });
 });
 
-// Enrollment: generar acceso (crea interno WebRTC + token) -> QR
-// Estado del acceso enviado a cada extension: si lo activaron, cuando y con que aparato.
-app.get('/api/enrollments', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT DISTINCT ON (ext) ext, created_at, expires_at, activated_at, device, platform, ip, uses
-        FROM pbxng_enroll ORDER BY ext, created_at DESC`);
-    res.json(rows.map(r => ({
-      ...r,
-      estado: r.activated_at ? 'activado'
-            : (r.expires_at && new Date(r.expires_at) < new Date()) ? 'vencido' : 'pendiente',
-    })));
-  } catch (e) { errorHttp(res, e); }
-});
-
-app.post('/api/enroll', async (req, res) => {
-  const { ext, label, video = false } = req.body || {};
-  if (!ext) return res.status(400).json({ error: 'ext requerido' });
-  const token = crypto.randomBytes(18).toString('hex');
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    // Si el interno ya existe, reusar su contraseña (no romper registros existentes); si no, crear WebRTC nuevo.
-    const ex = await c.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
-    let password;
-    if (ex.rows[0] && ex.rows[0].password) { password = ex.rows[0].password; }
-    else { password = 'Pbx' + crypto.randomBytes(4).toString('hex') + '#' + (10 + Math.floor(Math.random() * 89)); await createWebrtcEndpoint(c, String(ext), password, 'internal', 1, !!video); }
-    await c.query("INSERT INTO pbxng_enroll (token,ext,password,label,expires_at) VALUES ($1,$2,$3,$4, now() + interval '24 hours')", [token, String(ext), password, label || null]);
-    await c.query('COMMIT'); broadcastSoon();
-    res.json({ token, ext: String(ext), password, path: '/enroll?token=' + token });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
 
 /* Seguridad (/seguridad): vive en guard.js, se monta más abajo cuando ya existen
  * `astFwd` e `io` (las rutas /api/security*, /api/ipgeo, el socket 'security' y el
@@ -1708,36 +874,6 @@ app.delete('/api/prompts/:id', async (req, res) => {
   catch (e) { errorHttp(res, e); }
 });
 
-app.post('/api/enroll/email', async (req, res) => {
-  const { ext, to, tenant_id = 1 } = req.body || {};
-  if (!ext || !to) return res.status(400).json({ error: 'ext y destinatario requeridos' });
-  const c = await pool.connect();
-  try {
-    // Validar ANTES de crear nada: si el correo no se puede mandar, no dejamos un token
-    // huerfano (valido 24 h) que nadie recibio.
-    const { rows } = await pool.query('SELECT host,port,secure,username,password,from_addr,enabled FROM pbxng_email_config WHERE tenant_id=$1', [tenant_id]);
-    const cfg = rows[0];
-    if (!cfg || !cfg.enabled || !cfg.host) return res.status(400).json({ error: 'Configurá y activá el email de la empresa en Configuración → Email' });
-    const base = await (async () => { const { rows: r2 } = await pool.query("SELECT value FROM pbxng_settings WHERE key='domain'"); return (r2[0] && r2[0].value) || NODES.domain || process.env.DOMAIN || ''; })();
-    if (!base) return res.status(400).json({ error: 'Falta el dominio público de la central: sin él, el link de acceso saldría roto.' });
-
-    await c.query('BEGIN');
-    const ex = await c.query('SELECT password FROM ps_auths WHERE id=$1', [String(ext)]);
-    let password;
-    if (ex.rows[0] && ex.rows[0].password) { password = ex.rows[0].password; }
-    else { password = 'Pbx' + crypto.randomBytes(4).toString('hex') + '#' + (10 + Math.floor(Math.random() * 89)); await createWebrtcEndpoint(c, String(ext), password, 'internal', 1, false); }
-    const token = crypto.randomBytes(18).toString('hex');
-    await c.query("INSERT INTO pbxng_enroll (token,ext,password,expires_at) VALUES ($1,$2,$3, now() + interval '24 hours')", [token, String(ext), password]);
-    await c.query('COMMIT');
-    const url = 'https://' + base + '/enroll?token=' + token;
-    const png = await QRCode.toBuffer(url, { width: 320, margin: 1 });
-    const tx = nodemailer.createTransport({ host: cfg.host, port: cfg.port || 587, secure: !!cfg.secure, auth: cfg.username ? { user: cfg.username, pass: cfg.password } : undefined });
-    const { rows: bn } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand_name'");
-    const html = emails.enrollEmail({ brand: (bn[0] && bn[0].value) || 'PBX-NG', ext, url });
-    await tx.sendMail({ from: cfg.from_addr || cfg.username, to, subject: 'Tu acceso al softphone PBX-NG (interno ' + ext + ')', html, attachments: [{ filename: 'acceso-qr.png', content: png, cid: 'qr' }] });
-    res.json({ ok: true });
-  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: smtpHint(e) }); } finally { c.release(); }
-});
 
 // Push (admin): dispositivos nativos + estado de proveedores
 app.get('/api/push/devices', async (req, res) => { try { const devices = await pushProviders.listDevices(); const { rows } = await pool.query('SELECT ext, count(*)::int AS n FROM pbxng_push_subs GROUP BY ext'); const status = await pushProviders.providerStatus(); res.json({ devices, webpush: rows, status, vapid: VAPID.pub }); } catch (e) { errorHttp(res, e); } });
@@ -2028,40 +1164,15 @@ app.post('/api/asterisk/hangup', async (req, res) => {
   catch (e) { res.status(500).json({ error: 'No se pudo colgar' }); }
 });
 
-// --- Conexion a SBC-NG (modulo) ---
-app.get('/api/sbc-link', async (req, res) => {
-  try {
-    const lk = await sbcLink(true);
-    let estado = null;
-    if (lk.configured && lk.host) { const p = await salud.probarPuerto(lk.host, lk.port); estado = { vivo: p.vivo, ms: p.ms ?? null, motivo: p.motivo || null }; }
-    const { rows: ru } = await pool.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes WHERE trunk=$1', [lk.name]).catch(() => ({ rows: [{ n: 0 }] }));
-    res.json({ ...lk, estado, rutas_salientes: ru[0] ? ru[0].n : 0 });
-  } catch (e) { errorHttp(res, e); }
+/* Troncales y rutas (trunks.js): troncales de operador (pbxng_trunks + ps_*), rutas
+ * salientes/entrantes, el enlace fijo al SBC-NG (`to-sbc`, módulo `sbc`) y el diagnóstico
+ * de troncal. Sus rutas se registran acá, DESPUÉS del gate de auth + RBAC; `sbcLink` es lo
+ * único que el resto de la PBX mira para saber si hay un SBC adelante. */
+const { sbcLink, invalidarSbcLink, trunkStatuses } = require('./trunks')({
+  app, pool, NODES, amiCommand, endpointStates, moduleEnabled, setDialplan, astFwd, salud, diagtrunk, errorHttp,
+  broadcastSoon: (...a) => broadcastSoon(...a), logger,
 });
-app.post('/api/sbc-link', async (req, res) => {
-  try { const r = await upsertSbcLink(req.body || {}); broadcastSoon(); res.json({ ok: true, ruta_creada: r.ruta, link: await sbcLink(true) }); }
-  catch (e) { errorHttp(res, e); }
-});
-/* Desconectar el SBC-NG: borra la troncal fija y las rutas salientes que dependian de
- * ella (quedarian marcando a un endpoint inexistente) y apaga el modulo. La PBX sigue
- * funcionando con sus troncales de operador directas. */
-app.delete('/api/sbc-link', async (req, res) => {
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows: rutas } = await c.query('SELECT id, pattern FROM pbxng_outbound_routes WHERE trunk=$1', [SBC_TRUNK]);
-    for (const r of rutas) { await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [outExten(r.pattern)]); await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [r.id]); }
-    for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [SBC_TRUNK]);
-    await c.query('DELETE FROM pbxng_trunks WHERE kind=$1', ['sbc']);
-    await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'");
-    await c.query("INSERT INTO pbxng_settings(key,value) VALUES('mod_sbc','0') ON CONFLICT(key) DO UPDATE SET value='0'");
-    await c.query('COMMIT');
-    _sbcLinkCache.v = null;
-    try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
-    broadcastSoon();
-    res.json({ ok: true, rutas_borradas: rutas.length });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
+
 
 // --- Base de datos (PostgreSQL ARA + control plane) ---
 app.get('/api/db', async (req, res) => {
@@ -2081,25 +1192,6 @@ app.post('/api/db/maintenance', async (req, res) => {
   catch (e) { errorHttp(res, e); }
 });
 
-// --- IVR: generar audio por TTS y desplegarlo a Asterisk ---
-app.get('/api/ivr/audios', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,text,voice,ref,created_at FROM pbxng_ivr_audios ORDER BY created_at DESC'); res.json(rows); } catch (e) { errorHttp(res, e); } });
-app.post('/api/ivr/gen-audio', async (req, res) => {
-  try {
-    const b = req.body || {}; const text = (b.text || '').trim();
-    if (!text) return res.status(400).json({ error: 'texto requerido' });
-    let name = (b.name || ('ivr_' + Date.now())).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || ('ivr_' + Date.now());
-    const u = await vozBase();
-    const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice: b.voice, rate: 8000, format: 'wav' }), signal: AbortSignal.timeout(25000) });
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (!buf.length) return res.status(500).json({ error: 'TTS devolvió vacío' });
-    const sr = await astFwd('POST', '/sound', { name, b64: buf.toString('base64') }, 15000).then((x) => x.json());
-    if (!sr.ok) return res.status(500).json({ error: 'deploy: ' + (sr.error || '?') });
-    await pool.query("INSERT INTO pbxng_ivr_audios(name,text,voice,ref) VALUES($1,$2,$3,$4) ON CONFLICT(name) DO UPDATE SET text=$2,voice=$3,ref=$4,created_at=now()", [name, text, b.voice || '', sr.ref]);
-    res.json({ ok: true, ref: sr.ref, name });
-  } catch (e) { errorHttp(res, e); }
-});
-app.delete('/api/ivr/audios/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_ivr_audios WHERE id=$1', [req.params.id]); res.json({ ok: true }); } catch (e) { errorHttp(res, e); } });
-
 // --- Modulos (PBX modular: activar/desactivar) ---
 /* `sbc` = "Conexion a SBC-NG" (otro producto): apagado por defecto; se enciende solo
  * en instalaciones que ya tenian la troncal to-sbc (ver seed y migracion 0007).
@@ -2118,7 +1210,7 @@ app.post('/api/modules', async (req, res) => {
     try {
       if (id === 'turn') { const r = await turnFwd('POST', '/service', { action: enabled ? 'start' : 'stop' }, 12000); svc = await r.json(); }
     } catch (e) { svc = { error: e.message }; }
-    if (id === 'sbc') { _sbcLinkCache.v = null; broadcastSoon(); }
+    if (id === 'sbc') { invalidarSbcLink(); broadcastSoon(); }
     res.json({ ok: true, id, enabled: !!enabled, svc });
   } catch (e) { errorHttp(res, e); }
 });
@@ -2267,90 +1359,7 @@ app.post('/api/c2c', async (req, res) => { const b = req.body || {}; if (!b.name
 app.put('/api/c2c/:id', async (req, res) => { const b = req.body || {}; try { await pool.query('UPDATE pbxng_click2call SET name=$1,dest_type=$2,dest_value=$3,intro=$4,require_name=$5,collect_geo=$6,video=$7,enabled=$8 WHERE id=$9', [b.name, b.dest_type || 'extension', b.dest_value, b.intro || '', b.require_name !== false, !!b.collect_geo, !!b.video, b.enabled !== false, req.params.id]); res.json({ updated: req.params.id }); } catch (e) { errorHttp(res, e); } });
 app.delete('/api/c2c/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_click2call WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id }); } catch (e) { errorHttp(res, e); } });
 
-// Grabaciones (admin)
-// Match de grabación para un diálogo SIP (por from/to y proximidad temporal)
-app.get('/api/recordings/match', async (req, res) => {
-  try {
-    const a = (req.query.from || '').toString().slice(0, 40);
-    const b = (req.query.to || '').toString().slice(0, 40);
-    const ts = parseInt(req.query.ts, 10) || 0;
-    if (!a && !b) return res.json({});
-    // Un agente sólo puede buscar grabaciones de llamadas en las que participó su interno.
-    const propio = extPropia(req);
-    if (propio !== null && a !== propio && b !== propio) return res.status(403).json({ error: 'no podés acceder a las grabaciones de otra extensión' });
-    const { rows } = await pool.query(
-      `SELECT id, duration, src, dst, extract(epoch from started_at)*1000 AS started_ms
-       FROM pbxng_recordings
-       WHERE deleted=false
-         AND (src=$1 OR src=$2 OR dst=$1 OR dst=$2)
-         AND ($3::bigint = 0 OR abs(extract(epoch from started_at)*1000 - $3::bigint) < 300000)
-       ORDER BY ($3::bigint <> 0)::int * abs(extract(epoch from started_at)*1000 - $3::bigint) ASC, id DESC
-       LIMIT 1`, [a, b, ts]);
-    res.json(rows[0] || {});
-  } catch (e) { errorHttp(res, e); }
-});
-app.get('/api/recordings', async (req, res) => {
-  try { const { rows } = await pool.query('SELECT id, filename, ext, src, dst, started_at, bytes, duration, storage, remote_url FROM pbxng_recordings WHERE deleted=false ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 500'); res.json(rows); }
-  catch (e) { errorHttp(res, e); }
-});
-app.delete('/api/recordings/:id', async (req, res) => {
-  try { await pool.query('UPDATE pbxng_recordings SET deleted=true WHERE id=$1', [req.params.id]); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
-app.get('/api/recordings/config', async (req, res) => {
-  try { const { rows } = await pool.query("SELECT id, backend, nas_path, s3_endpoint, s3_region, s3_bucket, s3_key, COALESCE(NULLIF(s3_secret,''),'') <> '' AS has_secret, s3_prefix, auto_upload, retain_local, nas_type, nas_server, nas_share, nas_user, COALESCE(NULLIF(nas_pass,''),'') <> '' AS has_nas_pass FROM pbxng_rec_config WHERE id=1"); res.json(rows[0] || {}); }
-  catch (e) { errorHttp(res, e); }
-});
-app.post('/api/recordings/config', async (req, res) => {
-  const b = req.body || {};
-  try {
-    await pool.query(`UPDATE pbxng_rec_config SET backend=COALESCE($1,backend), nas_path=$2, s3_endpoint=$3, s3_region=$4, s3_bucket=$5, s3_key=$6, s3_secret=COALESCE(NULLIF($7,''), s3_secret), s3_prefix=COALESCE($8,s3_prefix), auto_upload=COALESCE($9,auto_upload), retain_local=COALESCE($10,retain_local), nas_type=COALESCE($11,nas_type), nas_server=$12, nas_share=$13, nas_user=$14, nas_pass=COALESCE(NULLIF($15,''),nas_pass), updated_at=now() WHERE id=1`,
-      [b.backend || null, b.nas_path || null, b.s3_endpoint || null, b.s3_region || null, b.s3_bucket || null, b.s3_key || null, b.s3_secret || '', b.s3_prefix || null, b.auto_upload, b.retain_local, b.nas_type || null, b.nas_server || null, b.nas_share || null, b.nas_user || null, b.nas_pass || '']);
-    res.json({ ok: true });
-  } catch (e) { errorHttp(res, e); }
-});
 
-// ---------------- Usuarios ----------------
-app.get('/api/users', async (req, res) => {
-  try { const { rows } = await pool.query('SELECT id,username,name,role,ext,created_at FROM pbxng_users ORDER BY id'); res.json(rows); }
-  catch (e) { errorHttp(res, e); }
-});
-/* Toda la familia /api/users es sólo admin (rbac.js: no figura en la tabla). */
-app.post('/api/users', async (req, res) => {
-  /* Rol por defecto 'agente': el más chico. Antes era 'admin', así que un alta apurada
-   * desde el panel (o un POST sin `role`) creaba administradores sin querer. */
-  const { username, password, name, role = 'agente', ext = null } = req.body || {};
-  if (!username || !password) return res.status(400).json({ error: 'usuario y contraseña obligatorios' });
-  if (String(password).length < 8) return res.status(400).json({ error: 'la contraseña debe tener al menos 8 caracteres' });
-  if (!ROLES.includes(role)) return res.status(400).json({ error: 'rol inválido (admin, supervisor o agente)' });
-  try {
-    await pool.query('INSERT INTO pbxng_users (username,password_hash,name,role,ext) VALUES ($1,$2,$3,$4,$5)', [String(username).trim(), await bcrypt.hash(String(password), 10), name || username, role, ext || null]);
-    res.status(201).json({ created: username });
-  } catch (e) { res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'el usuario ya existe' : e.message }); }
-});
-app.post('/api/users/:id/password', async (req, res) => {
-  const { password } = req.body || {};
-  if (!password || String(password).length < 8) return res.status(400).json({ error: 'la contraseña debe tener al menos 8 caracteres' });
-  try {
-    const r = await pool.query('UPDATE pbxng_users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(String(password), 10), req.params.id]);
-    if (!r.rowCount) return res.status(404).json({ error: 'usuario inexistente' });
-    res.json({ ok: true });
-  } catch (e) { errorHttp(res, e); }
-});
-app.delete('/api/users/:id', async (req, res) => {
-  try {
-    if (String(req.user.uid) === String(req.params.id)) return res.status(400).json({ error: 'no podés borrar tu propio usuario' });
-    const { rows } = await pool.query('SELECT username, role FROM pbxng_users WHERE id=$1', [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'usuario inexistente' });
-    if (rows[0].role === 'admin') {
-      /* Sin al menos un admin nadie puede volver a configurar la central: sería
-       * quedarse afuera de la propia casa. */
-      const { rows: n } = await pool.query("SELECT count(*)::int AS n FROM pbxng_users WHERE role='admin'");
-      if (n[0].n <= 1) return res.status(400).json({ error: 'no se puede borrar el último administrador' });
-    }
-    await pool.query('DELETE FROM pbxng_users WHERE id=$1', [req.params.id]); res.json({ deleted: req.params.id });
-  } catch (e) { errorHttp(res, e); }
-});
 
 /* ─────────────── ACME / Let's Encrypt ───────────────
  * Certificado TLS propio del appliance SIN proxy adelante. Sólo admin.
@@ -2404,7 +1413,6 @@ app.get('/api/system', async (req, res) => {
     { group: 'Nucleo', name: 'Conferencias', detail: 'app_confbridge', status: has('app_confbridge\\.so') ? 'ok' : 'off' },
     { group: 'Nucleo', name: 'WebSocket', detail: 'res_http_websocket', status: has('res_http_websocket\\.so') ? 'ok' : 'off' },
     { group: 'Datos', name: 'PostgreSQL', detail: dbver || '-', status: db ? 'ok' : 'down' },
-    { group: 'Datos', name: 'Redis', detail: 'cache / sesiones', status: 'ok' },
     { group: 'Datos', name: 'CDR', detail: 'cdr_pgsql', status: has('cdr_pgsql\\.so') ? 'ok' : 'off' },
     { group: 'Transporte', name: 'SIP UDP 5060', detail: 'telefonos / softphones', status: /udp/i.test(transports) ? 'ok' : 'off' },
     { group: 'Transporte', name: 'ARI / AMI', detail: 'control plane (LAN)', status: state.ari && state.ami ? 'ok' : 'down' },
@@ -2459,8 +1467,6 @@ app.get('/api/topology', async (req, res) => {
 });
 
 app.get('/api/extensions', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { errorHttp(res, e); } });
-app.get('/api/extensions/record-all', async (req, res) => { try { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); res.json({ enabled: !!(rows[0] && rows[0].value === '1') }); } catch (e) { errorHttp(res, e); } });
-app.post('/api/extensions/record-all', async (req, res) => { try { const on = !!(req.body && req.body.enabled); await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('record_all',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [on ? '1' : '0']); await setRecAll(on); res.json({ ok: true, enabled: on }); } catch (e) { errorHttp(res, e); } });
 app.get('/api/endpoints', async (req, res) => { try { res.json(await getExtensions()); } catch (e) { errorHttp(res, e); } });
 /* Modos de DTMF válidos (Asterisk chan_pjsip). Importa de verdad en porteros/frentes de
  * calle: muchos (Dahua, Hikvision) mandan el dígito de apertura por SIP INFO (RFC 2976)
@@ -2533,259 +1539,6 @@ app.delete('/api/endpoints/:id', async (req, res) => {
   catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 
-// ---------------- Rutas SALIENTES ----------------
-function outExten(p) { return p && p[0] === '_' ? p : '_' + p; }
-app.get('/api/routes/outbound', async (req, res) => {
-  try { const { rows } = await pool.query('SELECT id,name,pattern,trunk,strip,prepend,callerid FROM pbxng_outbound_routes ORDER BY id'); res.json(rows); }
-  catch (e) { errorHttp(res, e); }
-});
-// Troncal de salida por defecto. Con el modulo "Conexion a SBC-NG" activo y la troncal
-// to-sbc configurada, el saliente va por el SBC; si no, sale directo por la primera
-// troncal de operador. La PBX funciona completa con o sin SBC adelante.
-async function defaultOutTrunk(q) {
-  try {
-    const lk = await sbcLink();
-    if (lk.active) return lk.name;
-    const r = await q.query("SELECT name FROM pbxng_trunks WHERE COALESCE(kind,'asterisk') NOT IN ('webrtc','webrtc-client','sbc','kamailio') ORDER BY id LIMIT 1");
-    return r.rows[0] ? r.rows[0].name : null;
-  } catch (_) { return null; }
-}
-app.post('/api/routes/outbound', async (req, res) => {
-  const { name, pattern, trunk, strip = 0, prepend = '', callerid = '' } = req.body || {};
-  if (!pattern) return res.status(400).json({ error: 'patrón requerido' });
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const tk = (trunk && String(trunk).trim()) || (await defaultOutTrunk(c));
-    if (!tk) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'No hay ninguna troncal por donde salir: creá una troncal de operador primero (o conectá un SBC-NG en Configuración → SBC-NG).' }); }
-    await c.query('INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ($1,$2,$3,$4,$5,$6)', [name || pattern, pattern, tk, +strip || 0, prepend || null, callerid || null]);
-    const rows = []; let p = 1;
-    if (callerid) rows.push([p++, 'Set', 'CALLERID(num)=' + callerid]);
-    rows.push([p++, 'Dial', 'PJSIP/' + (prepend || '') + '${EXTEN:' + (+strip || 0) + '}@' + tk + ',60']);
-    rows.push([p++, 'Hangup', '']);
-    await setDialplan(c, 'internal', outExten(pattern), rows);
-    await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: pattern, trunk: tk });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.delete('/api/routes/outbound/:id', async (req, res) => {
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows } = await c.query('SELECT pattern FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
-    if (rows[0]) await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [outExten(rows[0].pattern)]);
-    await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
-    await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-// ---------------- Rutas ENTRANTES (DID) ----------------
-function inboundRows(dest_type, v) {
-  if (dest_type === 'ivr') return [[1, 'Goto', 'ivr,' + v + ',1']];
-  if (dest_type === 'cola') return [[1, 'Answer', ''], [2, 'Queue', v], [3, 'Hangup', '']];
-  if (dest_type === 'app') return [[1, 'Goto', 'internal,' + v + ',1']];
-  return [[1, 'Dial', 'PJSIP/' + v + ',30'], [2, 'Voicemail', v + '@default,u'], [3, 'Hangup', '']];
-}
-app.get('/api/routes/inbound', async (req, res) => {
-  try { const { rows } = await pool.query('SELECT id,did,name,dest_type,dest_value FROM pbxng_inbound_routes ORDER BY id'); res.json(rows); }
-  catch (e) { errorHttp(res, e); }
-});
-app.post('/api/routes/inbound', async (req, res) => {
-  const { did, name, dest_type = 'interno', dest_value } = req.body || {};
-  if (!did || !dest_value) return res.status(400).json({ error: 'DID y destino requeridos' });
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    await c.query('INSERT INTO pbxng_inbound_routes (did,name,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [did, name || did, dest_type, dest_value]);
-    await setDialplan(c, 'from-trunk', did, inboundRows(dest_type, dest_value));
-    await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: did });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.delete('/api/routes/inbound/:id', async (req, res) => {
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows } = await c.query('SELECT did FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
-    if (rows[0]) await c.query("DELETE FROM extensions WHERE context='from-trunk' AND exten=$1", [rows[0].did]);
-    await c.query('DELETE FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
-    await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-// ---------------- Troncales SIP (avanzado) ----------------
-const TRUNK_TRANSPORT = { udp: 'transport-udp', tcp: 'transport-tcp', tls: 'transport-tls' };
-function trunkDefaults(o = {}) {
-  return {
-    provider_host: o.provider_host || '', provider_port: +o.provider_port || 5060,
-    transport: ['udp', 'tcp', 'tls'].includes(o.transport) ? o.transport : 'udp',
-    mode: o.mode === 'ip' ? 'ip' : 'register',
-    username: o.username || '', from_user: o.from_user || o.username || '',
-    from_domain: o.from_domain || o.provider_host || '', callerid: o.callerid || '',
-    codecs: Array.isArray(o.codecs) && o.codecs.length ? o.codecs : ['ulaw', 'alaw'],
-    dtmf_mode: ['rfc4733', 'inband', 'info', 'auto'].includes(o.dtmf_mode) ? o.dtmf_mode : 'rfc4733',
-    nat: o.nat !== false, direct_media: !!o.direct_media,
-    qualify_frequency: +o.qualify_frequency || 60, expiration: +o.expiration || 3600,
-    retry_interval: +o.retry_interval || 60, context: o.context || 'from-trunk',
-    outbound_enabled: o.outbound_enabled !== false, outbound_prefix: o.outbound_prefix != null ? String(o.outbound_prefix) : '0',
-    outbound_strip: +o.outbound_strip || 0, logo: o.logo || (o.adv_config && o.adv_config.logo) || '',
-    dids: Array.isArray(o.dids) ? o.dids.filter(Boolean) : (o.dids ? String(o.dids).split(/[\s,]+/).filter(Boolean) : ((o.adv_config && o.adv_config.dids) || [])),
-    channels: +o.channels || (o.adv_config && +o.adv_config.channels) || 0,
-    gateway: o.gateway || (o.adv_config && o.adv_config.gateway) || '',
-  };
-}
-async function writeAsteriskTrunk(c, name, a, password, tenant_id) {
-  for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]);
-  const tr = TRUNK_TRANSPORT[a.transport] || 'transport-udp';
-  const tsuf = a.transport === 'tcp' ? ';transport=tcp' : a.transport === 'tls' ? ';transport=tls' : '';
-  const allow = a.codecs.join(',');
-  const nat = a.nat ? 'yes' : 'no';
-  await c.query("INSERT INTO ps_aors (id,contact,qualify_frequency,max_contacts,tenant_id) VALUES ($1,$2,$3,1,$4)", [name, `sip:${a.provider_host}:${a.provider_port}${tsuf}`, a.qualify_frequency, tenant_id]);
-  const hasAuth = !!(a.username && password);
-  if (hasAuth) await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,$4)", [name, a.username, password, tenant_id]);
-  await c.query(
-    "INSERT INTO ps_endpoints (id,transport,aors,outbound_auth,context,disallow,allow,from_user,from_domain,callerid,dtmf_mode,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by,tenant_id,pbxng_kind) " +
-    "VALUES ($1,$2,$1,$3,$4,'all',$5,$6,$7,$8,$9,$10,$11,$11,$11,'username,ip',$12,'trunk')",
-    [name, tr, hasAuth ? name : null, a.context, allow, a.from_user || null, a.from_domain || null, a.callerid || null, a.dtmf_mode, a.direct_media ? 'yes' : 'no', nat, tenant_id]
-  );
-  await c.query("INSERT INTO ps_endpoint_id_ips (id,endpoint,match) VALUES ($1,$1,$2)", [name, a.provider_host]);
-  if (a.mode === 'register') {
-    const cli = a.username ? `sip:${a.username}@${a.provider_host}:${a.provider_port}${tsuf}` : `sip:${a.provider_host}:${a.provider_port}${tsuf}`;
-    await c.query("INSERT INTO ps_registrations (id,server_uri,client_uri,outbound_auth,retry_interval,expiration,transport) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-      [name, `sip:${a.provider_host}:${a.provider_port}${tsuf}`, cli, hasAuth ? name : null, a.retry_interval, a.expiration, tr]);
-  }
-  if (a.outbound_enabled) {
-    const pre = a.outbound_prefix || '';
-    const exten = '_' + (pre ? pre : 'X') + '.';
-    const dialNum = a.outbound_strip ? `${'${EXTEN:' + a.outbound_strip + '}'}` : '${EXTEN}';
-    await setDialplan(c, 'internal', exten, [[1, 'NoOp', 'Salida ' + name], [2, 'Dial', 'PJSIP/' + dialNum + '@' + name + ',60'], [3, 'Hangup', '']]);
-  }
-}
-
-app.get('/api/trunks', async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,kam_config,adv_config FROM pbxng_trunks ORDER BY id");
-    const st = await trunkStatuses(rows);
-    res.json(rows.map(({ kam_config, adv_config, ...t }) => ({ ...t, status: (st[t.name] || {}).status || 'unknown', detail: (st[t.name] || {}).detail || '', register_provider: !!(kam_config && kam_config.register), link: ((t.kind === 'webrtc' || t.kind === 'webrtc-client') && kam_config && (kam_config.link || kam_config.remote_url)) || null, target: ((t.kind === 'webrtc' || t.kind === 'webrtc-client') && kam_config) ? (((String(kam_config.remote_url || kam_config.link || '').match(/wss?:\/\/([^/:]+)/) || [])[1]) || t.provider_host || '') : null, adv: adv_config || ((kam_config && kam_config.logo) ? { logo: kam_config.logo } : null), logo: (adv_config && adv_config.logo) || (kam_config && kam_config.logo) || null, rtt: (st[t.name] || {}).rtt != null ? (st[t.name] || {}).rtt : null, dids: (adv_config && adv_config.dids) || (kam_config && kam_config.dids) || [], channels: (adv_config && adv_config.channels) || (kam_config && kam_config.channels) || 0, gateway: (adv_config && adv_config.gateway) || (kam_config && kam_config.gateway) || '', mode: (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? t.kind : ((adv_config && adv_config.mode) || (t.do_register ? 'register' : 'ip')), transport: (t.kind === 'webrtc' || t.kind === 'webrtc-client') ? 'wss' : ((adv_config && adv_config.transport) || 'udp') })));
-  } catch (e) { errorHttp(res, e); }
-});
-
-app.get('/api/trunks/:name/detail', async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT name,provider_host,provider_port,username,COALESCE(kind,'asterisk') AS kind,adv_config,kam_config FROM pbxng_trunks WHERE name=$1", [req.params.name]);
-    if (!rows[0]) return res.status(404).json({ error: 'no existe' });
-    const t = rows[0];
-    const { rows: au } = await pool.query("SELECT 1 FROM ps_auths WHERE id=$1", [req.params.name]);
-    const kc = t.kam_config || {};
-    res.json({ name: t.name, kind: t.kind, has_password: !!au[0], username: t.username || kc.username || '', link: (t.kind === 'webrtc') ? (kc.link || ('wss://' + (NODES.domain || '') + '/ws')) : null, remote_url: (t.kind === 'webrtc-client') ? (kc.remote_url || '') : null, adv: trunkDefaults(t.adv_config || t.kam_config || { provider_host: t.provider_host, provider_port: t.provider_port, username: t.username, mode: t.do_register ? 'register' : 'ip' }) });
-  } catch (e) { errorHttp(res, e); }
-});
-
-app.post('/api/trunks', async (req, res) => {
-  const b = req.body || {};
-  const { name, password, tenant_id = 1, kind = 'asterisk' } = b;
-  // WebRTC (expone enlace WSS; el remoto registra como cliente WSS estándar SIP+DTLS-SRTP)
-  if (kind === 'webrtc') {
-    if (!name || !password) return res.status(400).json({ error: 'name y password son obligatorios' });
-    const uname = (b.username || name);
-    const c = await pool.connect();
-    try {
-      await c.query('BEGIN');
-      await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,1,'yes',30,$2) ON CONFLICT (id) DO UPDATE SET max_contacts=1,qualify_frequency=30", [name, tenant_id]);
-      await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,$4) ON CONFLICT (id) DO UPDATE SET username=$2,password=$3", [name, uname, password, tenant_id]);
-      await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by) VALUES ($1,'transport-ws',$1,$1,'from-trunk','all','ulaw,alaw,g722,vp8,h264',$2,'trunk','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes','username') ON CONFLICT (id) DO UPDATE SET context='from-trunk',webrtc='yes',transport='transport-ws',allow='ulaw,alaw,g722,vp8,h264',media_encryption='dtls',identify_by='username'", [name, tenant_id]);
-      const link = 'wss://' + (NODES.domain || '') + '/ws';
-      const kam = { kind: 'webrtc', username: uname, wss_path: '/ws', link, note: b.note || '' };
-      await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,5060,$3,false,$4,'webrtc',$5) ON CONFLICT (name) DO UPDATE SET kind='webrtc',username=$3,kam_config=$5", [name, (NODES.domain || ''), uname, tenant_id, JSON.stringify(kam)]);
-      await c.query('COMMIT'); broadcastSoon();
-      return res.status(201).json({ created: name, kind: 'webrtc', link, username: uname });
-    } catch (e) { await c.query('ROLLBACK'); return errorHttp(res, e); } finally { c.release(); }
-  }
-  // Troncales que vivian en el SBC embebido: hoy se administran en SBC-NG (otro producto).
-  if (kind === 'webrtc-client' || kind === 'kamailio') return res.status(400).json({ error: 'Las troncales vía SBC se administran en el panel de SBC-NG. En PBX-NG solo se configura la conexión al SBC (Configuración → SBC-NG).' });
-  if (kind === 'sbc') {
-    try { const r = await upsertSbcLink({ host: b.provider_host, port: b.provider_port, transport: b.transport, context: b.context, codecs: b.codecs, tenant_id }); broadcastSoon(); return res.status(201).json({ created: SBC_TRUNK, kind: 'sbc', ruta_creada: r.ruta }); }
-    catch (e) { return errorHttp(res, e); }
-  }
-  if (!name || !b.provider_host) return res.status(400).json({ error: 'name y provider_host son obligatorios' });
-  const a = trunkDefaults(b);
-  if (a.mode === 'register' && !(a.username && password)) return res.status(400).json({ error: 'usuario y contraseña son obligatorios en modo Registro' });
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ($1,$2,$3,$4,$5,$6,'asterisk',$7)", [name, a.provider_host, a.provider_port, a.username || null, a.mode === 'register', tenant_id, JSON.stringify(a)]);
-    await writeAsteriskTrunk(c, name, a, password, tenant_id);
-    await c.query('COMMIT'); res.status(201).json({ created: name, mode: a.mode });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-app.put('/api/trunks/:name', async (req, res) => {
-  const name = req.params.name; const b = req.body || {};
-  const { password, tenant_id = 1, kind = 'asterisk' } = b;
-  if (kind === 'webrtc') {
-    const uname = (b.username || name);
-    const c = await pool.connect();
-    try {
-      await c.query('BEGIN');
-      const { rows: ex } = await c.query("SELECT 1 FROM pbxng_trunks WHERE name=$1", [name]);
-      if (!ex[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'troncal no existe' }); }
-      const { rows: oldAuth } = await c.query('SELECT password FROM ps_auths WHERE id=$1', [name]);
-      const pass = password || (oldAuth[0] ? oldAuth[0].password : null);
-      if (!pass) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'contrasena requerida' }); }
-      await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,1,'yes',30,$2) ON CONFLICT (id) DO UPDATE SET max_contacts=1,qualify_frequency=30", [name, tenant_id]);
-      await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,$4) ON CONFLICT (id) DO UPDATE SET username=$2,password=$3", [name, uname, pass, tenant_id]);
-      await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by) VALUES ($1,'transport-ws',$1,$1,'from-trunk','all','ulaw,alaw,g722,vp8,h264',$2,'trunk','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes','username') ON CONFLICT (id) DO UPDATE SET context='from-trunk',webrtc='yes',transport='transport-ws',allow='ulaw,alaw,g722,vp8,h264',media_encryption='dtls',identify_by='username'", [name, tenant_id]);
-      const link = 'wss://' + (NODES.domain || '') + '/ws';
-      const kam = { kind: 'webrtc', username: uname, wss_path: '/ws', link, note: b.note || '' };
-      await c.query("UPDATE pbxng_trunks SET username=$2, kind='webrtc', kam_config=$3, adv_config=NULL WHERE name=$1", [name, uname, JSON.stringify(kam)]);
-      await c.query('COMMIT'); return res.json({ updated: name, kind: 'webrtc', link, username: uname });
-    } catch (e) { await c.query('ROLLBACK'); return errorHttp(res, e); } finally { c.release(); }
-  }
-  if (kind === 'webrtc-client') {
-    if (!b.remote_url || !b.username) return res.status(400).json({ error: 'remote_url y username son obligatorios' });
-    try {
-      const { rows: old } = await pool.query('SELECT kam_config FROM pbxng_trunks WHERE name=$1', [name]);
-      if (!old[0]) return res.status(404).json({ error: 'troncal no existe' });
-      const prev = (old[0] && old[0].kam_config) || {};
-      const pass = password || prev.password;
-      if (!pass) return res.status(400).json({ error: 'contrasena requerida' });
-      const rhost = (String(b.remote_url).match(/wss?:\/\/([^/:]+)/) || [])[1] || '';
-      const kam = { kind: 'webrtc-client', remote_url: b.remote_url, username: b.username, password: pass, note: b.note || '' };
-      await pool.query("UPDATE pbxng_trunks SET provider_host=$2, username=$3, do_register=true, kind='webrtc-client', kam_config=$4, adv_config=NULL WHERE name=$1", [name, rhost, b.username, JSON.stringify(kam)]);
-      return res.json({ updated: name, kind: 'webrtc-client' });
-    } catch (e) { return errorHttp(res, e); }
-  }
-  if (!b.provider_host) return res.status(400).json({ error: 'provider_host es obligatorio' });
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows: ex } = await c.query("SELECT COALESCE(kind,'asterisk') AS kind FROM pbxng_trunks WHERE name=$1", [name]);
-    if (!ex[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'troncal no existe' }); }
-    const { rows: oldAuth } = await c.query('SELECT password FROM ps_auths WHERE id=$1', [name]);
-    const oldPass = oldAuth[0] ? oldAuth[0].password : null;
-    for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]);
-    if (kind === 'kamailio') {
-      const { rows: old } = await c.query('SELECT kam_config FROM pbxng_trunks WHERE name=$1', [name]);
-      const prev = (old[0] && old[0].kam_config) || {};
-      const kam = Object.assign(trunkDefaults(b), { host: b.provider_host, port: +b.provider_port || 5060, register: b.mode !== 'ip', password: password || prev.password || null });
-      await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='kamailio', kam_config=$5, adv_config=NULL WHERE name=$6", [b.provider_host, kam.port, b.username || null, kam.register, JSON.stringify(kam), name]);
-      await c.query('COMMIT'); return res.json({ updated: name, kind: 'kamailio' });
-    }
-    const a = trunkDefaults(b);
-    const pass = password || oldPass;
-    if (a.mode === 'register' && !(a.username && pass)) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'usuario y contraseña requeridos en modo Registro' }); }
-    await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='asterisk', kam_config=NULL, adv_config=$5 WHERE name=$6", [a.provider_host, a.provider_port, a.username || null, a.mode === 'register', JSON.stringify(a), name]);
-    await writeAsteriskTrunk(c, name, a, pass, tenant_id);
-    await c.query('COMMIT'); res.json({ updated: name, mode: a.mode });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-app.delete('/api/trunks/:name', async (req, res) => {
-  const { name } = req.params; const c = await pool.connect();
-  try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); if (name === SBC_TRUNK) { await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'"); _sbcLinkCache.v = null; } await c.query('COMMIT'); res.json({ deleted: name }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-app.post('/api/trunks/diagnose', async (req, res) => { try { res.json(await diagtrunk.diagnosticar(req.body || {})); } catch (e) { errorHttp(res, e); } });
-app.get('/api/registrations', async (req, res) => { try { res.json({ output: await amiCommand('pjsip show registrations') }); } catch (e) { errorHttp(res, e); } });
 
 // ---------------- Integraciones (Telegram / WhatsApp) ----------------
 async function sendTelegram(cfg, text) {
@@ -2855,10 +1608,6 @@ app.post('/api/integrations/:type/test', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// ---------------- AI IVR (agentes) ----------------
-function aiAgentDialplan(exten, id) {
-  return [['ivr', exten, 1, 'NoOp', 'AI IVR agente ' + id], ['ivr', exten, 2, 'Answer', ''], ['ivr', exten, 3, 'Stasis', 'pbxng,ai,' + id], ['ivr', exten, 4, 'Hangup', '']];
-}
 app.get('/api/settings', async (req, res) => {
   try { const { rows } = await pool.query('SELECT key,value FROM pbxng_settings'); const o = {}; for (const r of rows) { o[r.key] = /key|secret|token|pass|account|credential|p8|private/i.test(r.key) ? (r.value ? '__SET__' : '') : r.value; } res.json(o); }
   catch (e) { errorHttp(res, e); }
@@ -2868,250 +1617,6 @@ app.post('/api/settings', async (req, res) => {
   try { for (const [k, v] of Object.entries(b)) { if (v === '__SET__') continue; await pool.query('INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [k, String(v == null ? '' : v)]); } res.json({ ok: true }); }
   catch (e) { errorHttp(res, e); }
 });
-app.get('/api/ai-agents', async (req, res) => {
-  try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
-  catch (e) { errorHttp(res, e); }
-});
-app.post('/api/ai-agents', async (req, res) => {
-  const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
-  if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows } = await c.query('INSERT INTO pbxng_ai_agents (name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id', [name, exten, greeting, system_prompt, voice, provider, model, enabled, sales_exten, support_exten, default_exten, crm_webhook, greeting_text]);
-    await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-    for (const r of aiAgentDialplan(exten, rows[0].id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-    await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: rows[0].id, exten });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.put('/api/ai-agents/:id', async (req, res) => {
-  const { id } = req.params;
-  const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows: old } = await c.query('SELECT exten FROM pbxng_ai_agents WHERE id=$1', [id]);
-    if (!old[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'agente no existe' }); }
-    await c.query('UPDATE pbxng_ai_agents SET name=$1,exten=$2,greeting=$3,system_prompt=$4,voice=$5,provider=$6,model=$7,enabled=$8,sales_exten=$10,support_exten=$11,default_exten=$12,crm_webhook=$13,greeting_text=$14 WHERE id=$9', [name, exten, greeting, system_prompt, voice, provider, model, enabled, id, sales_exten, support_exten, default_exten, crm_webhook, greeting_text]);
-    await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
-    if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-    for (const r of aiAgentDialplan(exten, id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-    await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.delete('/api/ai-agents/:id', async (req, res) => {
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows } = await c.query('SELECT exten FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
-    if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]);
-    await c.query('DELETE FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
-    await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-app.get('/api/ivr', async (req, res) => {
-  try { const { rows: ivrs } = await pool.query('SELECT id,name,exten,greeting,timeout,tenant_id,flow FROM pbxng_ivr ORDER BY id'); for (const iv of ivrs) { const { rows: o } = await pool.query('SELECT digit,dest_type,dest_value FROM pbxng_ivr_options WHERE ivr_id=$1 ORDER BY digit', [iv.id]); iv.options = o; } res.json(ivrs); }
-  catch (e) { errorHttp(res, e); }
-});
-function buildIvrDialplan(exten, greeting, timeout, options) {
-  const rows = [['ivr', exten, 1, 'Answer', ''], ['ivr', exten, 2, 'Read', `SEL,${greeting},1,,1,${timeout}`]];
-  options.forEach((o, i) => rows.push(['ivr', exten, 3 + i, 'GotoIf', `$["\${SEL}"="${o.digit}"]?${100 + i * 10}`]));
-  rows.push(['ivr', exten, 3 + options.length, 'Goto', `${exten},2`]);
-  options.forEach((o, i) => {
-    const b = 100 + i * 10; const v = o.dest_value;
-    rows.push(['ivr', exten, b, 'NoOp', `Opcion ${o.digit} -> ${o.dest_type}:${v || ''}`]);
-    if (o.dest_type === 'extension') { rows.push(['ivr', exten, b + 1, 'Dial', `PJSIP/${v},30`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
-    else if (o.dest_type === 'ringgroup') rows.push(['ivr', exten, b + 1, 'Goto', `internal,${v},1`]);
-    else if (o.dest_type === 'queue') { rows.push(['ivr', exten, b + 1, 'Queue', v]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
-    else if (o.dest_type === 'voicemail') { rows.push(['ivr', exten, b + 1, 'VoiceMail', `${v}@default,u`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
-    else if (o.dest_type === 'ivr' || o.dest_type === 'ai') rows.push(['ivr', exten, b + 1, 'Goto', `ivr,${v},1`]);
-    else rows.push(['ivr', exten, b + 1, 'Hangup', '']);
-  });
-  return rows;
-}
-app.post('/api/ivr', async (req, res) => {
-  const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], tenant_id = 1, flow = null } = req.body || {};
-  if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows } = await c.query('INSERT INTO pbxng_ivr (name,exten,greeting,timeout,tenant_id,flow) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [name, exten, greeting, timeout, tenant_id, flow]);
-    const id = rows[0].id;
-    for (const o of options) await c.query('INSERT INTO pbxng_ivr_options (ivr_id,digit,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [id, o.digit, o.dest_type, o.dest_value]);
-    await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-    for (const r of buildIvrDialplan(exten, greeting, timeout, options)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-    await c.query('COMMIT'); res.status(201).json({ created: id, exten });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.put('/api/ivr/:id', async (req, res) => {
-  const { id } = req.params;
-  const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], flow = null } = req.body || {};
-  if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const { rows: old } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]);
-    if (!old[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'IVR no existe' }); }
-    await c.query('UPDATE pbxng_ivr SET name=$1,exten=$2,greeting=$3,timeout=$4,flow=$5 WHERE id=$6', [name, exten, greeting, timeout, flow, id]);
-    await c.query('DELETE FROM pbxng_ivr_options WHERE ivr_id=$1', [id]);
-    for (const o of options) await c.query('INSERT INTO pbxng_ivr_options (ivr_id,digit,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [id, o.digit, o.dest_type, o.dest_value]);
-    await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
-    if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-    for (const r of buildIvrDialplan(exten, greeting, timeout, options)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-    await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-app.delete('/api/ivr/:id', async (req, res) => {
-  const { id } = req.params; const c = await pool.connect();
-  try { await c.query('BEGIN'); const { rows } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]); await c.query('DELETE FROM pbxng_ivr WHERE id=$1', [id]); await c.query('COMMIT'); res.json({ deleted: id }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-
-// ---------------------------------------------------------------------------
-//  Colas completas (bloque 1+2): los campos nativos viven en la tabla realtime
-//  `queues` (app_queue ya los soporta); pbxng_queues guarda lo nuestro (destino
-//  al vencer la espera, grabacion, anuncios por TTS).
-// ---------------------------------------------------------------------------
-const Q_NATIVE = ['strategy', 'timeout', 'musiconhold', 'maxlen', 'retry', 'wrapuptime', 'weight',
-  'servicelevel', 'joinempty', 'leavewhenempty', 'ringinuse', 'autofill', 'autopause',
-  'reportholdtime', 'memberdelay', 'announce_frequency', 'announce_holdtime', 'announce_position',
-  'periodic_announce', 'periodic_announce_frequency', 'monitor_type', 'monitor_format'];
-const Q_DEFAULTS = { strategy: 'ringall', timeout: 20, musiconhold: 'default', maxlen: 0, retry: 5,
-  wrapuptime: 10, weight: 0, servicelevel: 30, joinempty: 'yes', leavewhenempty: 'no',
-  ringinuse: 'no', autofill: 'yes', autopause: 'no', reportholdtime: 'no', memberdelay: 0,
-  announce_frequency: 0, announce_holdtime: 'no', announce_position: 'no',
-  periodic_announce: null, periodic_announce_frequency: 0, monitor_type: null, monitor_format: 'wav' };
-
-async function queueDialplan(c, q) {
-  // 1 NoOp · 2 Answer · [MixMonitor] · [Playback bienvenida] · Queue(...) · destino al vencer
-  const rows = [];
-  let p = 1;
-  rows.push([p++, 'NoOp', 'Cola ' + q.name + ' (' + (q.label || q.name) + ')']);
-  rows.push([p++, 'Answer', '']);
-  if (q.record) rows.push([p++, 'MixMonitor', 'pbxng-q' + q.name + '-${UNIQUEID}.wav,b']);
-  if (q.welcome_ref) rows.push([p++, 'Playback', q.welcome_ref]);
-  const maxw = Number(q.max_wait || 0) > 0 ? String(q.max_wait) : '';
-  rows.push([p++, 'Queue', q.name + ',tT,,,' + maxw]);
-  const dest = q.timeout_dest || 'hangup';
-  const val = String(q.timeout_value || '').trim();
-  if (dest === 'ext' && val) rows.push([p++, 'Goto', 'internal,' + val + ',1']);
-  else if (dest === 'voicemail' && val) rows.push([p++, 'VoiceMail', val + '@default,u']);
-  else if (dest === 'queue' && val) rows.push([p++, 'Queue', val + ',tT']);
-  else if (dest === 'ivr' && val) rows.push([p++, 'Goto', 'ivr,' + val + ',1']);
-  else rows.push([p++, 'Hangup', '']);
-  if (dest !== 'hangup') rows.push([p++, 'Hangup', '']);
-  await setDialplan(c, 'ivr', q.access_exten, rows);
-}
-async function queueFull(name) {
-  const { rows } = await pool.query(`SELECT pq.*, ${Q_NATIVE.map((x) => 'q.' + x).join(', ')} FROM pbxng_queues pq LEFT JOIN queues q ON q.name = pq.name WHERE pq.name=$1`, [name]);
-  return rows[0] || null;
-}
-// TTS -> prompt de Asterisk (reusa el pipeline del IVR: voz propia, sin subir WAVs)
-async function queueTts(text, voice, name) {
-  const u = await vozBase();
-  const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice: voice || undefined, rate: 8000, format: 'wav' }), signal: AbortSignal.timeout(30000) });
-  const buf = Buffer.from(await r.arrayBuffer());
-  if (!buf.length) throw new Error('el TTS devolvió audio vacío');
-  const sr = await astFwd('POST', '/sound', { name, b64: buf.toString('base64') }, 20000).then((x) => x.json());
-  if (!sr.ok) throw new Error('no se pudo desplegar el audio: ' + (sr.error || '?'));
-  return sr.ref;   // p.ej. custom/q_ventas_welcome
-}
-app.get('/api/queues', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`SELECT pq.*, ${Q_NATIVE.map((x) => 'q.' + x).join(', ')},
-        (SELECT count(*) FROM queue_members m WHERE m.queue_name = pq.name) AS members
-      FROM pbxng_queues pq LEFT JOIN queues q ON q.name = pq.name ORDER BY pq.name`);
-    res.json(rows);
-  } catch (e) { errorHttp(res, e); }
-});
-function qNative(b) {
-  const out = {};
-  for (const k of Q_NATIVE) out[k] = (b[k] === undefined || b[k] === '') ? Q_DEFAULTS[k] : b[k];
-  if (out.monitor_type !== 'MixMonitor') out.monitor_type = null;   // la grabacion la maneja el dialplan
-  return out;
-}
-async function saveQueue(b, creating) {
-  const name = String(b.name || '').trim();
-  const access_exten = String(b.access_exten || '').trim();
-  if (!name) throw new Error('name es obligatorio');
-  if (creating && !access_exten) throw new Error('access_exten es obligatorio');
-  const n = qNative(b);
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    const cols = Object.keys(n);
-    if (creating) {
-      await c.query(`INSERT INTO queues (name, ${cols.join(',')}) VALUES ($1, ${cols.map((_, i) => '$' + (i + 2)).join(',')})`, [name, ...cols.map((k) => n[k])]);
-      await c.query('INSERT INTO pbxng_queues (name,label,access_exten,tenant_id) VALUES ($1,$2,$3,$4)', [name, b.label || name, access_exten, b.tenant_id || 1]);
-    } else {
-      await c.query(`UPDATE queues SET ${cols.map((k, i) => k + '=$' + (i + 2)).join(', ')} WHERE name=$1`, [name, ...cols.map((k) => n[k])]);
-      await c.query('UPDATE pbxng_queues SET label=$2, access_exten=COALESCE(NULLIF($3,\'\'), access_exten) WHERE name=$1', [name, b.label || name, access_exten]);
-    }
-    // metadatos propios
-    await c.query(`UPDATE pbxng_queues SET max_wait=$2, timeout_dest=$3, timeout_value=$4, record=$5, voice=COALESCE($6, voice) WHERE name=$1`,
-      [name, Number(b.max_wait || 0), b.timeout_dest || 'hangup', b.timeout_value || null, !!b.record, b.voice || null]);
-    // anuncios por TTS (solo si cambio el texto)
-    const { rows: cur } = await c.query('SELECT welcome_text, welcome_ref, periodic_text, periodic_ref, voice FROM pbxng_queues WHERE name=$1', [name]);
-    const q0 = cur[0] || {};
-    const voice = b.voice || q0.voice || null;
-    const wTxt = (b.welcome_text || '').trim(), pTxt = (b.periodic_text || '').trim();
-    let wRef = q0.welcome_ref, pRef = q0.periodic_ref;
-    if (wTxt !== (q0.welcome_text || '') || (wTxt && !wRef)) {
-      wRef = wTxt ? await queueTts(wTxt, voice, 'q_' + name.replace(/[^a-zA-Z0-9_-]/g, '') + '_welcome') : null;
-      await c.query('UPDATE pbxng_queues SET welcome_text=$2, welcome_ref=$3 WHERE name=$1', [name, wTxt || null, wRef]);
-    }
-    if (pTxt !== (q0.periodic_text || '') || (pTxt && !pRef)) {
-      pRef = pTxt ? await queueTts(pTxt, voice, 'q_' + name.replace(/[^a-zA-Z0-9_-]/g, '') + '_periodic') : null;
-      await c.query('UPDATE pbxng_queues SET periodic_text=$2, periodic_ref=$3 WHERE name=$1', [name, pTxt || null, pRef]);
-    }
-    await c.query('UPDATE queues SET periodic_announce=$2, periodic_announce_frequency=$3 WHERE name=$1',
-      [name, pRef || null, pRef ? Number(b.periodic_announce_frequency || 60) : 0]);
-    // dialplan del numero de acceso
-    const { rows: qr } = await c.query('SELECT * FROM pbxng_queues WHERE name=$1', [name]);
-    await queueDialplan(c, qr[0]);
-    await c.query('COMMIT');
-  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; }
-  finally { c.release(); }
-  broadcastSoon();
-  return await queueFull(name);
-}
-app.post('/api/queues', async (req, res) => {
-  try { res.status(201).json(await saveQueue(req.body || {}, true)); }
-  catch (e) { errorHttp(res, e); }
-});
-app.put('/api/queues/:name', async (req, res) => {
-  try { res.json(await saveQueue({ ...(req.body || {}), name: req.params.name }, false)); }
-  catch (e) { errorHttp(res, e); }
-});
-// Escuchar un anuncio antes de guardarlo (devuelve el WAV, no lo despliega)
-app.post('/api/queues/preview-announce', async (req, res) => {
-  try {
-    const b = req.body || {}; const text = (b.text || '').trim();
-    if (!text) return res.status(400).json({ error: 'texto requerido' });
-    const u = await vozBase();
-    const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice: b.voice || undefined, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(30000) });
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (!buf.length) return res.status(500).json({ error: 'el TTS devolvió audio vacío' });
-    res.set('Content-Type', 'audio/wav').send(buf);
-  } catch (e) { errorHttp(res, e); }
-});
-app.delete('/api/queues/:name', async (req, res) => {
-  const { name } = req.params; const c = await pool.connect();
-  try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_queues WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM queue_members WHERE queue_name=$1', [name]); await c.query('DELETE FROM queues WHERE name=$1', [name]); await c.query('DELETE FROM pbxng_queues WHERE name=$1', [name]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: name }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.post('/api/queues/:name/members', async (req, res) => {
-  const { name } = req.params; const { ext } = req.body || {};
-  if (!ext) return res.status(400).json({ error: 'ext es obligatorio' });
-  try { await pool.query(`INSERT INTO queue_members (queue_name,interface,membername,state_interface,penalty,paused,uniqueid) VALUES ($1,$2,$3,$2,0,0,(SELECT COALESCE(MAX(uniqueid),0)+1 FROM queue_members)) ON CONFLICT (queue_name,interface) DO NOTHING`, [name, 'PJSIP/' + ext, ext]); broadcastSoon(); res.status(201).json({ added: ext }); }
-  catch (e) { errorHttp(res, e); }
-});
-app.delete('/api/queues/:name/members/:ext', async (req, res) => { const { name, ext } = req.params; try { await pool.query('DELETE FROM queue_members WHERE queue_name=$1 AND interface=$2', [name, 'PJSIP/' + ext]); broadcastSoon(); res.json({ removed: ext }); } catch (e) { errorHttp(res, e); } });
-app.get('/api/queues/:name/live', async (req, res) => { try { res.json({ output: await amiCommand('queue show ' + req.params.name) }); } catch (e) { errorHttp(res, e); } });
 
 app.get('/api/wallboard', async (req, res) => {
   const out = { today: {}, queues: [] };
@@ -3130,9 +1635,6 @@ app.get('/api/wallboard', async (req, res) => {
   res.json(out);
 });
 
-/* Historial: admin y supervisor ven todo (con ?ext= filtran); agente y token de softphone
- * SIEMPRE ven sólo su interno, se ignore lo que manden en ?ext=. */
-app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); const propio = extPropia(req); const ext = propio ? propio : (req.query.ext ? String(req.query.ext) : null); if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' }); try { const q = ext ? await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr WHERE src=$2 OR dst=$2 ORDER BY start DESC LIMIT $1", [limit, ext]) : await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(q.rows); } catch (e) { errorHttp(res, e); } });
 
 app.get('/api/conferences', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,pin FROM pbxng_conferences ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/conferences', async (req, res) => {
@@ -3144,148 +1646,7 @@ app.post('/api/conferences', async (req, res) => {
 });
 app.delete('/api/conferences/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_conferences WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_conferences WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 
-app.get('/api/ringgroups', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members,strategy,ring_time FROM pbxng_ringgroups ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
-app.post('/api/ringgroups', async (req, res) => {
-  const { name, label, access_exten, members, strategy = 'ringall', ring_time = 25 } = req.body || {};
-  if (!name || !access_exten || !members) return res.status(400).json({ error: 'name, access_exten y members son obligatorios' });
-  const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const dialStr = list.map(e => 'PJSIP/' + e).join('&');
-  const c = await pool.connect();
-  try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_ringgroups (name,label,access_exten,members,strategy,ring_time) VALUES ($1,$2,$3,$4,$5,$6)', [name, label || name, access_exten, list.join(','), strategy, ring_time]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Ring group ' + name], [2, 'Dial', dialStr + ',' + ring_time], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
-
-app.get('/api/paging', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members FROM pbxng_paging ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
-app.post('/api/paging', async (req, res) => {
-  const { name, label, access_exten, members } = req.body || {};
-  if (!name || !access_exten || !members) return res.status(400).json({ error: 'name, access_exten y members son obligatorios' });
-  const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const pageStr = list.map(e => 'PJSIP/' + e).join('&');
-  const c = await pool.connect();
-  try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_paging (name,label,access_exten,members) VALUES ($1,$2,$3,$4)', [name, label || name, access_exten, list.join(',')]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Paging ' + name], [2, 'Page', pageStr + ',i'], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
-
-app.get('/api/mailboxes', async (req, res) => { try { const { rows } = await pool.query("SELECT mailbox,fullname,email FROM pbxng_mailboxes ORDER BY mailbox"); res.json(rows); } catch (e) { errorHttp(res, e); } });
-app.post('/api/mailboxes', async (req, res) => {
-  const { mailbox, password, fullname, email, context = 'default' } = req.body || {};
-  if (!mailbox || !password) return res.status(400).json({ error: 'mailbox y password son obligatorios' });
-  const c = await pool.connect();
-  try { await c.query('BEGIN'); await c.query("INSERT INTO voicemail (mailbox,context,password,fullname,email) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [mailbox, context, String(password), fullname || mailbox, email || null]); await c.query("INSERT INTO pbxng_mailboxes (mailbox,fullname,email) VALUES ($1,$2,$3) ON CONFLICT (mailbox) DO UPDATE SET fullname=EXCLUDED.fullname,email=EXCLUDED.email", [mailbox, fullname || mailbox, email || null]); await c.query('COMMIT'); res.status(201).json({ created: mailbox }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
-
-const FEATURE_CODES = [
-  { code: '*43', name: 'Prueba de eco', desc: 'Repite tu voz para probar audio', rows: [[1, 'Answer', ''], [2, 'Echo', ''], [3, 'Hangup', '']] },
-  { code: '*65', name: 'Decir mi número', desc: 'Locuta el número del interno', rows: [[1, 'Answer', ''], [2, 'SayDigits', '${CALLERID(num)}'], [3, 'Hangup', '']] },
-  { code: '*97', name: 'Mi buzón de voz', desc: 'Entra al buzón del interno que llama', rows: [[1, 'Answer', ''], [2, 'VoiceMailMain', '${CALLERID(num)}@default'], [3, 'Hangup', '']] },
-  { code: '*98', name: 'Buzón (otro)', desc: 'Pide número de buzón y PIN', rows: [[1, 'Answer', ''], [2, 'VoiceMailMain', ''], [3, 'Hangup', '']] },
-];
-app.get('/api/featurecodes', async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT exten FROM extensions WHERE context='internal' AND exten = ANY($1)", [FEATURE_CODES.map(f => f.code)]);
-    const installed = new Set(rows.map(r => r.exten));
-    res.json(FEATURE_CODES.map(f => ({ code: f.code, name: f.name, desc: f.desc, installed: installed.has(f.code) })));
-  } catch (e) { errorHttp(res, e); }
-});
-app.post('/api/featurecodes/install', async (req, res) => {
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    for (const f of FEATURE_CODES) await setDialplan(c, 'internal', f.code, f.rows);
-    await c.query('COMMIT'); broadcastSoon(); res.json({ ok: true, count: FEATURE_CODES.length });
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.post('/api/featurecodes/uninstall', async (req, res) => {
-  try { await pool.query("DELETE FROM extensions WHERE context='internal' AND exten = ANY($1)", [FEATURE_CODES.map(f => f.code)]); broadcastSoon(); res.json({ ok: true }); }
-  catch (e) { errorHttp(res, e); }
-});
-/* ═══════════════ Aparcado, captura y música en espera ═══════════════════════
- *
- * Estas tres NO viven en la base (Asterisk las lee de archivos), así que el panel
- * genera su config en el volumen compartido y recarga por AMI. Ver astconf.js.
- * ==========================================================================*/
-
-const setGet = async (k, def) => { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value != null ? rows[0].value : def; } catch (_) { return def; } };
-const setPut = (k, v) => pool.query("INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2", [k, String(v)]);
-
-// --- Aparcado de llamadas ---
-app.get('/api/parking', async (req, res) => {
-  try {
-    res.json({
-      parkext: await setGet('park_ext', '700'),
-      desde: parseInt(await setGet('park_desde', '701'), 10),
-      hasta: parseInt(await setGet('park_hasta', '720'), 10),
-      parkingtime: parseInt(await setGet('park_time', '300'), 10),
-      comebacktoorigin: (await setGet('park_comeback', '1')) === '1',
-    });
-  } catch (e) { errorHttp(res, e); }
-});
-app.put('/api/parking', async (req, res) => {
-  const b = req.body || {};
-  try {
-    if (b.parkext) await setPut('park_ext', String(b.parkext).replace(/\D/g, '') || '700');
-    if (b.desde) await setPut('park_desde', parseInt(b.desde, 10) || 701);
-    if (b.hasta) await setPut('park_hasta', parseInt(b.hasta, 10) || 720);
-    if (b.parkingtime) await setPut('park_time', Math.max(10, parseInt(b.parkingtime, 10) || 300));
-    if (b.comebacktoorigin !== undefined) await setPut('park_comeback', b.comebacktoorigin ? '1' : '0');
-    res.json({ ok: true, pendiente: 'aplicar para que Asterisk lo tome' });
-  } catch (e) { errorHttp(res, e); }
-});
-app.post('/api/parking/apply', async (req, res) => {
-  try {
-    const cfg = {
-      parkext: await setGet('park_ext', '700'),
-      desde: parseInt(await setGet('park_desde', '701'), 10),
-      hasta: parseInt(await setGet('park_hasta', '720'), 10),
-      parkingtime: parseInt(await setGet('park_time', '300'), 10),
-      comebacktoorigin: (await setGet('park_comeback', '1')) === '1',
-    };
-    astconf.parking(cfg);
-    const out = await amiCommand('module reload res_parking.so');
-    res.json({ ok: true, cfg, salida: String(out || '').slice(0, 400) });
-  } catch (e) { errorHttp(res, e); }
-});
-/* Plazas del aparcado, ESTRUCTURADAS: devolvemos el rango completo y cuáles están
- * ocupadas, para que el panel dibuje una tabla de verdad y no un volcado de texto.
- * Los datos salen de la acción AMI ParkedCalls (eventos), no de parsear el CLI. */
-app.get('/api/parking/lots', async (req, res) => {
-  try {
-    const desde = parseInt(await setGet('park_desde', '701'), 10);
-    const hasta = parseInt(await setGet('park_hasta', '720'), 10);
-    const tiempo = parseInt(await setGet('park_time', '300'), 10);
-
-    // ParkedCalls devuelve un evento por llamada aparcada.
-    let evs = [];
-    try {
-      const r = await amiAction({ Action: 'ParkedCalls' });
-      evs = (r && (r.events || r.eventlist || [])) || [];
-      if (!Array.isArray(evs)) evs = [];
-    } catch (_) {}
-
-    const ocupadas = evs
-      .filter((e) => String(e.event || e.Event || '').toLowerCase() === 'parkedcall')
-      .map((e) => ({
-        plaza: parseInt(e.parkingspace || e.ParkingSpace, 10),
-        canal: e.parkeechannel || e.ParkeeChannel || '',
-        numero: e.parkeecalleridnum || e.ParkeeCallerIDNum || '',
-        nombre: e.parkeecalleridname || e.ParkeeCallerIDName || '',
-        aparcada_por: e.parkerdialstring || e.ParkerDialString || '',
-        restante: parseInt(e.parkingtimeout || e.ParkingTimeout, 10) || null,
-      }))
-      .filter((p) => p.plaza);
-
-    const mapa = Object.fromEntries(ocupadas.map((o) => [o.plaza, o]));
-    const plazas = [];
-    for (let n = Math.min(desde, hasta); n <= Math.max(desde, hasta); n++) {
-      plazas.push(mapa[n] ? { plaza: n, libre: false, ...mapa[n] } : { plaza: n, libre: true });
-    }
-    res.json({ plazas, ocupadas: ocupadas.length, total: plazas.length, parkingtime: tiempo });
-  } catch (e) { errorHttp(res, e); }
-});
-
-// --- Captura de llamada: grupo por interno (ps_endpoints) ---
+// --- Captura de llamada: grupo por interno (ps_endpoints; el aparcado y la MOH están en apps.js) ---
 app.get('/api/pickup-groups', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT id AS ext, named_pickup_group, named_call_group FROM ps_endpoints ORDER BY id");
@@ -3300,64 +1661,6 @@ app.put('/api/pickup-groups/:ext', async (req, res) => {
     await pool.query('UPDATE ps_endpoints SET named_call_group=$1, named_pickup_group=$1 WHERE id=$2', [g, req.params.ext]);
     await amiCommand('module reload res_pjsip.so');
     res.json({ ok: true, ext: req.params.ext, grupo: g });
-  } catch (e) { errorHttp(res, e); }
-});
-
-// --- Música en espera ---
-app.get('/api/moh', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM pbxng_moh_classes ORDER BY nombre');
-    res.json(rows.map((c) => ({ ...c, archivos: astconf.mohArchivos(c.nombre) })));
-  } catch (e) { errorHttp(res, e); }
-});
-app.post('/api/moh', async (req, res) => {
-  const b = req.body || {};
-  const nombre = String(b.nombre || '').replace(/[^\w.\-]/g, '').slice(0, 40);
-  if (!nombre) return res.status(400).json({ error: 'nombre inválido' });
-  if (nombre === 'default') return res.status(400).json({ error: '"default" es la clase de fábrica' });
-  try {
-    await pool.query("INSERT INTO pbxng_moh_classes (nombre, descripcion, sort, announcement) VALUES ($1,$2,$3,$4) ON CONFLICT (nombre) DO UPDATE SET descripcion=EXCLUDED.descripcion, sort=EXCLUDED.sort, announcement=EXCLUDED.announcement",
-      [nombre, b.descripcion || null, ['alpha', 'random', 'randstart'].includes(b.sort) ? b.sort : 'alpha', b.announcement || null]);
-    astconf.mohCarpeta(nombre);
-    res.json({ ok: true, nombre });
-  } catch (e) { errorHttp(res, e); }
-});
-app.delete('/api/moh/:nombre', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM pbxng_moh_classes WHERE nombre=$1', [req.params.nombre]);
-    astconf.mohBorrarCarpeta(req.params.nombre);
-    res.json({ ok: true });
-  } catch (e) { errorHttp(res, e); }
-});
-// Subir un audio a una clase (base64, como el resto de las subidas del panel)
-app.post('/api/moh/:nombre/audio', async (req, res) => {
-  const b = req.body || {};
-  const nombre = String(req.params.nombre).replace(/[^\w.\-]/g, '');
-  const file = String(b.filename || '').replace(/[^\w.\-]/g, '').slice(0, 80);
-  if (!nombre || !file) return res.status(400).json({ error: 'falta clase o nombre de archivo' });
-  if (!/\.(wav|gsm|ulaw|alaw|sln|g722|mp3)$/i.test(file)) return res.status(400).json({ error: 'formato no soportado (wav, gsm, ulaw, alaw, sln, g722, mp3)' });
-  try {
-    const datos = String(b.data || '').replace(/^data:[^,]+,/, '');
-    const buf = Buffer.from(datos, 'base64');
-    if (!buf.length) return res.status(400).json({ error: 'archivo vacío' });
-    const dir = astconf.mohCarpeta(nombre);
-    require('fs').writeFileSync(require('path').join(dir, file), buf);
-    res.json({ ok: true, archivo: file, bytes: buf.length });
-  } catch (e) { errorHttp(res, e); }
-});
-app.delete('/api/moh/:nombre/audio/:file', async (req, res) => {
-  try {
-    const dir = astconf.mohCarpeta(String(req.params.nombre).replace(/[^\w.\-]/g, ''));
-    require('fs').rmSync(require('path').join(dir, String(req.params.file).replace(/[^\w.\-]/g, '')), { force: true });
-    res.json({ ok: true });
-  } catch (e) { errorHttp(res, e); }
-});
-app.post('/api/moh/apply', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM pbxng_moh_classes ORDER BY nombre');
-    astconf.moh(rows);
-    const out = await amiCommand('moh reload');
-    res.json({ ok: true, clases: rows.length, salida: String(out || '').slice(0, 400) });
   } catch (e) { errorHttp(res, e); }
 });
 
@@ -3698,6 +2001,8 @@ ami.on('managerevent', (e) => {
     }
   } catch (e) { logger('CRM').error('semilla de encuesta', e); }
 })();
+// Par VAPID usable antes del primer push (ver el bloque Web Push de arriba).
+asegurarVapid().catch(e => logger('PUSH').error('asegurarVapid', e));
 
 let CRMGO2RTC = process.env.GO2RTC_URL || '';
 const GO2RTC_MGMT = process.env.GO2RTC_MGMT || 'http://pbxng-go2rtc:1984';
@@ -3856,40 +2161,6 @@ app.post('/api/survey', async (req,res)=>{ const b=req.body||{}; try{
 app.get('/api/survey', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_call_surveys ORDER BY created_at DESC LIMIT 200'); res.json(rows); }catch(e){errorHttp(res, e);} });
 // ==================== fin CRM ====================
 
-// ==================== Indexador de grabaciones (MixMonitor -> pbxng_recordings) ====================
-(function () {
-  async function indexRecordings() {
-    try {
-      const _fs = require('fs'); let files = [];
-      try { files = _fs.readdirSync('/recordings').filter(f => f.endsWith('.wav')).map(f => { try { const st = _fs.statSync('/recordings/' + f); return { filename: f, bytes: st.size, mtime: Math.floor(st.mtimeMs / 1000) }; } catch (e) { return null; } }).filter(Boolean); } catch (e) { return; }
-      for (const f of (Array.isArray(files) ? files : [])) {
-        if (!f.filename || f.bytes == null || f.bytes < 1200) continue;
-        const m = /^pbxng-([0-9A-Za-z]+)-(\d+)\.wav$/.exec(f.filename);
-        if (!m) continue;
-        const rext = m[1]; const epoch = parseInt(m[2], 10);
-        const ex = await pool.query('SELECT 1 FROM pbxng_recordings WHERE filename=$1 LIMIT 1', [f.filename]);
-        if (ex.rows.length) continue;
-        let src = rext, dst = null;
-        try {
-          const cq = await pool.query(
-            "SELECT src, dst FROM cdr WHERE (src=$1 OR dst=$1) AND abs(extract(epoch from start) - $2) < 300 ORDER BY abs(extract(epoch from start) - $2) ASC LIMIT 1",
-            [rext, epoch]);
-          if (cq.rows[0]) { src = cq.rows[0].src; dst = cq.rows[0].dst; }
-        } catch (e) {}
-        const dur = Math.max(0, Math.round((f.bytes - 44) / 16000));
-        try {
-          await pool.query(
-            "INSERT INTO pbxng_recordings (filename, ext, src, dst, started_at, bytes, duration, storage, deleted) VALUES ($1,$2,$3,$4,to_timestamp($5),$6,$7,'local',false)",
-            [f.filename, rext, src, dst, epoch, f.bytes, dur]);
-        } catch (e) {}
-      }
-    } catch (e) {}
-  }
-  setTimeout(indexRecordings, 8000);
-  setInterval(indexRecordings, 45000);
-  let _hangIdxT = null; try { ami.on('managerevent', (e) => { const ev = ((e && (e.event || e.Event)) || '').toLowerCase(); if (ev === 'hangup') { clearTimeout(_hangIdxT); _hangIdxT = setTimeout(indexRecordings, 4000); } }); } catch (e) {}
-})();
-// ==================== fin indexador ====================
 /* ── Cierre de la cadena de Express: 404 JSON de /api y manejador de errores final ──
  * Van al final a propósito: Express resuelve en orden de registro y estos dos tienen
  * que quedar detrás de TODAS las rutas (incluidas las que registran los módulos). */

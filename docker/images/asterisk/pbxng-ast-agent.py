@@ -4,8 +4,13 @@ import json, os, re, subprocess, time, sys, hmac, ipaddress, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROUTES_FILE = "/etc/pbxng-ast-routes.json"
 # Token compartido con la API (mismo volumen "certs" montado en /etc/pbxng). La API lo
-# manda en X-PBXNG-Token; acá sólo se exige para /fw/* (control del firewall del host).
+# manda en X-PBXNG-Token; se exige en todo POST y en los GET que devuelven configuración
+# (/net, /route, /fw/bans). Sin token configurado (instalación vieja sin agent.token) se
+# acepta sólo desde redes privadas/loopback, que es de donde llega la API por el bridge.
 TOKEN_FILE = os.environ.get("PBXNG_AGENT_TOKEN_FILE", "/etc/pbxng/agent.token")
+# Ajustes opcionales del firewall del host (JSON). Hoy: {"ari_public": true} para NO
+# restringir 8088/5038 a redes privadas, y "mgmt_allow": ["1.2.3.0/24"] para sumar redes.
+FW_CONFIG_FILE = os.environ.get("PBXNG_FW_CONFIG", "/etc/pbxng/fw.json")
 
 def sh(cmd, t=8):
     try: return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=t).stdout.strip()
@@ -18,11 +23,33 @@ def load_routes():
 def save_routes(rs): 
     try: json.dump(rs, open(ROUTES_FILE, "w"))
     except Exception: pass
+def route_clean(r):
+    """Valida una ruta {dest, gw, dev} y la devuelve normalizada, o (None, error).
+    dest es 'default' o una red; gw una IP; dev un nombre de placa. Se valida ANTES de
+    guardar y también al reaplicar (un JSON viejo o editado a mano no puede terminar
+    en un shell): con esto 'ip route' se llama siempre con argv, nunca con shell."""
+    dest = str(r.get("dest", "") or "").strip()
+    if dest != "default":
+        try: dest = str(ipaddress.ip_network(dest, strict=False))
+        except Exception: return None, "dest inválido (red CIDR o 'default')"
+    gw = str(r.get("gw", "") or "").strip()
+    if gw:
+        try: gw = str(ipaddress.ip_address(gw))
+        except Exception: return None, "gw inválido"
+    dev = str(r.get("dev", "") or "").strip()
+    if dev and not re.match(r"^[a-zA-Z0-9_.@-]{1,24}$", dev): return None, "dev inválido"
+    if not gw and not dev: return None, "hace falta gw o dev"
+    return {"dest": dest, "gw": gw, "dev": dev}, None
+def route_argv(verb, r):
+    cmd = ["ip", "route", verb, r["dest"]]
+    if r.get("gw"): cmd += ["via", r["gw"]]
+    if r.get("dev"): cmd += ["dev", r["dev"]]
+    return cmd
 def apply_route(r):
-    cmd = "ip route replace %s" % r["dest"]
-    if r.get("gw"): cmd += " via %s" % r["gw"]
-    if r.get("dev"): cmd += " dev %s" % r["dev"]
-    sh(cmd)
+    clean, e = route_clean(r)
+    if e: return
+    try: subprocess.run(route_argv("replace", clean), capture_output=True, text=True, timeout=8)
+    except Exception: pass
 def reapply_all():
     for r in load_routes(): apply_route(r)
 
@@ -81,8 +108,84 @@ def core():
 # set "banned" (ipv4_addr, flags timeout) y regla 'ip saddr @banned drop' en una chain
 # input de prioridad -10 (antes del filter normal, así ni siquiera llega a Asterisk).
 # Se usa argv (nunca shell): las IPs se validan con ipaddress pero igual no se concatenan.
+#
+# En la misma chain viven las reglas de "gestión": ARI/HTTP+WS 8088 y AMI 5038 sólo se
+# aceptan desde redes privadas (sets mgmt_allow / mgmt_allow6) y el resto se DROPEA.
+# Motivo: Asterisk corre en host network y http.conf tiene bindaddr=0.0.0.0 a la fuerza
+# (la API está en un contenedor bridge y llega por la IP LAN del host, ASTERISK_HOST;
+# 127.0.0.1 no le sirve). Los navegadores WebRTC también entran por 8088 pero siempre
+# a través del proxy (NPM, IP privada), así que siguen pasando; lo que se corta es que
+# alguien publique 8088 crudo a internet y deje el ARI (usuario/clave) al alcance de
+# cualquiera. Se desactiva con {"ari_public": true} en /etc/pbxng/fw.json.
 FW_FAMILY, FW_TABLE, FW_SET, FW_CHAIN = "inet", "pbxng", "banned", "input"
+FW_MGMT4, FW_MGMT6, FW_MGMT_TAG = "mgmt_allow", "mgmt_allow6", "pbxng-mgmt"
+FW_MGMT_PORTS = (8088, 5038, 8092)   # ARI/WS, AMI y este agente: solo desde redes privadas
+# Privadas (RFC1918, incluye la subred de docker 172.17-31) + loopback; en v6 loopback,
+# ULA y link-local. Lo que agregue fw.json se suma, nunca reemplaza.
+FW_MGMT_BASE4 = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+FW_MGMT_BASE6 = ("::1/128", "fc00::/7", "fe80::/10")
 FW_LOCK = threading.Lock()
+
+def fw_config():
+    """Lee /etc/pbxng/fw.json (opcional). Devuelve {ari_public: bool, allow4: [...], allow6: [...]}.
+    Las redes extra se validan con ipaddress: lo que no parsea se ignora en silencio
+    (el archivo lo escribe un administrador a mano; un typo no puede tumbar el agente)."""
+    cfg = {"ari_public": False, "allow4": list(FW_MGMT_BASE4), "allow6": list(FW_MGMT_BASE6)}
+    try:
+        raw = json.load(open(FW_CONFIG_FILE))
+    except Exception:
+        return cfg
+    if not isinstance(raw, dict): return cfg
+    cfg["ari_public"] = bool(raw.get("ari_public", False))
+    for n in raw.get("mgmt_allow") or []:
+        try:
+            net = ipaddress.ip_network(str(n).strip(), strict=False)
+        except Exception:
+            continue
+        key = "allow4" if net.version == 4 else "allow6"
+        if str(net) not in cfg[key]: cfg[key].append(str(net))
+    return cfg
+
+def fw_ports_expr():
+    return "{ %s }" % ", ".join(str(p) for p in FW_MGMT_PORTS)
+
+def fw_ruleset_text(cfg=None):
+    """Ruleset declarativo equivalente a lo que arma ensure_fw(). No se aplica con
+    'nft -f' (duplicaría reglas en cada arranque): sirve para documentar y para
+    validar la sintaxis con `nft -c -f` (--print-fw)."""
+    cfg = cfg or fw_config()
+    L = ["table %s %s {" % (FW_FAMILY, FW_TABLE),
+         "    set %s {" % FW_SET, "        type ipv4_addr", "        flags timeout", "    }"]
+    if not cfg["ari_public"]:
+        L += ["    set %s {" % FW_MGMT4, "        type ipv4_addr", "        flags interval",
+              "        elements = { %s }" % ", ".join(cfg["allow4"]), "    }",
+              "    set %s {" % FW_MGMT6, "        type ipv6_addr", "        flags interval",
+              "        elements = { %s }" % ", ".join(cfg["allow6"]), "    }"]
+    L += ["    chain %s {" % FW_CHAIN,
+          "        type filter hook input priority -10; policy accept;",
+          "        ip saddr @%s drop" % FW_SET]
+    if not cfg["ari_public"]:
+        L += fw_mgmt_rules()
+    L += ["    }", "}"]
+    return "\n".join(L) + "\n"
+
+def fw_mgmt_rules():
+    """Las tres reglas de gestión, en orden, como texto de chain (para el ruleset) y
+    como argv (para 'nft add rule'). Van marcadas con un comment para encontrarlas."""
+    ports = fw_ports_expr()
+    return [
+        "        ip saddr @%s tcp dport %s accept comment \"%s\"" % (FW_MGMT4, ports, FW_MGMT_TAG),
+        "        ip6 saddr @%s tcp dport %s accept comment \"%s\"" % (FW_MGMT6, ports, FW_MGMT_TAG),
+        "        tcp dport %s drop comment \"%s\"" % (ports, FW_MGMT_TAG),
+    ]
+
+def fw_mgmt_rules_argv():
+    ports = fw_ports_expr()
+    return [
+        ["ip", "saddr", "@" + FW_MGMT4, "tcp", "dport", ports, "accept", "comment", FW_MGMT_TAG],
+        ["ip6", "saddr", "@" + FW_MGMT6, "tcp", "dport", ports, "accept", "comment", FW_MGMT_TAG],
+        ["tcp", "dport", ports, "drop", "comment", FW_MGMT_TAG],
+    ]
 
 def nft(args, t=8, stdin=None):
     """Corre nft con argv. Devuelve (rc, stdout, stderr). rc=127 si no está instalado,
@@ -137,7 +240,45 @@ def ensure_fw():
         if rc2 != 0:
             return {"enabled": False, "motivo": "no se pudo agregar la regla: %s" % (err2 or "exit %d" % rc2)}
         creado.append("rule")
-    return {"enabled": True, "creado": creado}
+    st = fw_mgmt_sync(out)
+    if st.get("error"):
+        # La tabla de baneos ya quedó bien: que falle la parte de gestión no la deshabilita,
+        # pero se informa para que el panel/log lo muestren.
+        return {"enabled": True, "creado": creado, "mgmt": False, "motivo": st["error"]}
+    if st.get("creado"): creado.append("mgmt")
+    return {"enabled": True, "creado": creado, "mgmt": st.get("mgmt", False)}
+
+def fw_mgmt_sync(chain_listing):
+    """Reconcilia las reglas de gestión (8088/5038 sólo desde redes privadas) con fw.json.
+    Los sets se dejan EXACTAMENTE con las redes configuradas (flush + add en una
+    transacción) así un cambio en fw.json se aplica en el próximo ensure_fw() sin tocar
+    las reglas; las reglas se agregan una sola vez (se buscan por su comment) y se
+    borran por handle si ari_public pasa a true. Devuelve {mgmt, creado?, error?}."""
+    cfg = fw_config()
+    present = FW_MGMT_TAG in (chain_listing or "")
+    if cfg["ari_public"]:
+        if not present: return {"mgmt": False}
+        rc, out, err = nft(["-a", "list", "chain", FW_FAMILY, FW_TABLE, FW_CHAIN])
+        if rc != 0: return {"mgmt": True, "error": "no se pudo listar la chain: %s" % (err or "exit %d" % rc)}
+        # De atrás para adelante: los handles no cambian al borrar, pero igual es más prolijo.
+        handles = [m.group(1) for m in re.finditer(r'comment "%s".*?# handle (\d+)' % re.escape(FW_MGMT_TAG), out)]
+        for h in reversed(handles):
+            rc, _, err = nft(["delete", "rule", FW_FAMILY, FW_TABLE, FW_CHAIN, "handle", h])
+            if rc != 0: return {"mgmt": True, "error": "no se pudo borrar la regla %s: %s" % (h, err or "exit %d" % rc)}
+        for s in (FW_MGMT4, FW_MGMT6): nft(["delete", "set", FW_FAMILY, FW_TABLE, s])
+        return {"mgmt": False, "creado": False}
+    script = ""
+    for name, typ, nets in ((FW_MGMT4, "ipv4_addr", cfg["allow4"]), (FW_MGMT6, "ipv6_addr", cfg["allow6"])):
+        script += "add set %s %s %s { type %s; flags interval; }\n" % (FW_FAMILY, FW_TABLE, name, typ)
+        script += "flush set %s %s %s\n" % (FW_FAMILY, FW_TABLE, name)
+        if nets: script += "add element %s %s %s { %s }\n" % (FW_FAMILY, FW_TABLE, name, ", ".join(nets))
+    rc, _, err = nft(["-f", "-"], stdin=script)
+    if rc != 0: return {"mgmt": False, "error": "no se pudieron preparar los sets de gestión: %s" % (err or "exit %d" % rc)}
+    if present: return {"mgmt": True}
+    for argv in fw_mgmt_rules_argv():
+        rc, _, err = nft(["add", "rule", FW_FAMILY, FW_TABLE, FW_CHAIN] + argv)
+        if rc != 0: return {"mgmt": False, "error": "no se pudo agregar la regla de gestión: %s" % (err or "exit %d" % rc)}
+    return {"mgmt": True, "creado": True}
 
 def host_ips():
     """IPs propias del host (red del host): jamás se banea una, cortaría la gestión."""
@@ -241,10 +382,13 @@ def agent_token():
     try: return open(TOKEN_FILE).read().strip()
     except Exception: return os.environ.get("PBXNG_AGENT_TOKEN", "").strip()
 
-def fw_auth(handler):
-    """/fw/* toca el firewall del host: exige X-PBXNG-Token si hay token configurado.
-    Sin token (instalación vieja sin /etc/pbxng/agent.token) se acepta sólo desde
-    redes privadas/loopback, que es de donde llega la API (bridge de docker)."""
+def agent_auth(handler):
+    """Todo POST (firewall, rutas, placas, modo de red, diagnóstico, audios, reload) y los
+    GET que devuelven configuración (/net, /route, /fw/bans) exigen X-PBXNG-Token si hay
+    token configurado: son acciones sobre el host, no lecturas de estado. Sin token
+    (instalación vieja sin /etc/pbxng/agent.token) se acepta sólo desde redes
+    privadas/loopback, que es de donde llega la API (bridge de docker). /core y /metrics
+    quedan abiertos: sólo versión, contadores, carga y memoria, nada de secretos ni IPs."""
     tok = agent_token()
     got = handler.headers.get("X-PBXNG-Token", "") or ""
     if tok:
@@ -262,20 +406,23 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
         self.end_headers(); self.wfile.write(b)
     def do_GET(self):
+        # Lecturas de estado sin secretos: abiertas (las usa el panel para el semáforo).
         if self.path.startswith("/core"): return self._s(200, {"ok": True, "metrics": metrics(), **core()})
+        if self.path.startswith("/metrics"): return self._s(200, {"ok": True, "metrics": metrics()})
+        # Lo que describe la red del host o el firewall va con token.
+        if not agent_auth(self): return self._s(401, {"error": "token inválido"})
         if self.path.startswith("/net"): return self._s(200, {"ifaces": ifaces(), "kernel_routes": sh("ip route show 2>/dev/null").splitlines(), "managed": load_routes()})
-        if self.path.startswith("/fw/"):
-            if not fw_auth(self): return self._s(401, {"error": "token inválido"})
-            if self.path.startswith("/fw/bans"): return self._s(200, fw_bans())
-            return self._s(404, {"error": "not found"})
+        if self.path.startswith("/route"): return self._s(200, {"managed": load_routes()})
+        if self.path.startswith("/fw/bans"): return self._s(200, fw_bans())
         self._s(404, {"error": "not found"})
     def do_POST(self):
+        # Todo POST cambia algo en el host: token antes de leer siquiera el cuerpo.
+        if not agent_auth(self): return self._s(401, {"error": "token inválido"})
         n = int(self.headers.get("Content-Length", 0) or 0)
         try: b = json.loads(self.rfile.read(n) or b"{}")
         except Exception: b = {}
+        if not isinstance(b, dict): b = {}
         if self.path.startswith("/fw/"):
-            if not fw_auth(self): return self._s(401, {"error": "token inválido"})
-            if not isinstance(b, dict): b = {}
             if self.path.startswith("/fw/ban"):
                 ip, e = fw_valid_ip(b.get("ip"))
                 if e: return self._s(400, {"error": e})
@@ -390,19 +537,27 @@ class H(BaseHTTPRequestHandler):
         if self.path.startswith("/route"):
             act = b.get("action"); rs = load_routes()
             if act == "add":
-                r = {"id": str(int(time.time()*1000)), "dest": b.get("dest",""), "gw": b.get("gw",""), "dev": b.get("dev",""), "note": b.get("note","")}
-                if not r["dest"]: return self._s(400, {"error": "dest requerido"})
-                rs = [x for x in rs if x["dest"] != r["dest"]]; rs.append(r); save_routes(rs); apply_route(r)
+                clean, e = route_clean(b)
+                if e: return self._s(400, {"error": e})
+                r = {"id": str(int(time.time()*1000)), **clean, "note": str(b.get("note", ""))[:200]}
+                rs = [x for x in rs if x.get("dest") != r["dest"]]; rs.append(r); save_routes(rs); apply_route(r)
                 return self._s(200, {"ok": True, "id": r["id"]})
             if act == "del":
-                rid = str(b.get("id","")); tgt = [x for x in rs if x["id"] == rid]
-                if tgt: sh("ip route del %s" % tgt[0]["dest"])
-                rs = [x for x in rs if x["id"] != rid]; save_routes(rs)
+                rid = str(b.get("id","")); tgt = [x for x in rs if x.get("id") == rid]
+                if tgt:
+                    clean, e = route_clean(tgt[0])
+                    if not e:
+                        try: subprocess.run(["ip", "route", "del", clean["dest"]], capture_output=True, text=True, timeout=8)
+                        except Exception: pass
+                rs = [x for x in rs if x.get("id") != rid]; save_routes(rs)
                 return self._s(200, {"ok": True})
             return self._s(400, {"error": "action invalida"})
         self._s(404, {"error": "not found"})
 
 if __name__ == "__main__":
+    if "--print-fw" in sys.argv:
+        # Ruleset declarativo equivalente (para docs y `nft -c -f`); no se aplica así.
+        sys.stdout.write(fw_ruleset_text()); sys.exit(0)
     if "--ensure-fw" in sys.argv:
         # Lo llama el entrypoint antes de arrancar Asterisk: crea la tabla si falta y
         # sale con 0 siempre (un host sin nftables no tiene que frenar la central).
