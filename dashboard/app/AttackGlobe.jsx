@@ -27,7 +27,7 @@
  *  tiene WebGL, cae al mapa plano de siempre (AttackMap).
  * ==========================================================================*/
 import { useEffect, useRef, useState } from 'react';
-import { Group, Text, Badge, ThemeIcon } from '@mantine/core';
+import { Group, Text, Badge, ThemeIcon, useMantineColorScheme } from '@mantine/core';
 import {
   IconWorldBolt, IconBan, IconFlame, IconWorld, IconShieldCheck, IconLockOff,
   IconWaveSine, IconRadar2, IconKey, IconUserOff, IconHandStop, IconLock, IconAlertTriangle,
@@ -76,6 +76,25 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   const dragRef = useRef(null);
   const [webglRoto, setWebglRoto] = useState(false);
 
+  /* Tema del panel. OJO con qué se adapta y qué no:
+   *   - El panel del mapa va SIEMPRE oscuro en los dos temas. No es un capricho:
+   *     cobe dibuja el océano transparente, así que ese fondo es lo que le da
+   *     cuerpo a la esfera. Ponerlo claro hace desaparecer el planeta.
+   *   - Lo que sí cambia: el tono del panel y cómo se apoya en la página (en claro
+   *     lleva borde y sombra para leerse como una consola embebida; en oscuro se
+   *     funde), y el brillo del planeta, un punto más alto en claro. */
+  const { colorScheme } = useMantineColorScheme();
+  const dark = colorScheme === 'dark';
+  const TEMA = dark
+    ? { fondo: 'radial-gradient(120% 120% at 50% 15%, #0e2036 0%, #0a1524 55%, #060b14 100%)',
+        borde: '1px solid rgba(255,255,255,.06)',
+        sombra: 'inset 0 0 60px rgba(0,0,0,.45)',
+        base: [0.24, 0.33, 0.46], glow: [0.13, 0.2, 0.32], brillo: 5 }
+    : { fondo: 'radial-gradient(120% 120% at 50% 15%, #16293f 0%, #101f33 55%, #0a1524 100%)',
+        borde: '1px solid rgba(15,23,42,.10)',
+        sombra: 'inset 0 0 50px rgba(0,0,0,.35), 0 10px 28px rgba(15,23,42,.16)',
+        base: [0.30, 0.40, 0.54], glow: [0.20, 0.30, 0.46], brillo: 6 };
+
   // Países que están atacando (de top_paises, ya geolocalizado por la API).
   const pts = (paises || [])
     .map((p) => { const ll = LL[String(p.cc || '').toUpperCase()]; return ll ? { ...p, lat: ll[0], lon: ll[1] } : null; })
@@ -99,7 +118,7 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   // Recreamos el globo sólo cuando cambia el conjunto de puntos (el socket refresca
   // seguido y no queremos reconstruir el planeta en cada tick).
   const firma = pts.map((p) => `${p.cc}:${p.n}`).sort().join('|')
-    + '#' + modoGeo + '#' + geoPts.map((g) => g.cc).sort().join(',');
+    + '#' + modoGeo + '#' + geoPts.map((g) => g.cc).sort().join(',') + '#' + (dark ? 'd' : 'l');
 
   useEffect(() => {
     let vivo = true;
@@ -142,10 +161,10 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           dark: 1,
           diffuse: 1.2,
           mapSamples: 16000,
-          mapBrightness: 5,
-          baseColor: [0.24, 0.33, 0.46],
+          mapBrightness: TEMA.brillo,
+          baseColor: TEMA.base,
           markerColor: [1, 0.3, 0.24],
-          glowColor: [0.13, 0.2, 0.32],
+          glowColor: TEMA.glow,
           markers,
           onRender: (state) => {
             if (!dragRef.current) phiRef.current += 0.0035;
@@ -187,8 +206,7 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
        eso se ve igual de bien con el panel en claro o en oscuro. */
     <div className="pbx-fade-in" style={{
       position: 'relative', width: '100%', height: '100%', minHeight: 400, borderRadius: 14, overflow: 'hidden',
-      background: 'radial-gradient(120% 120% at 50% 15%, #0e2036 0%, #0a1524 55%, #060b14 100%)',
-      boxShadow: 'inset 0 0 60px rgba(0,0,0,.45)',
+      background: TEMA.fondo, border: TEMA.borde, boxShadow: TEMA.sombra,
     }}>
       <style jsx>{`
         @keyframes agLive { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
