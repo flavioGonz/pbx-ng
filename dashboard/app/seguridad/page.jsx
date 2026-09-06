@@ -711,46 +711,6 @@ function GeoBlock({ admin }) {
   );
 }
 
-/* Alarma "bajo ataque": aparece cuando el ritmo de eventos de seguridad en el último
-   minuto pasa el umbral (lo calcula la API en /api/security). Roja, pulsante, con el
-   ritmo, cuántas IPs y el que más golpea. Las defensas ya están actuando; esto es el aviso. */
-function AtaqueBanner({ a }) {
-  return (
-    <Card p="md" radius="md" className="atk-banner" style={{
-      background: 'linear-gradient(100deg, rgba(240,68,56,.16), rgba(240,68,56,.06))',
-      border: '1px solid var(--mantine-color-red-5)', overflow: 'hidden', position: 'relative' }}>
-      <style jsx global>{`
-        @keyframes atkPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(240,68,56,.45); } 50% { box-shadow: 0 0 0 6px rgba(240,68,56,0); } }
-        @keyframes atkBlink { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
-        .atk-banner { animation: atkPulse 1.6s ease-in-out infinite; }
-        .atk-ic { animation: atkBlink 1s ease-in-out infinite; }
-      `}</style>
-      <Group justify="space-between" wrap="nowrap">
-        <Group gap="md" wrap="nowrap">
-          <ThemeIcon size={46} radius="xl" color="red" variant="filled" className="atk-ic"><IconAlertTriangle size={26} /></ThemeIcon>
-          <div>
-            <Group gap={8}>
-              <Text fw={900} fz="lg" c="red.7" style={{ letterSpacing: .4 }}>BAJO ATAQUE</Text>
-              <Badge color="red" variant="filled" size="sm">EN VIVO</Badge>
-            </Group>
-            <Text size="sm" c="dimmed">
-              La central está recibiendo un flujo anómalo: <b>{a.golpes_min}</b> eventos/min{a.ips > 0 ? <> desde <b>{a.ips}</b> IP{a.ips === 1 ? '' : 's'}</> : ''}.
-              Las mitigaciones (contador de fallos + bloqueo en nftables) están actuando.
-            </Text>
-          </div>
-        </Group>
-        {a.top_ip && (
-          <Card p="xs" radius="md" withBorder bg="light-dark(var(--mantine-color-red-0),rgba(240,68,56,.08))" style={{ flexShrink: 0 }}>
-            <Text size="10px" c="dimmed" tt="uppercase" fw={700}>El que más golpea</Text>
-            <Text ff="monospace" fw={700} c="red.7">{a.top_ip}</Text>
-            <Text size="10px" c="dimmed">{a.top_ip_golpes} golpe(s) en 60 s</Text>
-          </Card>
-        )}
-      </Group>
-    </Card>
-  );
-}
-
 /* Estado del enforcement en el encabezado: que la base diga "bloqueada" no sirve de
    nada si el firewall del host no lo aplicó. Se muestra siempre, verde o naranja. */
 function EnforcementBadge({ e }) {
@@ -799,11 +759,12 @@ export default function Seguridad() {
             : <>El agente de Asterisk no responde{enf.motivo ? <>: <Code>{enf.motivo}</Code></> : '.'} Revisá que el contenedor de Asterisk esté arriba y que la API llegue a su puerto <Code>:8092</Code>.</>}
         </Alert>
       )}
-      {data && data.ataque && data.ataque.activo && <AtaqueBanner a={data.ataque} />}
+      {/* El aviso de ataque ya no es una franja arriba: vive DENTRO del mapa, con la
+          bandera del pais que golpea pulsando sobre su punto. Ver AttackGlobe. */}
       {/* Registro en vivo (izquierda) + mapa de ataques en vivo (derecha) */}
       <Grid gutter="lg" align="stretch">
         <Grid.Col span={{ base: 12, lg: 8 }}><LiveLog /></Grid.Col>
-        <Grid.Col span={{ base: 12, lg: 4 }}><AttackGlobe paises={(data && data.top_paises) || []} bloqueos={(data && data.bloqueos) || []} geoblock={(data && data.geoblock) || null} kpis={k} /></Grid.Col>
+        <Grid.Col span={{ base: 12, lg: 4 }}><AttackGlobe paises={(data && data.top_paises) || []} bloqueos={(data && data.bloqueos) || []} geoblock={(data && data.geoblock) || null} ataque={(data && data.ataque) || null} kpis={k} /></Grid.Col>
       </Grid>
       <Tabs defaultValue="soc" variant="pills" radius="md" keepMounted={false}>
         <Tabs.List mb="md">

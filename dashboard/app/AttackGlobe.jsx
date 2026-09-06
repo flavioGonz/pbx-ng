@@ -51,12 +51,17 @@ const LL = {
 };
 const HOME = [-34.9, -56.2];   // Uruguay: el blanco de los ataques
 
-export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = null, kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
+const flagUrl = (cc) => `https://flagcdn.com/${String(cc).toLowerCase()}.svg`;
+
+export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = null, ataque = null, kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const globeRef = useRef(null);
   const phiRef = useRef(0);
   const dragRef = useRef(null);
+  // Un nodo DOM por bandera. Se mueven en cada frame desde onRender (no por estado
+  // de React: son 60 fps y volver a renderizar el arbol seria carisimo).
+  const flagRefs = useRef(new Map());
   const [webglRoto, setWebglRoto] = useState(false);
 
   /* Tema completo del mapa: panel, planeta, textos y chips.
@@ -104,6 +109,13 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
     .filter(Boolean);
   const geoColor = modoGeo === 'permitir' ? [0.3, 0.72, 1] : [1, 0.6, 0.15];
   const geoHex = modoGeo === 'permitir' ? '#4db8ff' : '#f79009';
+
+  /* De quién es el ataque en curso: detectarAtaque() devuelve la IP más insistente
+   * pero no su país, así que lo cruzamos con los bloqueos (que sí traen cc). */
+  const atacando = ataque && ataque.activo ? ataque : null;
+  const origen = atacando && atacando.top_ip
+    ? (bloqueos || []).find((b) => b && b.ip === atacando.top_ip) || null
+    : null;
 
   // Recreamos el globo sólo cuando cambia el conjunto de puntos (el socket refresca
   // seguido y no queremos reconstruir el planeta en cada tick).
@@ -161,6 +173,28 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
             state.phi = phiRef.current;
             state.width = ancho * dpr;
             state.height = alto * dpr;
+
+            /* Banderas encima de su punto. cobe pinta en WebGL y no admite HTML sobre
+             * la esfera, asi que proyectamos nosotros lat/lon -> x,y de pantalla con la
+             * rotacion actual y movemos los nodos. La formula sale de la que usa cobe
+             * para centrar una posicion: phi0 = PI - (lon*PI/180 - PI/2). */
+            const R = Math.min(ancho, alto) / 2;
+            const cx = ancho / 2, cy = alto / 2;
+            const th = 0.25;
+            flagRefs.current.forEach((el, key) => {
+              if (!el) return;
+              const [la, lo] = el.dataset.ll.split(',').map(Number);
+              const lam = (la * Math.PI) / 180;
+              const phi0 = Math.PI - ((lo * Math.PI) / 180 - Math.PI / 2);
+              const d = phi0 - phiRef.current;
+              const x = Math.cos(lam) * Math.sin(d);
+              const yt = Math.sin(lam), zt = Math.cos(lam) * Math.cos(d);
+              const y = yt * Math.cos(th) - zt * Math.sin(th);
+              const z = yt * Math.sin(th) + zt * Math.cos(th);
+              // z>0 = cara visible del globo; del otro lado se esconde
+              el.style.opacity = z > 0.06 ? '1' : '0';
+              el.style.transform = `translate(-50%,-100%) translate(${cx + x * R}px, ${cy - y * R - 6}px)`;
+            });
           },
         });
       } catch (_) { if (vivo) setWebglRoto(true); return; }
@@ -201,6 +235,7 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
       <style jsx>{`
         @keyframes agLive { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
         @keyframes agIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+        @keyframes agGolpe { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
       `}</style>
 
       <div ref={wrapRef} style={{ position: 'absolute', inset: 0 }}>
@@ -210,6 +245,30 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           style={{ width: '100%', height: '100%', cursor: 'grab', touchAction: 'none' }}
         />
       </div>
+
+      {/* Banderas encima de su punto. Van fuera del canvas (WebGL no admite HTML
+          adentro) y las mueve onRender en cada frame según la rotación. */}
+      {pts.map((p) => {
+        const esOrigen = origen && String(origen.cc || '').toUpperCase() === String(p.cc).toUpperCase();
+        return (
+          <div
+            key={'fl-' + p.cc}
+            ref={(el) => { if (el) flagRefs.current.set(p.cc, el); else flagRefs.current.delete(p.cc); }}
+            data-ll={`${p.lat},${p.lon}`}
+            style={{
+              position: 'absolute', left: 0, top: 0, zIndex: 3, pointerEvents: 'none',
+              display: 'flex', alignItems: 'center', gap: 4, padding: '2px 5px', borderRadius: 6,
+              background: esOrigen ? 'rgba(240,68,56,.92)' : TEMA.chip,
+              border: esOrigen ? '1px solid rgba(255,255,255,.5)' : TEMA.chipBorde,
+              boxShadow: esOrigen ? '0 0 10px rgba(240,68,56,.7)' : '0 2px 6px rgba(0,0,0,.25)',
+              opacity: 0, transition: 'opacity .25s',
+              animation: esOrigen ? 'agGolpe 1s ease-in-out infinite' : undefined,
+            }}>
+            <img src={flagUrl(p.cc)} alt="" width={15} height={11} style={{ borderRadius: 2, objectFit: 'cover', display: 'block' }} />
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: esOrigen ? '#fff' : TEMA.txt, lineHeight: 1 }}>{p.n || 1}</span>
+          </div>
+        );
+      })}
 
       {/* título + estado en vivo */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 12px', zIndex: 4,
@@ -223,6 +282,23 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           </Badge>
         </Group>
       </div>
+
+      {/* Ataque en curso: el aviso vive acá, en el mapa, y no como franja arriba de
+          la página. La bandera del país que golpea ya pulsa sobre su punto. */}
+      {atacando && (
+        <div style={{ position: 'absolute', top: 34, left: 12, zIndex: 6, display: 'flex', alignItems: 'center', gap: 7,
+          padding: '4px 9px', borderRadius: 9, background: 'rgba(240,68,56,.94)',
+          border: '1px solid rgba(255,255,255,.35)', boxShadow: '0 0 16px rgba(240,68,56,.55)',
+          animation: 'agGolpe 1.2s ease-in-out infinite' }}>
+          {origen && origen.cc && <img src={flagUrl(origen.cc)} alt="" width={17} height={12} style={{ borderRadius: 2, objectFit: 'cover' }} />}
+          <div style={{ lineHeight: 1.15 }}>
+            <Text style={{ fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: .4 }}>BAJO ATAQUE</Text>
+            <Text style={{ fontSize: 9, color: 'rgba(255,255,255,.9)', whiteSpace: 'nowrap' }}>
+              {atacando.golpes_min}/min · {atacando.top_ip || (atacando.ips + ' IPs')}
+            </Text>
+          </div>
+        </div>
+      )}
 
       {/* KPIs verticales */}
       <div style={{ position: 'absolute', top: 44, right: 10, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 4, width: 108 }}>
