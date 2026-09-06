@@ -60,7 +60,7 @@ const TIPOS = [
 const tipoDe = (reason) => TIPOS.find((t) => t.re.test(String(reason || ''))) || { key: 'otro', color: '#ff6a5e', Icon: IconAlertTriangle, label: 'Intento bloqueado' };
 const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 
-export default function AttackGlobe({ paises = [], bloqueos = [], kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
+export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = null, kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const globeRef = useRef(null);
@@ -80,8 +80,17 @@ export default function AttackGlobe({ paises = [], bloqueos = [], kpis = {}, tit
     .slice(0, 8)
     .map((b) => ({ ip: b.ip, cc: b.cc, pais: b.country, tipo: tipoDe(b.reason), reason: b.reason, at: b.blocked_at }));
 
-  // Firma: sólo recreamos el globo cuando cambia el conjunto (evita el parpadeo del socket).
-  const firma = pts.map((p) => `${p.cc}:${p.n}`).sort().join('|');
+  // Países vetados por el filtro geográfico. Son un MURO, no ataques: se pintan
+  // distinto (ámbar si es lista negra, cian si es lista blanca) y sin arco.
+  const modoGeo = (geoblock && geoblock.modo) || 'bloquear';
+  const geoPts = ((geoblock && geoblock.paises) || [])
+    .map((g) => { const ll = LL[String(g.cc || '').toUpperCase()]; return ll ? { cc: g.cc, nombre: g.nombre, lat: ll[0], lon: ll[1] } : null; })
+    .filter(Boolean);
+  const geoColor = modoGeo === 'permitir' ? [0.3, 0.7, 1] : [1, 0.58, 0.13];
+  const geoHex = modoGeo === 'permitir' ? '#4db8ff' : '#f79009';
+
+  // Firma: recreamos el globo cuando cambia el conjunto de ataques O el de vetados.
+  const firma = pts.map((p) => `${p.cc}:${p.n}`).sort().join('|') + '#' + modoGeo + '#' + geoPts.map((g) => g.cc).sort().join(',');
 
   useEffect(() => {
     let vivo = true;
@@ -102,9 +111,13 @@ export default function AttackGlobe({ paises = [], bloqueos = [], kpis = {}, tit
       };
       medir();
 
+      const atacantes = new Set(pts.map((p) => String(p.cc).toUpperCase()));
       const markers = [
         { location: HOME, size: 0.07, color: [0.16, 0.86, 0.62] },
         ...pts.map((p) => ({ location: [p.lat, p.lon], size: 0.035 + ((p.n || 1) / maxN) * 0.075, color: [1, 0.3, 0.24] })),
+        // países vetados que NO están atacando ahora: sólo el muro, sin arco
+        ...geoPts.filter((g) => !atacantes.has(String(g.cc).toUpperCase()))
+          .map((g) => ({ location: [g.lat, g.lon], size: 0.03, color: geoColor })),
       ];
       // Un arco por país atacante hacia nosotros, con el color del tipo dominante.
       const arcs = pts.map((p) => {
@@ -239,9 +252,20 @@ export default function AttackGlobe({ paises = [], bloqueos = [], kpis = {}, tit
         </div>
       )}
 
+      {/* leyenda del filtro por país (sólo si hay países configurados) */}
+      {geoPts.length > 0 && (
+        <div style={{ position: 'absolute', bottom: 8, right: 12, zIndex: 5, display: 'flex', alignItems: 'center', gap: 7,
+          padding: '4px 10px', borderRadius: 9, background: 'rgba(9,16,28,.6)', border: '1px solid rgba(255,255,255,.08)', backdropFilter: 'blur(3px)' }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: geoHex, boxShadow: `0 0 7px ${geoHex}`, flex: '0 0 9px' }} />
+          <Text style={{ fontSize: 11, color: '#c8d6ee', whiteSpace: 'nowrap' }}>
+            {geoPts.length} {modoGeo === 'permitir' ? `país${geoPts.length === 1 ? '' : 'es'} permitido${geoPts.length === 1 ? '' : 's'}` : `país${geoPts.length === 1 ? '' : 'es'} vetado${geoPts.length === 1 ? '' : 's'}`}
+          </Text>
+        </div>
+      )}
+
       {pts.length === 0 && feed.length === 0 && (
         <Group justify="center" style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}>
-          <Text size="sm" c="#7f93b5">Sin ataques localizados todavía.</Text>
+          <Text size="sm" c="#7f93b5">{geoPts.length > 0 ? 'Sin ataques en curso. Los puntos marcan el filtro por país.' : 'Sin ataques localizados todavía.'}</Text>
         </Group>
       )}
     </div>

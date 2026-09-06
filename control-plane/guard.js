@@ -450,6 +450,11 @@ module.exports = function initGuard(deps) {
     const topPaises = Object.values(porPais).sort((a, b) => b.n - a.n).slice(0, 12);
     const topAtacantes = [...conBandera].sort((a, b) => (b.hits || 0) - (a.hits || 0)).slice(0, 10);
     const { rows: eventos } = await pool.query("SELECT id, kind, severity, detail, created_at FROM pbxng_sec_events WHERE kind IN ('bloqueo','desbloqueo','ataque','geo','ajustes','motor') ORDER BY id DESC LIMIT 100");
+    // Países vetados por el filtro geográfico. No son ataques: son un muro puesto a
+    // propósito. El mapa los pinta distinto (sin arco, otro color) para que se
+    // distinga "país que ataca ahora" de "país que decidimos no dejar entrar".
+    const { rows: geoPaises } = await pool.query('SELECT cc, nombre FROM pbxng_geoblock ORDER BY nombre').catch(() => ({ rows: [] }));
+    const { rows: geoModo } = await pool.query("SELECT value FROM pbxng_settings WHERE key='sec_geoblock_modo'").catch(() => ({ rows: [] }));
     const { rows: k } = await pool.query(`SELECT
         (SELECT count(*)::int FROM pbxng_sec_events WHERE kind='bloqueo' AND created_at > now() - interval '24 hours') AS ultimas_24h,
         (SELECT COALESCE(sum((detail->>'n')::int),0)::int FROM pbxng_sec_events WHERE kind='fallo' AND created_at > now() - interval '24 hours') AS fallos_24h`);
@@ -457,6 +462,7 @@ module.exports = function initGuard(deps) {
       kpis: { bloqueados: conBandera.length, permanentes: conBandera.filter((b) => b.permanent).length, ultimas_24h: (k[0] && k[0].ultimas_24h) || 0, paises: topPaises.length, fallos_24h: (k[0] && k[0].fallos_24h) || 0 },
       bloqueos: conBandera, top_paises: topPaises, top_atacantes: topAtacantes, eventos,
       ataque: detectarAtaque(),
+      geoblock: { modo: (geoModo[0] && geoModo[0].value) === 'permitir' ? 'permitir' : 'bloquear', paises: geoPaises },
       enforcement: { ...enforcement },
     };
   }
