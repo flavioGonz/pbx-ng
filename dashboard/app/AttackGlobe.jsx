@@ -18,7 +18,7 @@
  *  SOC. Si el navegador no tiene WebGL, cae al mapa plano de siempre (AttackMap).
  * ==========================================================================*/
 import { useEffect, useRef, useState } from 'react';
-import { Group, Text, Badge, ThemeIcon } from '@mantine/core';
+import { Group, Text, Badge, ThemeIcon, useMantineColorScheme } from '@mantine/core';
 import {
   IconWorldBolt, IconBan, IconFlame, IconWorld, IconShieldCheck, IconLockOff,
   IconWaveSine, IconRadar2, IconKey, IconUserOff, IconHandStop, IconLock, IconAlertTriangle,
@@ -68,6 +68,8 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   const thetaRef = useRef(0.25);
   const dragRef = useRef(null);
   const [webglRoto, setWebglRoto] = useState(false);
+  const { colorScheme } = useMantineColorScheme();
+  const dark = colorScheme === 'dark';
 
   const pts = (paises || [])
     .map((p) => { const ll = LL[String(p.cc || '').toUpperCase()]; return ll ? { ...p, lat: ll[0], lon: ll[1] } : null; })
@@ -90,7 +92,7 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   const geoHex = modoGeo === 'permitir' ? '#4db8ff' : '#f79009';
 
   // Firma: recreamos el globo cuando cambia el conjunto de ataques O el de vetados.
-  const firma = pts.map((p) => `${p.cc}:${p.n}`).sort().join('|') + '#' + modoGeo + '#' + geoPts.map((g) => g.cc).sort().join(',');
+  const firma = pts.map((p) => `${p.cc}:${p.n}`).sort().join('|') + '#' + modoGeo + '#' + geoPts.map((g) => g.cc).sort().join(',') + '#' + (dark ? 'd' : 'l');
 
   useEffect(() => {
     let vivo = true;
@@ -133,13 +135,17 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           height: alto * dpr,
           phi: phiRef.current,
           theta: thetaRef.current,
-          dark: 1,
-          diffuse: 1.2,
+          // El planeta tiene que verse sobre CUALQUIER fondo (tema claro u oscuro).
+          // La clave es el contraste: puntos de continente claros + un halo (glowColor)
+          // que le da borde a la esfera. Sin halo y con colores oscuros, el globo se
+          // fundía con el fondo y sólo quedaban los marcadores flotando.
+          dark: dark ? 1 : 0,
+          diffuse: 1.1,
           mapSamples: 16000,
-          mapBrightness: 5,
-          baseColor: [0.24, 0.33, 0.46],
+          mapBrightness: dark ? 6 : 8,
+          baseColor: dark ? [0.42, 0.5, 0.62] : [0.62, 0.68, 0.78],
           markerColor: [1, 0.3, 0.24],
-          glowColor: [0.13, 0.2, 0.32],
+          glowColor: dark ? [0.35, 0.45, 0.62] : [0.85, 0.9, 1],
           markers,
           arcs,                 // cobe 2.x: los arcos se animan solos (se dibujan y desvanecen)
           arcColor: [1, 0.42, 0.32],
@@ -187,12 +193,13 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
         @keyframes agIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      {/* Disco oscuro detrás del globo. cobe dibuja el planeta con el "océano"
-          transparente: sin un fondo oscuro, la esfera se pierde contra la página clara
-          y sólo flotan los puntos. Este disco radial le devuelve el cuerpo a la esfera
-          y se desvanece en los bordes, así que NO es un recuadro: es un orbe que flota. */}
+      {/* Halo suave detrás del globo — sólo realza, no lo tapa. El cuerpo de la esfera
+          lo pone ahora cobe (con más brillo y halo propio); antes un disco oscuro y
+          grande se lo tragaba. En claro, un velo tenue; en oscuro, un resplandor azul. */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
-        background: 'radial-gradient(circle at 50% 47%, #0a1826 0%, #0a1826 34%, rgba(10,24,38,.55) 52%, rgba(10,24,38,0) 68%)' }} />
+        background: dark
+          ? 'radial-gradient(circle at 50% 47%, rgba(30,52,86,.45) 0%, rgba(20,36,60,.18) 42%, rgba(10,20,34,0) 66%)'
+          : 'radial-gradient(circle at 50% 47%, rgba(120,140,180,.18) 0%, rgba(150,165,195,.08) 44%, rgba(200,210,230,0) 66%)' }} />
 
       {/* el globo, sin recuadro: se funde con el fondo del panel */}
       <div ref={wrapRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
