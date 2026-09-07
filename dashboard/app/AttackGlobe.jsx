@@ -51,17 +51,32 @@ const LL = {
 };
 const HOME = [-34.9, -56.2];   // Uruguay: el blanco de los ataques
 
+/* Encuadre del globo — valores tomados del playground de cobe, no inventados.
+ * OJO: `scale` y `offset` NO son solo estetica; el shader los aplica a las
+ * coordenadas de pantalla, asi que la proyeccion de las etiquetas tiene que usar
+ * exactamente los mismos numeros o quedan corridas. Por eso viven aca y no sueltos. */
+const VISTA = {
+  theta: -0.16,
+  phi0: 4.02,          // rotacion inicial
+  mapSamples: 40000,   // mas puntos = continentes mas finos
+  diffuse: 1.2,
+  scale: 1.35,
+  offset: [-30, -10],  // en pixeles de dispositivo, como los toma cobe
+  markerSize: 0.03,
+};
+
 const flagUrl = (cc) => `https://flagcdn.com/${String(cc).toLowerCase()}.svg`;
 
 export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = null, ataque = null, kpis = {}, titulo = 'Mapa de ataques en vivo' }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const globeRef = useRef(null);
-  const phiRef = useRef(0);
+  const phiRef = useRef(VISTA.phi0);
   const dragRef = useRef(null);
   // Un nodo DOM por bandera. Se mueven en cada frame desde onRender (no por estado
   // de React: son 60 fps y volver a renderizar el arbol seria carisimo).
   const flagRefs = useRef(new Map());
+  const lineRefs = useRef(new Map());   // la línea que une el punto con su etiqueta
   const [webglRoto, setWebglRoto] = useState(false);
 
   /* Tema completo del mapa: panel, planeta, textos y chips.
@@ -82,18 +97,20 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
         velo: 'linear-gradient(180deg, rgba(6,11,20,.82) 0%, rgba(6,11,20,0) 100%)',
         txt: '#eaf1ff', txt2: '#9fb2d4', txtSombra: '0 1px 3px rgba(0,0,0,.6)',
         chip: 'rgba(9,16,28,.62)', chipBorde: '1px solid rgba(255,255,255,.1)',
-        globoDark: 1, base: [0.24, 0.33, 0.46], glow: [0.13, 0.2, 0.32], brillo: 5,
+        globoDark: 1, base: [0.24, 0.33, 0.46], glow: [0.13, 0.2, 0.32], brillo: 6, brilloBase: 0,
       }
     : {
-        fondo: 'radial-gradient(120% 120% at 50% 12%, #ffffff 0%, #f5f8fd 55%, #eaf0f9 100%)',
+        fondo: 'radial-gradient(120% 120% at 50% 12%, #ffffff 0%, #fbfcfe 60%, #f2f5fa 100%)',
         borde: '1px solid rgba(15,23,42,.08)',
         sombra: '0 8px 26px rgba(15,23,42,.07)',
         velo: 'linear-gradient(180deg, rgba(255,255,255,.9) 0%, rgba(255,255,255,0) 100%)',
         txt: '#101f33', txt2: '#5b6b85', txtSombra: 'none',
         chip: 'rgba(255,255,255,.86)', chipBorde: '1px solid rgba(15,23,42,.09)',
-        // dark:0 = el modo claro de cobe. Halo blanco: es lo que le dibuja el borde
-        // a la esfera contra un fondo claro.
-        globoDark: 0, base: [0.32, 0.42, 0.56], glow: [1, 1, 1], brillo: 6,
+        /* Esfera BLANCA con los continentes en puntos oscuros. Es el modo dark:0 de
+         * cobe: ahi el brillo del mapa OSCURECE la tierra en vez de aclararla, asi
+         * que con baseColor blanco el oceano queda blanco y la tierra se dibuja en
+         * puntitos. Halo blanco para que la esfera se recorte del fondo. */
+        globoDark: 0, base: [1, 1, 1], glow: [1, 1, 1], brillo: 3, brilloBase: 0,
       };
 
   // Países que están atacando (de top_paises, ya geolocalizado por la API).
@@ -143,12 +160,12 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
 
       const atacantes = new Set(pts.map((p) => String(p.cc).toUpperCase()));
       const markers = [
-        { location: HOME, size: 0.06, color: [0.16, 0.86, 0.62] },
-        ...pts.map((p) => ({ location: [p.lat, p.lon], size: 0.035 + ((p.n || 1) / maxN) * 0.075, color: [1, 0.3, 0.24] })),
+        { location: HOME, size: VISTA.markerSize * 1.6, color: [0.16, 0.86, 0.62] },
+        ...pts.map((p) => ({ location: [p.lat, p.lon], size: VISTA.markerSize + ((p.n || 1) / maxN) * 0.045, color: [1, 0.3, 0.24] })),
         // el muro del filtro por país, salvo los que además están atacando: en ese
         // caso gana el rojo, porque lo que importa es que está golpeando ahora
         ...geoPts.filter((g) => !atacantes.has(String(g.cc).toUpperCase()))
-          .map((g) => ({ location: [g.lat, g.lon], size: 0.028, color: geoColor })),
+          .map((g) => ({ location: [g.lat, g.lon], size: VISTA.markerSize * 0.9, color: geoColor })),
       ];
 
       let globo;
@@ -158,11 +175,14 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           devicePixelRatio: dpr,
           width: ancho * dpr,
           height: alto * dpr,
-          phi: 0,
-          theta: 0.25,
+          phi: VISTA.phi0,
+          theta: VISTA.theta,
+          scale: VISTA.scale,
+          offset: VISTA.offset,
+          mapBaseBrightness: TEMA.brilloBase,
           dark: TEMA.globoDark,
-          diffuse: 1.2,
-          mapSamples: 16000,
+          diffuse: VISTA.diffuse,
+          mapSamples: VISTA.mapSamples,
           mapBrightness: TEMA.brillo,
           baseColor: TEMA.base,
           markerColor: [1, 0.3, 0.24],
@@ -189,11 +209,18 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
              *
              * Antes tenía el marcador mal armado y el radio 25 % grande: la bandera
              * orbitaba a la velocidad correcta pero caía en el lugar equivocado. */
-            const th = 0.25;                       // theta con el que se creó el globo
+            const th = VISTA.theta;                // el MISMO theta con el que se creó
             const cT = Math.cos(th), sT = Math.sin(th);
             const cP = Math.cos(phiRef.current), sP = Math.sin(phiRef.current);
-            const R = 0.4 * alto;
-            const cx = ancho / 2, cy = alto / 2;
+            /* scale y offset del shader:
+             *   b = ((frag/t)*2 - 1)/scale - offset*(1,-1)/t   ...  b.x *= t.x/t.y
+             * Despejando la posición de pantalla queda el radio multiplicado por
+             * `scale`, y el offset entra a la mitad. El offset viene en píxeles de
+             * dispositivo (como lo toma cobe), por eso se divide por dpr. */
+            const S = VISTA.scale;
+            const R = S * 0.4 * alto;
+            const cx = ancho / 2 + (S * VISTA.offset[0]) / (2 * dpr);
+            const cy = alto / 2 + (S * VISTA.offset[1]) / (2 * dpr);
             flagRefs.current.forEach((el) => {
               if (!el) return;
               const [la, lo] = el.dataset.ll.split(',').map(Number);
@@ -207,8 +234,31 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
               const ry = mx * (sP * sT) + my * cT + mz * (-cP * sT);
               const rz = mx * (-sP * cT) + my * sT + mz * (cP * cT);
               // rz > 0 = cara visible; del otro lado se esconde
-              el.style.opacity = rz > 0.05 ? '1' : '0';
-              el.style.transform = `translate(-50%,-100%) translate(${cx + R * rx}px, ${cy - R * ry - 5}px)`;
+              const visible = rz > 0.05;
+              const px = cx + R * rx, py = cy - R * ry;
+
+              /* La etiqueta no va encima del punto: se empuja hacia AFUERA del globo,
+               * en la misma dirección radial, y una línea fina la une con su punto.
+               * Así se lee sin tapar el planeta (el estilo del globo de Vercel). */
+              let dx = px - cx, dy = py - cy;
+              const len = Math.hypot(dx, dy) || 1;
+              dx /= len; dy /= len;
+              const lx = cx + dx * (R + 34);
+              const ly = cy + dy * (R + 34);
+
+              el.style.opacity = visible ? '1' : '0';
+              // la etiqueta se alinea del lado que corresponde para no invadir el globo
+              const anclaX = dx < -0.25 ? '-100%' : dx > 0.25 ? '0%' : '-50%';
+              el.style.transform = `translate(${anclaX},-50%) translate(${lx}px, ${ly}px)`;
+
+              const ln = lineRefs.current.get(el.dataset.cc);
+              if (ln) {
+                ln.style.opacity = visible ? '1' : '0';
+                // curva suave desde el punto hasta la etiqueta
+                const mxq = (px + lx) / 2 + dy * 10;
+                const myq = (py + ly) / 2 - dx * 10;
+                ln.setAttribute('d', `M ${px} ${py} Q ${mxq} ${myq} ${lx} ${ly}`);
+              }
             });
           },
         });
@@ -261,8 +311,23 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
         />
       </div>
 
-      {/* Banderas encima de su punto. Van fuera del canvas (WebGL no admite HTML
-          adentro) y las mueve onRender en cada frame según la rotación. */}
+      {/* Etiquetas AFUERA del globo, unidas al punto por una línea fina (el estilo
+          del globo de Vercel). Quedan más legibles que pegadas encima y no tapan el
+          planeta. Las líneas van en un SVG y las etiquetas son divs: las dos cosas
+          se mueven desde onRender, en cada frame, siguiendo la rotación. */}
+      <svg style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none', overflow: 'visible' }}>
+        {pts.map((p) => (
+          <path
+            key={'ln-' + p.cc}
+            ref={(el) => { if (el) lineRefs.current.set(p.cc, el); else lineRefs.current.delete(p.cc); }}
+            fill="none"
+            stroke={dark ? 'rgba(200,215,240,.55)' : 'rgba(15,23,42,.45)'}
+            strokeWidth="1"
+            style={{ opacity: 0, transition: 'opacity .25s' }}
+          />
+        ))}
+      </svg>
+
       {pts.map((p) => {
         const esOrigen = origen && String(origen.cc || '').toUpperCase() === String(p.cc).toUpperCase();
         return (
@@ -270,17 +335,20 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
             key={'fl-' + p.cc}
             ref={(el) => { if (el) flagRefs.current.set(p.cc, el); else flagRefs.current.delete(p.cc); }}
             data-ll={`${p.lat},${p.lon}`}
+            data-cc={p.cc}
             style={{
               position: 'absolute', left: 0, top: 0, zIndex: 3, pointerEvents: 'none',
-              display: 'flex', alignItems: 'center', gap: 4, padding: '2px 5px', borderRadius: 6,
-              background: esOrigen ? 'rgba(240,68,56,.92)' : TEMA.chip,
-              border: esOrigen ? '1px solid rgba(255,255,255,.5)' : TEMA.chipBorde,
-              boxShadow: esOrigen ? '0 0 10px rgba(240,68,56,.7)' : '0 2px 6px rgba(0,0,0,.25)',
-              opacity: 0, transition: 'opacity .25s',
+              display: 'flex', alignItems: 'center', gap: 5, padding: '2px 6px', borderRadius: 5,
+              background: esOrigen ? '#e5342a' : (dark ? 'rgba(12,20,34,.92)' : 'rgba(15,23,42,.92)'),
+              boxShadow: esOrigen ? '0 0 10px rgba(229,52,42,.6)' : '0 1px 4px rgba(0,0,0,.25)',
+              whiteSpace: 'nowrap', opacity: 0, transition: 'opacity .25s',
               animation: esOrigen ? 'agGolpe 1s ease-in-out infinite' : undefined,
             }}>
-            <img src={flagUrl(p.cc)} alt="" width={15} height={11} style={{ borderRadius: 2, objectFit: 'cover', display: 'block' }} />
-            <span style={{ fontSize: 9.5, fontWeight: 700, color: esOrigen ? '#fff' : TEMA.txt, lineHeight: 1 }}>{p.n || 1}</span>
+            <img src={flagUrl(p.cc)} alt="" width={14} height={10} style={{ borderRadius: 1, objectFit: 'cover', display: 'block' }} />
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: '#fff', letterSpacing: .2,
+                           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+              {String(p.cc).toUpperCase()} · {p.n || 1}
+            </span>
           </div>
         );
       })}
