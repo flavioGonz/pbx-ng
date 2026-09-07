@@ -221,43 +221,51 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
             const R = S * 0.4 * alto;
             const cx = ancho / 2 + (S * VISTA.offset[0]) / (2 * dpr);
             const cy = alto / 2 + (S * VISTA.offset[1]) / (2 * dpr);
-            flagRefs.current.forEach((el) => {
-              if (!el) return;
-              const [la, lo] = el.dataset.ll.split(',').map(Number);
-              const rad = Math.PI / 180;
+            const rad = Math.PI / 180;
+
+            /* Proyecta lat/lon a pantalla. Derivado del shader de cobe 0.6.3:
+             *   m = (cos(lat)cos(lon), sin(lat), -cos(lat)sin(lon))
+             *   ray = m · Mᵀ   (el shader rota el RAYO, no el marcador) */
+            const proy = (la, lo) => {
               const ca = Math.cos(la * rad);
               const mx = ca * Math.cos(lo * rad);
               const my = Math.sin(la * rad);
               const mz = -ca * Math.sin(lo * rad);
-              // ray = m · Mᵀ
               const rx = mx * cP + mz * sP;
               const ry = mx * (sP * sT) + my * cT + mz * (-cP * sT);
               const rz = mx * (-sP * cT) + my * sT + mz * (cP * cT);
-              // rz > 0 = cara visible; del otro lado se esconde
-              const visible = rz > 0.05;
-              const px = cx + R * rx, py = cy - R * ry;
+              return { x: cx + R * rx, y: cy - R * ry, visible: rz > 0.05 };
+            };
 
-              /* La etiqueta no va encima del punto: se empuja hacia AFUERA del globo,
-               * en la misma dirección radial, y una línea fina la une con su punto.
-               * Así se lee sin tapar el planeta (el estilo del globo de Vercel). */
-              let dx = px - cx, dy = py - cy;
-              const len = Math.hypot(dx, dy) || 1;
-              dx /= len; dy /= len;
-              const lx = cx + dx * (R + 34);
-              const ly = cy + dy * (R + 34);
+            // La central: es el destino de todas las líneas.
+            const casa = proy(HOME[0], HOME[1]);
 
-              el.style.opacity = visible ? '1' : '0';
-              // la etiqueta se alinea del lado que corresponde para no invadir el globo
-              const anclaX = dx < -0.25 ? '-100%' : dx > 0.25 ? '0%' : '-50%';
-              el.style.transform = `translate(${anclaX},-50%) translate(${lx}px, ${ly}px)`;
+            flagRefs.current.forEach((el) => {
+              if (!el) return;
+              const [la, lo] = el.dataset.ll.split(',').map(Number);
+              const q = proy(la, lo);
 
+              // La bandera va JUSTO encima de su punto, apenas despegada.
+              el.style.opacity = q.visible ? '1' : '0';
+              el.style.transform = `translate(-50%,-100%) translate(${q.x}px, ${q.y - 9}px)`;
+
+              /* La línea va del país atacante HACIA LA CENTRAL (Uruguay): es lo que
+               * cuenta el ataque. Arco suave — la curvatura es una fracción chica de
+               * la distancia, así rebota apenas en vez de dispararse hacia arriba. */
               const ln = lineRefs.current.get(el.dataset.cc);
               if (ln) {
-                ln.style.opacity = visible ? '1' : '0';
-                // curva suave desde el punto hasta la etiqueta
-                const mxq = (px + lx) / 2 + dy * 10;
-                const myq = (py + ly) / 2 - dx * 10;
-                ln.setAttribute('d', `M ${px} ${py} Q ${mxq} ${myq} ${lx} ${ly}`);
+                const juntos = q.visible && casa.visible;
+                ln.style.opacity = juntos ? '1' : '0';
+                if (juntos) {
+                  const dx = casa.x - q.x, dy = casa.y - q.y;
+                  const dist = Math.hypot(dx, dy) || 1;
+                  // perpendicular, elegida hacia afuera del centro del globo
+                  let nx = -dy / dist, ny = dx / dist;
+                  const mx2 = (q.x + casa.x) / 2, my2 = (q.y + casa.y) / 2;
+                  if (nx * (mx2 - cx) + ny * (my2 - cy) < 0) { nx = -nx; ny = -ny; }
+                  const comba = dist * 0.16;          // rebote suave, no un arco alto
+                  ln.setAttribute('d', `M ${q.x} ${q.y} Q ${mx2 + nx * comba} ${my2 + ny * comba} ${casa.x} ${casa.y}`);
+                }
               }
             });
           },
