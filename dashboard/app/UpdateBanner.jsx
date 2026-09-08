@@ -44,7 +44,9 @@ export default function UpdateBanner() {
       } catch (_) {}
     };
     check();
-    const iv = setInterval(check, 30000);
+    // No es /backend (es el version.json del propio panel), pero con la pestaña de fondo
+    // tampoco tiene sentido: al volver a mirarla el `visibilitychange` de abajo consulta.
+    const iv = setInterval(() => { if (!document.hidden) check(); }, 30000);
     const onVis = () => { if (!document.hidden) check(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };

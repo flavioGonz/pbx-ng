@@ -3,38 +3,40 @@ import { Stack, Title, Text, Badge, Tabs, Alert, Code, Button, Group } from '@ma
 import { IconArrowDownLeft, IconArrowUpRight, IconTag, IconPhoneIncoming, IconArrowsSplit, IconTarget, IconAsterisk, IconDeviceLandlinePhone, IconBackspace, IconPlus, IconId, IconRoute, IconRouteAltLeft, IconShieldLock } from '@tabler/icons-react';
 import CrudPanel from '../CrudPanel';
 import { toast } from '../notify';
-import { useEffect, useState } from 'react';
+import { apiGet, apiPost, useApi } from '../api';
+import { useMemo, useState } from 'react';
 import PageHeader from '../PageHeader';
 import DidOverview from '../DidOverview';
 
 const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación' };
 
 export default function Rutas({ embedded } = {}) {
-  const [trunkOpts, setTrunkOpts] = useState([]); const [trunksRaw, setTrunksRaw] = useState([]);
-  const [sbcActive, setSbcActive] = useState(false);
-  useEffect(() => { fetch('/backend/api/sbc-link').then((r) => r.json()).then((d) => setSbcActive(!!(d && d.active))).catch(() => {}); }, []);
-  const hasSbc = sbcActive;
+  const { data: sbcLink } = useApi('/sbc-link');
+  const hasSbc = !!(sbcLink && sbcLink.active);
   const [gen, setGen] = useState(false); const [rk, setRk] = useState(0);
   async function generar() {
     setGen(true);
     try {
       const [inb, outb] = await Promise.all([
-        fetch('/backend/api/routes/inbound').then((r) => r.json()).catch(() => []),
-        fetch('/backend/api/routes/outbound').then((r) => r.json()).catch(() => []),
+        apiGet('/routes/inbound').catch(() => []),
+        apiGet('/routes/outbound').catch(() => []),
       ]);
       let n = 0;
       if (!(Array.isArray(outb) && outb.some((o) => (o.pattern || '').replace(/^_/, '') === '0X.'))) {
-        await fetch('/backend/api/routes/outbound', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: hasSbc ? 'Salida por 0 (SBC)' : 'Salida por 0', pattern: '0X.', strip: 1 }) }); n++;
+        await apiPost('/routes/outbound', { name: hasSbc ? 'Salida por 0 (SBC)' : 'Salida por 0', pattern: '0X.', strip: 1 }); n++;
       }
       if (!(Array.isArray(inb) && inb.length)) {
-        await fetch('/backend/api/routes/inbound', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ did: '_X.', name: 'Entrada por defecto (ajustar interno)', dest_type: 'interno', dest_value: '1001' }) }); n++;
+        await apiPost('/routes/inbound', { did: '_X.', name: 'Entrada por defecto (ajustar interno)', dest_type: 'interno', dest_value: '1001' }); n++;
       }
       toast(n ? ('Generadas ' + n + ' ruta(s) sugerida(s) hacia el SBC \u2014 revis\u00e1 y ajust\u00e1 el destino') : 'Ya hab\u00eda rutas; no se gener\u00f3 nada nuevo', 'ok');
       setRk((k) => k + 1);
-    } catch (e) { toast('No se pudo generar', 'bad'); }
+    } catch (e) { toast('No se pudo generar: ' + e.message, 'bad'); }
     setGen(false);
   }
-  useEffect(() => { fetch('/backend/api/trunks').then((r) => r.json()).then((d) => { if (Array.isArray(d)) { setTrunksRaw(d); setTrunkOpts(d.filter((t) => t.kind !== 'webrtc').map((t) => ({ value: t.name, label: (t.kind === 'sbc' ? 'SBC · ' : '') + t.name + (t.provider_host ? ' (' + t.provider_host + ')' : '') }))); } }).catch(() => {}); }, []);
+  const { data: trunksData } = useApi('/trunks');
+  const trunkOpts = useMemo(() => (Array.isArray(trunksData) ? trunksData : [])
+    .filter((t) => t.kind !== 'webrtc')
+    .map((t) => ({ value: t.name, label: (t.kind === 'sbc' ? 'SBC · ' : '') + t.name + (t.provider_host ? ' (' + t.provider_host + ')' : '') })), [trunksData]);
   return (
     <Stack gap="lg">
       {!embedded && <PageHeader icon={<IconRoute size={24} />} title="Rutas" subtitle="Enrutamiento de llamadas de las troncales · entrantes (DID) y salientes" color="indigo" />}
@@ -53,7 +55,7 @@ export default function Rutas({ embedded } = {}) {
         <Tabs.Panel value="entrantes">
           <DidOverview />
           <CrudPanel key={"in-" + rk} title="Rutas entrantes (DID)" subtitle="Número que recibís del operador → destino interno" color="indigo" icon={<IconArrowDownLeft size={18} />}
-            idKey="id" fetchUrl="/backend/api/routes/inbound" createUrl="/backend/api/routes/inbound" deleteUrl={(r) => '/backend/api/routes/inbound/' + r.id}
+            idKey="id" fetchUrl="/routes/inbound" createUrl="/routes/inbound" deleteUrl={(r) => '/routes/inbound/' + r.id}
             columns={[
               { key: 'did', label: 'DID / Número', mono: true, icon: <IconPhoneIncoming size={13} /> },
               { key: 'name', label: 'Nombre', icon: <IconTag size={13} /> },
@@ -70,7 +72,7 @@ export default function Rutas({ embedded } = {}) {
 
         <Tabs.Panel value="salientes">
           <CrudPanel key={"out-" + rk} title="Rutas salientes" subtitle={hasSbc ? "Patrón de marcado → salida por el SBC. El operador se elige en SBC → Operadores." : "Patrón de marcado → salida por la troncal de operador que elijas."} color="teal" icon={<IconArrowUpRight size={18} />}
-            idKey="id" fetchUrl="/backend/api/routes/outbound" createUrl="/backend/api/routes/outbound" deleteUrl={(r) => '/backend/api/routes/outbound/' + r.id}
+            idKey="id" fetchUrl="/routes/outbound" createUrl="/routes/outbound" deleteUrl={(r) => '/routes/outbound/' + r.id}
             columns={[
               { key: 'name', label: 'Nombre', icon: <IconTag size={13} /> },
               { key: 'pattern', label: 'Patrón', icon: <IconAsterisk size={13} />, render: (r) => <Badge variant="light" color="pbx" ff="monospace">_{r.pattern}</Badge> },

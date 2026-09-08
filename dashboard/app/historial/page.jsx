@@ -36,7 +36,9 @@ export default function Historial({ embedded = false }) {
     try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setRecs(Array.isArray(d) ? d : []); } catch (_) {}
     setLoading(false);
   }
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
+  // CDR + grabaciones: 300 filas y el índice de audio por vuelta. Con la pestaña oculta,
+  // nada; visible, cada 30 s (una llamada que terminó hace 20 s no urge en una lista).
+  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
   useEffect(() => { setShown(80); }, [tab, q]);
 
   const eps = snap?.extensions || [];

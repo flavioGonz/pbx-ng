@@ -1,14 +1,13 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { usePoll, useApi } from './api';
+import { fmtBytes, fmtUptime, fmtFechaHora } from './fmt';
 import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider, Alert } from '@mantine/core';
 import Slot from './Slot';
 import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard, IconBolt, IconPlugConnected, IconAlertTriangle } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import SystemOverview from './SystemOverview';
 import { useLive } from './useLive';
-
-const fmtB = (n) => { if (n == null) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; n = +n; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i]; };
-const fmtUp = (s) => { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; };
 
 // Gráfico de área inline (CPU + Memoria), sin dependencias
 function AreaChart({ cpu, mem, h = 150 }) {
@@ -49,33 +48,60 @@ function Bar({ label, value, total, color = 'pbx' }) {
 
 export default function Resumen() {
   const { snap, connected } = useLive();
-  const [m, setM] = useState(null); const [sys, setSys] = useState(null); const [trunks, setTrunks] = useState([]);
-  const [topo, setTopo] = useState(null);
-  const [core, setCore] = useState(null);
+  /* Presupuesto de pedidos de esta pantalla (era ~44 por minuto: /metrics cada 3 s,
+   * /asterisk/core cada 6 s, /trunks cada 10 s y el /system/overview propio de
+   * SystemOverview cada 8 s). Ahora:
+   *   - lo VIVO (canales, extensiones, colas, AMI/ARI/base) llega por el snapshot del
+   *     socket: no se encuesta nada de eso;
+   *   - /system/overview cada 30 s es la ÚNICA fuente de recursos. Trae lo mismo que
+   *     /metrics (su nodo `core` es el mismo `os.*` del host, más `storage.db`), así
+   *     que /metrics se fue y SystemOverview ya no encuesta por su cuenta;
+   *   - lo que cambia poco (versión del motor, transportes, módulos, troncales,
+   *     topología medida) va a 60 s;
+   *   - /system son tres comandos AMI y sólo lista módulos: una sola vez.
+   * Total en régimen: 2 + 1 + 1 + 1 = 5 pedidos por minuto, y CERO con la pestaña
+   * en segundo plano (usePoll se frena solo). Ver "pedido a api" en el informe:
+   * con troncales y topología dentro del snapshot esto bajaría a 2 por minuto. */
+  const { data: ov } = usePoll('/system/overview', 30000);
+  const { data: trunksData } = usePoll('/trunks', 60000);
+  const { data: core } = usePoll('/asterisk/core', 60000);
+  const { data: sys } = useApi('/system');
+  /* Antes era `useApi` (una sola carga): el cartel "Hay componentes caídos" se
+   * dibujaba con la medición del momento en que abriste la pestaña y no se
+   * enteraba nunca más. Con un minuto de cadencia sigue siendo barato y avisa. */
+  const { data: topo } = usePoll('/topology', 60000);
+  const trunks = Array.isArray(trunksData) ? trunksData : [];
+
+  /* Mismos campos que devolvía /api/metrics, armados desde /system/overview para no
+   * pedir dos veces lo mismo (el nodo `core` es el host donde corre la API). Va con
+   * `useMemo` y no como objeto suelto porque abajo hay un efecto que agrega un punto
+   * al gráfico por cada medición nueva: con una identidad distinta en cada render se
+   * llamaría a sí mismo para siempre. */
+  const m = useMemo(() => {
+    const n = (ov?.nodes || []).find((x) => x.id === 'core');
+    if (!n) return null;
+    return {
+      cpu: n.cpu_pct,
+      cores: n.ncpu,
+      load: n.load != null ? [n.load] : null,
+      uptime: n.uptime_s,
+      mem: n.mem_total_mb ? { total: n.mem_total_mb * 1048576, used: n.mem_used_mb * 1048576 } : null,
+      disk: n.disk,
+      db_size: ov?.storage?.db?.ok ? ov.storage.db.bytes : null,
+    };
+  }, [ov]);
   const [hist, setHist] = useState({ cpu: [], mem: [] });
   const histRef = useRef({ cpu: [], mem: [] });
 
+  // La serie del gráfico se arma con cada medición que llega: 40 puntos, ahora a 30 s
+  // cada uno, o sea ~20 minutos de historia en vez de ~2. Para una tendencia de CPU y
+  // memoria alcanza y sobra, y es lo que permite tener un solo poll en la pantalla.
   useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const d = await fetch('/backend/api/metrics').then(r => r.json());
-        if (!alive) return; setM(d);
-        const memPct = d.mem ? Math.round((d.mem.used / d.mem.total) * 100) : 0;
-        const hc = [...histRef.current.cpu, d.cpu || 0].slice(-40);
-        const hm = [...histRef.current.mem, memPct].slice(-40);
-        histRef.current = { cpu: hc, mem: hm }; setHist({ cpu: hc, mem: hm });
-      } catch (_) {}
-    };
-    tick(); const t = setInterval(tick, 3000);
-    fetch('/backend/api/system').then(r => r.json()).then(d => alive && setSys(d)).catch(() => {});
-    fetch('/backend/api/topology').then(r => r.json()).then(d => alive && setTopo(d)).catch(() => {});
-    fetch('/backend/api/trunks').then(r => r.json()).then(d => alive && setTrunks(Array.isArray(d) ? d : [])).catch(() => {});
-    const ts = setInterval(() => { fetch('/backend/api/trunks').then(r => r.json()).then(d => alive && setTrunks(Array.isArray(d) ? d : [])).catch(() => {}); }, 10000);
-    const loadCore = () => fetch('/backend/api/asterisk/core').then(r => r.json()).then(d => alive && setCore(d)).catch(() => {});
-    loadCore(); const tc = setInterval(loadCore, 6000);
-    return () => { alive = false; clearInterval(t); clearInterval(ts); clearInterval(tc); };
-  }, []);
+    if (!m) return;
+    const pct = m.mem ? Math.round((m.mem.used / m.mem.total) * 100) : 0;
+    histRef.current = { cpu: [...histRef.current.cpu, m.cpu || 0].slice(-40), mem: [...histRef.current.mem, pct].slice(-40) };
+    setHist(histRef.current);
+  }, [m]);
 
   const eps = snap?.extensions || [], ch = snap?.channels || [], qs = snap?.queues || [], h = snap?.health || {};
   const online = eps.filter(e => e.status === 'online').length;
@@ -184,19 +210,19 @@ export default function Resumen() {
       </Card>
 
       {/* Infraestructura completa: cada nodo con sus recursos, interfaces y servicios */}
-      <SystemOverview />
+      <SystemOverview data={ov} />
 
       {/* Fila 1: espacio · recursos · servicios */}
       <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
         <Card withBorder radius="lg" padding="lg" shadow="sm">
           <Text fw={600} mb="md">Uso de espacio</Text>
           <SimpleGrid cols={2}>
-            <Donut value={diskPct} color={diskPct > 85 ? 'red' : 'pbx'} label="Disco" center={diskPct + '%'} sub={m?.disk ? fmtB(m.disk.used) : ''} />
-            <Donut value={memPct} color={memPct > 85 ? 'red' : 'grape'} label="Memoria" center={memPct + '%'} sub={m?.mem ? fmtB(m.mem.used) : ''} />
+            <Donut value={diskPct} color={diskPct > 85 ? 'red' : 'pbx'} label="Disco" center={diskPct + '%'} sub={m?.disk ? fmtBytes(m.disk.used) : ''} />
+            <Donut value={memPct} color={memPct > 85 ? 'red' : 'grape'} label="Memoria" center={memPct + '%'} sub={m?.mem ? fmtBytes(m.mem.used) : ''} />
           </SimpleGrid>
           <Divider my="sm" />
-          <Group justify="space-between"><Text size="xs" c="dimmed">Disco total</Text><Text size="xs" fw={600}>{m?.disk ? fmtB(m.disk.total) : '—'}</Text></Group>
-          <Group justify="space-between"><Text size="xs" c="dimmed">Base de datos</Text><Text size="xs" fw={600}>{fmtB(m?.db_size)}</Text></Group>
+          <Group justify="space-between"><Text size="xs" c="dimmed">Disco total</Text><Text size="xs" fw={600}>{m?.disk ? fmtBytes(m.disk.total) : '—'}</Text></Group>
+          <Group justify="space-between"><Text size="xs" c="dimmed">Base de datos</Text><Text size="xs" fw={600}>{fmtBytes(m?.db_size)}</Text></Group>
         </Card>
 
         <Card withBorder radius="lg" padding="lg" shadow="sm">
@@ -228,10 +254,10 @@ export default function Resumen() {
       <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
         <Card withBorder radius="lg" padding="lg" shadow="sm">
           <Text fw={600} mb="md">Estado del PBX</Text>
-          <StatRow icon={<IconClock size={15} />} label="Hora del sistema" value={snap ? new Date(snap.ts).toLocaleString('es-UY', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '—'} />
+          <StatRow icon={<IconClock size={15} />} label="Hora del sistema" value={fmtFechaHora(snap?.ts)} />
           <StatRow icon={<IconPhone size={15} />} label="Llamadas activas" value={ch.length} color="teal" />
           <StatRow icon={<IconUsers size={15} />} label="Usuarios WebRTC" value={webrtc} color="grape" />
-          <StatRow icon={<IconActivity size={15} />} label="Uptime servidor" value={fmtUp(m?.uptime)} color="orange" />
+          <StatRow icon={<IconActivity size={15} />} label="Uptime servidor" value={fmtUptime(m?.uptime)} color="orange" />
           <Box mt="md">
             <Bar label="Extensiones registrados" value={online} total={eps.length} color="teal" />
             <Bar label="Colas / ACD" value={qs.length} total={qs.length || 1} color="violet" />

@@ -1,11 +1,12 @@
 /* AstNet.jsx — Red del núcleo Asterisk: switch SVG animado + diagnóstico animado (fila partida),
  * cambio de IP y activar/desactivar interfaces EN CALIENTE (vía ast-agent), y rutas estáticas. */
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Group, Text, Badge, ThemeIcon, Grid, Stack, SimpleGrid, TextInput, Button, Code, Alert, Loader, NumberInput, Tooltip, ActionIcon, Modal, Switch as MSwitch } from '@mantine/core';
 import { IconNetwork, IconStethoscope, IconActivity, IconMapPin, IconInfoCircle, IconAlertTriangle, IconPlugConnected, IconServer2, IconWifi, IconEdit, IconPower, IconCircleCheck, IconCircleX, IconRoute, IconWorld, IconPlayerPlay } from '@tabler/icons-react';
 import RoutesPanel from './RoutesPanel';
 import { toast } from './notify';
+import { apiPost, usePoll } from './api';
 
 const UP = (fi) => /UP/i.test(fi.state || '');
 const primaryIp = (fi) => ((fi.addrs || []).find((a) => a.includes('/')) || (fi.addrs || [])[0] || '').split('/')[0];
@@ -69,8 +70,9 @@ function Diagnostico({ sugerencias }) {
   const [steps, setSteps] = useState([]);
   const [running, setRunning] = useState(false);
   async function call(que) {
-    try { return await fetch('/backend/api/asterisk/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: host.trim(), que, port }) }).then((r) => r.json()); }
-    catch (_) { return { ok: false, salida: 'no se pudo ejecutar' }; }
+    // Cada paso muestra su propio resultado en la fila: un error se pinta ahí, no en un toast.
+    try { return await apiPost('/asterisk/diag', { host: host.trim(), que, port }); }
+    catch (e) { return { ok: false, salida: e.message }; }
   }
   async function diagnosticar() {
     const h = host.trim(); if (!h) { toast('Escribí un host o una IP', 'bad'); return; }
@@ -130,13 +132,20 @@ function Diagnostico({ sugerencias }) {
 }
 
 export default function AstNet() {
-  const [net, setNet] = useState(null);
   const [sel, setSel] = useState(null);
   const [ipModal, setIpModal] = useState(null);   // { dev }
   const [cidr, setCidr] = useState(''); const [replace, setReplace] = useState(false); const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(null);   // { dev, action, up }
-  async function load() { try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {} }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  /* Cada 8 s: el estado de las placas (enlace, IP) cambia por fuera del panel.
+   * `usePoll` lo pausa con la pestaña oculta. */
+  const { data: net, error: netError, recargar: load } = usePoll('/asterisk/net', 30000);
+  /* Un solo aviso por caída: si el agente no contesta, el poll reintenta cada 8 s y
+   * un toast por vuelta sería peor que el error. Se rearma cuando vuelve a responder. */
+  const avisado = useRef(false);
+  useEffect(() => {
+    if (netError && !avisado.current) { avisado.current = true; toast(netError.message, 'bad'); }
+    if (!netError && net) avisado.current = false;
+  }, [netError, net]);
   const ifaces = (net && net.ifaces) || [];
   const sugerencias = useMemo(() => {
     const s = [];
@@ -147,15 +156,21 @@ export default function AstNet() {
   async function applyIp() {
     if (!/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(cidr.trim())) { toast('Escribí una IP/CIDR válida (ej 192.168.1.50/24)', 'bad'); return; }
     setBusy(true);
-    const r = await fetch('/backend/api/asterisk/iface', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: replace ? 'replace' : 'addip', dev: ipModal.dev, cidr: cidr.trim() }) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
-    setBusy(false);
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('IP aplicada en ' + ipModal.dev + ' (en caliente)', 'ok'); setIpModal(null); setCidr(''); setReplace(false); setTimeout(load, 800); }
+    try {
+      await apiPost('/asterisk/iface', { action: replace ? 'replace' : 'addip', dev: ipModal.dev, cidr: cidr.trim() });
+      toast('IP aplicada en ' + ipModal.dev + ' (en caliente)', 'ok');
+      setIpModal(null); setCidr(''); setReplace(false); setTimeout(load, 800);
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
+    finally { setBusy(false); }
   }
   async function applyUpDown() {
     setBusy(true);
-    const r = await fetch('/backend/api/asterisk/iface', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: confirm.up ? 'up' : 'down', dev: confirm.dev }) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
-    setBusy(false);
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast((confirm.up ? 'Activada ' : 'Desactivada ') + confirm.dev, 'info'); setConfirm(null); setTimeout(load, 800); }
+    try {
+      await apiPost('/asterisk/iface', { action: confirm.up ? 'up' : 'down', dev: confirm.dev });
+      toast((confirm.up ? 'Activada ' : 'Desactivada ') + confirm.dev, 'info');
+      setConfirm(null); setTimeout(load, 800);
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
+    finally { setBusy(false); }
   }
 
   return (

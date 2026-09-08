@@ -30,7 +30,7 @@ function FeatureCodes() {
 
 export default function AplicacionesTab({ tab }) {
   if (tab === 'rg') return (
-    <CrudPanel icon={<IconUsersGroup size={18} />} color="teal" title="Ring Groups" subtitle="Timbran varios internos a la vez" idKey="name" fetchUrl="/backend/api/ringgroups" createUrl="/backend/api/ringgroups" deleteUrl={(r) => '/backend/api/ringgroups/' + r.name}
+    <CrudPanel icon={<IconUsersGroup size={18} />} color="teal" title="Ring Groups" subtitle="Timbran varios internos a la vez" idKey="name" fetchUrl="/ringgroups" createUrl="/ringgroups" deleteUrl={(r) => '/ringgroups/' + r.name}
       columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'members', label: 'Internos', icon: <IconUsers size={13} /> }, { key: 'strategy', label: 'Estrategia' }]}
       fields={[
         { name: 'name', label: 'Nombre', required: true, icon: <IconTag size={15} />, placeholder: 'soporte', description: 'Identificador del grupo. Ej: soporte, ventas.' },
@@ -40,7 +40,7 @@ export default function AplicacionesTab({ tab }) {
       ]} emptyText="Sin ring groups." />
   );
   if (tab === 'paging') return (
-    <CrudPanel icon={<IconBroadcast size={18} />} color="orange" title="Paging / Intercom" subtitle="Aviso por altavoz a un grupo (auto-respuesta)" idKey="name" fetchUrl="/backend/api/paging" createUrl="/backend/api/paging" deleteUrl={(r) => '/backend/api/paging/' + r.name}
+    <CrudPanel icon={<IconBroadcast size={18} />} color="orange" title="Paging / Intercom" subtitle="Aviso por altavoz a un grupo (auto-respuesta)" idKey="name" fetchUrl="/paging" createUrl="/paging" deleteUrl={(r) => '/paging/' + r.name}
       columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'members', label: 'Internos', icon: <IconUsers size={13} /> }]}
       fields={[
         { name: 'name', label: 'Nombre', required: true, icon: <IconTag size={15} />, placeholder: 'piso1', description: 'Identificador del grupo de paging. Ej: piso1.' },
@@ -50,7 +50,7 @@ export default function AplicacionesTab({ tab }) {
       ]} emptyText="Sin grupos de paging." />
   );
   if (tab === 'conf') return (
-    <CrudPanel icon={<IconUsers size={18} />} color="grape" title="Salas de conferencia" subtitle="ConfBridge · PIN opcional" idKey="name" fetchUrl="/backend/api/conferences" createUrl="/backend/api/conferences" deleteUrl={(r) => '/backend/api/conferences/' + r.name}
+    <CrudPanel icon={<IconUsers size={18} />} color="grape" title="Salas de conferencia" subtitle="ConfBridge · PIN opcional" idKey="name" fetchUrl="/conferences" createUrl="/conferences" deleteUrl={(r) => '/conferences/' + r.name}
       columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'pin', label: 'PIN' }]}
       fields={[
         { name: 'name', label: 'Nombre', required: true, icon: <IconTag size={15} />, placeholder: 'sala1', description: 'Identificador de la sala. Ej: sala1, directorio.' },
@@ -60,7 +60,7 @@ export default function AplicacionesTab({ tab }) {
       ]} emptyText="Sin salas de conferencia." />
   );
   if (tab === 'vm') return (
-    <CrudPanel icon={<IconMail size={18} />} color="indigo" title="Buzones de voz" subtitle="Marcá *97 desde el interno para escuchar mensajes" idKey="mailbox" fetchUrl="/backend/api/mailboxes" createUrl="/backend/api/mailboxes" deleteUrl={(r) => '/backend/api/mailboxes/' + r.mailbox}
+    <CrudPanel icon={<IconMail size={18} />} color="indigo" title="Buzones de voz" subtitle="Marcá *97 desde el interno para escuchar mensajes" idKey="mailbox" fetchUrl="/mailboxes" createUrl="/mailboxes" deleteUrl={(r) => '/mailboxes/' + r.mailbox}
       columns={[{ key: 'mailbox', label: 'Buzón', mono: true }, { key: 'fullname', label: 'Nombre' }, { key: 'email', label: 'Email' }]}
       fields={[
         { name: 'mailbox', label: 'Buzón (interno)', required: true, icon: <IconHash size={15} />, placeholder: '1001', description: 'Número del interno dueño del buzón. Ej: 1001.' },
@@ -71,7 +71,7 @@ export default function AplicacionesTab({ tab }) {
   );
   if (tab === 'codes') return <FeatureCodes />;
   if (tab === 'ai') return (
-    <CrudPanel title="Agentes de IVR con IA" subtitle="Bots de voz · STT → LLM → TTS (integración de IA pendiente de conectar)" idKey="id" fetchUrl="/backend/api/ai-agents" createUrl="/backend/api/ai-agents" deleteUrl={(r) => '/backend/api/ai-agents/' + r.id}
+    <CrudPanel title="Agentes de IVR con IA" subtitle="Bots de voz · STT → LLM → TTS (integración de IA pendiente de conectar)" idKey="id" fetchUrl="/ai-agents" createUrl="/ai-agents" deleteUrl={(r) => '/ai-agents/' + r.id}
       columns={[
         { key: 'name', label: 'Agente', mono: false },
         { key: 'exten', label: 'Acceso', render: (r) => <Badge variant="light" color="pbx" ff="monospace">{r.exten}</Badge> },

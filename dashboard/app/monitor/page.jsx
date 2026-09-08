@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Stack, Title, Text, Card, Group, Badge, Table, Button, Modal, TextInput, ThemeIcon, SimpleGrid } from '@mantine/core';
 import { IconHeadphones, IconMicrophone, IconUsersGroup, IconPhone, IconActivity, IconEar, IconBroadcast } from '@tabler/icons-react';
 import { useLive } from '../useLive';
+import { apiPost } from '../api';
 import { toast } from '../notify';
 import Slot from '../Slot';
 
@@ -34,9 +35,16 @@ export default function Monitor() {
     const s = (sup || '').trim();
     if (!s) { toast('Indicá tu extensión', 'bad'); return; }
     try { localStorage.setItem(SUPKEY, s); } catch (_) {}
-    const r = await fetch('/backend/api/calls/spy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sup: s, target: sel, mode }) }).then(x => x.json()).catch(() => ({ error: 1 }));
-    setSel(null);
-    toast(r.error ? 'Error: ' + (r.error || '') : 'Llamando a tu extensión ' + s + '…', r.error ? 'bad' : 'ok');
+    /* El ChanSpy puede fallar por permiso (403), por interno inexistente o porque la
+     * llamada ya cortó: el mensaje de la API es el que sirve, no un «Error: 1». */
+    try {
+      await apiPost('/calls/spy', { sup: s, target: sel, mode });
+      setSel(null);
+      toast('Llamando a tu extensión ' + s + '…', 'ok');
+    } catch (e) {
+      setSel(null);
+      toast(e.message, 'bad');
+    }
   }
 
   const kpis = [

@@ -3,12 +3,12 @@ import { useEffect, useState, Fragment } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, TextInput, ActionIcon, Tooltip, Select, Switch, PasswordInput, SimpleGrid, ThemeIcon, Tabs, Divider, SegmentedControl, Code, Collapse, Loader, CopyButton } from '@mantine/core';
 import { IconRefresh, IconSearch, IconTrash, IconDownload, IconDeviceFloppy, IconCloud, IconServer, IconFolder, IconMicrophone2, IconWaveSine, IconDatabase, IconSettings, IconClock, IconUser, IconPlayerPlay, IconPlayerPause, IconBrandDebian, IconBrandAws, IconStethoscope, IconCircleCheck, IconCircleX, IconInfoCircle, IconCopy, IconCheck, IconHash } from '@tabler/icons-react';
 import { TableSkeleton } from '../Skeletons';
+import { api, apiDel, apiPost, useApi, usePoll } from '../api';
+import { fmtBytes, fmtReloj } from '../fmt';
 import { toast } from '../notify';
 import RecordingPlayer from '../RecordingPlayer';
 import MiniWave from '../MiniWave';
 
-const fmtSize = (b) => !b ? '—' : b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB';
-const fmtDur = (s) => { s = s || 0; return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
 const STG = { local: ['gray', 'Local', IconFolder], s3: ['blue', 'S3', IconCloud], nas: ['teal', 'NAS', IconServer] };
 const pctColor = (p) => p >= 90 ? '#dc2626' : p >= 75 ? '#f59e0b' : p >= 50 ? '#eab308' : '#12b76a';
 
@@ -46,9 +46,9 @@ function GaugeCard({ brand, title, sub, color, usage, active, tip }) {
         {has ? <FillDisk pct={usage.pct} /> : <ThemeIcon size={70} radius="md" variant="light" color={color}><Ic size={40} /></ThemeIcon>}
         <div style={{ flex: 1 }}>
           {has ? <>
-            <Text fw={800} fz={20} lh={1}>{fmtSize(usage.used)}</Text>
-            <Text fz="xs" c="dimmed">de {fmtSize(usage.total)} · libre {fmtSize(usage.avail)}</Text>
-          </> : <Text fw={800} fz={18} lh={1}>{usage ? fmtSize(usage.bytes) : '—'}</Text>}
+            <Text fw={800} fz={20} lh={1}>{fmtBytes(usage.used)}</Text>
+            <Text fz="xs" c="dimmed">de {fmtBytes(usage.total)} · libre {fmtBytes(usage.avail)}</Text>
+          </> : <Text fw={800} fz={18} lh={1}>{usage ? fmtBytes(usage.bytes) : '—'}</Text>}
           <Group gap={6} mt={6}><Badge size="xs" variant="light" color={color} leftSection={<IconMicrophone2 size={10} />}>{usage ? (usage.files || 0) : 0} grab.</Badge>{!has && usage && <Badge size="xs" variant="light" color="gray">sin límite fijo</Badge>}</Group>
         </div>
       </Group>
@@ -61,8 +61,10 @@ function NasDiag({ cfg }) {
   const [busy, setBusy] = useState(false); const [res, setRes] = useState(null); const [open, setOpen] = useState(false);
   async function run() {
     setBusy(true); setRes(null); setOpen(true);
-    try { const d = await fetch('/backend/api/recordings/storage/nastest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nas_type: cfg.nas_type || 'mount', nas_path: cfg.nas_path, nas_server: cfg.nas_server, nas_share: cfg.nas_share, nas_user: cfg.nas_user }) }).then(r => r.json()); setRes(d); }
-    catch (_) { setRes({ ok: false, pasos: [{ paso: 'Error', ok: false, detalle: 'no se pudo ejecutar' }] }); }
+    /* El diagnóstico ya reporta sus pasos en el cuerpo; si ni siquiera se pudo ejecutar
+     * (503, sin red), el motivo va como un paso más en vez de perderse. */
+    try { setRes(await apiPost('/recordings/storage/nastest', { nas_type: cfg.nas_type || 'mount', nas_path: cfg.nas_path, nas_server: cfg.nas_server, nas_share: cfg.nas_share, nas_user: cfg.nas_user })); }
+    catch (e) { setRes({ ok: false, pasos: [{ paso: 'Error', ok: false, detalle: e.message }] }); }
     setBusy(false);
   }
   return (
@@ -90,23 +92,47 @@ function NasDiag({ cfg }) {
 const Th = ({ icon, children, tip }) => <Table.Th><Tooltip label={tip} disabled={!tip} withArrow><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap', cursor: tip ? 'help' : 'default' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Tooltip></Table.Th>;
 
 export default function Grabaciones({ embedded = false, section = 'list' }) {
-  const [list, setList] = useState([]); const [loading, setLoading] = useState(true); const [q, setQ] = useState('');
+  const [q, setQ] = useState('');
   const [cfg, setCfg] = useState(null); const [savingCfg, setSavingCfg] = useState(false); const [playId, setPlayId] = useState(null);
-  const [usage, setUsage] = useState(null);
-  async function load() { try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setList(Array.isArray(d) ? d : []); } catch (_) { setList([]); } setLoading(false); }
-  async function loadCfg() { try { setCfg(await fetch('/backend/api/recordings/config').then(r => r.json())); } catch (_) {} }
-  async function loadUsage() { try { setUsage(await fetch('/backend/api/recordings/storage/usage').then(r => r.json())); } catch (_) {} }
-  useEffect(() => { load(); loadCfg(); loadUsage(); const t = setInterval(() => { load(); loadUsage(); }, 12000); return () => clearInterval(t); }, []);
-  async function del(id) { if (!confirm('¿Eliminar esta grabación?')) return; await fetch('/backend/api/recordings/' + id, { method: 'DELETE' }); toast('Grabación eliminada', 'info'); load(); }
+  // Listado y ocupación se refrescaban cada 12 s con `setInterval`; misma cadencia, ahora con pausa.
+  const { data: listData, cargando, recargar: load } = usePoll('/recordings', 30000);
+  const { data: usage, recargar: loadUsage } = usePoll('/recordings/storage/usage', 60000);
+  /* La configuración se edita en pantalla, así que la respuesta de la API sólo siembra el
+   * formulario: si se recargara sola pisaría lo que el usuario está tipeando. */
+  const { data: cfgSrv, recargar: loadCfg } = useApi('/recordings/config');
+  useEffect(() => { if (cfgSrv) setCfg(cfgSrv); }, [cfgSrv]);
+  const list = Array.isArray(listData) ? listData : [];
+  const loading = cargando && !listData;
+  async function del(id) {
+    if (!confirm('¿Eliminar esta grabación?')) return;
+    // Antes se ignoraba el resultado: un borrado rechazado por permiso decía «eliminada» igual.
+    try { await apiDel('/recordings/' + id); toast('Grabación eliminada', 'info'); load(); }
+    catch (e) { toast(e.message, 'bad'); }
+  }
+  /* La descarga era un `<a href download>`: el navegador arma ese pedido por su cuenta y no
+   * pasa por el parche de `window.fetch`, así que iba sin el Bearer y el WAV volvía 401 sin
+   * que nadie se enterara. Con `raw: true` el pedido sí lleva el token y el archivo se baja
+   * desde el blob; si falla, se ve el motivo. */
+  async function descargar(r) {
+    try {
+      const resp = await api('/recordings/' + r.id + '/audio', { raw: true });
+      const url = URL.createObjectURL(await resp.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = r.filename || ('grabacion-' + r.id + '.wav');
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { toast('No se pudo descargar', 'bad', { description: e.message }); }
+  }
   async function saveCfg() {
     setSavingCfg(true);
-    const r = await fetch('/backend/api/recordings/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) }).then(x => x.json()).catch(() => ({ error: 1 }));
+    try { await apiPost('/recordings/config', cfg); toast('Configuración guardada', 'ok'); }
+    catch (e) { toast('Error al guardar', 'bad', { description: e.message }); }
     setSavingCfg(false);
-    toast(r.error ? 'Error al guardar' : 'Configuración guardada', r.error ? 'bad' : 'ok'); loadCfg(); loadUsage();
+    loadCfg(); loadUsage();
   }
   async function testStore() {
-    const r = await fetch('/backend/api/recordings/storage/test', { method: 'POST' }).then(x => x.json()).catch((e) => ({ error: e.message || 1 }));
-    toast(r.error ? ('Error: ' + r.error) : (r.msg || 'OK'), r.error ? 'bad' : 'ok');
+    try { const r = await apiPost('/recordings/storage/test'); toast((r && r.msg) || 'OK', 'ok'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
   }
   const setC = (k, v) => setCfg(c => ({ ...c, [k]: v }));
   const fl = list.filter(r => !q || String(r.id).includes(q) || (r.ext || '').includes(q) || (r.filename || '').includes(q) || (r.src || '').includes(q) || (r.dst || '').includes(q));
@@ -115,8 +141,8 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
   const onCloud = list.filter(r => r.storage !== 'local').length;
   const kpis = [
     { k: 'Grabaciones', v: list.length, icon: IconWaveSine, c: 'pbx' },
-    { k: 'Almacenado', v: fmtSize(totalBytes), icon: IconDatabase, c: 'violet' },
-    { k: 'Duración total', v: fmtDur(totalDur), icon: IconClock, c: 'teal' },
+    { k: 'Almacenado', v: fmtBytes(totalBytes), icon: IconDatabase, c: 'violet' },
+    { k: 'Duración total', v: fmtReloj(totalDur), icon: IconClock, c: 'teal' },
     { k: 'En NAS / S3', v: onCloud, icon: IconCloud, c: 'blue' },
   ];
   const backend = (cfg && cfg.backend) || 'local';
@@ -145,12 +171,12 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
                     <Table.Td><Badge size="sm" variant="light" color="gray" ff="monospace">#{r.id}</Badge></Table.Td>
                     <Table.Td><Text fz="xs">{r.started_at ? new Date(r.started_at).toLocaleString('es-UY') : '—'}</Text></Table.Td>
                     <Table.Td><Group gap={6}><ThemeIcon size="sm" radius="xl" variant="light" color="pbx"><IconWaveSine size={13} /></ThemeIcon><Text ff="monospace" fw={600}>{r.ext || '—'}</Text></Group></Table.Td>
-                    <Table.Td><Badge variant="light" color="gray">{fmtDur(r.duration)}</Badge></Table.Td>
-                    <Table.Td>{fmtSize(r.bytes)}</Table.Td>
+                    <Table.Td><Badge variant="light" color="gray">{fmtReloj(r.duration)}</Badge></Table.Td>
+                    <Table.Td>{fmtBytes(r.bytes)}</Table.Td>
                     <Table.Td><Tooltip label={'Guardada en ' + lbl} withArrow><Badge variant="light" color={col} leftSection={<Ic size={12} />}>{lbl}</Badge></Tooltip></Table.Td>
                     <Table.Td><MiniWave recId={r.id} /></Table.Td><Table.Td><Button size="compact-xs" variant={playId === r.id ? 'filled' : 'light'} color="teal" leftSection={playId === r.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === r.id ? null : r.id)}>{playId === r.id ? 'Cerrar' : 'Reproducir'}</Button></Table.Td>
                     <Table.Td ta="right"><Group gap={4} justify="flex-end">
-                      <Tooltip label="Descargar WAV"><ActionIcon variant="subtle" component="a" href={'/backend/api/recordings/' + r.id + '/audio'} download><IconDownload size={17} /></ActionIcon></Tooltip>
+                      <Tooltip label="Descargar WAV"><ActionIcon variant="subtle" onClick={() => descargar(r)}><IconDownload size={17} /></ActionIcon></Tooltip>
                       <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>
                     </Group></Table.Td>
                   </Table.Tr>

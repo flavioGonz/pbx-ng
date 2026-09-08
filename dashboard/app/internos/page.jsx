@@ -1,10 +1,12 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader, Alert, Select } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useLive } from '../useLive';
+import { apiGet, apiPost, apiPut, apiDel, usePoll, useApi } from '../api';
+import { fmtFechaHora } from '../fmt';
 import { toast } from '../notify';
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
@@ -40,7 +42,7 @@ const rttColor = (r) => r == null ? 'gray' : r < 80 ? 'teal' : r < 200 ? 'yellow
 function AccesoBadge({ a }) {
   if (!a) return <Text c="dimmed" size="sm">—</Text>;
   if (a.estado === 'activado') {
-    const cuando = new Date(a.activated_at).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const cuando = fmtFechaHora(a.activated_at);
     return (
       <Tooltip multiline w={260} label={
         <div>
@@ -72,26 +74,18 @@ export default function Extensiones() {
   const [qrExt, setQrExt] = useState(''); const [enroll, setEnroll] = useState(null); const [gen, setGen] = useState(false);
   const [emailTo, setEmailTo] = useState(''); const [sending, setSending] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const [recAll, setRecAll] = useState(false);
   // Bitacora del acceso enviado: si lo activaron, cuando y con que aparato.
-  const [acc, setAcc] = useState({});
-  async function loadAcc() {
-    try {
-      const d = await fetch('/backend/api/enrollments').then(r => r.json());
-      const m = {}; (Array.isArray(d) ? d : []).forEach(x => { m[String(x.ext)] = x; }); setAcc(m);
-    } catch (_) {}
-  }
-  useEffect(() => { loadAcc(); const t = setInterval(loadAcc, 20000); return () => clearInterval(t); }, []);
-  useEffect(() => { fetch('/backend/api/extensions/record-all').then(r => r.json()).then(d => setRecAll(!!d.enabled)).catch(() => {}); }, []);
+  const { data: enrollments } = usePoll('/enrollments', 30000);
+  const acc = useMemo(() => { const m = {}; (Array.isArray(enrollments) ? enrollments : []).forEach(x => { m[String(x.ext)] = x; }); return m; }, [enrollments]);
+  const { data: recAllData } = useApi('/extensions/record-all');
+  const recAll = !!(recAllData && recAllData.enabled);
   // La grabación global se administra en Configuración → SIP; acá sólo se lee para avisar en el editor.
 
   // Plan de numeracion: el backend sabe que numeros estan ocupados (y por quien) y cual es el
   // proximo libre dentro del rango que ya se usa. Sugerimos ese, no "el ultimo + 1" a ciegas.
-  const [plan, setPlan] = useState(null);
+  const { data: plan, recargar: loadPlan } = useApi('/numbering/plan');
   const [numChk, setNumChk] = useState(null);   // { ok, mensaje, motivo, aviso }
   const [numBusy, setNumBusy] = useState(false);
-  async function loadPlan() { try { setPlan(await fetch('/backend/api/numbering/plan').then(r => r.json())); } catch (_) {} }
-  useEffect(() => { loadPlan(); }, []);
 
   function suggestExt() {
     if (plan && plan.next) return plan.next;
@@ -106,12 +100,13 @@ export default function Extensiones() {
     const n = (form.id || '').trim();
     if (!n) { setNumChk(null); return; }
     setNumBusy(true);
+    const ctrl = new AbortController();
     const t = setTimeout(async () => {
-      try { setNumChk(await fetch('/backend/api/numbering/check?ext=' + encodeURIComponent(n)).then(r => r.json())); }
+      try { setNumChk(await apiGet('/numbering/check?ext=' + encodeURIComponent(n), { signal: ctrl.signal })); }
       catch (_) { setNumChk(null); }
       setNumBusy(false);
     }, 350);
-    return () => { clearTimeout(t); setNumBusy(false); };
+    return () => { clearTimeout(t); ctrl.abort(); setNumBusy(false); };
   }, [form.id, editing, opened]);
 
   function openNew() { loadPlan(); setForm(EMPTY); setEditing(false); setEnroll(null); setEmailTo(''); setNumChk(null); open(); }
@@ -123,27 +118,35 @@ export default function Extensiones() {
     if (!editing && numChk && !numChk.ok) { toast('Ese número no se puede usar', 'bad', { description: numChk.mensaje }); return; }
     setSaving(true);
     const body = { id: form.id, name: form.name || '', password: form.pass || undefined, video: form.video, record: form.record, webrtc: form.type === 'webrtc', max_contacts: form.max_contacts, dtmf_mode: form.dtmf_mode };
-    const url = editing ? '/backend/api/endpoints/' + form.id : '/backend/api/endpoints';
-    const r = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(x => x.json()).catch(() => ({ error: 'red' }));
+    try {
+      const r = editing ? await apiPut('/endpoints/' + form.id, body) : await apiPost('/endpoints', body);
+      toast(editing ? 'Extensión ' + form.id + ' actualizada' : 'Extensión ' + ((r && r.created) || form.id) + ' creada', 'ok');
+      close(); loadPlan();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
     setSaving(false);
-    if (r.error) toast('Error: ' + r.error, 'bad');
-    else { toast(editing ? 'Extensión ' + form.id + ' actualizada' : 'Extensión ' + (r.created || form.id) + ' creada', 'ok'); close(); loadPlan(); }
   }
   async function generate(extArg) {
     const ex = extArg || qrExt; if (!ex) return; setGen(true); setEnroll(null);
-    const r = await fetch('/backend/api/enroll', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext: ex }) }).then(x => x.json()).catch(() => ({ error: 'red' }));
+    try {
+      const r = await apiPost('/enroll', { ext: ex });
+      setEnroll({ ...r, url: location.origin + '/enroll?token=' + r.token });
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
     setGen(false);
-    if (r.error) toast('Error: ' + r.error, 'bad');
-    else setEnroll({ ...r, url: location.origin + '/enroll?token=' + r.token });
   }
   async function sendEmail() {
     if (!emailTo) return; setSending(true);
-    const r = await fetch('/backend/api/enroll/email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext: form.id, to: emailTo, tenant_id: form.tenant_id || 1 }) }).then(x => x.json()).catch(() => ({ error: 'red' }));
+    try {
+      await apiPost('/enroll/email', { ext: form.id, to: emailTo, tenant_id: form.tenant_id || 1 });
+      toast('QR enviado a ' + emailTo, 'ok'); setEmailTo('');
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
     setSending(false);
-    toast(r.error ? 'Error: ' + r.error : 'QR enviado a ' + emailTo, r.error ? 'bad' : 'ok');
-    if (!r.error) setEmailTo('');
   }
-  async function del(epid) { if (!confirm('¿Eliminar la extensión ' + epid + '?')) return; await fetch('/backend/api/endpoints/' + epid, { method: 'DELETE' }); toast('Extensión ' + epid + ' eliminado', 'info'); }
+  async function del(epid) {
+    if (!confirm('¿Eliminar la extensión ' + epid + '?')) return;
+    // La lista sale del snapshot del socket, así que se refresca sola al borrar.
+    try { await apiDel('/endpoints/' + epid); toast('Extensión ' + epid + ' eliminado', 'info'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+  }
 
   const online = list.filter(e => e.status === 'online').length;
   const inCall = list.filter(e => e.channels > 0).length;

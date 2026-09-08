@@ -1,13 +1,12 @@
 'use client';
 /* SystemOverview - la foto de la infraestructura: cada nodo con sus recursos, sus interfaces
    de red y sus servicios. No solo el core: tambien el borde (SBC + rtpengine + TURN) y la IA. */
-import { useEffect, useState } from 'react';
 import { Card, Group, Text, Stack, Badge, Progress, SimpleGrid, ThemeIcon, Table, Tooltip, Divider, RingProgress, Box } from '@mantine/core';
+import { usePoll } from './api';
 import { IconServer2, IconShieldLock, IconCpu, IconDeviceSdCard, IconNetwork, IconDatabase, IconMicrophone2, IconMailbox, IconRobot, IconCircleFilled, IconArrowDown, IconArrowUp, IconAlertTriangle, IconPlugConnected } from '@tabler/icons-react';
 import Slot from './Slot';
+import { fmtBytes, fmtUptime } from './fmt';
 
-const fmtB = (n) => { if (n == null) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; n = +n; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i]; };
-const fmtUp = (s) => { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; };
 const tone = (p) => (p == null ? 'gray' : p >= 90 ? 'red' : p >= 75 ? 'orange' : p >= 50 ? 'yellow' : 'teal');
 const ICON = { core: IconServer2, edge: IconShieldLock, ai: IconRobot };
 
@@ -48,7 +47,7 @@ function NodeCard({ n }) {
         <Metric label="Memoria" pct={n.mem_pct} icon={<IconPlugConnected size={13} opacity={.6} />}
           detail={n.mem_total_mb ? `${(n.mem_used_mb / 1024).toFixed(1)} / ${(n.mem_total_mb / 1024).toFixed(1)} GB` : ''} />
         <Metric label="Disco" pct={dp} icon={<IconDeviceSdCard size={13} opacity={.6} />}
-          detail={n.disk ? `${fmtB(n.disk.used)} de ${fmtB(n.disk.total)} · libre ${fmtB(n.disk.free)}` : 'no reportado'} />
+          detail={n.disk ? `${fmtBytes(n.disk.used)} de ${fmtBytes(n.disk.total)} · libre ${fmtBytes(n.disk.free)}` : 'no reportado'} />
       </Group>
 
       <Divider my="sm" />
@@ -56,20 +55,20 @@ function NodeCard({ n }) {
         <Group gap={5}>
           {(n.services || []).map(s => <Badge key={s} size="xs" variant="dot" color={n.ok ? 'teal' : 'gray'}>{s}</Badge>)}
         </Group>
-        <Text size="xs" c="dimmed">{n.uptime_s ? 'activo hace ' + fmtUp(n.uptime_s) : ''}</Text>
+        <Text size="xs" c="dimmed">{n.uptime_s ? 'activo hace ' + fmtUptime(n.uptime_s) : ''}</Text>
       </Group>
     </Card>
   );
 }
 
-export default function SystemOverview() {
-  const [d, setD] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    const tick = () => fetch('/backend/api/system/overview').then(r => r.json()).then(x => alive && setD(x)).catch(() => {});
-    tick(); const t = setInterval(tick, 8000);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
+/* `data` viene de afuera cuando la pantalla que nos monta YA está encuestando
+ * /system/overview (el Resumen lo hace): así hay UN solo pedido por pestaña en vez de
+ * dos con cadencias distintas. Sin `data` este componente sigue siendo autónomo, con
+ * `usePoll` para que se frene con la pestaña en segundo plano (antes era un
+ * `setInterval` de 8 s que seguía corriendo con el navegador minimizado). */
+export default function SystemOverview({ data }) {
+  const propio = usePoll(data === undefined ? '/system/overview' : null, 30000);
+  const d = data === undefined ? propio.data : data;
 
   const nodes = (d && d.nodes) || [];
   const st = (d && d.storage) || {};
@@ -115,8 +114,8 @@ export default function SystemOverview() {
                       <Table.Td><Text size="sm" fw={600} ff="monospace">{i.name}</Text></Table.Td>
                       <Table.Td><Text size="xs" ff="monospace">{(i.addrs || []).join(' · ') || '—'}</Text></Table.Td>
                       <Table.Td><Badge size="xs" variant="light" color={/up/i.test(i.state) ? 'teal' : 'gray'}>{i.state || '—'}</Badge></Table.Td>
-                      <Table.Td><Group gap={4} wrap="nowrap"><IconArrowDown size={12} color="var(--mantine-color-teal-6)" /><Text size="xs">{fmtB(i.rx_bytes)}</Text></Group></Table.Td>
-                      <Table.Td><Group gap={4} wrap="nowrap"><IconArrowUp size={12} color="var(--mantine-color-blue-6)" /><Text size="xs">{fmtB(i.tx_bytes)}</Text></Group></Table.Td>
+                      <Table.Td><Group gap={4} wrap="nowrap"><IconArrowDown size={12} color="var(--mantine-color-teal-6)" /><Text size="xs">{fmtBytes(i.rx_bytes)}</Text></Group></Table.Td>
+                      <Table.Td><Group gap={4} wrap="nowrap"><IconArrowUp size={12} color="var(--mantine-color-blue-6)" /><Text size="xs">{fmtBytes(i.tx_bytes)}</Text></Group></Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -135,9 +134,9 @@ export default function SystemOverview() {
                 sections={[{ value: st.disk.pct, color: tone(st.disk.pct) }]}
                 label={<div style={{ textAlign: 'center' }}><Text fw={800} fz="lg" lh={1}><Slot value={st.disk.pct} />%</Text><Text fz={10} c="dimmed">usado</Text></div>} />
               <Stack gap={6} style={{ flex: 1 }}>
-                <Group justify="space-between"><Text size="xs" c="dimmed">Total</Text><Text size="xs" fw={700}>{fmtB(st.disk.total)}</Text></Group>
-                <Group justify="space-between"><Text size="xs" c="dimmed">Ocupado</Text><Text size="xs" fw={700}>{fmtB(st.disk.used)}</Text></Group>
-                <Group justify="space-between"><Text size="xs" c="dimmed">Libre</Text><Text size="xs" fw={700} c={st.disk.pct >= 85 ? 'red' : undefined}>{fmtB(st.disk.free)}</Text></Group>
+                <Group justify="space-between"><Text size="xs" c="dimmed">Total</Text><Text size="xs" fw={700}>{fmtBytes(st.disk.total)}</Text></Group>
+                <Group justify="space-between"><Text size="xs" c="dimmed">Ocupado</Text><Text size="xs" fw={700}>{fmtBytes(st.disk.used)}</Text></Group>
+                <Group justify="space-between"><Text size="xs" c="dimmed">Libre</Text><Text size="xs" fw={700} c={st.disk.pct >= 85 ? 'red' : undefined}>{fmtBytes(st.disk.free)}</Text></Group>
               </Stack>
             </Group>
           )}
@@ -146,19 +145,19 @@ export default function SystemOverview() {
             <Group justify="space-between" wrap="nowrap">
               <Group gap={8}><ThemeIcon size={26} radius="md" variant="light" color="red"><IconMicrophone2 size={14} /></ThemeIcon><Text size="sm">Grabaciones</Text></Group>
               <Tooltip label={st.recordings ? st.recordings.files + ' archivos' : 'sin datos'}>
-                <Text size="sm" fw={700}>{st.recordings ? fmtB(st.recordings.bytes) : '—'}</Text>
+                <Text size="sm" fw={700}>{st.recordings ? fmtBytes(st.recordings.bytes) : '—'}</Text>
               </Tooltip>
             </Group>
             <Group justify="space-between" wrap="nowrap">
               <Group gap={8}><ThemeIcon size={26} radius="md" variant="light" color="orange"><IconMailbox size={14} /></ThemeIcon><Text size="sm">Buzones de voz</Text></Group>
               <Tooltip label={st.voicemail ? st.voicemail.files + ' archivos' : 'sin datos'}>
-                <Text size="sm" fw={700}>{st.voicemail ? fmtB(st.voicemail.bytes) : '—'}</Text>
+                <Text size="sm" fw={700}>{st.voicemail ? fmtBytes(st.voicemail.bytes) : '—'}</Text>
               </Tooltip>
             </Group>
             <Group justify="space-between" wrap="nowrap">
               <Group gap={8}><ThemeIcon size={26} radius="md" variant="light" color="blue"><IconDatabase size={14} /></ThemeIcon><Text size="sm">Base de datos</Text></Group>
               <Tooltip label={st.db && st.db.ok ? `${st.db.cdr} llamadas en el CDR · ${st.db.conns} conexiones` : 'sin datos'}>
-                <Text size="sm" fw={700}>{st.db && st.db.ok ? fmtB(st.db.bytes) : '—'}</Text>
+                <Text size="sm" fw={700}>{st.db && st.db.ok ? fmtBytes(st.db.bytes) : '—'}</Text>
               </Tooltip>
             </Group>
           </Stack>

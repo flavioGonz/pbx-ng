@@ -17,7 +17,9 @@ export default function Telefonos() {
   const base = typeof window !== 'undefined' ? window.location.origin : '';
   async function load() { try { setList(await fetch('/backend/api/phones').then(r => r.json())); } catch (_) {} }
   async function loadSrv() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setSrv(s.prov_sip_server || ''); } catch (_) {} }
-  useEffect(() => { load(); loadSrv(); const t = setInterval(load, 10000); return () => clearInterval(t); }, []);
+  /* Los teléfonos aprovisionados son una tabla de configuración; lo único que se mueve
+   * es el `last_seen` (y la ventana de "en línea" es de 10 minutos, no de 10 segundos). */
+  useEffect(() => { load(); loadSrv(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   function nuevo() { setForm(empty); setOpened(true); }
   function edit(p) { setForm({ ...empty, ...p }); setOpened(true); }

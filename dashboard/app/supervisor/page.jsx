@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { apiGet, apiPost, usePoll } from '../api';
 import { useSoftphone } from '../useSoftphone';
 import { useAuth, logout } from '../auth';
 import Softphone from '../Softphone';
@@ -13,9 +14,6 @@ export default function SupervisorPanel() {
   const sp = useSoftphone();
   const scheme = useComputedColorScheme('dark', { getInitialValueInEffect: true });
   const dark = scheme === 'dark';
-  const [dir, setDir] = useState([]);
-  const [pres, setPres] = useState({});
-  const [queues, setQueues] = useState([]);
   const [qlive, setQlive] = useState({});
   const [libreta, setLibreta] = useState(false);
   const connectedRef = useRef(false);
@@ -24,26 +22,51 @@ export default function SupervisorPanel() {
 
   useEffect(() => {
     if (connectedRef.current) return; connectedRef.current = true;
-    fetch('/backend/api/me/sipcreds').then(r => r.json()).then(d => { if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {}); else toast('Tu usuario no tiene extensión asignado', 'bad'); }).catch(() => {});
+    (async () => {
+      try {
+        const d = await apiGet('/me/sipcreds');
+        if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {});
+        else toast('Tu usuario no tiene extensión asignado', 'bad');
+      } catch (e) { toast(e.message, 'bad'); }
+    })();
   }, []);
 
-  const load = useCallback(() => {
-    fetch('/backend/api/directory').then(r => r.json()).then(d => Array.isArray(d) && setDir(d)).catch(() => {});
-    fetch('/backend/api/presence').then(r => r.json()).then(d => setPres(d || {})).catch(() => {});
-    fetch('/backend/api/queues').then(r => r.json()).then(async (qs) => {
-      if (!Array.isArray(qs)) return; setQueues(qs);
+  /* Las tres listas se refrescaban con un `setInterval` de 6 s que seguía corriendo con la
+   * pestaña de fondo; `usePoll` mantiene la cadencia pero se frena mientras nadie mira. */
+  const { data: dirData, recargar: recargarDir } = usePoll('/directory', 30000);
+  const { data: presData, recargar: recargarPres } = usePoll('/presence', 6000);
+  const { data: queuesData, recargar: recargarQueues } = usePoll('/queues', 6000);
+  const dir = Array.isArray(dirData) ? dirData : [];
+  const pres = presData || {};
+  const queues = Array.isArray(queuesData) ? queuesData : [];
+  const load = useCallback(() => { recargarDir(); recargarPres(); recargarQueues(); }, [recargarDir, recargarPres, recargarQueues]);
+
+  /* El detalle en vivo de cada cola es un pedido por cola (tope de 12): va colgado del
+   * resultado de `/queues`, así se renueva con el mismo pulso y con la misma pausa. */
+  useEffect(() => {
+    if (!queues.length) { setQlive({}); return; }
+    let vivo = true;
+    (async () => {
       const live = {};
-      await Promise.all(qs.slice(0, 12).map((q) => fetch('/backend/api/queues/' + encodeURIComponent(q.name) + '/live').then(r => r.json()).then((d) => { live[q.name] = d; }).catch(() => {})));
-      setQlive(live);
-    }).catch(() => {});
-  }, []);
-  useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, [load]);
+      await Promise.all(queues.slice(0, 12).map(async (q) => {
+        try { live[q.name] = await apiGet('/queues/' + encodeURIComponent(q.name) + '/live'); } catch (_) { /* una cola sin datos no puede tapar al resto */ }
+      }));
+      if (vivo) setQlive(live);
+    })();
+    return () => { vivo = false; };
+    // Se dispara con la respuesta de `/queues`, no con el array derivado (que cambia en cada render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuesData]);
 
   async function spy(target, mode) {
     if (!ext) { toast('Tu usuario no tiene extensión para escuchar', 'bad'); return; }
     if (!registered) { toast('Tu softphone aún no está en línea', 'bad'); return; }
-    const r = await fetch('/backend/api/calls/spy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sup: ext, target: String(target), mode }) }).then(x => x.json()).catch(() => ({ error: 1 }));
-    if (r && r.error) { toast('No se pudo iniciar (' + (r.error === 1 ? 'red' : r.error) + ')', 'bad'); return; }
+    try {
+      await apiPost('/calls/spy', { sup: ext, target: String(target), mode });
+    } catch (e) {
+      toast('No se pudo iniciar (' + e.message + ')', 'bad');
+      return;
+    }
     toast((mode === 'whisper' ? 'Susurro' : mode === 'barge' ? 'Irrupción' : 'Escucha') + ' → ' + target + '. Atendé tu softphone.', 'ok');
   }
   const st = (e) => { const p = pres[String(e)] || pres[e]; return p === 'inuse' || p === 'busy' ? 'en llamada' : p === 'available' || p === 'not_inuse' ? 'libre' : (p || 'offline'); };

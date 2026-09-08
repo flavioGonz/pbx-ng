@@ -121,7 +121,38 @@ de cada archivo y en `.claude/agents/api.md`.
   es obligatorio salvo en el primer ingreso (`must_change: true` en el login), donde el panel no
   lo pide. La clave de OTRO usuario se cambia por `POST /api/users/:id/password` (solo `admin`).
 - Panel ante 401: borra la sesión y va a `/login`. Ante 403: no redirige, muestra un toast con el
-  `error` del JSON (dedupe de 3 s) y le deja el body intacto a la página.
+  `error` del JSON (dedupe de 3 s) y le deja el body intacto a la página. Eso lo hace el parche
+  global de `window.fetch` en `app/auth.jsx` y **no se duplica** en la capa de acceso.
+- Capa de acceso del panel (`dashboard/app/api.js`, desde sprint1-seguridad): `api(path,
+  {method, body, signal, raw, headers})` pega a `/backend/api` + `path` (con o sin barra
+  inicial), pone `Content-Type: application/json` si el body es un objeto, parsea el JSON
+  (`null` sin cuerpo) y, si `!r.ok`, tira un `Error` con `.status` y `.message` = `data.error`
+  o el texto en español por status (400 «Datos inválidos», 401 «Sesión vencida», 403 «No tenés
+  permiso para esta acción», 404 «No encontrado», 409 «Ya existe», 429 «Demasiados intentos»,
+  5xx «Error del servidor»); un fallo de red da `status: 0` y «Sin conexión con el servidor».
+  Con `raw: true` devuelve la `Response` (audio, descargas). Ayudantes: `apiGet/apiPost/apiPut/
+  apiDel`, `usePoll(path, ms, opts)` y `useApi(path, deps)` → `{data, error, cargando,
+  recargar}`; los hooks cancelan con `AbortController` al desmontar y `usePoll` **pausa
+  mientras `document.hidden`** y recarga al volver. Formateo compartido en
+  `dashboard/app/fmt.js` (`fmtDur`, `fmtReloj`, `fmtFecha`, `fmtHora`, `fmtFechaHora`,
+  `fmtBytes`, `fmtUptime`, `codecLabel`, `banderaCC`, `estadoColor`).
+- **Política de encuestado del panel** (desde sprint1-seguridad; vale para pantallas nuevas):
+  1) lo que ya viaja en el `snapshot` del socket (§4: `health`, `extensions`, `channels`,
+  `queues`) **no se pide por HTTP** — Resumen, Extensiones, Monitor, Wallboard y Topología lo
+  leen de `useLive()`; 2) lo que es configuración (troncales, rutas, módulos, IVR, teléfonos,
+  agentes IA, tablas de `CrudPanel`, `/asterisk/core`, `/asterisk/net`, `/turn`, `/db`) se
+  encuesta cada **30 s o más**, porque lo cambia una persona desde este mismo panel y el
+  cambio propio ya recarga a mano; 3) sólo se deja cadencia de segundos donde el dato se
+  mueve solo y se lo está mirando: traza SIP (`SipLadder`, 3 s), plazas de aparcado
+  (`/funciones`, 5 s) y el tablero del supervisor (`/presence`, `/queues/*/live`, 6 s);
+  4) ningún poll pide nada con `document.hidden` (lo garantiza `usePoll`; los pocos
+  `setInterval` que quedan lo comprueban a mano). Con esto una pestaña abierta en el Resumen
+  hace 5 pedidos por minuto (`/system/overview` cada 30 s + `/trunks`, `/asterisk/core` y
+  `/topology` cada 60 s) contra los ~44 de antes, y cero en segundo plano.
+- `GET /api/metrics` ya **no lo usa ninguna pantalla**: su contenido es un subconjunto de
+  `GET /api/system/overview` (el nodo `core` es el mismo `os.*` del host y `storage.db.bytes`
+  es el `db_size`), así que el Resumen pide uno solo de los dos. La ruta sigue existiendo para
+  quien la consuma desde afuera.
 - Estado degradado en el panel (`app/shell.jsx`): banner rojo "Base de datos sin respuesta" si el
   `snapshot` del socket trae `health.db=false` o, con el socket caído, si `GET /backend/health`
   (→ `/health` de la API) responde 503 o `db:false`; ese poll corre cada 30 s **sólo** mientras
@@ -139,6 +170,22 @@ de cada archivo y en `.claude/agents/api.md`.
   para el `apiToken` de `GET /api/provision`.
 - Cabeceras: `helmet` con CSP apagada y `Cross-Origin-Resource-Policy: cross-origin` (el panel,
   `/softphone/` y los audios se sirven a través del proxy).
+- Cabeceras del panel (`dashboard/next.config.js`, `SECURITY_HEADERS`, salen en TODA respuesta
+  de Next: páginas, `/_next/static` y `public/`): `X-Frame-Options: DENY`, `nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` (geo/mic/cámara sólo
+  `self`, que el softphone necesita) y desde `sprint1-seguridad` una **CSP completa**:
+  `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src
+  'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'
+  https://fonts.googleapis.com https://unpkg.com; img-src 'self' data: blob: https:; font-src
+  'self' data: https://fonts.gstatic.com; media-src 'self' blob:; connect-src 'self'; worker-src
+  'self' blob:`. Consecuencias para todo el equipo: **cualquier recurso nuevo de un tercero
+  (script, hoja de estilo, fuente, o un `fetch`/WebSocket a otro origen) hay que agregarlo ahí
+  o el navegador lo bloquea en silencio**. `connect-src 'self'` vale porque todo va por el mismo
+  origen (API `/backend`, socket `/socket.io`, SIP `wss://<host>/ws`); si alguna vez el panel
+  tiene que pegarle a la API en otro host hay que abrir `connect-src`. `script-src` lleva
+  `'unsafe-inline'` y no un nonce porque Next 14 sólo firma sus inline si la CSP la pone un
+  `middleware.js` (y las páginas del panel son estáticas: el nonce quedaría cacheado); el
+  porqué largo está comentado en `next.config.js`.
 - Rutas públicas (sin token) = exactamente `PUBLIC_API` en `control-plane/auth.js`. Hoy: `auth/login`,
   `phone/token`, `auth/setup`, `ice`, `branding`, `enroll/:token`, `prompts/:id/audio`,
   `push/vapid`, `push/(subscribe|register|unsubscribe)`, `internal/wake`, `c2c/public/*`,
@@ -227,6 +274,27 @@ reemplaza a `/api/security` de fail2ban, `security/ban` y `security/unban`, que 
   como máximo) si `alertar` está prendido; `alerts.js` mantiene además el chequeo por
   ventana larga de `security.attack` sobre los fallos agregados.
 
+Cómo la consume el panel (desde 1.8.0): **`dashboard/app/api.js` es el único punto de acceso
+del panel a la API**. Toda pantalla o componente nuevo pide por `api()`/`apiGet`/`apiPost`/
+`apiPut`/`apiDel`/`usePoll`/`useApi` (forma y opciones en §2) y **no** escribe `fetch('/backend/api…')`
+a mano; el formateo sale de `dashboard/app/fmt.js`. Las únicas excepciones legítimas son los
+pedidos que no cuelgan de `/api`: `GET /backend/health` (estado degradado del shell), los
+archivos estáticos del propio panel (`/version.json`, `/manuales/*`) y el parche de
+`window.fetch` de `app/auth.jsx`, que es la implementación y no un consumidor. Contrato de
+errores del lado del panel, espejo del de acá: la capa convierte todo `!r.ok` en un `Error` con
+`.status`, `.data` (el body) y `.message` = el campo `error` del JSON o, si la respuesta no
+traía uno, el texto en español por status; un fallo de red da `.status = 0` y «Sin conexión con
+el servidor». Consecuencia para `api`: **el texto de `{error}` se le muestra tal cual al
+usuario en un toast**, así que tiene que estar en español y ser entendible (los 8 `catch` con
+`status(400).json({error: e.message})` que quedan en rutas admin/supervisor, §5 bloque 3 de la
+evaluación, hoy llegan a la pantalla). Una respuesta `200` con `{error}` en el cuerpo **no** es
+un error para la capa: hay que devolver el status HTTP correcto. Los cuatro casos que quedan
+así (`GET /api/npm/cert`, `GET /api/npm/hosts`, `GET /api/npm/test` y `topology.error_medicion`)
+son estados previsibles, no fallos, y el panel los trata a mano. La CSP del panel (§2) cierra
+`connect-src` en `'self'`: la API, el socket y el SIP tienen que seguir viniendo por el mismo
+origen (`/backend`, `/socket.io`, `wss://<host>/ws`); mover cualquiera de los tres a otro host
+obliga a abrir esa directiva en `dashboard/next.config.js` en el mismo cambio.
+
 Convenciones: JSON siempre; errores `{ error: '<mensaje en español para el usuario>' }` con
 el status HTTP correcto (400 validación, 401 sin sesión, 403 sin permiso, 404, 409, 500). Los
 mensajes crudos de PostgreSQL no se devuelven al cliente. `Cache-Control: no-store` en todo `/api`.
@@ -276,6 +344,13 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   (`io({ path: '/socket.io', transports: ['polling'], upgrade: false, auth })`): `dashboard/server.js`
   proxya `/socket.io` (HTTP y upgrade) tanto en `npm run dev` como en producción, y `:3000`
   sólo escucha en loopback (§8), así que nunca se salta directo a la API.
+- **El socket no se abre sin JWT.** El servidor exige `auth.token` en el handshake, así que del
+  lado del panel `getSocket()` (`app/useLive.js`) devuelve `null` si no hay
+  `localStorage.pbxng_jwt` en vez de conectar igual: desde `/login` la conexión sólo lograba que
+  engine.io cerrara la sesión y que el poll en vuelo devolviera 400 en la consola. Todo
+  consumidor de `getSocket()` tiene que tolerar el `null` (hoy `useLive()`, `app/LiveLog.jsx` y
+  `app/seguridad/page.jsx`). Después del login hay recarga completa de página, así que el
+  módulo se re-evalúa con el token ya guardado.
 - Handshake con `auth.token` = JWT de panel. Sala `state` recibe `snapshot` (`{ts, health:{db,ari,ami},
   extensions, channels, queues}`) al conectar, en cada evento relevante (debounce 300 ms) y cada
   15 s como reconciliado.

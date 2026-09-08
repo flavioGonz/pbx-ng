@@ -74,7 +74,10 @@ export default function SipLadder() {
 
   const load = async () => { try { const d = await fetch('/backend/api/sip/messages?limit=500').then((r) => r.json()); if (Array.isArray(d)) setMsgs(d.map((x) => ({ ...x, t: Number(x.t) }))); } catch (_) {} };
   useEffect(() => { load(); fetch('/backend/api/sip/state').then((r) => r.json()).then((d) => setOn(!!d.on)).catch(() => {}); }, []);
-  useEffect(() => { const t = setInterval(() => { if (liveRef.current && !drawer) load(); }, 3000); return () => clearInterval(t); }, [drawer]);
+  /* Traza SIP en vivo: acá los 3 s SÍ se justifican (es un sniffer, se mira mientras se
+   * reproduce un problema) y ya se frena con el modo "en vivo" apagado o con el detalle
+   * abierto. Lo que faltaba era no seguir capturando con la pestaña de fondo. */
+  useEffect(() => { const t = setInterval(() => { if (liveRef.current && !drawer && !document.hidden) load(); }, 3000); return () => clearInterval(t); }, [drawer]);
 
   const filtered = useMemo(() => {
     let arr = msgs;

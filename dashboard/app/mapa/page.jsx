@@ -32,7 +32,9 @@ export default function Mapa() {
     try { const d = await fetch('/backend/api/geo?hours=' + hours + '&limit=500').then(r => r.json()); setPts(Array.isArray(d) ? d : []); } catch (_) {}
     try { const c = await fetch('/backend/api/cdr?limit=500').then(r => r.json()); setCdr(Array.isArray(c) ? c : []); } catch (_) {}
   }
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [hours]);
+  /* Dos pedidos por vuelta (geo + CDR de 500 filas) sobre una ventana de días: a 15 s
+   * se redibujaba el mapa entero para agregar, con suerte, un punto. */
+  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, [hours]);
 
   // último punto por extensión
   const byExt = useMemo(() => {

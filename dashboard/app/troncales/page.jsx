@@ -7,6 +7,7 @@ import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers
 import { useLive } from '../useLive';
 import TrunkEditor from '../TrunkEditor';
 import { toast } from '../notify';
+import { apiPost, apiPut, apiDel, usePoll } from '../api';
 
 const CODECS = ['ulaw', 'alaw', 'g722', 'g729', 'opus', 'gsm'];
 const blank = {
@@ -55,12 +56,15 @@ const nodeTypes = { t: TNode };
 
 export default function Troncales() {
   const { snap } = useLive();
-  const [trunks, setTrunks] = useState([]); const [open, setOpen] = useState(false); const [editName, setEditName] = useState(null); const [f, setF] = useState(blank);
+  const [open, setOpen] = useState(false); const [editName, setEditName] = useState(null); const [f, setF] = useState(blank);
   const [saving, setSaving] = useState(false); const [editing, setEditing] = useState(false); const [showList, setShowList] = useState(true); const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
-  const [topo, setTopo] = useState(null);
-  async function load() { try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {} try { setTopo(await fetch('/backend/api/topology').then(r => r.json())); } catch (_) {} }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  /* Mismo refresco de 8 s que antes, pero por la capa: se pausa con la pestaña
+   * escondida y `load()` (botón Refrescar, alta y baja) fuerza las dos consultas. */
+  const { data: trunksData, recargar: recargarTrunks } = usePoll('/trunks', 30000);
+  const { data: topo, recargar: recargarTopo } = usePoll('/topology', 30000);
+  const trunks = Array.isArray(trunksData) ? trunksData : [];
+  const load = () => { recargarTrunks(); recargarTopo(); };
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
   async function onLogo(file) {
     if (!file) return;
@@ -79,14 +83,21 @@ export default function Troncales() {
   async function create() {
     if (!f.name || !f.provider_host) { toast('Nombre y host del proveedor son obligatorios', 'bad'); return; }
     setSaving(true);
-    const url = editing ? '/backend/api/trunks/' + encodeURIComponent(f.name) : '/backend/api/trunks';
     const body = { ...f, provider_port: +f.provider_port || 5060 };
     if (editing && !f.password) delete body.password;
-    const r = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(x => x.json()).catch(() => ({ error: 'red' }));
+    try {
+      const r = editing ? await apiPut('/trunks/' + encodeURIComponent(f.name), body) : await apiPost('/trunks', body);
+      toast(editing ? 'Troncal actualizada' : 'Troncal ' + ((r && r.created) || f.name) + ' creada', 'ok');
+      setOpen(false); load();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
     setSaving(false);
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(editing ? 'Troncal actualizada' : 'Troncal ' + (r.created || f.name) + ' creada', 'ok'); setOpen(false); load(); }
   }
-  async function del(t) { if (!confirm('¿Eliminar la troncal ' + t.name + '?')) return; await fetch('/backend/api/trunks/' + t.name, { method: 'DELETE' }); toast('Troncal eliminada', 'info'); setSel(null); load(); }
+  async function del(t) {
+    if (!confirm('¿Eliminar la troncal ' + t.name + '?')) return;
+    try { await apiDel('/trunks/' + encodeURIComponent(t.name)); toast('Troncal eliminada', 'info'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+    setSel(null); load();
+  }
 
   const ch = (snap?.channels || []).length;
   /* Hay SBC-NG adelante solo si el modulo esta activo y la troncal fija configurada (lo

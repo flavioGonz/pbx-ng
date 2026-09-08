@@ -8,6 +8,12 @@ let socket;
 export function getSocket() {
   if (!socket && typeof window !== 'undefined') {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('pbxng_jwt') : null;
+    /* Sin sesión de panel no hay socket. El servidor exige JWT en el handshake
+     * (CONTRATOS §4), así que conectar desde /login sólo lograba que engine.io
+     * cerrara la sesión y que el poll en vuelo volviera 400 en la consola. Después
+     * de entrar hay recarga completa (login hace location.href), así que este
+     * módulo se re-evalúa con el token ya guardado. */
+    if (!token) return null;
     // Siempre mismo origen: server.js proxya /socket.io a la API tanto en `npm run dev`
     // como en producción, y :3000 sólo escucha en loopback (CONTRATOS §2/§4), así que
     // saltar directo a la API rompería el tiempo real para quien entra por :3001.

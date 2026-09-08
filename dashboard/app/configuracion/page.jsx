@@ -1,14 +1,36 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, Title, Text, Stack, SimpleGrid, Group, Badge, Tabs, Button, Skeleton, Select, TextInput, PasswordInput, NumberInput, Switch, ThemeIcon, Divider, Table, ActionIcon, FileButton, Tooltip, Code, Alert } from '@mantine/core';
 import { IconRefresh, IconMail, IconDeviceFloppy, IconSend, IconMicrophone2, IconUpload, IconTrash, IconServer2, IconAdjustments, IconBrandTelegram, IconBrandWhatsapp, IconPlugConnected, IconInfoCircle, IconShieldLock, IconBell, IconPhone } from '@tabler/icons-react';
 import { toast } from '../notify';
+import { api, apiPost, apiPut, apiDel } from '../api';
 import ModulesPanel from '../ModulesPanel';
 import BrandingPanel from '../BrandingPanel';
 import ProxyPanel from '../ProxyPanel';
 import AlertsPanel from '../AlertsPanel';
 import TurnConsole from '../TurnConsole';
 import SipPanel from '../SipPanel';
+/* El audio se baja con `raw: true` al primer clic (blob) en vez de dejarle la URL al
+ * <audio>: así no se traen todos los audios de la tabla al abrir la pestaña. La ruta
+ * /api/prompts/:id/audio es pública (PUBLIC_API, porque el <audio> del navegador no
+ * manda el token), o sea que esto es por tráfico, no por permisos. */
+function PromptAudio({ id }) {
+  const [src, setSrc] = useState('');
+  const ref = useRef(null);
+  useEffect(() => () => { if (src) URL.revokeObjectURL(src); }, [src]);
+  async function cargar() {
+    if (src) return;
+    try { const r = await api('/prompts/' + id + '/audio', { raw: true }); setSrc(URL.createObjectURL(await r.blob())); }
+    catch (e) { toast('No se pudo cargar el audio', 'bad', { description: e.message }); }
+  }
+  return (
+    <div onClick={cargar} style={{ display: 'inline-block' }}>
+      <audio ref={ref} controls preload="none" style={{ height: 28, maxWidth: 180 }} src={src || undefined}
+        onCanPlay={() => { if (ref.current) ref.current.play().catch(() => {}); }} />
+    </div>
+  );
+}
+
 const STMAP = { ok: ['teal', 'Activo'], pending: ['yellow', 'Pendiente'], optional: ['gray', 'Opcional'], down: ['red', 'Caído'], off: ['gray', 'Inactivo'] };
 
 export default function Configuracion() {
@@ -18,29 +40,57 @@ export default function Configuracion() {
   const [ints, setInts] = useState({}); const [intForm, setIntForm] = useState({ telegram: {}, whatsapp: {} });
   const [tab, setTab] = useState('componentes');
   useEffect(() => { try { const t = new URLSearchParams(window.location.search).get('tab'); if (t) setTab(t); } catch (_) {} }, []);
-  async function load() { setLoading(true); try { setData(await fetch('/backend/api/system').then(r => r.json())); } catch (_) { setData(null); } setLoading(false); }
-  async function loadMail() { try { const d = await fetch('/backend/api/email/config').then(r => r.json()); const arr = Array.isArray(d) ? d : []; setMails(arr); if (arr.length && tid == null) { setTid(String(arr[0].tenant_id)); setMform(arr[0]); } } catch (_) {} }
-  async function loadPrompts() { try { const d = await fetch('/backend/api/prompts').then(r => r.json()); setPrompts(Array.isArray(d) ? d : []); } catch (_) {} }
-  async function loadInts() { try { const d = await fetch('/backend/api/integrations').then(r => r.json()); const m = {}; (Array.isArray(d) ? d : []).forEach(x => m[x.type] = x); setInts(m); } catch (_) {} }
+  async function load() { setLoading(true); try { setData(await api('/system')); } catch (e) { setData(null); toast(e.message, 'bad'); } finally { setLoading(false); } }
+  async function loadMail() { try { const d = await api('/email/config'); const arr = Array.isArray(d) ? d : []; setMails(arr); if (arr.length && tid == null) { setTid(String(arr[0].tenant_id)); setMform(arr[0]); } } catch (e) { toast(e.message, 'bad'); } }
+  async function loadPrompts() { try { const d = await api('/prompts'); setPrompts(Array.isArray(d) ? d : []); } catch (e) { toast(e.message, 'bad'); } }
+  async function loadInts() { try { const d = await api('/integrations'); const m = {}; (Array.isArray(d) ? d : []).forEach(x => m[x.type] = x); setInts(m); } catch (e) { toast(e.message, 'bad'); } }
   useEffect(() => { load(); loadMail(); loadPrompts(); loadInts(); }, []);
   const setIF = (t, k, v) => setIntForm(f => ({ ...f, [t]: { ...f[t], [k]: v } }));
-  async function saveInt(type) { const body = { ...intForm[type], enabled: ints[type]?.enabled }; const r = await fetch('/backend/api/integrations/' + type, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(x => x.json()).catch(() => ({ error: 1 })); toast(r.error ? 'Error al guardar' : 'Integración guardada', r.error ? 'bad' : 'ok'); setIntForm(f => ({ ...f, [type]: {} })); loadInts(); }
-  async function toggleInt(type, en) { setInts(m => ({ ...m, [type]: { ...m[type], enabled: en } })); await fetch('/backend/api/integrations/' + type, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: en }) }).catch(() => {}); loadInts(); }
-  async function testInt(type) { const r = await fetch('/backend/api/integrations/' + type + '/test', { method: 'POST' }).then(x => x.json()).catch(() => ({ error: 1 })); toast(r.error ? 'Falló: ' + (r.error || '') : 'Mensaje de prueba enviado', r.error ? 'bad' : 'ok'); }
+  async function saveInt(type) {
+    try { await apiPut('/integrations/' + type, { ...intForm[type], enabled: ints[type]?.enabled }); toast('Integración guardada', 'ok'); }
+    catch (e) { toast('Error al guardar', 'bad', { description: e.message }); }
+    finally { setIntForm(f => ({ ...f, [type]: {} })); loadInts(); }
+  }
+  async function toggleInt(type, en) {
+    setInts(m => ({ ...m, [type]: { ...m[type], enabled: en } }));
+    try { await apiPut('/integrations/' + type, { enabled: en }); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { loadInts(); }   // releer deja el interruptor donde de verdad quedó
+  }
+  async function testInt(type) {
+    try { await apiPost('/integrations/' + type + '/test'); toast('Mensaje de prueba enviado', 'ok'); }
+    catch (e) { toast('Falló: ' + e.message, 'bad'); }
+  }
   function pickTenant(v) { setTid(v); const m = mails.find(x => String(x.tenant_id) === String(v)); setMform(m || { tenant_id: v }); }
   const setM = (k, val) => setMform(f => ({ ...f, [k]: val }));
-  async function saveMail() { setMsaving(true); const r = await fetch('/backend/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...mform, tenant_id: tid }) }).then(x => x.json()).catch(() => ({ error: 1 })); setMsaving(false); toast(r.error ? 'Error al guardar' : 'Email guardado', r.error ? 'bad' : 'ok'); loadMail(); }
-  async function testMail() { if (!testTo) return; const r = await fetch('/backend/api/email/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tid, to: testTo }) }).then(x => x.json()).catch(() => ({ error: 1 })); toast(r.error ? 'Error: ' + (r.error || '') : 'Email de prueba enviado', r.error ? 'bad' : 'ok'); }
+  async function saveMail() {
+    setMsaving(true);
+    try { await apiPost('/email/config', { ...mform, tenant_id: tid }); toast('Email guardado', 'ok'); }
+    catch (e) { toast('Error al guardar', 'bad', { description: e.message }); }
+    finally { setMsaving(false); loadMail(); }
+  }
+  async function testMail() {
+    if (!testTo) return;
+    try { await apiPost('/email/test', { tenant_id: tid, to: testTo }); toast('Email de prueba enviado', 'ok'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+  }
   async function uploadPrompt(file) {
     if (!file) return;
     const name = (pname || file.name.replace(/\.[^.]+$/, '')).toLowerCase().replace(/[^a-z0-9_-]/g, '');
     if (!name) { toast('Poné un nombre válido', 'bad'); return; }
     const fmt = (file.name.split('.').pop() || 'wav').toLowerCase(); setPup(true);
     const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.readAsDataURL(file); });
-    const r = await fetch('/backend/api/prompts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, format: fmt, data: b64 }) }).then(x => x.json()).catch(() => ({ error: 1 }));
-    setPup(false); toast(r.error ? 'Error al subir' : 'Audio ' + (r.name || name) + ' subido', r.error ? 'bad' : 'ok'); setPname(''); loadPrompts();
+    try { const r = await apiPost('/prompts', { name, format: fmt, data: b64 }) || {}; toast('Audio ' + (r.name || name) + ' subido', 'ok'); setPname(''); }
+    catch (e) { toast('Error al subir', 'bad', { description: e.message }); }
+    finally { setPup(false); loadPrompts(); }
   }
-  async function delPrompt(id) { if (!confirm('¿Eliminar este audio?')) return; await fetch('/backend/api/prompts/' + id, { method: 'DELETE' }); toast('Audio eliminado', 'info'); loadPrompts(); }
+  async function delPrompt(id) {
+    if (!confirm('¿Eliminar este audio?')) return;
+    // Antes se borraba «a ciegas»: un rechazo por permiso decía «Audio eliminado» igual.
+    try { await apiDel('/prompts/' + id); toast('Audio eliminado', 'info'); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { loadPrompts(); }
+  }
 
   const comps = data?.components || [];
   const groups = [...new Set(comps.map(c => c.group))];
@@ -177,7 +227,7 @@ export default function Configuracion() {
                     <Table.Td>{p.format}</Table.Td>
                     <Table.Td>{p.bytes ? (p.bytes / 1024).toFixed(0) + ' KB' : '—'}</Table.Td>
                     <Table.Td>{p.synced_at ? <Badge size="sm" variant="light" color="teal">En Asterisk</Badge> : <Badge size="sm" variant="light" color="yellow">Sincronizando…</Badge>}</Table.Td>
-                    <Table.Td><audio controls preload="none" style={{ height: 28, maxWidth: 180 }} src={'/backend/api/prompts/' + p.id + '/audio'} /></Table.Td>
+                    <Table.Td><PromptAudio id={p.id} /></Table.Td>
                     <Table.Td ta="right"><Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => delPrompt(p.id)}><IconTrash size={16} /></ActionIcon></Tooltip></Table.Td>
                   </Table.Tr>
                 ))}</Table.Tbody>

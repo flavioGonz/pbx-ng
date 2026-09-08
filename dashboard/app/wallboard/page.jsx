@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SimpleGrid, Card, Text, Title, Stack, Table, Badge, Group, ThemeIcon, RingProgress, Progress, ActionIcon, Tooltip, Box } from '@mantine/core';
 import { IconPhone, IconUsers, IconHeadset, IconBolt, IconPhoneIncoming, IconPhoneOutgoing, IconPhoneOff, IconClock, IconMaximize, IconMinimize, IconArrowDownLeft, IconArrowUpRight, IconActivity, IconPhoneCall, IconUserCheck } from '@tabler/icons-react';
 import { useLive } from '../useLive';
+import { usePoll } from '../api';
+import { fmtReloj } from '../fmt';
 import Slot from '../Slot';
-
-function fmtDur(s) { if (s == null || s < 0) return '—'; s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60; const p = n => String(n).padStart(2, '0'); return h ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`; }
 
 function Spark({ data, color = '#ffffff' }) {
   if (!data || data.length < 2) return null;
@@ -33,7 +33,6 @@ function Kpi({ label, value, sub, icon: Icon, accent, color = 'blue', spark }) {
 
 export default function Wallboard() {
   const { snap, connected } = useLive();
-  const [wb, setWb] = useState({ today: {}, queues: [] });
   const [now, setNow] = useState(Date.now());
   const [hist, setHist] = useState([]);
   const [fs, setFs] = useState(false);
@@ -41,9 +40,13 @@ export default function Wallboard() {
   useEffect(() => setMounted(true), []);
   const lastRef = useRef(-1);
 
+  // El reloj de la cabecera no es un refresco de datos: sigue latiendo aunque no se mire.
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-  async function loadWb() { try { setWb(await fetch('/backend/api/wallboard').then(r => r.json())); } catch (_) {} }
-  useEffect(() => { loadWb(); const t = setInterval(loadWb, 8000); return () => clearInterval(t); }, []);
+  /* Los totales del día y las colas vienen de la API; el resto de la pantalla ya llega por
+   * socket (`useLive`). El wallboard suele quedar abierto en una pantalla de pared, pero
+   * también en una pestaña de fondo: con `usePoll` deja de pedir mientras no se ve. */
+  const { data: wbData } = usePoll('/wallboard', 8000);
+  const wb = useMemo(() => wbData || { today: {}, queues: [] }, [wbData]);
 
   const eps = snap?.extensions || [], ch = snap?.channels || [], qs = snap?.queues || [];
   useEffect(() => {
@@ -111,7 +114,7 @@ export default function Wallboard() {
           </SimpleGrid>
           <Group justify="space-between" mt="md"><Text fz="xs" c="dimmed">Tasa de atención</Text><Text fz="xs" fw={600}>{answeredPct}%</Text></Group>
           <Progress.Root size="lg" mt={4}><Progress.Section value={answeredPct} color="teal" /></Progress.Root>
-          <Text fz="xs" c="dimmed" mt="sm">Duración media de conversación: <b>{fmtDur(t.avg_talk)}</b></Text>
+          <Text fz="xs" c="dimmed" mt="sm">Duración media de conversación: <b>{fmtReloj(t.avg_talk)}</b></Text>
         </Card>
 
         <Card withBorder radius="lg" padding="lg" shadow="sm">
@@ -146,7 +149,7 @@ export default function Wallboard() {
                 </Group>
                 <Group mt="md" gap="lg">
                   <div><Text fz="xs" c="dimmed">En espera</Text><Text fw={800} fz={26} c={q.waiting > 0 ? 'orange' : undefined}>{q.waiting ?? 0}</Text></div>
-                  <div><Text fz="xs" c="dimmed">Espera máx.</Text><Text fw={700} fz={18}>{fmtDur(q.holdtime)}</Text></div>
+                  <div><Text fz="xs" c="dimmed">Espera máx.</Text><Text fw={700} fz={18}>{fmtReloj(q.holdtime)}</Text></div>
                   <div><Text fz="xs" c="dimmed">Atend./Aband.</Text><Text fw={700} fz={18}><Text span c="teal">{q.completed ?? 0}</Text>/<Text span c="red">{q.abandoned ?? 0}</Text></Text></div>
                 </Group>
               </Card>
@@ -170,7 +173,7 @@ export default function Wallboard() {
                     <Table.Td fw={600}>{c.caller || '—'}</Table.Td>
                     <Table.Td>{c.connected || '—'}</Table.Td>
                     <Table.Td><Badge variant="light" color={stateColor(c.state)}>{c.state}</Badge></Table.Td>
-                    <Table.Td ff="monospace" fw={600}>{fmtDur(dur)}</Table.Td>
+                    <Table.Td ff="monospace" fw={600}>{fmtReloj(dur)}</Table.Td>
                     <Table.Td ff="monospace" fz="xs" c="dimmed">{c.name}</Table.Td>
                   </Table.Tr>
                 );

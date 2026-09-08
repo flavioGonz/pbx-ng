@@ -5,6 +5,7 @@ import '@xyflow/react/dist/style.css';
 import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper } from '@mantine/core';
 import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiGet, apiPost, apiPut, BASE } from './api';
 
 const DEST = {
   extension: { label: 'Interno', color: '#0ea5e9', icon: IconPhoneCall },
@@ -54,9 +55,31 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
   const [greeting, setGreeting] = useState(ivr?.greeting || 'demo-congrats');
   const [ivrAudios, setIvrAudios] = useState([]);
   const [genOpen, setGenOpen] = useState(false); const [genText, setGenText] = useState(''); const [genName, setGenName] = useState(''); const [genVoice, setGenVoice] = useState(''); const [genVoices, setGenVoices] = useState([]); const [genBusy, setGenBusy] = useState(false);
-  useEffect(() => { fetch('/backend/api/ivr/audios').then(r => r.json()).then(d => Array.isArray(d) && setIvrAudios(d)).catch(() => {}); fetch('/backend/api/voz').then(r => r.json()).then(d => { setGenVoices(d.voices || []); if (d.default_voice) setGenVoice(d.default_voice); }).catch(() => {}); }, []);
-  async function previewGen() { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: genText, voice: genVoice }) }); const b = await r.blob(); if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); } } catch (_) {} }
-  async function genAudio() { if (!genText.trim()) return; setGenBusy(true); const r = await fetch('/backend/api/ivr/gen-audio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: genText, voice: genVoice || undefined, name: genName || undefined }) }).then(x => x.json()).catch(() => ({ error: 1 })); setGenBusy(false); if (r.error) { toast('Error generando audio: ' + r.error, 'bad'); return; } toast('Audio generado y desplegado a Asterisk', 'ok'); setGreeting(r.ref); setGenOpen(false); fetch('/backend/api/ivr/audios').then(x => x.json()).then(d => Array.isArray(d) && setIvrAudios(d)).catch(() => {}); }
+  const cargarAudios = () => apiGet('/ivr/audios').then(d => Array.isArray(d) && setIvrAudios(d)).catch(e => toast(e.message, 'bad'));
+  useEffect(() => {
+    cargarAudios();
+    apiGet('/voz').then(d => { setGenVoices(d.voices || []); if (d.default_voice) setGenVoice(d.default_voice); })
+      .catch(e => toast(e.message, 'bad'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // `raw` porque /voz/test devuelve el WAV sintetizado, no JSON.
+  async function previewGen() {
+    try {
+      const r = await api('/voz/test', { method: 'POST', body: { text: genText, voice: genVoice }, raw: true });
+      const b = await r.blob();
+      if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); }
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  async function genAudio() {
+    if (!genText.trim()) return;
+    setGenBusy(true);
+    try {
+      const r = await apiPost('/ivr/gen-audio', { text: genText, voice: genVoice || undefined, name: genName || undefined });
+      toast('Audio generado y desplegado a Asterisk', 'ok');
+      setGreeting(r.ref); setGenOpen(false); cargarAudios();
+    } catch (e) { toast('Error generando audio: ' + e.message, 'bad'); }
+    finally { setGenBusy(false); }
+  }
   const [timeout, setTimeoutV] = useState(ivr?.timeout || 8);
   const [prompts, setPrompts] = useState(promptsProp || []);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -64,7 +87,8 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
   const [sel, setSel] = useState(null);
   const audioRef = useRef(null);
 
-  useEffect(() => { if (!promptsProp) fetch('/backend/api/prompts').then(r => r.json()).then(d => setPrompts(Array.isArray(d) ? d : [])).catch(() => {}); }, [promptsProp]);
+  const cargarPrompts = () => apiGet('/prompts').then(d => setPrompts(Array.isArray(d) ? d : [])).catch(e => toast(e.message, 'bad'));
+  useEffect(() => { if (!promptsProp) cargarPrompts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [promptsProp]);
 
   useEffect(() => {
     if (ivr?.flow?.nodes?.length) {
@@ -101,18 +125,26 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
     if (!name || !exten) { toast('Nombre y numero de acceso son obligatorios', 'bad'); return; }
     const options = nodes.filter(n => n.type === 'option' && n.data.digit !== '').map(n => ({ digit: n.data.digit, dest_type: n.data.dest_type, dest_value: n.data.dest_value || '' }));
     const flow = { nodes, edges };
-    const body = JSON.stringify({ name, exten, greeting, timeout, options, flow });
-    const url = ivr?.id ? '/backend/api/ivr/' + ivr.id : '/backend/api/ivr';
-    const method = ivr?.id ? 'PUT' : 'POST';
-    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body }).then(x => x.json()).catch(() => ({ error: 'red' }));
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(ivr?.id ? 'IVR actualizado' : 'IVR creado (acceso ' + exten + ')', 'ok'); onSaved && onSaved(); onClose && onClose(); }
+    const body = { name, exten, greeting, timeout, options, flow };
+    try {
+      if (ivr?.id) await apiPut('/ivr/' + ivr.id, body); else await apiPost('/ivr', body);
+      toast(ivr?.id ? 'IVR actualizado' : 'IVR creado (acceso ' + exten + ')', 'ok');
+      onSaved && onSaved(); onClose && onClose();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
   }
 
   async function playGreeting() {
     const p = prompts.find(x => x.name === greeting);
-    if (p) { if (audioRef.current) { audioRef.current.src = '/backend/api/prompts/' + p.id + '/audio'; audioRef.current.play().catch(() => {}); } return; }
+    if (p) { if (audioRef.current) { audioRef.current.src = BASE + '/prompts/' + p.id + '/audio'; audioRef.current.play().catch(() => {}); } return; }
     const a = ivrAudios.find(x => x.ref === greeting);
-    if (a) { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: a.text, voice: a.voice }) }); const b = await r.blob(); if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); } } catch (_) {} return; }
+    if (a) {
+      try {
+        const r = await api('/voz/test', { method: 'POST', body: { text: a.text, voice: a.voice }, raw: true });
+        const b = await r.blob();
+        if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); }
+      } catch (e) { toast(e.message, 'bad'); }
+      return;
+    }
     toast('Audio de sistema: se escucha en la llamada (sin preview acá)', 'info');
   }
   async function uploadAudio(file) {
@@ -120,8 +152,10 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
     const buf = await file.arrayBuffer(); const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
     const nm = file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
     const fmt = (file.name.split('.').pop() || 'wav').toLowerCase();
-    const r = await fetch('/backend/api/prompts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nm, format: fmt, data: b64 }) }).then(x => x.json()).catch(() => ({ error: 'red' }));
-    if (r.error) toast('Error subiendo audio: ' + r.error, 'bad'); else { toast('Audio "' + nm + '" cargado', 'ok'); setGreeting(nm); fetch('/backend/api/prompts').then(r => r.json()).then(d => setPrompts(Array.isArray(d) ? d : [])).catch(() => {}); }
+    try {
+      await apiPost('/prompts', { name: nm, format: fmt, data: b64 });
+      toast('Audio "' + nm + '" cargado', 'ok'); setGreeting(nm); cargarPrompts();
+    } catch (e) { toast('Error subiendo audio: ' + e.message, 'bad'); }
   }
 
   const promptData = [...new Set([greeting, ...prompts.map(p => p.name), ...ivrAudios.map(a => a.ref), 'demo-congrats', 'vm-goodbye', 'hello-world'])].filter(Boolean).map(n => ({ value: n, label: n }));

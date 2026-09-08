@@ -19,24 +19,13 @@ import {
 } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast, toastPromise } from '../notify';
+import { api } from '../api';
+import { fmtBytes } from '../fmt';
 
-async function api(path, opts = {}) {
-  const r = await fetch('/backend/api' + path, {
-    method: opts.method || 'GET',
-    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const j = await r.json().catch(() => null);
-  if (!r.ok || (j && j.error)) throw new Error((j && j.error) || ('El servidor respondió ' + r.status + '.'));
-  return j || {};
-}
-
-const peso = (b) => {
-  if (!b && b !== 0) return '—';
-  const u = ['B', 'KB', 'MB', 'GB']; let i = 0, n = b;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${n.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
-};
+/* El tamaño de un respaldo se escribe igual que en cualquier otra pantalla (fmt.js);
+ * esta página tenía su propia copia de la conversión. La fecha, en cambio, se queda
+ * acá: es la única que lleva año y hora juntos (un respaldo se elige por eso). */
+const peso = fmtBytes;
 const fecha = (s) => { try { return new Date(s).toLocaleString('es-UY', { dateStyle: 'short', timeStyle: 'short' }); } catch (_) { return s; } };
 
 /* Respaldo programado. Lee y escribe GET/POST /api/backup/schedule
@@ -51,10 +40,7 @@ function RespaldoProgramado() {
 
   const cargar = useCallback(async () => {
     try {
-      const r = await fetch('/backend/api/backup/schedule');
-      if (r.status === 404) { setEstado('noDisponible'); return; }
-      const j = await r.json().catch(() => null);
-      if (!r.ok || (j && j.error)) throw new Error((j && j.error) || ('El servidor respondió ' + r.status + '.'));
+      const j = await api('/backup/schedule');
       setRemoto(j || {});
       setForm({
         enabled: !!(j && j.enabled),
@@ -62,7 +48,11 @@ function RespaldoProgramado() {
         keep: Number.isInteger(j && j.keep) ? j.keep : 14,
       });
       setEstado('ok');
-    } catch (e) { setEstado('error'); toast(e.message, 'bad'); }
+    } catch (e) {
+      // Una API anterior al planificador contesta 404: no es un error para el operador.
+      if (e.status === 404) { setEstado('noDisponible'); return; }
+      setEstado('error'); toast(e.message, 'bad');
+    }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -169,13 +159,9 @@ export default function Respaldos() {
     setSubiendo(true);
     try {
       await toastPromise(
-        fetch('/backend/api/backup/subir/' + encodeURIComponent(file.name), {
+        api('/backup/subir/' + encodeURIComponent(file.name), {
           method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
-        }).then(async (r) => {
-          const j = await r.json().catch(() => null);
-          if (!r.ok || (j && j.error)) throw new Error((j && j.error) || 'No se pudo subir');
-          cargar(); return j;
-        }),
+        }).then((j) => { cargar(); return j; }),
         { loading: `Subiendo ${file.name}…`, success: 'Respaldo subido y verificado',
           error: (e) => e.message || 'No se pudo subir' });
     } catch (_) {} finally { setSubiendo(false); resetFile.current && resetFile.current(); }
@@ -200,6 +186,20 @@ export default function Respaldos() {
           error: (e) => e.message || 'No se pudo restaurar' });
       setRest(null);
     } catch (_) {} finally { setRestaurando(false); }
+  };
+
+  /* Era un `<a href download>`: ese pedido lo arma el navegador, no pasa por el parche de
+   * `window.fetch` de auth.jsx y bajaba un 401 disfrazado de archivo. Con `raw: true` va
+   * con el token y, si falla, se ve el motivo. */
+  const descargar = async (nombre) => {
+    try {
+      const resp = await api(`/backup/${encodeURIComponent(nombre)}/archivo`, { raw: true });
+      const url = URL.createObjectURL(await resp.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = nombre;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { toast('No se pudo descargar', 'bad', { description: e.message }); }
   };
 
   const borrar = (n) => toastPromise(
@@ -271,8 +271,8 @@ export default function Respaldos() {
                     <Table.Td><Badge variant="light" color="gray">{peso(b.bytes)}</Badge></Table.Td>
                     <Table.Td>
                       <Group gap={4} justify="flex-end" wrap="nowrap">
-                        <Tooltip label="Descargar"><ActionIcon variant="subtle" component="a"
-                          href={`/backend/api/backup/${encodeURIComponent(b.nombre)}/archivo`}><IconDownload size={16} /></ActionIcon></Tooltip>
+                        <Tooltip label="Descargar"><ActionIcon variant="subtle"
+                          onClick={() => descargar(b.nombre)}><IconDownload size={16} /></ActionIcon></Tooltip>
                         <Tooltip label="Restaurar desde este respaldo"><ActionIcon variant="subtle" color="orange"
                           onClick={() => abrirRestaurar(b.nombre)}><IconRestore size={16} /></ActionIcon></Tooltip>
                         <Tooltip label="Borrar"><ActionIcon variant="subtle" color="red"

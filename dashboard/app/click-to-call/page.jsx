@@ -17,7 +17,8 @@ export default function Click2Call() {
   const base = typeof window !== 'undefined' ? window.location.origin : '';
   const urlOf = (t) => base + '/call/' + t;
   async function load() { try { setList(await fetch('/backend/api/c2c').then(r => r.json())); } catch (_) {} }
-  useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, []);
+  // Lista de enlaces: pura configuración, y los cambios propios ya llaman a `load()`.
+  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   function nuevo() { setForm(empty); setOpened(true); }
   function edit(l) { setForm({ ...empty, ...l }); setOpened(true); }

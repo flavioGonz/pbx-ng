@@ -4,6 +4,8 @@ import { Stack, Card, Group, Text, Button, Badge, ThemeIcon, SimpleGrid, Tabs, T
 import { IconWaveSine, IconActivity, IconMicrophone2, IconSettings, IconFileText, IconRefresh, IconCpu, IconDeviceFloppy, IconPlayerPlay, IconPlayerStop, IconDownload, IconTrash, IconClock, IconBolt, IconServer2, IconReload, IconInfoCircle, IconCheck, IconVolume, IconArrowBackUp, IconSparkles, IconAlertTriangle, IconStar, IconStarFilled, IconPlugConnected, IconGauge } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
+import { api, apiGet, apiPost, apiPut, apiDel, usePoll } from '../api';
+import { fmtUptime } from '../fmt';
 
 /* ── Avatar parlante: un rostro moderno que "pronuncia" cuando suena el audio ─────── */
 function TalkingAvatar({ speaking, gender = 'f', size = 150 }) {
@@ -84,8 +86,6 @@ function Spark({ data, color, label, unit, value }) {
     </svg></Card>);
 }
 
-const fmtUp = (s) => { s = parseInt(s) || 0; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'; };
-
 export default function VozConsole({ section = null }) {
   const [voz, setVoz] = useState(null); const [hist, setHist] = useState([]);
   const [voices, setVoices] = useState(null); const [cfg, setCfg] = useState({ whisper: 'small', default_voice: '', models: [] });
@@ -98,19 +98,29 @@ export default function VozConsole({ section = null }) {
   const ask = (cfg) => setConfirmCfg(cfg);
   const doConfirm = async () => { const fn = confirmCfg && confirmCfg.onConfirm; setConfirmCfg(null); if (fn) await fn(); };
 
-  async function loadVoz() {
-    try { const v = await fetch('/backend/api/voz').then(r => r.json()); setVoz(v);
-      if (v.ok && v.metrics) setHist(h => [...h, { cpu: v.metrics.cpu_pct || 0, mem: v.metrics.mem_pct || 0 }].slice(-40));
-    } catch (_) { setVoz({ ok: false }); }
-  }
-  async function loadVoices() { try { setVoices(await fetch('/backend/api/voz/voices').then(r => r.json())); } catch (_) {} }
+  /* El estado del servicio se sondea solo cada 4 s (igual que antes), pero `usePoll`
+     lo frena mientras la pestaña está oculta: son 15 pedidos/minuto por pestaña. */
+  const { data: vozData, error: vozError, recargar: loadVoz } = usePoll('/voz', 30000);
+  useEffect(() => {
+    if (vozError) { setVoz({ ok: false }); return; }
+    if (!vozData) return;
+    setVoz(vozData);
+    if (vozData.ok && vozData.metrics) setHist(h => [...h, { cpu: vozData.metrics.cpu_pct || 0, mem: vozData.metrics.mem_pct || 0 }].slice(-40));
+  }, [vozData, vozError]);
+
+  async function loadVoices() { try { setVoices(await apiGet('/voz/voices')); } catch (e) { toast(e.message, 'bad'); } }
   async function loadCfg() {
-    try { const c = await fetch('/backend/api/voz/config').then(r => r.json()); setCfg(c); if (!testVoice) setTestVoice(c.default_voice || 'es-UY-ValentinaNeural'); } catch (_) {}
-    try { const s = await fetch('/backend/api/settings').then(r => r.json()); if (s.voz_url) setUrl(s.voz_url); if (s.voz_length_scale) setSpeed(s.voz_length_scale); } catch (_) {}
+    try { const c = await apiGet('/voz/config'); setCfg(c); if (!testVoice) setTestVoice(c.default_voice || 'es-UY-ValentinaNeural'); } catch (e) { toast(e.message, 'bad'); }
+    try { const s = await apiGet('/settings'); if (s.voz_url) setUrl(s.voz_url); if (s.voz_length_scale) setSpeed(s.voz_length_scale); } catch (e) { toast(e.message, 'bad'); }
   }
-  async function loadLogs() { try { const j = await fetch('/backend/api/voz/logs').then(r => r.json()); setLogs(j.logs || ''); } catch (_) {} }
-  async function loadSp() { try { setSp(await fetch('/backend/api/sysprompts').then(r => r.json())); } catch (_) {} }
-  async function spSeed() { setBusy('seed'); await fetch('/backend/api/sysprompts/seed', { method: 'POST' }); setBusy(''); loadSp(); toast('Catálogo cargado', 'ok'); }
+  async function loadLogs() { try { const j = await apiGet('/voz/logs'); setLogs(j.logs || ''); } catch (e) { toast(e.message, 'bad'); } }
+  async function loadSp() { try { setSp(await apiGet('/sysprompts')); } catch (e) { toast(e.message, 'bad'); } }
+  async function spSeed() {
+    setBusy('seed');
+    try { await apiPost('/sysprompts/seed'); toast('Catálogo cargado', 'ok'); loadSp(); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); }
+  }
   async function spGenerate(names) {
     const list = names || sp.map(x => x.name);
     if (!list.length) return;
@@ -118,41 +128,78 @@ export default function VozConsole({ section = null }) {
     const B = 8;
     for (let i = 0; i < list.length; i += B) {
       const batch = list.slice(i, i + B);
-      try { await fetch('/backend/api/sysprompts/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: spVoice, names: batch }) }); } catch (_) {}
+      try { await apiPost('/sysprompts/generate', { voice: spVoice, names: batch }); } catch (e) { toast(e.message, 'bad'); }
       setSpProg({ done: Math.min(i + B, list.length), total: list.length });
       loadSp();
     }
     setSpProg(null); loadSp(); toast('Audios generados con ' + spVoice, 'ok');
   }
-  async function spRevert(names) { setBusy('revert'); await fetch('/backend/api/sysprompts/revert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: names || [] }) }); setBusy(''); setTimeout(loadSp, 1500); toast('Restaurando originales…', 'info'); }
-  async function spSaveText(name, text) { try { await fetch('/backend/api/sysprompts/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch (_) {} }
-  async function spPlay(name) { try { const r = await fetch('/backend/api/sysprompts/test/' + encodeURIComponent(name) + '?t=' + Date.now()); if (!r.ok) return; const u = URL.createObjectURL(await r.blob()); if (spRef.current) { spRef.current.src = u; await spRef.current.play().catch(() => {}); } } catch (_) {} }
-  useEffect(() => { loadVoz(); loadVoices(); loadCfg(); loadSp(); const t = setInterval(loadVoz, 4000); return () => clearInterval(t); }, []);
+  async function spRevert(names) {
+    setBusy('revert');
+    try { await apiPost('/sysprompts/revert', { names: names || [] }); toast('Restaurando originales…', 'info'); setTimeout(loadSp, 1500); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); }
+  }
+  async function spSaveText(name, text) {
+    try { await apiPut('/sysprompts/' + encodeURIComponent(name), { text }); } catch (e) { toast(e.message, 'bad'); }
+  }
+  // `raw` porque devuelve el audio; el `?t=` evita que el navegador sirva el anterior.
+  async function spPlay(name) {
+    try {
+      const r = await api('/sysprompts/test/' + encodeURIComponent(name) + '?t=' + Date.now(), { raw: true });
+      const u = URL.createObjectURL(await r.blob());
+      if (spRef.current) { spRef.current.src = u; await spRef.current.play().catch(() => {}); }
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadVoices(); loadCfg(); loadSp(); }, []);
 
-  async function saveBasics() { setBusy('basics'); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: url, voz_length_scale: speed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setBusy(''); toast(r.error ? 'Error' : 'Guardado', r.error ? 'bad' : 'ok'); }
+  async function saveBasics() {
+    setBusy('basics');
+    try { await apiPost('/settings', { voz_url: url, voz_length_scale: speed }); toast('Guardado', 'ok'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+    finally { setBusy(''); }
+  }
   async function saveEngine() {
-    setBusy('engine'); const r = await fetch('/backend/api/voz/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whisper: cfg.whisper, default_voice: cfg.default_voice }) }).then(x => x.json()).catch(() => ({ error: 1 })); setBusy('');
-    toast(r.error ? 'Error: ' + r.error : 'Aplicado · reiniciando servicio…', r.error ? 'bad' : 'ok');
+    setBusy('engine');
+    try { await apiPost('/voz/config', { whisper: cfg.whisper, default_voice: cfg.default_voice }); toast('Aplicado · reiniciando servicio…', 'ok'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+    finally { setBusy(''); }
   }
   async function setDefaultVoice(key) {
     setCfg(c => ({ ...c, default_voice: key }));
-    const r = await fetch('/backend/api/voz/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whisper: cfg.whisper, default_voice: key }) }).then(x => x.json()).catch(() => ({ error: 1 }));
-    toast(r.error ? 'Error al fijar la voz' : 'Voz por defecto: ' + key, r.error ? 'bad' : 'ok'); loadVoices();
+    try { await apiPost('/voz/config', { whisper: cfg.whisper, default_voice: key }); toast('Voz por defecto: ' + key, 'ok'); }
+    catch (e) { toast('Error al fijar la voz', 'bad', { description: e.message }); }
+    loadVoices();
   }
-  async function install(key) { setBusy('inst' + key); const r = await fetch('/backend/api/voz/voices/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) }).then(x => x.json()).catch(() => ({ error: 'red' })); setBusy(''); toast(r.error ? 'Error: ' + r.error : 'Voz instalada', r.error ? 'bad' : 'ok'); loadVoices(); loadVoz(); }
-  async function removeVoice(key) { await fetch('/backend/api/voz/voices/' + encodeURIComponent(key), { method: 'DELETE' }); toast('Voz eliminada', 'info'); loadVoices(); loadVoz(); }
+  async function install(key) {
+    setBusy('inst' + key);
+    try { await apiPost('/voz/voices/install', { key }); toast('Voz instalada', 'ok'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+    finally { setBusy(''); loadVoices(); loadVoz(); }
+  }
+  async function removeVoice(key) {
+    try { await apiDel('/voz/voices/' + encodeURIComponent(key)); toast('Voz eliminada', 'info'); }
+    catch (e) { toast(e.message, 'bad'); }
+    loadVoices(); loadVoz();
+  }
   async function play(voiceKey, label, gender) {
     setBusy('test'); setPlaying({ key: voiceKey, label: label || voiceKey, gender: gender || 'f' });
     try {
-      const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: testText, voice: voiceKey }) });
-      if (!r.ok) { toast('Error generando audio', 'bad'); setBusy(''); setPlaying(null); return; }
+      // `raw`: la respuesta es el WAV sintetizado, no JSON.
+      const r = await api('/voz/test', { method: 'POST', body: { text: testText, voice: voiceKey }, raw: true });
       const blob = await r.blob(); const u = URL.createObjectURL(blob);
       if (audioRef.current) { audioRef.current.src = u; await audioRef.current.play().catch(() => {}); }
-    } catch (_) { toast('Error de red', 'bad'); setPlaying(null); }
+    } catch (e) { toast('Error generando audio', 'bad', { description: e.message }); setPlaying(null); }
     setBusy('');
   }
   function stop() { if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } setSpeaking(false); setPlaying(null); }
-  async function restart() { setBusy('restart'); await fetch('/backend/api/voz/restart', { method: 'POST' }); toast('Reiniciando servicio…', 'info'); setBusy(''); setTimeout(() => { loadVoz(); loadVoices(); }, 6000); }
+  async function restart() {
+    setBusy('restart');
+    try { await apiPost('/voz/restart'); toast('Reiniciando servicio…', 'info'); setTimeout(() => { loadVoz(); loadVoices(); }, 6000); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); }
+  }
 
   const m = voz?.metrics || {}; const st = voz?.stats || {}; const inst = voices?.installed || []; const cat = voices?.catalog || []; const edge = voices?.edge || [];
   const edgeCards = edge.map(v => ({ ...v, ...edgeMeta(v) }));
@@ -236,7 +283,7 @@ export default function VozConsole({ section = null }) {
         <Group gap={8} mb="sm"><ThemeIcon variant="light" color="teal" size={26} radius="md"><IconGauge size={15} /></ThemeIcon><Text fw={700}>Monitoreo del servicio</Text></Group>
         {!voz?.ok ? <Alert color="red" variant="light" icon={<IconInfoCircle size={18} />}>No se pudo contactar el servicio de voz en {url}. Verificá el contenedor pbxng-voz.</Alert> : <>
           <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} mb="md">
-            <Card withBorder radius="md" padding="sm"><Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="grape" size={36} radius="md"><IconClock size={18} /></ThemeIcon><div><Text size="xs" c="dimmed">Uptime</Text><Text fw={700} fz="sm">{fmtUp(m.uptime_s)}</Text></div></Group></Card>
+            <Card withBorder radius="md" padding="sm"><Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="grape" size={36} radius="md"><IconClock size={18} /></ThemeIcon><div><Text size="xs" c="dimmed">Uptime</Text><Text fw={700} fz="sm">{fmtUptime(m.uptime_s)}</Text></div></Group></Card>
             <Card withBorder radius="md" padding="sm"><Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="cyan" size={36} radius="md"><IconCpu size={18} /></ThemeIcon><div><Text size="xs" c="dimmed">Núcleos</Text><Text fw={700} fz="sm">{m.ncpu}</Text></div></Group></Card>
             <Card withBorder radius="md" padding="sm"><Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="blue" size={36} radius="md"><IconMicrophone2 size={18} /></ThemeIcon><div><Text size="xs" c="dimmed">Síntesis (TTS)</Text><Text fw={700} fz="sm">{st.tts || 0} · {st.tts_avg_ms || 0}ms</Text></div></Group></Card>
             <Card withBorder radius="md" padding="sm"><Group gap="xs" wrap="nowrap"><ThemeIcon variant="light" color="teal" size={36} radius="md"><IconWaveSine size={18} /></ThemeIcon><div><Text size="xs" c="dimmed">Transcripción (STT)</Text><Text fw={700} fz="sm">{st.stt || 0} · {st.stt_avg_ms || 0}ms</Text></div></Group></Card>

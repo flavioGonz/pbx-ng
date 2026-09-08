@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Stack, Card, Group, Text, TextInput, PasswordInput, Button, ThemeIcon, Badge, Table, Alert, Anchor, Divider, SimpleGrid } from '@mantine/core';
 import { IconShieldLock, IconDeviceFloppy, IconPlugConnected, IconRefresh, IconLock, IconExternalLink, IconInfoCircle, IconCertificate } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiPost } from './api';
+import { fmtFecha } from './fmt';
 
 const CERT_ERR = {
   'npm-not-configured': 'Configurá la URL del proxy y guardá.',
@@ -22,37 +24,41 @@ export default function ProxyPanel() {
 
   async function loadSettings() {
     try {
-      const s = await fetch('/backend/api/settings').then((r) => r.json());
+      const s = await api('/settings');
       setF({ npm_url: s.npm_url || '', npm_identity: s.npm_identity || '', domain: s.domain || '' });
       setHasSecret(s.npm_secret === '__SET__');
-    } catch (_) {}
+    } catch (e) { toast(e.message, 'bad'); }
   }
-  async function loadCert() { try { setCert(await fetch('/backend/api/npm/cert').then((r) => r.json())); } catch (_) { setCert({ error: 'net' }); } }
-  async function loadHosts() { try { setHosts(await fetch('/backend/api/npm/hosts').then((r) => r.json())); } catch (_) { setHosts({ error: 'net', items: [] }); } }
+  /* El NPM contesta 200 con `{error:'cert-not-found'}` para los casos previsibles (sin
+   * credenciales, sin dominio): eso NO es un fallo de red y lo explica el Alert de abajo.
+   * El catch queda para el fallo de verdad, que además avisa. */
+  async function loadCert() { try { setCert(await api('/npm/cert')); } catch (e) { setCert({ error: 'net' }); toast(e.message, 'bad'); } }
+  async function loadHosts() { try { setHosts(await api('/npm/hosts')); } catch (e) { setHosts({ error: 'net', items: [] }); toast(e.message, 'bad'); } }
   useEffect(() => { loadSettings(); loadCert(); loadHosts(); }, []);
 
   async function save() {
     setSaving(true);
     const body = { npm_url: f.npm_url.trim(), npm_identity: f.npm_identity.trim(), domain: f.domain.trim() };
     body.npm_secret = secret ? secret : '__SET__'; // __SET__ => el backend conserva el guardado
-    const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => ({ error: 1 }));
-    setSaving(false);
-    if (r.error) { toast('Error al guardar', 'bad'); return; }
+    try { await apiPost('/settings', body); }
+    catch (e) { toast(e.message, 'bad'); return; }
+    finally { setSaving(false); }
     setSecret(''); toast('Proxy guardado', 'ok'); loadSettings();
     await test(true);
   }
   async function test(silent) {
     setTesting(true);
-    const r = await fetch('/backend/api/npm/test', { method: 'POST' }).then((x) => x.json()).catch(() => ({ ok: false, error: 'net' }));
-    setTesting(false);
-    if (r.ok) toast('Conexión OK · ' + (r.hosts || 0) + ' hosts en el proxy', 'ok');
-    else if (!silent) toast('Falló: ' + (CERT_ERR[r.error] || r.error || 'error'), 'bad');
+    let r;
+    try { r = await apiPost('/npm/test'); }
+    catch (e) { if (!silent) toast(e.message, 'bad'); r = { ok: false }; }
+    finally { setTesting(false); }
+    if (r && r.ok) toast('Conexión OK · ' + (r.hosts || 0) + ' hosts en el proxy', 'ok');
+    else if (!silent && r && r.error) toast('Falló: ' + (CERT_ERR[r.error] || r.error || 'error'), 'bad');
     loadCert(); loadHosts();
   }
 
   const certOk = cert && cert.days_left != null;
   const certColor = certOk ? (cert.days_left < 15 ? 'red' : cert.days_left < 30 ? 'yellow' : 'teal') : 'gray';
-  const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch (_) { return '—'; } };
 
   return (
     <Stack gap="md" maw={760}>
@@ -80,7 +86,7 @@ export default function ProxyPanel() {
         {certOk ?
           <Group gap="lg">
             <Badge size="lg" variant="light" color={certColor} leftSection={<IconLock size={13} />}>{cert.days_left} días restantes</Badge>
-            <Text size="sm" c="dimmed">Vence el <b>{fmtDate(cert.expires_date)}</b>{cert.provider ? ' · ' + cert.provider : ''}</Text>
+            <Text size="sm" c="dimmed">Vence el <b>{fmtFecha(cert.expires_date)}</b>{cert.provider ? ' · ' + cert.provider : ''}</Text>
           </Group> :
           <Alert variant="light" color="gray" icon={<IconInfoCircle size={18} />}>{(cert && CERT_ERR[cert.error]) || 'Sin datos del certificado. Configurá y probá la conexión.'}</Alert>}
       </Card>

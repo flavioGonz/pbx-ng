@@ -6,6 +6,8 @@ import { Stack, Text, Group, Badge, Card, Modal, Table, SimpleGrid, ThemeIcon, L
 import { IconShieldLock, IconServer2, IconWorld, IconArrowsLeftRight, IconUsers, IconApps, IconDeviceLandlinePhone, IconRouteAltLeft, IconLock, IconBolt, IconRouter, IconCloud, IconEdit, IconTrash, IconPlus, IconExternalLink, IconWaveSine, IconDatabase } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import TrunkEditor from './TrunkEditor';
+import { apiDel, usePoll } from './api';
+import { toast } from './notify';
 
 function Node({ data }) {
   const st = data.status;
@@ -111,24 +113,35 @@ const INFO = {
 
 export default function SbcFlow({ fullBleed }) {
   const { snap } = useLive();
-  const [trunks, setTrunks] = useState([]); const [sys, setSys] = useState(null); const [voz, setVoz] = useState(null); const [mods, setMods] = useState({}); const [db, setDb] = useState(null);
-  const [topo, setTopo] = useState(null);
   const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [menu, setMenu] = useState(null);
   const flowRef = useRef(null);
   const [teOpen, setTeOpen] = useState(false);
   const [teName, setTeName] = useState(null);
-  async function load() {
-    try { setTrunks(await fetch('/backend/api/trunks').then(r => r.json())); } catch (_) {}
-    try { setSys(await fetch('/backend/api/system').then(r => r.json())); } catch (_) {}
-    try { setVoz(await fetch('/backend/api/voz').then(r => r.json())); } catch (_) {}
-    try { setMods(await fetch('/backend/api/modules').then(r => r.json())); } catch (_) {}
-    try { setDb(await fetch('/backend/api/db').then(r => r.json())); } catch (_) {}
-    try { setTopo(await fetch('/backend/api/topology').then(r => r.json())); } catch (_) {}
+
+  /* Las seis fuentes del lienzo. Todas son CONFIGURACIÓN (qué troncales hay, qué
+   * módulos están activos, qué nodos declara la topología): cambian cuando alguien
+   * toca el panel, no solas. A 8 s eran 45 pedidos por minuto para dibujar un
+   * diagrama que casi nunca cambia; a 30 s son 12. Lo que sí es vivo —AMI/ARI/base—
+   * ya llega por el snapshot del socket y no se encuesta acá. Además `usePoll` las pausa
+   * con la pestaña oculta (la topología suele quedar abierta en un monitor todo el día)
+   * y cada una conserva su último dato si una vuelta falla, en vez de vaciar el lienzo. */
+  const { data: trunksData, recargar: recargarTrunks } = usePoll('/trunks', 30000, { inicial: [] });
+  const { data: sys } = usePoll('/system', 30000);
+  const { data: voz, error: vozError } = usePoll('/voz', 30000);
+  const { data: modsData } = usePoll('/modules', 30000, { inicial: {} });
+  const { data: db, error: dbError } = usePoll('/db', 30000);
+  const { data: topo } = usePoll('/topology', 30000);
+  const trunks = Array.isArray(trunksData) ? trunksData : [];
+  const mods = modsData || {};
+
+  async function delTrunk(name) {
+    if (!confirm('¿Eliminar la troncal ' + name + '?')) return;
+    try { await apiDel('/trunks/' + encodeURIComponent(name)); toast('Troncal ' + name + ' eliminada', 'ok'); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { recargarTrunks(); }
   }
-  async function delTrunk(name) { if (!confirm('¿Eliminar la troncal ' + name + '?')) return; try { await fetch('/backend/api/trunks/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} load(); }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
 
   const eps = snap?.extensions || []; const ch = snap?.channels || []; const qs = snap?.queues || [];
   const online = eps.filter(e => e.status === 'online').length;
@@ -161,8 +174,8 @@ export default function SbcFlow({ fullBleed }) {
       { id: 'asterisk', type: 'pbx', position: { x: 520, y: 320 }, data: { title: 'Asterisk PBX', ip: topo?.nodes?.asterisk || '-', icon: <IconServer2 size={18} />, accent: true, status: snap?.health?.ami ? 'ok' : medido('asterisk', 'down'), live: ch.length > 0, metrics: [{ label: 'Version', value: sys?.asterisk || '-' }, { label: 'Canales', value: ch.length, hot: ch.length > 0 }] } },
       { id: 'internos', type: 'pbx', position: { x: 840, y: 150 }, data: { title: 'Internos', icon: <IconUsers size={18} />, status: 'ok', live: ch.length > 0, metrics: [{ label: 'Registrados', value: online + '/' + eps.length }] } },
       { id: 'apps', type: 'pbx', position: { x: 840, y: 510 }, data: { title: 'Aplicaciones', icon: <IconApps size={17} />, status: 'ok', metrics: [{ label: 'Colas', value: qs.length }] } },
-      { id: 'voz', type: 'pbx', position: { x: 840, y: 690 }, data: { title: 'Voz IA (TTS/STT)', ip: topo?.nodes?.voz || '-', icon: <IconWaveSine size={17} />, status: voz && (voz.whisper || voz.ok || voz.default_voice) ? 'ok' : (voz && voz.error ? 'down' : 'pending'), metrics: [{ label: 'Motor', value: 'Piper + Whisper' }, { label: 'Whisper', value: (voz && voz.whisper) || '-' }] } },
-      { id: 'db', type: 'pbx', position: { x: 840, y: 330 }, data: { title: 'PostgreSQL', ip: topo?.nodes?.db || '-', icon: <IconDatabase size={17} />, status: medido('db', db && !db.error ? 'ok' : (db && db.error ? 'down' : 'pending')), metrics: [{ label: 'Realtime', value: 'ARA' }, { label: 'Tamaño', value: (db && db.size) || '-' }] } },
+      { id: 'voz', type: 'pbx', position: { x: 840, y: 690 }, data: { title: 'Voz IA (TTS/STT)', ip: topo?.nodes?.voz || '-', icon: <IconWaveSine size={17} />, status: voz && (voz.whisper || voz.ok || voz.default_voice) ? 'ok' : ((voz && voz.error) || vozError ? 'down' : 'pending'), metrics: [{ label: 'Motor', value: 'Piper + Whisper' }, { label: 'Whisper', value: (voz && voz.whisper) || '-' }] } },
+      { id: 'db', type: 'pbx', position: { x: 840, y: 330 }, data: { title: 'PostgreSQL', ip: topo?.nodes?.db || '-', icon: <IconDatabase size={17} />, status: medido('db', db && !db.error ? 'ok' : ((db && db.error) || dbError ? 'down' : 'pending')), metrics: [{ label: 'Realtime', value: 'ARA' }, { label: 'Tamaño', value: (db && db.size) || '-' }] } },
     ];
     /* El borde PROPIO del appliance. Antes no tenia nodo: su IP se dibujaba en la
      * caja rotulada 'SBC-NG', que en realidad representa un producto distinto. */
@@ -191,7 +204,7 @@ export default function SbcFlow({ fullBleed }) {
       data: { title: t.name, ip: t.provider_host, circle: true, icon: <IconDeviceLandlinePhone size={18} />, logo: t.logo || (t.adv && t.adv.logo), tint: ts === 'offline' ? 'down' : ts === 'online' ? 'up' : undefined, status: ts === 'online' ? 'ok' : ts === 'offline' ? 'down' : 'pending', pulse: ts === 'offline' ? 'down' : ts === 'online' ? 'ok' : null, metrics: [{ label: 'directa', value: (t.transport || 'udp').toUpperCase() }, ...(ts === 'offline' ? [{ label: 'Estado', value: 'CAÍDO' }] : ts === 'online' ? [{ label: 'Estado', value: 'Activo' }] : [])] },
     }); });
     return [...base, ...opNodes].filter((n) => !hidden.has(n.id));
-  }, [trunks, sys, snap, voz, mods, db, topo, hasSbc, borde, extPrincipal]);
+  }, [trunks, sys, snap, voz, vozError, mods, db, dbError, topo, hasSbc, borde, extPrincipal]);
 
   useEffect(() => {
     let saved = {};

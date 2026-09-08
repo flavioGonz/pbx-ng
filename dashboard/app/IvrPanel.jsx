@@ -1,22 +1,24 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, Group, Text, Button, Table, Badge, ActionIcon } from '@mantine/core';
 import { IconArrowsSplit, IconHash, IconVolume, IconList, IconPlus, IconEdit, IconTrash } from '@tabler/icons-react';
 import { toast } from './notify';
+import { apiDel, usePoll } from './api';
 
 const DLABEL = { extension: 'Extensión', ringgroup: 'Ring Group', queue: 'Cola', voicemail: 'Buzon', ivr: 'Otro IVR', ai: 'Agente IA', hangup: 'Colgar' };
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 
 export default function IvrPanel() {
   const router = useRouter();
-  const [list, setList] = useState([]);
-  async function load() { try { setList(await fetch('/backend/api/ivr').then(r => r.json())); } catch (_) {} }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  // Misma cadencia de antes (8 s), pero pausada cuando la pestaña no se ve.
+  const { data, error, recargar } = usePoll('/ivr', 30000);
+  const list = Array.isArray(data) ? data : [];
+  useEffect(() => { if (error) toast(error.message, 'bad'); }, [error]);
   async function del(id) {
     if (!confirm('Eliminar este IVR?')) return;
-    await fetch('/backend/api/ivr/' + id, { method: 'DELETE' });
-    toast('IVR eliminado', 'info'); load();
+    try { await apiDel('/ivr/' + id); toast('IVR eliminado', 'info'); recargar(); }
+    catch (e) { toast(e.message, 'bad'); }
   }
   return (
     <Card withBorder radius="lg" padding="lg">

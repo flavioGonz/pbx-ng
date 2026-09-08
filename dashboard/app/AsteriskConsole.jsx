@@ -6,15 +6,35 @@ import { IconServer2, IconActivity, IconNetwork, IconTerminal2, IconShieldLock, 
 import { useLive } from './useLive';
 import RoutesPanel from './RoutesPanel';
 import { toast } from './notify';
+import { usePoll } from './api';
 
 export default function AsteriskConsole() {
-  const { snap } = useLive();
+  const { snap, connected } = useLive();
   const [health, setHealth] = useState(null);
-  const [core, setCore] = useState(null); const [net, setNet] = useState(null);
-  const [exts, setExts] = useState([]);
-  async function load() { try { setHealth(await fetch('/backend/health').then((r) => r.json())); } catch (_) {} try { setCore(await fetch('/backend/api/asterisk/core').then((r) => r.json())); } catch (_) {} try { setNet(await fetch('/backend/api/asterisk/net').then((r) => r.json())); } catch (_) {} }
-  useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, []);
-  useEffect(() => { const lf = () => fetch('/backend/api/extensions').then((r) => r.json()).then((d) => Array.isArray(d) && setExts(d)).catch(() => {}); lf(); const t = setInterval(lf, 7000); return () => clearInterval(t); }, []);
+
+  /* `/backend/health` NO cuelga de /api (es el healthcheck del contenedor, sin token):
+   * queda como fetch suelto. Lo demás sí pasa por la capa `api`.
+   * Con el socket conectado NO se consulta: el snapshot ya trae `health.ami/ari` y es
+   * la fuente que usa `amiUp`/`ariUp` más abajo. Encuestarlo cada 6 s era pedir por
+   * HTTP lo mismo que ya estaba llegando solo (mismo criterio que `app/shell.jsx`). */
+  useEffect(() => {
+    if (connected) { setHealth(null); return; }
+    let vivo = true;
+    const pedir = () => fetch('/backend/health', { cache: 'no-store' })
+      .then((r) => r.json()).then((d) => { if (vivo) setHealth(d); })
+      .catch(() => { if (vivo) setHealth(null); });
+    pedir();
+    const t = setInterval(() => { if (!document.hidden) pedir(); }, 30000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [connected]);
+
+  /* Versión, transportes y módulos cambian sólo cuando se reinicia el motor; canales y
+   * endpoints ya vienen del snapshot. 6 s era cadencia de dato vivo para dato estático. */
+  const { data: coreData, error: coreError } = usePoll('/asterisk/core', 30000);
+  /* El fallo no se traga ni se repite en un toast cada 6 s: la tarjeta de abajo ya
+   * dice que el agente no contesta, y ahora además con el motivo real. */
+  const core = coreData || (coreError ? { error: coreError.message } : null);
+
   const ch = (snap && snap.channels) || []; const m = (core && core.metrics) || {};
   const amiUp = health ? !!health.ami : !!(snap && snap.health && snap.health.ami); const ariUp = health ? !!health.ari : !!(snap && snap.health && snap.health.ari);
   const flag = (on, l) => <Badge variant="light" color={on ? 'teal' : 'gray'} size="sm">{l}</Badge>;

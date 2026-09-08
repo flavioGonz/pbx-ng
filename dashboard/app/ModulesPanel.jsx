@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Stack, Card, Group, Text, Switch, ThemeIcon, Badge, Alert } from '@mantine/core';
 import { IconShieldLock, IconArrowsLeftRight, IconWaveSine, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconInfoCircle, IconHeadset } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiPost } from './api';
 
 const MODS = [
   { id: 'callcenter', label: 'Call Center (Agentes y Supervisores)', desc: 'Habilita los paneles de Agente y Supervisor y sus roles en el login: softphone WebRTC integrado, colas, CDR propio, cambio de clave, y escucha/susurro/irrupción para supervisores.', icon: IconHeadset },
@@ -18,15 +19,18 @@ const MODS = [
 
 export default function ModulesPanel() {
   const [mods, setMods] = useState(null); const [busy, setBusy] = useState('');
-  async function load() { try { setMods(await fetch('/backend/api/modules').then((r) => r.json())); } catch (_) {} }
+  async function load() { try { setMods(await api('/modules')); } catch (e) { toast(e.message, 'bad'); } }
   useEffect(() => { load(); }, []);
   async function toggle(id, en) {
     setBusy(id); setMods((m) => ({ ...m, [id]: en }));
-    const r = await fetch('/backend/api/modules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, enabled: en }) }).then((x) => x.json()).catch(() => ({ error: 1 }));
-    setBusy('');
-    if (r.error) { toast('No se pudo cambiar el módulo', 'bad'); load(); return; }
-    const svcNote = r.svc && r.svc.error ? ' (servicio: ' + r.svc.error + ')' : (r.svc && r.svc.queued ? ' (servicio en cola)' : '');
-    toast((en ? 'Módulo activado' : 'Módulo desactivado') + svcNote, 'ok');
+    try {
+      const r = await apiPost('/modules', { id, enabled: en });
+      const svcNote = r && r.svc && r.svc.error ? ' (servicio: ' + r.svc.error + ')' : (r && r.svc && r.svc.queued ? ' (servicio en cola)' : '');
+      toast((en ? 'Módulo activado' : 'Módulo desactivado') + svcNote, 'ok');
+    } catch (e) {
+      // El interruptor ya se movió: si el backend lo rechazó hay que releer para no mentir.
+      toast(e.message, 'bad'); load();
+    } finally { setBusy(''); }
   }
   if (!mods) return <Text c="dimmed" size="sm">Cargando módulos…</Text>;
   return (

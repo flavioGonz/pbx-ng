@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Card, Group, Text, Switch, TextInput, NumberInput, Button, Badge, Stack, ThemeIcon, Divider, Table, Loader, Center, Tooltip, ActionIcon, Collapse } from '@mantine/core';
 import { IconBellRinging, IconDeviceFloppy, IconSend, IconChevronDown, IconShieldLock, IconLogin, IconPhoneOff, IconServerBolt, IconCurrencyDollar, IconHeadset, IconMail, IconRefresh } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiPost } from './api';
+import { fmtFecha, fmtHora } from './fmt';
 
 const META = {
   'security.attack':     { icon: <IconShieldLock size={17} />, color: 'red',    title: 'Estamos bajo ataque', desc: 'Ráfaga de intentos de registro fallidos. Una sola alerta agrupada, no un mail por IP.' },
@@ -39,10 +41,11 @@ export default function AlertsPanel() {
 
   async function load() {
     try {
-      const d = await fetch('/backend/api/alerts/rules').then(r => r.json());
+      const d = await api('/alerts/rules');
       setRules(d.rules || []); setTo(d.default_to || '');
-      setHist(await fetch('/backend/api/alerts/history').then(r => r.json()).catch(() => []));
-    } catch (_) { setRules([]); }
+    } catch (e) { setRules([]); toast(e.message, 'bad'); }
+    // El historial es accesorio: si falla, las reglas se siguen viendo (pero se avisa).
+    try { setHist(await api('/alerts/history') || []); } catch (e) { toast(e.message, 'bad'); }
   }
   useEffect(() => { load(); }, []);
 
@@ -52,31 +55,31 @@ export default function AlertsPanel() {
   async function toggle(r, on) {
     upd(r.event, { enabled: on });
     setBusy(r.event);
-    const res = await fetch('/backend/api/alerts/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...r, enabled: on }) }).then(x => x.json()).catch(() => ({ error: 1 }));
-    setBusy('');
-    if (res.error) { upd(r.event, { enabled: !on }); toast('No se pudo guardar', 'bad'); return; }
-    toast((META[r.event]?.title || r.event) + (on ? ': activada' : ': desactivada'), on ? 'ok' : 'info');
+    try {
+      await apiPost('/alerts/rules', { ...r, enabled: on });
+      toast((META[r.event]?.title || r.event) + (on ? ': activada' : ': desactivada'), on ? 'ok' : 'info');
+    } catch (e) {
+      upd(r.event, { enabled: !on });   // el interruptor vuelve solo: no guardó nada
+      toast(e.message, 'bad');
+    } finally { setBusy(''); }
   }
   const updParam = (ev, k, v) => setRules(rs => rs.map(r => r.event === ev ? { ...r, params: { ...(r.params || {}), [k]: v } } : r));
 
   async function saveTo() {
-    await fetch('/backend/api/alerts/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ default_to: to }) });
-    toast('Destinatario por defecto guardado', 'ok');
+    try { await apiPost('/alerts/rules', { default_to: to }); toast('Destinatario por defecto guardado', 'ok'); }
+    catch (e) { toast(e.message, 'bad'); }
   }
   async function save(r) {
     setBusy(r.event);
-    const res = await fetch('/backend/api/alerts/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) }).then(x => x.json()).catch(() => ({ error: 1 }));
-    setBusy('');
-    if (res.error) { toast('No se pudo guardar', 'bad'); return; }
-    toast((META[r.event]?.title || r.event) + ': guardado', 'ok');
+    try { await apiPost('/alerts/rules', r); toast((META[r.event]?.title || r.event) + ': guardado', 'ok'); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); }
   }
   async function test(ev) {
     setBusy(ev + ':test');
-    const res = await fetch('/backend/api/alerts/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event: ev }) }).then(x => x.json()).catch(() => ({ error: 'red' }));
-    setBusy('');
-    toast(res.error ? res.error : 'Alerta de prueba enviada', res.error ? 'bad' : 'ok');
-    load();
+    try { await apiPost('/alerts/test', { event: ev }); toast('Alerta de prueba enviada', 'ok'); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); load(); }
   }
 
   if (!rules) return <Center mih={240}><Loader color="orange" /></Center>;
@@ -164,7 +167,7 @@ export default function AlertsPanel() {
             <Table.Tbody>
               {hist.map(h => (
                 <Table.Tr key={h.id}>
-                  <Table.Td fz="xs">{new Date(h.created_at).toLocaleString('es-UY')}</Table.Td>
+                  <Table.Td fz="xs">{fmtFecha(h.created_at)} {fmtHora(h.created_at, { segundos: true })}</Table.Td>
                   <Table.Td><Badge size="xs" variant="light" ff="monospace" color={h.severity === 'crit' ? 'red' : h.severity === 'warn' ? 'orange' : 'blue'}>{h.event}</Badge></Table.Td>
                   <Table.Td fz="xs">{h.title}</Table.Td>
                   <Table.Td fz="xs" c="dimmed">{h.to_addr || '—'}</Table.Td>

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useSoftphone } from '../useSoftphone';
 import { useAuth, logout } from '../auth';
 import Softphone from '../Softphone';
@@ -15,9 +15,10 @@ import {
   IconId, IconMapPin, IconClipboardCheck, IconPlayerPause, IconCircleDot, IconVideoOff,
   IconUsers, IconVideo,
 } from '@tabler/icons-react';
+import { api, apiGet, apiPost, useApi, usePoll } from '../api';
+import { fmtFechaHora, fmtReloj } from '../fmt';
 import { toast } from '../notify';
 
-function fdur(sec){ sec=+sec||0; const m=Math.floor(sec/60), s=sec%60; return m+':'+String(s).padStart(2,'0'); }
 const initials = (n) => (n || '?').split(/[\s.]+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 const enc = encodeURIComponent;
 
@@ -39,15 +40,24 @@ const CSS = `
 
 function RecPlay({ row }) {
   const [state, setState] = useState('idle'); const [src, setSrc] = useState(null); const audioRef = useRef(null);
+  /* El WAV se baja con `raw: true` y se reproduce desde un blob: un `src` apuntando a
+   * /backend lo pide el propio <audio>, fuera del parche de `window.fetch`, así que iba
+   * sin el Bearer y el reproductor quedaba mudo sin decir por qué. */
+  const urlRef = useRef(null);
+  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
   async function toggle() {
     if (state === 'ready') { const a = audioRef.current; if (a) { a.paused ? a.play() : a.pause(); } return; }
     setState('loading');
     try {
       const ts = row.start ? Date.parse(row.start) : 0;
-      const d = await fetch(`/backend/api/recordings/match?from=${enc(row.src)}&to=${enc(row.dst)}&ts=${ts}`).then(r => r.json());
-      if (d && d.id) { setSrc(`/backend/api/recordings/${d.id}/audio`); setState('ready'); setTimeout(() => audioRef.current && audioRef.current.play().catch(() => {}), 60); }
-      else { setState('none'); toast('Sin grabación para esta llamada', 'bad'); }
-    } catch { setState('none'); }
+      const d = await apiGet(`/recordings/match?from=${enc(row.src)}&to=${enc(row.dst)}&ts=${ts}`);
+      if (d && d.id) {
+        const resp = await api(`/recordings/${d.id}/audio`, { raw: true });
+        urlRef.current = URL.createObjectURL(await resp.blob());
+        setSrc(urlRef.current); setState('ready');
+        setTimeout(() => audioRef.current && audioRef.current.play().catch(() => {}), 60);
+      } else { setState('none'); toast('Sin grabación para esta llamada', 'bad'); }
+    } catch (e) { setState('none'); toast(e.message, 'bad'); }
   }
   if (state === 'ready') return <audio ref={audioRef} src={src} controls style={{ height: 28, maxWidth: 150 }} />;
   return <Tooltip label={state === 'none' ? 'Sin grabación' : 'Escuchar'}><ActionIcon size="sm" variant="light" color={state === 'none' ? 'gray' : 'grape'} loading={state === 'loading'} onClick={toggle} disabled={state === 'none'}><IconPlayerPlay size={14} /></ActionIcon></Tooltip>;
@@ -145,9 +155,9 @@ function SurveyModal({ opened, onClose, fields, ctx }) {
     for (const f of fields) if (f.required && (ans[f.id] === undefined || ans[f.id] === '' || ans[f.id] === null)) { toast('Completá: ' + f.label, 'bad'); return; }
     setBusy(true);
     const labeled = {}; fields.forEach(f => { if (ans[f.id] !== undefined) labeled[f.label] = ans[f.id]; });
-    const r = await fetch('/backend/api/survey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext: ctx.ext, client_id: ctx.clientId, caller: ctx.num, answers: labeled }) }).then(x => x.json()).catch(() => ({ error: 1 }));
+    try { await apiPost('/survey', { ext: ctx.ext, client_id: ctx.clientId, caller: ctx.num, answers: labeled }); }
+    catch (e) { setBusy(false); toast('No se pudo guardar la encuesta', 'bad', { description: e.message }); return; }
     setBusy(false);
-    if (r && r.error) { toast('No se pudo guardar la encuesta', 'bad'); return; }
     toast('Encuesta registrada', 'ok'); onClose();
   }
   return (
@@ -174,19 +184,15 @@ export default function AgentePanel() {
   const sp = useSoftphone();
   const scheme = useComputedColorScheme('dark', { getInitialValueInEffect: true });
   const dark = scheme === 'dark';
-  const [cdr, setCdr] = useState([]);
-  const [dir, setDir] = useState([]);
   const [cliCache, setCliCache] = useState({});
   const [pwOpen, setPwOpen] = useState(false);
   const [cur, setCur] = useState(''); const [np, setNp] = useState(''); const [np2, setNp2] = useState(''); const [pwBusy, setPwBusy] = useState(false);
   const [filter, setFilter] = useState('all');
   const [client, setClient] = useState(null);
-  const [surveyFields, setSurveyFields] = useState([]);
   const [surveyOpen, setSurveyOpen] = useState(false);
   const [surveyCtx, setSurveyCtx] = useState({});
   const [paused, setPaused] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
-  const [agentState, setAgentState] = useState({ inQueue: false });
   const wasInCall = useRef(false);
   const lastCtx = useRef({});
   const connectedRef = useRef(false);
@@ -196,21 +202,35 @@ export default function AgentePanel() {
 
   useEffect(() => {
     if (connectedRef.current) return; connectedRef.current = true;
-    fetch('/backend/api/me/sipcreds').then(r => r.json()).then(d => { if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {}); else toast('Tu usuario no tiene extensión asignado', 'bad'); }).catch(() => {});
-    fetch('/backend/api/survey/fields').then(r => r.json()).then(d => Array.isArray(d) && setSurveyFields(d)).catch(() => {});
-    fetch('/backend/api/agent/state').then(r => r.json()).then(d => { if (d) { setPaused(!!d.paused); setAgentState(d); } }).catch(() => {});
+    (async () => {
+      try {
+        const d = await apiGet('/me/sipcreds');
+        if (d && d.ext && d.password) sp.connect(d.ext, d.password, false).catch(() => {});
+        else toast('Tu usuario no tiene extensión asignado', 'bad');
+      } catch (e) { toast(e.message, 'bad'); }
+    })();
   }, []);
 
-  const loadCdr = useCallback(() => { if (!ext) return; fetch('/backend/api/cdr?ext=' + ext + '&limit=80').then(r => r.json()).then(d => Array.isArray(d) && setCdr(d)).catch(() => {}); }, [ext]);
-  useEffect(() => { loadCdr(); const t = setInterval(loadCdr, 15000); return () => clearInterval(t); }, [loadCdr]);
-  useEffect(() => { const l = () => fetch('/backend/api/directory').then(r => r.json()).then(d => Array.isArray(d) && setDir(d)).catch(() => {}); l(); const t = setInterval(l, 12000); return () => clearInterval(t); }, []);
+  // Los campos de la encuesta se leen una vez: son configuración, no estado en vivo.
+  const { data: surveyData } = useApi('/survey/fields');
+  const surveyFields = useMemo(() => (Array.isArray(surveyData) ? surveyData : []), [surveyData]);
+  const { data: agentSt } = useApi('/agent/state');
+  useEffect(() => { if (agentSt) setPaused(!!agentSt.paused); }, [agentSt]);
+
+  /* Mismas cadencias que los `setInterval` de antes (15 s el historial, 12 s la libreta),
+   * pero sin seguir pidiendo cuando el agente deja la pestaña de fondo. */
+  const { data: cdrData, recargar: loadCdr } = usePoll(ext ? '/cdr?ext=' + ext + '&limit=80' : null, 15000);
+  const { data: dirData } = usePoll('/directory', 30000);
+  const cdr = useMemo(() => (Array.isArray(cdrData) ? cdrData : []), [cdrData]);
+  const dir = Array.isArray(dirData) ? dirData : [];
 
   // cache de nombre de cliente por número (para columna Cliente)
   useEffect(() => {
     if (!ext) return;
     const nums = [...new Set(cdr.map(r => String(r.src) === String(ext) ? r.dst : r.src))].filter(n => n && !(n in cliCache));
     if (!nums.length) return; let alive = true;
-    (async () => { const upd = {}; for (const n of nums.slice(0, 30)) { try { const c = await fetch('/backend/api/clients/lookup?number=' + enc(n)).then(r => r.json()); upd[n] = (c && c.id) ? c.name : null; } catch { upd[n] = null; } } if (alive) setCliCache(m => ({ ...m, ...upd })); })();
+    // Un número sin ficha no es un error de red: se cachea como `null` para no volver a pedirlo.
+    (async () => { const upd = {}; for (const n of nums.slice(0, 30)) { try { const c = await apiGet('/clients/lookup?number=' + enc(n)); upd[n] = (c && c.id) ? c.name : null; } catch (_) { upd[n] = null; } } if (alive) setCliCache(m => ({ ...m, ...upd })); })();
     return () => { alive = false; };
   }, [cdr, ext]);
 
@@ -218,7 +238,9 @@ export default function AgentePanel() {
   useEffect(() => {
     let live = true;
     if (!callNum) { setClient(null); return; }
-    fetch('/backend/api/clients/lookup?number=' + enc(callNum)).then(r => r.json()).then(c => { if (live) setClient(c && c.id ? c : { _miss: true }); }).catch(() => { if (live) setClient(null); });
+    apiGet('/clients/lookup?number=' + enc(callNum))
+      .then(c => { if (live) setClient(c && c.id ? c : { _miss: true }); })
+      .catch(() => { if (live) setClient(null); });   // sin ficha se sigue atendiendo igual
     return () => { live = false; };
   }, [callNum]);
   useEffect(() => { if (callNum) lastCtx.current = { num: callNum, clientId: client && client.id ? client.id : null, ext }; }, [callNum, client, ext]);
@@ -231,10 +253,14 @@ export default function AgentePanel() {
 
   async function togglePause() {
     setPauseBusy(true); const nv = !paused;
-    const r = await fetch('/backend/api/agent/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: nv }) }).then(x => x.json()).catch(() => null);
+    try {
+      const r = await apiPost('/agent/pause', { paused: nv });
+      setPaused(!!(r && r.paused));
+      toast(r && r.paused ? 'En pausa — no recibirás llamadas de cola' : 'Disponible de nuevo', 'ok');
+    } catch (e) {
+      toast('No se pudo cambiar el estado', 'bad', { description: e.message });
+    }
     setPauseBusy(false);
-    if (r && !r.error) { setPaused(!!r.paused); toast(r.paused ? 'En pausa — no recibirás llamadas de cola' : 'Disponible de nuevo', 'ok'); }
-    else toast('No se pudo cambiar el estado', 'bad');
   }
   async function changePw() {
     if (!cur) { toast('Indicá tu contraseña actual', 'bad'); return; }
@@ -243,9 +269,9 @@ export default function AgentePanel() {
     setPwBusy(true);
     /* `current` es obligatorio desde 1.4.0: una sesión robada del localStorage no alcanza
      * para cambiar la clave (docs/CONTRATOS.md §2). */
-    const r = await fetch('/backend/api/auth/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ current: cur, password: np }) }).then(x => x.json()).catch(() => ({ error: 1 }));
+    try { await apiPost('/auth/password', { current: cur, password: np }); }
+    catch (e) { setPwBusy(false); toast(e.message, 'bad'); return; }
     setPwBusy(false);
-    if (r.error) { toast(typeof r.error === 'string' ? r.error : 'No se pudo cambiar', 'bad'); return; }
     toast('Contraseña actualizada', 'ok'); setPwOpen(false); setCur(''); setNp(''); setNp2('');
   }
 
@@ -328,8 +354,8 @@ export default function AgentePanel() {
                           </Table.Td>
                           <Table.Td>{cli ? <Badge variant="light" color="grape" leftSection={<IconUsers size={11} />}>{cli}</Badge> : <Text fz="xs" c="dimmed">—</Text>}</Table.Td>
                           <Table.Td style={{ textAlign: 'center' }}>{tc > 1 ? <Badge variant="light" color={tc >= 3 ? 'orange' : 'blue'}>{tc}×</Badge> : <Text fz="sm" c="dimmed">{tc || '—'}</Text>}</Table.Td>
-                          <Table.Td><Text fz="xs">{r.start ? new Date(r.start).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</Text></Table.Td>
-                          <Table.Td><Text fz="xs" ff="monospace">{fdur(r.billsec)}</Text></Table.Td>
+                          <Table.Td><Text fz="xs">{r.start ? fmtFechaHora(r.start) : ''}</Text></Table.Td>
+                          <Table.Td><Text fz="xs" ff="monospace">{fmtReloj(r.billsec)}</Text></Table.Td>
                           <Table.Td>{out ? <Badge size="sm" variant="light" color="blue">Saliente</Badge> : ok ? <Badge size="sm" variant="light" color="teal">Contestada</Badge> : <Badge size="sm" variant="light" color="red">Perdida</Badge>}</Table.Td>
                           <Table.Td><Group gap={6} wrap="nowrap" justify="flex-end">{ok ? <RecPlay row={r} /> : null}<Tooltip label="Rellamar"><ActionIcon size="sm" variant="light" color="teal" disabled={!registered || inCall} onClick={() => sp.placeCall(String(other))}><IconPhone size={14} /></ActionIcon></Tooltip></Group></Table.Td>
                         </Table.Tr>

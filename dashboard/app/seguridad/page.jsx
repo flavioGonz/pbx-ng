@@ -77,7 +77,9 @@ function usePoll(path, ms = 5000) {
   useEffect(() => {
     vivo.current = true; setCargando(true); recargar();
     if (!ms) return () => { vivo.current = false; };
-    const t = setInterval(recargar, ms);
+    // Con la pestaña de fondo no se reconcilia nada: al volver, el socket ya trajo los
+    // `sec:ev` que faltaban y este mismo poll dispara igual en el próximo tick.
+    const t = setInterval(() => { if (!document.hidden) recargar(); }, ms);
     return () => { vivo.current = false; clearInterval(t); };
   }, [path, ms, recargar]);
   return { data, error, cargando, recargar };

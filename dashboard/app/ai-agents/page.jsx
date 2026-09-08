@@ -30,7 +30,8 @@ export default function AiAgents() {
   async function saveVoz() { setVozSaving(true); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: vozUrl, voz_length_scale: vozSpeed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setVozSaving(false); toast(r.error ? 'Error' : 'Servicio de voz guardado', r.error ? 'bad' : 'ok'); loadVoz(); }
   async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) {} }
   async function loadKey() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setKeySet(s.openai_api_key === '__SET__'); if (s.voz_url) setVozUrl(s.voz_url); if (s.voz_length_scale) setVozSpeed(s.voz_length_scale); } catch (_) {} }
-  useEffect(() => { load(); loadKey(); loadVoz(); loadVozList(); const t = setInterval(() => { load(); loadVoz(); }, 8000); return () => clearInterval(t); }, []);
+  // Agentes y motor de voz: configuración + un health que no cambia cada 8 s.
+  useEffect(() => { load(); loadKey(); loadVoz(); loadVozList(); const t = setInterval(() => { if (!document.hidden) { load(); loadVoz(); } }, 30000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   function edit(a) { setForm({ ...empty, ...a }); setOpened(true); }
   function nuevo() { setForm(empty); setOpened(true); }

@@ -20,7 +20,8 @@ export default function Notificaciones() {
     try { setData(await fetch('/backend/api/push/devices').then(r => r.json())); } catch (_) {}
     try { const s = await fetch('/backend/api/settings').then(r => r.json()); setSetStatus(s); setAp(a => ({ ...a, apns_key_id: s.apns_key_id && s.apns_key_id !== '__SET__' ? s.apns_key_id : a.apns_key_id, apns_team_id: s.apns_team_id || a.apns_team_id, apns_topic: s.apns_topic || a.apns_topic, apns_prod: s.apns_prod === '1' })); } catch (_) {}
   }
-  useEffect(() => { load(); const t = setInterval(load, 12000); return () => clearInterval(t); }, []);
+  // Dos pedidos por vuelta (dispositivos + settings) para datos de configuración: 30 s.
+  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
 
   async function saveSettings(obj, after) {
     const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) }).then(x => x.json()).catch(() => ({ error: 1 }));

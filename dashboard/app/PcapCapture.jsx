@@ -19,7 +19,9 @@ export default function PcapCapture() {
   const timer = useRef(null);
 
   const load = async () => { try { const d = await fetch('/backend/api/capture/list').then((r) => r.json()); if (Array.isArray(d)) setList(d); } catch (_) {} };
-  useEffect(() => { if (open) { load(); timer.current = setInterval(load, 2000); } return () => clearInterval(timer.current); }, [open]);
+  /* 2 s se justifica: es el progreso de una captura que está corriendo ahora y se la
+   * mira para saber cuándo pararla. Sólo con el panel abierto y la pestaña a la vista. */
+  useEffect(() => { if (open) { load(); timer.current = setInterval(() => { if (!document.hidden) load(); }, 2000); } return () => clearInterval(timer.current); }, [open]);
 
   const start = async () => {
     setStarting(true);

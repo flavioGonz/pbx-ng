@@ -17,44 +17,29 @@ import {
 } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast, toastPromise } from '../notify';
-
-/* El panel del PBX habla con su API por /backend/api (sin helper global): este
-   envoltorio hace lo mismo que el resto de las pantallas, con manejo de error. */
-async function api(path, opts = {}) {
-  const r = await fetch('/backend/api' + path, {
-    method: opts.method || 'GET',
-    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || (j && j.error)) throw new Error((j && j.error) || ('HTTP ' + r.status));
-  return j;
-}
+import { apiGet, apiPost, apiPut, apiDel, usePoll } from '../api';
 
 
 /* ─────────────── Aparcado de llamadas ─────────────── */
 function Parking() {
   const [cfg, setCfg] = useState(null);
-  const [lots, setLots] = useState('');
-  const cargar = () => api('/parking').then(setCfg).catch((e) => toast(e.message, 'bad'));
+  const [verLots, setVerLots] = useState(false);
+  const cargar = () => apiGet('/parking').then(setCfg).catch((e) => toast(e.message, 'bad'));
   useEffect(() => { cargar(); }, []);
 
   const guardar = () => toastPromise(
-    api('/parking', { method: 'PUT', body: cfg }),
+    apiPut('/parking', cfg),
     { loading: 'Guardando…', success: 'Guardado (aplicá para que Asterisk lo tome)', error: (e) => e.message });
 
   const aplicar = () => toastPromise(
-    api('/parking/apply', { method: 'POST' }).then((r) => { if (r && r.error) throw new Error(r.error); return r; }),
+    apiPost('/parking/apply').then((r) => { if (r && r.error) throw new Error(r.error); return r; }),
     { loading: 'Aplicando en Asterisk…', success: 'Aparcado activo', error: (e) => e.message });
 
-  const verPlazas = () => api('/parking/lots').then(setLots).catch((e) => toast(e.message, 'bad'));
   // Refresco automático mientras el panel de plazas está abierto: una llamada aparcada
-  // es algo que cambia solo, y mirar una foto vieja no sirve.
-  useEffect(() => {
-    if (!lots) return;
-    const t = setInterval(() => api('/parking/lots').then(setLots).catch(() => {}), 5000);
-    return () => clearInterval(t);
-  }, [!!lots]);
+  // es algo que cambia solo, y mirar una foto vieja no sirve. (Se pausa con la pestaña oculta.)
+  const { data: lotsData, error: lotsError, recargar: recargarLots } = usePoll('/parking/lots', 5000, { enabled: verLots });
+  const lots = verLots ? lotsData : null;   // `usePoll` conserva el último dato al pausarse
+  useEffect(() => { if (lotsError) toast(lotsError.message, 'bad'); }, [lotsError]);
 
   if (!cfg) return <Skeleton h={220} radius="lg" />;
   const plazas = Math.max(0, (cfg.hasta || 0) - (cfg.desde || 0) + 1);
@@ -82,10 +67,10 @@ function Parking() {
           <Badge variant="light" color="blue">{plazas} plaza(s): {cfg.desde}–{cfg.hasta}</Badge>
           <Button variant="default" leftSection={<IconDeviceFloppy size={16} />} onClick={guardar}>Guardar</Button>
           <Button leftSection={<IconPlayerPlay size={16} />} onClick={aplicar}>Aplicar en Asterisk</Button>
-          <Button variant={lots ? 'light' : 'subtle'} leftSection={<IconRefresh size={16} />} onClick={verPlazas}>
+          <Button variant={lots ? 'light' : 'subtle'} leftSection={<IconRefresh size={16} />} onClick={() => { setVerLots(true); if (verLots) recargarLots(); }}>
             {lots ? 'Actualizar plazas' : 'Ver plazas ocupadas'}
           </Button>
-          {lots && <Button variant="subtle" color="gray" onClick={() => setLots(null)}>Ocultar</Button>}
+          {lots && <Button variant="subtle" color="gray" onClick={() => setVerLots(false)}>Ocultar</Button>}
         </Group>
 
         {lots && (
@@ -162,11 +147,11 @@ function Parking() {
 /* ─────────────── Captura de llamada ─────────────── */
 function Pickup() {
   const [rows, setRows] = useState(null);
-  const cargar = () => api('/pickup-groups').then(setRows).catch(() => setRows([]));
+  const cargar = () => apiGet('/pickup-groups').then(setRows).catch((e) => { toast(e.message, 'bad'); setRows([]); });
   useEffect(() => { cargar(); }, []);
 
   const set = (ext, grupo) => toastPromise(
-    api(`/pickup-groups/${ext}`, { method: 'PUT', body: { grupo } }).then(cargar),
+    apiPut(`/pickup-groups/${ext}`, { grupo }).then(cargar),
     { loading: 'Guardando…', success: `${ext}: grupo "${grupo || 'sin grupo'}"`, error: (e) => e.message });
 
   return (
@@ -217,29 +202,29 @@ function Moh() {
   const [clases, setClases] = useState(null);
   const [nueva, setNueva] = useState('');
   const resetRef = useRef(null);
-  const cargar = () => api('/moh').then(setClases).catch(() => setClases([]));
+  const cargar = () => apiGet('/moh').then(setClases).catch((e) => { toast(e.message, 'bad'); setClases([]); });
   useEffect(() => { cargar(); }, []);
 
   const crear = () => {
     if (!nueva.trim()) return;
-    toastPromise(api('/moh', { method: 'POST', body: { nombre: nueva.trim() } }).then(() => { setNueva(''); cargar(); }),
+    toastPromise(apiPost('/moh', { nombre: nueva.trim() }).then(() => { setNueva(''); cargar(); }),
       { loading: 'Creando…', success: 'Clase creada: ahora subile audios', error: (e) => e.message });
   };
   const borrar = (n) => {
     if (!confirm(`¿Borrar la clase "${n}" y sus audios?`)) return;
-    toastPromise(api(`/moh/${n}`, { method: 'DELETE' }).then(cargar), { loading: 'Borrando…', success: 'Clase borrada', error: (e) => e.message });
+    toastPromise(apiDel(`/moh/${n}`).then(cargar), { loading: 'Borrando…', success: 'Clase borrada', error: (e) => e.message });
   };
   const subir = async (clase, file) => {
     if (!file) return;
     const data = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(file); });
-    toastPromise(api(`/moh/${clase}/audio`, { method: 'POST', body: { filename: file.name, data } }).then(cargar),
+    toastPromise(apiPost(`/moh/${clase}/audio`, { filename: file.name, data }).then(cargar),
       { loading: `Subiendo ${file.name}…`, success: 'Audio subido (aplicá para que suene)', error: (e) => e.message });
   };
   const borrarAudio = (clase, f) => toastPromise(
-    api(`/moh/${clase}/audio/${f}`, { method: 'DELETE' }).then(cargar),
+    apiDel(`/moh/${clase}/audio/${f}`).then(cargar),
     { loading: 'Borrando…', success: 'Audio borrado', error: (e) => e.message });
   const aplicar = () => toastPromise(
-    api('/moh/apply', { method: 'POST' }).then((r) => { if (r && r.error) throw new Error(r.error); return r; }),
+    apiPost('/moh/apply').then((r) => { if (r && r.error) throw new Error(r.error); return r; }),
     { loading: 'Recargando música en espera…', success: (r) => `Aplicado: ${(r && r.clases) || 0} clase(s)`, error: (e) => e.message });
 
   return (

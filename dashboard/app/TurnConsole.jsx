@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Stack, Group, Text, Badge, Card, SimpleGrid, Table, Button, TextInput, NumberInput, PasswordInput, ThemeIcon, Divider, Code, ScrollArea, Box, Tooltip, ActionIcon, Loader, Center } from '@mantine/core';
 import { IconArrowsLeftRight, IconRefresh, IconDeviceFloppy, IconBolt, IconWorld, IconHash, IconKey, IconPlugConnected, IconCloud, IconTestPipe, IconReload, IconCpu, IconRouter, IconShieldCheck, IconShieldX } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiPost, usePoll } from './api';
 import { fetchIceServers, probeIce } from './iceProbe';
 
 export default function TurnConsole() {
@@ -22,28 +23,46 @@ export default function TurnConsole() {
   }
   useEffect(() => { runProbe(); }, []);
 
-  async function load() {
-    try {
-      const h = await fetch('/backend/api/turn').then((r) => r.json());
-      setD(h);
-      setCfg((c) => ({ ...c, realm: h.realm || '', listening_port: h.listening_port || '', min_port: h.min_port || '', max_port: h.max_port || '', external_ip: h.external_ip || '', user_name: h.user_name || '' }));
-    } catch (_) { setD({ error: true }); }
-  }
-  useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, []);
+  /* Refresco cada 6 s (sesiones y métricas del coturn cambian solas). Con la pestaña
+   * oculta `usePoll` lo pausa: nadie está mirando las allocations. */
+  const { data: turn, error: turnError, recargar: load } = usePoll('/turn', 30000);
+  useEffect(() => {
+    if (!turn) return;
+    setD(turn);
+    // El formulario se rellena con lo que hay en el servidor, pero sin pisar la clave
+    // que el operador esté tipeando (user_password no viene del backend).
+    setCfg((c) => ({ ...c, realm: turn.realm || '', listening_port: turn.listening_port || '', min_port: turn.min_port || '', max_port: turn.max_port || '', external_ip: turn.external_ip || '', user_name: turn.user_name || '' }));
+  }, [turn]);
+  useEffect(() => { if (turnError) setD({ error: true }); }, [turnError]);
 
   async function save() {
     setBusy('save');
     const body = { realm: cfg.realm, listening_port: cfg.listening_port, min_port: cfg.min_port, max_port: cfg.max_port, external_ip: cfg.external_ip, user_name: cfg.user_name };
     if (cfg.user_password) body.user_password = cfg.user_password;
-    const r = await fetch('/backend/api/turn/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => ({ error: 1 }));
-    setBusy('');
-    if (r.error) { toast('No se pudo guardar: ' + r.error, 'bad'); return; }
+    try { await apiPost('/turn/config', body); }
+    catch (e) { toast('No se pudo guardar: ' + e.message, 'bad'); return; }
+    finally { setBusy(''); }
     toast('Configuración aplicada (Turn-NG reiniciado)' + (cfg.user_password ? ' · recordá que cambiar la credencial obliga a recargar los softphones' : ''), 'ok');
     setCfg((c) => ({ ...c, user_password: '' })); setTimeout(load, 800);
   }
-  async function restart() { setBusy('restart'); const r = await fetch('/backend/api/turn/restart', { method: 'POST' }).then((x) => x.json()).catch(() => ({})); setBusy(''); toast(r.ok ? 'Turn-NG reiniciado' : 'No se pudo reiniciar', r.ok ? 'ok' : 'bad'); setTimeout(load, 800); }
-  async function test() { setBusy('test'); setTestOut(''); const r = await fetch('/backend/api/turn/test', { method: 'POST' }).then((x) => x.json()).catch(() => ({ out: 'error' })); setBusy(''); setTestOut(r.out || JSON.stringify(r)); }
-  async function showLogs() { setBusy('logs'); const r = await fetch('/backend/api/turn/logs').then((x) => x.json()).catch(() => ({ log: 'error' })); setBusy(''); setLogs(r.log || ''); }
+  async function restart() {
+    setBusy('restart');
+    try { const r = await apiPost('/turn/restart'); toast(r && r.ok ? 'Turn-NG reiniciado' : 'No se pudo reiniciar', r && r.ok ? 'ok' : 'bad'); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); setTimeout(load, 800); }
+  }
+  async function test() {
+    setBusy('test'); setTestOut('');
+    try { const r = await apiPost('/turn/test'); setTestOut((r && r.out) || JSON.stringify(r)); }
+    catch (e) { toast(e.message, 'bad'); setTestOut(e.message); }
+    finally { setBusy(''); }
+  }
+  async function showLogs() {
+    setBusy('logs');
+    try { const r = await api('/turn/logs'); setLogs((r && r.log) || ''); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); }
+  }
 
   if (!d) return <Center mih={360}><Stack align="center" gap="sm"><Loader size="lg" color="cyan" /><Text c="dimmed" size="sm">Cargando estado de Turn-NG…</Text></Stack></Center>;
   if (d.error) return <Card withBorder radius="md" padding="lg"><Text c="red" fw={600}>No se pudo contactar el agente TURN (CT106:8091).</Text><Text size="sm" c="dimmed" mt={4}>Verificá que el servicio pbxng-turn esté activo.</Text></Card>;

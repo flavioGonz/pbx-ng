@@ -8,7 +8,9 @@ import { toast } from './notify';
 export default function DbConsole() {
   const [d, setD] = useState(null); const [q, setQ] = useState(''); const [busy, setBusy] = useState('');
   async function load() { try { setD(await fetch('/backend/api/db').then((r) => r.json())); } catch (_) { setD({ error: true }); } }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  /* Estado de PostgreSQL (tamaño, tablas, conexiones): no cambia en 8 s, y el VACUUM
+   * de acá ya refresca a mano. Además no se pide nada con la pestaña de fondo. */
+  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
   async function maint(table) { setBusy(table || 'all'); const r = await fetch('/backend/api/db/maintenance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(table ? { table } : {}) }).then((x) => x.json()).catch(() => ({ error: 1 })); setBusy(''); toast(r.error ? 'Error en mantenimiento' : ('VACUUM ANALYZE ejecutado' + (table ? ' en ' + table : '')), r.error ? 'bad' : 'ok'); setTimeout(load, 600); }
   if (!d) return <Center mih={360}><Stack align="center" gap="sm"><Loader size="lg" color="cyan" /><Text c="dimmed" size="sm">Cargando estado de la base…</Text></Stack></Center>;
   if (d.error) return <Card withBorder radius="md" padding="lg"><Text c="red" fw={600}>No se pudo consultar PostgreSQL.</Text></Card>;

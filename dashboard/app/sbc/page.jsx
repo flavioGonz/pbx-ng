@@ -6,11 +6,12 @@
  * Acá sólo se configura la CONEXIÓN: a qué dirección le habla Asterisk, por qué
  * transporte, y si el saliente sale por ahí. Todo lo demás del borde se administra
  * en el panel de SBC-NG. */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, Stack, Group, Text, Badge, Button, TextInput, Select, MultiSelect, Switch, Alert, ThemeIcon, SimpleGrid, Divider, Anchor, Code } from '@mantine/core';
 import { IconRouteAltLeft, IconPlugConnected, IconPlugConnectedX, IconInfoCircle, IconExternalLink, IconBolt, IconDeviceFloppy, IconRefresh, IconShieldCheck } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
+import { apiPost, apiDel, usePoll } from '../api';
 
 const CODECS = ['ulaw', 'alaw', 'g722', 'opus', 'g729'];
 
@@ -21,43 +22,52 @@ export default function SbcLinkPage() {
   const [busy, setBusy] = useState('');
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
-  async function load() {
-    try {
-      const d = await fetch('/backend/api/sbc-link').then((r) => r.json());
-      setLink(d);
-      if (d && d.configured) setF((s) => ({ ...s, host: d.host || '', port: String(d.port || 5060), transport: d.transport || 'udp', context: d.context || 'from-trunk', codecs: d.codecs || s.codecs, panel_url: d.panel_url || '' }));
-      else if (d) setF((s) => ({ ...s, panel_url: d.panel_url || '' }));
-    } catch (_) {}
-    try { setMods(await fetch('/backend/api/modules').then((r) => r.json())); } catch (_) {}
-  }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  /* Cada 8 s: el estado del enlace («vivo», ms) lo mide el backend contra el SBC, así
+   * que hay que volver a preguntar. `usePoll` lo pausa con la pestaña oculta. */
+  const { data: linkData, error: linkError, recargar: recargarLink } = usePoll('/sbc-link', 30000);
+  const { data: modsData, error: modsError, recargar: recargarMods } = usePoll('/modules', 30000);
+  const load = () => { recargarLink(); recargarMods(); };
+
+  useEffect(() => {
+    if (!linkData) return;
+    setLink(linkData);
+    const d = linkData;
+    if (d.configured) setF((s) => ({ ...s, host: d.host || '', port: String(d.port || 5060), transport: d.transport || 'udp', context: d.context || 'from-trunk', codecs: d.codecs || s.codecs, panel_url: d.panel_url || '' }));
+    else setF((s) => ({ ...s, panel_url: d.panel_url || '' }));
+  }, [linkData]);
+  useEffect(() => { if (modsData) setMods(modsData); }, [modsData]);
+  /* Un solo aviso por caída (el poll reintenta cada 8 s); se rearma al volver a responder. */
+  const avisado = useRef(false);
+  useEffect(() => {
+    const e = linkError || modsError;
+    if (e && !avisado.current) { avisado.current = true; toast(e.message, 'bad'); }
+    if (!e) avisado.current = false;
+  }, [linkError, modsError]);
 
   async function toggleModule(en) {
     setBusy('mod');
-    const r = await fetch('/backend/api/modules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'sbc', enabled: en }) }).then((x) => x.json()).catch(() => ({ error: 1 }));
-    setBusy('');
-    if (r.error) { toast('No se pudo cambiar el módulo', 'bad'); return; }
-    toast(en ? 'Módulo activado: la central usará el SBC-NG cuando esté configurado' : 'Módulo desactivado: la central opera sin SBC', 'ok');
-    load();
+    try {
+      await apiPost('/modules', { id: 'sbc', enabled: en });
+      toast(en ? 'Módulo activado: la central usará el SBC-NG cuando esté configurado' : 'Módulo desactivado: la central opera sin SBC', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(''); load(); }
   }
   async function save() {
     if (!f.host.trim()) { toast('La dirección del SBC-NG es obligatoria', 'bad'); return; }
     setBusy('save');
-    const r = await fetch('/backend/api/sbc-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...f, port: +f.port || 5060 }) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
-    setBusy('');
-    if (r.error) { toast('Error: ' + r.error, 'bad'); return; }
-    toast('Conexión al SBC-NG guardada' + (r.ruta_creada ? ' · ruta saliente «marca 0» creada' : ''), 'ok');
-    load();
+    try {
+      const r = await apiPost('/sbc-link', { ...f, port: +f.port || 5060 }) || {};
+      toast('Conexión al SBC-NG guardada' + (r.ruta_creada ? ' · ruta saliente «marca 0» creada' : ''), 'ok');
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
+    finally { setBusy(''); load(); }
   }
   async function disconnect() {
     const n = link && link.rutas_salientes ? link.rutas_salientes : 0;
     if (!confirm('¿Desconectar el SBC-NG?\n\nSe borra la troncal fija hacia el SBC' + (n ? ' y ' + n + ' ruta(s) saliente(s) que salían por él' : '') + '. La central sigue funcionando con sus troncales de operador directas.')) return;
     setBusy('del');
-    const r = await fetch('/backend/api/sbc-link', { method: 'DELETE' }).then((x) => x.json()).catch(() => ({ error: 'red' }));
-    setBusy('');
-    if (r.error) { toast('Error: ' + r.error, 'bad'); return; }
-    toast('SBC-NG desconectado. La central opera sin borde.', 'ok');
-    load();
+    try { await apiDel('/sbc-link'); toast('SBC-NG desconectado. La central opera sin borde.', 'ok'); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+    finally { setBusy(''); load(); }
   }
 
   const enabled = mods ? mods.sbc !== false : !!(link && link.enabled);

@@ -4,35 +4,40 @@ import { useEffect, useState } from 'react';
 import { Card, Group, Text, Table, Button, ActionIcon, Tooltip, Modal, TextInput, Select, Stack, Badge, Code } from '@mantine/core';
 import { IconPlus, IconEdit, IconTrash, IconRoute, IconAlertTriangle, IconNetwork } from '@tabler/icons-react';
 import { toast } from './notify';
+import { apiPost, usePoll } from './api';
 
 export default function RoutesPanel({ scope }) {
   const isAst = true;   // el borde (SBC-NG) es otro producto: sus rutas viven en su panel
   const [routes, setRoutes] = useState([]); const [ifaces, setIfaces] = useState([]);
   const [open, setOpen] = useState(false); const [editId, setEditId] = useState(null);
   const [f, setF] = useState({ dest: '', gw: '', dev: '', note: '' }); const [busy, setBusy] = useState(false);
-  async function load() {
-    try {
-      const d = await fetch('/backend/api/asterisk/net').then((r) => r.json()); setRoutes(d.managed || []); setIfaces(((d.ifaces) || []).map((x) => x.name));
-    } catch (_) {}
-  }
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  /* Cada 8 s como antes, pero pausado con la pestaña oculta. */
+  const { data: net, error: netError, recargar: load } = usePoll('/asterisk/net', 30000);
+  useEffect(() => {
+    if (!net) return;
+    setRoutes(net.managed || []); setIfaces((net.ifaces || []).map((x) => x.name));
+  }, [net]);
+  useEffect(() => { if (netError) setRoutes([]); }, [netError]);
   function openNew() { setEditId(null); setF({ dest: '', gw: '', dev: '', note: '' }); setOpen(true); }
   function openEdit(r) { setEditId(r.id); setF({ dest: r.dest || '', gw: r.gw || '', dev: r.dev || '', note: r.note || '' }); setOpen(true); }
   async function save() {
     if (!f.dest.trim() || (!f.gw.trim() && !f.dev.trim())) { toast('Indicá destino y gateway o interfaz', 'bad'); return; }
     setBusy(true);
     try {
-      if (editId) await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'del', id: editId }) });
-      await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add', ...f }) });
-    } catch (_) {}
-    setBusy(false); setOpen(false); toast(editId ? 'Ruta actualizada' : 'Ruta agregada (se aplica en segundos)', 'ok'); setTimeout(load, 800);
+      // Editar = borrar y volver a agregar; si el borrado falla no se agrega la duplicada.
+      if (editId) await apiPost('/asterisk/route', { action: 'del', id: editId });
+      await apiPost('/asterisk/route', { action: 'add', ...f });
+      setOpen(false);
+      toast(editId ? 'Ruta actualizada' : 'Ruta agregada (se aplica en segundos)', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+    finally { setBusy(false); setTimeout(load, 800); }
   }
   async function del(r) {
     if (!confirm('¿Quitar la ruta ' + r.dest + '?')) return;
-    try {
-      await fetch('/backend/api/asterisk/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'del', id: r.id }) });
-    } catch (_) {}
-    toast('Ruta quitada', 'info'); setTimeout(load, 600);
+    // Antes decía «Ruta quitada» aunque el agente rechazara el pedido.
+    try { await apiPost('/asterisk/route', { action: 'del', id: r.id }); toast('Ruta quitada', 'info'); }
+    catch (e) { toast(e.message, 'bad'); }
+    finally { setTimeout(load, 600); }
   }
   const host = 'Asterisk (núcleo)';
   const col = 'blue';

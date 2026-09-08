@@ -1,10 +1,12 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Select, ActionIcon, Tooltip, ThemeIcon } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconKey, IconSearch, IconUser, IconId, IconShieldCheck, IconCalendar } from '@tabler/icons-react';
 import { toast } from '../notify';
 import { TableSkeleton } from '../Skeletons';
+import { apiPost, apiDel, useApi } from '../api';
+import { fmtFecha } from '../fmt';
 /* Mismos roles que control-plane/rbac.js (docs/CONTRATOS.md §2). Los viejos 'operator' y
  * 'viewer' ya no existen en la API: un usuario con ese rol guardado se muestra con la
  * etiqueta cruda (roleLabel) para que el admin lo vea y lo corrija. */
@@ -15,23 +17,32 @@ const PASS_MIN = 8;
 
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 export default function Usuarios() {
-  const [list, setList] = useState([]); const [loading, setLoading] = useState(true); const [q, setQ] = useState('');
+  const { data: usuarios, cargando: loading, recargar: load } = useApi('/users');
+  const list = Array.isArray(usuarios) ? usuarios : [];
+  const [q, setQ] = useState('');
   const [opened, { open, close }] = useDisclosure(false);
   const [pwOpen, { open: openPw, close: closePw }] = useDisclosure(false);
   const [f, setF] = useState({ role: ROL_DEFAULT }); const [pwTarget, setPwTarget] = useState(null); const [pw, setPw] = useState('');
-  async function load() { try { const d = await fetch('/backend/api/users').then(r => r.json()); setList(Array.isArray(d) ? d : []); } catch (_) { setList([]); } setLoading(false); }
-  useEffect(() => { load(); }, []);
   const up = (k, v) => setF(s => ({ ...s, [k]: v }));
   async function create() {
     if (!f.password || f.password.length < PASS_MIN) { toast(`La contraseña debe tener al menos ${PASS_MIN} caracteres`, 'bad'); return; }
-    const r = await fetch('/backend/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) }).then(x => x.json());
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('Usuario ' + r.created + ' creado', 'ok'); setF({ role: ROL_DEFAULT }); close(); load(); }
+    try {
+      const r = await apiPost('/users', f);
+      toast('Usuario ' + ((r && r.created) || f.username) + ' creado', 'ok');
+      setF({ role: ROL_DEFAULT }); close(); load();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
   }
-  async function del(u) { if (!confirm('¿Eliminar el usuario ' + u.username + '?')) return; const r = await fetch('/backend/api/users/' + u.id, { method: 'DELETE' }).then(x => x.json()); if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('Usuario eliminado', 'info'); load(); } }
+  async function del(u) {
+    if (!confirm('¿Eliminar el usuario ' + u.username + '?')) return;
+    try { await apiDel('/users/' + u.id); toast('Usuario eliminado', 'info'); load(); }
+    catch (e) { toast('Error: ' + e.message, 'bad'); }
+  }
   async function resetPw() {
     if (pw.length < PASS_MIN) { toast(`La contraseña debe tener al menos ${PASS_MIN} caracteres`, 'bad'); return; }
-    const r = await fetch('/backend/api/users/' + pwTarget.id + '/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) }).then(x => x.json());
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast('Contraseña actualizada', 'ok'); setPw(''); closePw(); }
+    try {
+      await apiPost('/users/' + pwTarget.id + '/password', { password: pw });
+      toast('Contraseña actualizada', 'ok'); setPw(''); closePw();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
   }
   const roleLabel = (r) => (ROLES.find(x => x.value === r) || {}).label || r;
   const roleColor = (r) => r === 'admin' ? 'pbx' : r === 'supervisor' ? 'teal' : r === 'agente' ? 'blue' : 'gray';
@@ -54,7 +65,7 @@ export default function Usuarios() {
                   <Table.Tr key={u.id}>
                     <Table.Td ff="monospace" fw={600}>{u.username}</Table.Td><Table.Td>{u.name}</Table.Td>
                     <Table.Td><Badge variant="light" color={roleColor(u.role)}>{roleLabel(u.role)}</Badge></Table.Td>
-                    <Table.Td>{u.created_at ? new Date(u.created_at).toLocaleDateString('es-UY') : '—'}</Table.Td>
+                    <Table.Td>{fmtFecha(u.created_at)}</Table.Td>
                     <Table.Td ta="right"><Group gap={4} justify="flex-end">
                       <Tooltip label="Cambiar contraseña"><ActionIcon variant="subtle" color="gray" onClick={() => { setPwTarget(u); setPw(''); openPw(); }}><IconKey size={17} /></ActionIcon></Tooltip>
                       {u.username !== 'admin' && <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(u)}><IconTrash size={17} /></ActionIcon></Tooltip>}

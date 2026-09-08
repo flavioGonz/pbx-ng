@@ -9,8 +9,10 @@ estimados.
 
 > **Actualización 1.4.0 (2026-09-05, sprint 1 de seguridad):** los ítems marcados con **✅ 1.4.0**
 > quedaron resueltos en esa versión (ver `CHANGELOG.md` y `docs/CONTRATOS.md`). El texto original
-> se conserva tal cual como registro de lo que había. Lo mismo para **✅ 1.5.0** (robustez) y
-> **✅ 1.6.0** (centro de seguridad real sobre Asterisk + nftables).
+> se conserva tal cual como registro de lo que había. Lo mismo para **✅ 1.5.0** (robustez),
+> **✅ 1.6.0** (centro de seguridad real sobre Asterisk + nftables), **✅ 1.7.0** (endurecimiento
+> de Asterisk y red de seguridad de desarrollo: ESLint, pruebas de integración, CI) y
+> **✅ 1.8.0** (panel: capa `app/api.js`, formateo compartido, menos encuestado y CSP).
 
 ## 1. Qué es hoy, en una frase
 
@@ -287,11 +289,44 @@ red/TURN/NPM/captura, `backup`, CRM/encuesta, wallboard, conferencias y pickup-g
 pendiente: Prettier y la prueba e2e de humo del panel (login → topología → troncales) con
 Playwright.
 
-**Bloque 6 — panel.** Una capa `api.js` (un solo lugar para URL base, token, `r.ok`, errores y
-reintento) y reemplazar los 265 fetch; `error.jsx`/`loading.jsx`; JWT en cookie `HttpOnly`;
-no guardar la clave SIP en `localStorage` (o cifrarla); reducir el polling apoyándose en los
-eventos que ya llegan por socket (y arreglar el upgrade a WebSocket en el proxy para dejar el
-long-polling); utilidades compartidas (`fmtDur`, códecs); CSP con `script-src`.
+**Bloque 6 — panel.** Casi completo en 1.8.0. Una capa `api.js` (un solo lugar para URL base,
+token, `r.ok`, errores y reintento) ✅ 1.8.0 (`dashboard/app/api.js`: `api/apiGet/apiPost/apiPut/
+apiDel` + los hooks `usePoll`/`useApi`; el error es una excepción con `.status`, `.data` y
+`.message` en español, y el 401/403 sigue viviendo en el parche de `window.fetch` de `auth.jsx`
+para no duplicarlo; contrato en `docs/CONTRATOS.md` §2 y §3) y reemplazar los fetch ✅ 1.8.0
+**parcial**: 33 archivos migrados, los `fetch(` de `dashboard/app` bajaron de 251 a 94 y quedan
+~84 pedidos a la API sueltos en 30 archivos (`ai-agents`, `phone`, `telefonos`, `TrunkEditor`,
+`SipLadder`, `PcapCapture`, `login`, `push.js`, `useSoftphone.js`, `certificados`, `intercom`,
+`RecordingPlayer`/`MiniWave`…). Utilidades compartidas (`fmtDur`, códecs) ✅ 1.8.0
+(`dashboard/app/fmt.js`, que además unificó `fmtBytes`/`fmtUptime`/`banderaCC`/`estadoColor`).
+Reducir el polling apoyándose en los eventos que ya llegan por socket ✅ 1.8.0 (política escrita
+en `docs/CONTRATOS.md` §2: el `snapshot` no se re-pide por HTTP, la configuración va a 30 s o
+más, y `usePoll` no pide nada con `document.hidden`; el Resumen pasó de ~44 a 5 pedidos por
+minuto y a cero en segundo plano, y dejó de pedir `/api/metrics` porque es un subconjunto de
+`/api/system/overview`). CSP con `script-src` ✅ 1.8.0 (`dashboard/next.config.js`, política
+completa; pendiente: `script-src` todavía lleva `https://unpkg.com` porque leaflet y wavesurfer
+se cargan por CDN — bajarlos a `dashboard/public/vendor/` es lo que deja la política cerrada, y
+de paso hace que `/mapa`, `/clientes/[id]` y las formas de onda funcionen en una central sin
+salida a internet). De paso, `getSocket()` ya no abre el socket sin JWT (§4).
+
+Sigue pendiente, y por qué no se hizo en 1.8.0:
+- **JWT en cookie `HttpOnly`**: no es un cambio de panel sino del contrato de sesión. Hoy el
+  token en `localStorage` lo leen `auth.jsx`, `useLive.js` (handshake del socket), `push.js`,
+  `useSoftphone.js` y el softphone nativo; pasarlo a cookie obliga a que la API la emita y la
+  valide, a resolver CSRF en toda escritura y a decidir qué hace el token de alcance `phone`,
+  que vive 30 días en un aparato. Corresponde a `api` + `panel` en el mismo sprint.
+- **Clave SIP fuera de `localStorage`** (o cifrada): mismo motivo — la guarda el softphone web
+  para poder re-registrar sin volver a enrolar, así que el reemplazo real es que la API entregue
+  una credencial de corta vida renovable, no esconderla en el navegador (cifrarla con una clave
+  que también está en el navegador no agrega nada).
+- `error.jsx`/`loading.jsx` por ruta: no se agregaron; las pantallas migradas muestran el error
+  con un toast y el estado `cargando` de los hooks.
+- Arreglar el upgrade a WebSocket en el proxy para dejar el long-polling: sin cambios (el panel
+  sigue con `transports: ['polling'], upgrade: false`); es de `empaquetado`.
+- Hallazgos abiertos de la revisión de 1.8.0 (menores, en `CHANGELOG.md` → *Known issues*):
+  `RoutesPanel` vacía la tabla ante un fallo momentáneo del poll, `CrudPanel` avisa por cada
+  ciclo fallido en vez de una sola vez, la descarga de respaldos pasa por memoria, y quedan
+  fugas de `ObjectURL` en las previews de audio.
 
 ## 6. Veredicto
 

@@ -1,9 +1,10 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, Group, Button, TextInput, Stack, Badge, Text, ActionIcon, Pill, Tooltip } from '@mantine/core';
 import { IconPlus, IconTrash, IconEdit, IconMicrophone, IconVolume, IconClockPause } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { toast } from './notify';
+import { apiDel, apiPost, useApi } from './api';
 import QueueEditor from './QueueEditor';
 
 const STRAT = { ringall: 'Timbrar todos', rrmemory: 'Round-robin', leastrecent: 'Menos reciente', fewestcalls: 'Menos llamadas', random: 'Aleatoria', linear: 'Lineal', wrandom: 'Aleatoria ponderada' };
@@ -11,36 +12,41 @@ const STRAT = { ringall: 'Timbrar todos', rrmemory: 'Round-robin', leastrecent: 
 export default function QueuePanel() {
   const { snap } = useLive();
   const live = snap?.queues || [];              // estado en vivo (agentes online, etc.)
-  const [full, setFull] = useState([]);         // configuración completa
-  const [voices, setVoices] = useState([]);
   const [edit, setEdit] = useState(null);       // objeto cola | 'new' | null
   const [newAgent, setNewAgent] = useState({});
 
-  async function load() {
-    try { const d = await fetch('/backend/api/queues').then(r => r.json()); setFull(Array.isArray(d) ? d : []); } catch (_) {}
-  }
-  useEffect(() => { load(); }, []);
-  useEffect(() => {
-    fetch('/backend/api/voz/voices').then(r => r.json()).then(d => {
-      const edge = (d.edge || []).map(v => ({ value: v.key, label: v.label }));
-      const piper = (d.installed || []).map(v => ({ value: v.key, label: v.label || v.key }));
-      setVoices([...edge, ...piper]);
-    }).catch(() => {});
-  }, []);
+  // La configuración completa no cambia sola: se recarga a mano tras guardar o borrar.
+  const { data: cfgList, error: cfgError, recargar: load } = useApi('/queues');
+  const full = Array.isArray(cfgList) ? cfgList : [];
+  useEffect(() => { if (cfgError) toast(cfgError.message, 'bad'); }, [cfgError]);
+
+  const { data: vozVoices } = useApi('/voz/voices');
+  const voices = useMemo(() => {
+    const d = vozVoices || {};
+    const edge = (d.edge || []).map(v => ({ value: v.key, label: v.label }));
+    const piper = (d.installed || []).map(v => ({ value: v.key, label: v.label || v.key }));
+    return [...edge, ...piper];
+  }, [vozVoices]);
 
   const cfgOf = (name) => full.find(q => q.name === name) || {};
 
   async function delQ(name) {
     if (!confirm('¿Eliminar la cola ' + name + '?')) return;
-    await fetch('/backend/api/queues/' + name, { method: 'DELETE' });
-    toast('Cola eliminada', 'info'); load();
+    try { await apiDel('/queues/' + encodeURIComponent(name)); toast('Cola eliminada', 'info'); load(); }
+    catch (e) { toast(e.message, 'bad'); }
   }
   async function addAgent(name) {
     const ext = (newAgent[name] || '').trim(); if (!ext) return;
-    await fetch('/backend/api/queues/' + name + '/members', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext }) });
-    toast('Agente ' + ext + ' agregado', 'ok'); setNewAgent(s => ({ ...s, [name]: '' }));
+    try {
+      await apiPost('/queues/' + encodeURIComponent(name) + '/members', { ext });
+      toast('Agente ' + ext + ' agregado', 'ok'); setNewAgent(s => ({ ...s, [name]: '' }));
+    } catch (e) { toast(e.message, 'bad'); }
   }
-  async function rmAgent(name, ext) { await fetch('/backend/api/queues/' + name + '/members/' + ext, { method: 'DELETE' }); toast('Agente quitado', 'info'); }
+  async function rmAgent(name, ext) {
+    // La lista de agentes viene del snapshot del socket, así que se refresca sola.
+    try { await apiDel('/queues/' + encodeURIComponent(name) + '/members/' + encodeURIComponent(ext)); toast('Agente quitado', 'info'); }
+    catch (e) { toast(e.message, 'bad'); }
+  }
 
   return (
     <Stack>

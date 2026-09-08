@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Modal, Tabs, Stack, Group, TextInput, NumberInput, Select, Switch, Textarea, Button, Text, Divider, Loader, ActionIcon, Tooltip } from '@mantine/core';
 import { IconDeviceFloppy, IconPlayerPlay, IconSparkles, IconVolume } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiPost, apiPut } from './api';
 
 const STRAT = [['ringall', 'Timbrar todos'], ['rrmemory', 'Round-robin con memoria'], ['leastrecent', 'El que hace más que no atiende'], ['fewestcalls', 'El que menos llamadas atendió'], ['random', 'Aleatoria'], ['linear', 'Lineal (por orden)'], ['wrandom', 'Aleatoria ponderada']];
 const YN = [['yes', 'Sí'], ['no', 'No']];
@@ -34,8 +35,8 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
     if (!text || !text.trim()) return;
     setPlay(text);
     try {
-      const r = await fetch('/backend/api/queues/preview-announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice: f.voice }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'error');
+      // `raw` porque la respuesta es el WAV sintetizado, no JSON.
+      const r = await api('/queues/preview-announce', { method: 'POST', body: { text, voice: f.voice }, raw: true });
       const b = await r.blob();
       if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play(); }
     } catch (e) { toast('No se pudo generar el audio: ' + e.message, 'bad'); }
@@ -44,13 +45,12 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
 
   async function save() {
     setBusy(true);
-    const url = creating ? '/backend/api/queues' : '/backend/api/queues/' + encodeURIComponent(f.name);
-    const r = await fetch(url, { method: creating ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) })
-      .then(x => x.json()).catch(() => ({ error: 'fallo de red' }));
-    setBusy(false);
-    if (r.error) { toast('No se pudo guardar: ' + r.error, 'bad'); return; }
-    toast('Cola ' + (f.label || f.name) + ' guardada', 'ok');
-    onSaved && onSaved(r); onClose();
+    try {
+      const r = creating ? await apiPost('/queues', f) : await apiPut('/queues/' + encodeURIComponent(f.name), f);
+      toast('Cola ' + (f.label || f.name) + ' guardada', 'ok');
+      onSaved && onSaved(r); onClose();
+    } catch (e) { toast('No se pudo guardar: ' + e.message, 'bad'); }
+    finally { setBusy(false); }
   }
 
   const sel = (label, key, opts, desc) => (

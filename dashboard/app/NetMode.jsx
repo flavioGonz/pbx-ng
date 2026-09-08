@@ -18,17 +18,9 @@ import {
   IconArrowBackUp, IconListCheck, IconInfoCircle,
 } from '@tabler/icons-react';
 import { toast, toastPromise } from './notify';
-
-async function api(path, opts = {}) {
-  const r = await fetch('/backend/api' + path, {
-    method: opts.method || 'GET',
-    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || (j && j.error)) throw new Error((j && j.error) || ('HTTP ' + r.status));
-  return j;
-}
+/* Tenía su propia copia del helper (misma firma, mismo `throw`): ahora usa la capa
+ * compartida, que además da el mensaje en español y el `status` del error. */
+import { api } from './api';
 
 /* Dibujo simple del modo: dos placas separadas (router) o unidas por un puente (switch). */
 function Diagrama({ modo, wan, lan, nat }) {

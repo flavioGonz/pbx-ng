@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { Card, Stack, Group, Text, Badge, Button, TextInput, NumberInput, Select, MultiSelect, Switch, Alert, ThemeIcon, Tabs, Table, Code, Divider, TagsInput, Tooltip, Loader } from '@mantine/core';
 import { IconDeviceFloppy, IconRefresh, IconNetwork, IconAdjustmentsHorizontal, IconWaveSine, IconClockHour4, IconLock, IconMicrophone2, IconAlertTriangle, IconRotateClockwise, IconPlugConnected, IconInfoCircle, IconMusic } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiPost } from './api';
 
 const YN = [{ value: 'yes', label: 'Sí' }, { value: 'no', label: 'No' }];
 const TOS = ['cs0', 'cs1', 'cs2', 'cs3', 'cs4', 'cs5', 'cs6', 'cs7', 'af11', 'af21', 'af31', 'af41', 'ef'].map((v) => ({ value: v, label: v.toUpperCase() }));
@@ -35,8 +36,8 @@ export default function SipPanel() {
   const set = (sec, k, v) => setCfg((c) => ({ ...c, [sec]: { ...c[sec], [k]: v } }));
 
   async function load() {
-    try { const d = await fetch('/backend/api/sipconf').then((r) => r.json()); if (!d.error) setCfg(d); else toast(d.error, 'bad'); }
-    catch (_) { toast('No se pudo leer la configuración SIP', 'bad'); }
+    try { setCfg(await api('/sipconf')); }
+    catch (e) { toast(e.message, 'bad'); }
   }
   useEffect(() => { load(); }, []);
 
@@ -44,9 +45,10 @@ export default function SipPanel() {
     if (!cfg) return;
     setBusy('save');
     const body = { general: cfg.general, nat: cfg.nat, rtp: cfg.rtp, timers: cfg.timers, tls: cfg.tls, codecs: cfg.codecs, apply_timers: applyTimers, apply_tos: applyTos };
-    const r = await fetch('/backend/api/sipconf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
-    setBusy('');
-    if (r.error) { toast('No se pudo guardar', 'bad', { description: r.error }); return; }
+    let r;
+    try { r = await apiPost('/sipconf', body) || {}; }
+    catch (e) { toast('No se pudo guardar', 'bad', { description: e.message }); return; }
+    finally { setBusy(''); }
     setApplyTimers(false); setApplyTos(false);
     if (r.restart_required) { setRestart(true); toast('Guardado. NAT, TLS o rango RTP cambiaron: hace falta reiniciar Asterisk', 'warn', { duration: 6000 }); }
     else toast('Configuración SIP aplicada' + (r.timers_applied != null ? ' · temporizadores en ' + r.timers_applied + ' endpoints' : ''), 'ok');
@@ -55,17 +57,17 @@ export default function SipPanel() {
   async function doRestart(now) {
     if (!confirm(now ? '¿Reiniciar Asterisk AHORA? Se cortan todas las llamadas en curso.' : '¿Reiniciar Asterisk cuando no haya llamadas? La central espera a quedar libre y reinicia sola.')) return;
     setBusy('restart');
-    const r = await fetch('/backend/api/sipconf/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ now }) }).then((x) => x.json()).catch(() => ({ error: 'red' }));
-    setBusy('');
-    if (r.error) { toast('No se pudo reiniciar', 'bad', { description: r.error }); return; }
+    try { await apiPost('/sipconf/restart', { now }); }
+    catch (e) { toast('No se pudo reiniciar', 'bad', { description: e.message }); return; }
+    finally { setBusy(''); }
     setRestart(false);
     toast(now ? 'Asterisk reiniciando' : 'Asterisk reiniciará apenas no haya llamadas', 'info');
   }
   async function toggleRecAll(on) {
     setBusy('rec');
-    const r = await fetch('/backend/api/extensions/record-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then((x) => x.json()).catch(() => ({ error: 1 }));
-    setBusy('');
-    if (r.error) { toast('No se pudo cambiar la grabación global', 'bad'); return; }
+    try { await apiPost('/extensions/record-all', { enabled: on }); }
+    catch (e) { toast(e.message, 'bad'); return; }
+    finally { setBusy(''); }
     setCfg((c) => ({ ...c, record_all: on }));
     toast(on ? 'Grabación global activada: se graban todas las llamadas' : 'Grabación global desactivada', on ? 'warn' : 'ok');
   }

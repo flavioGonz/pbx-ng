@@ -4,6 +4,7 @@ import { Card, Group, Title, Text, Button, Table, Modal, TextInput, PasswordInpu
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconSearch, IconPencil } from '@tabler/icons-react';
 import { toast } from './notify';
+import { apiDel, apiPost, usePoll } from './api';
 import { TableSkeleton } from './Skeletons';
 
 function Field({ f, value, up }) {
@@ -15,24 +16,31 @@ function Field({ f, value, up }) {
   return <TextInput {...common} placeholder={f.placeholder} />;
 }
 
+/* `fetchUrl` / `createUrl` / `deleteUrl(row)` son rutas de la API SIN el prefijo
+   `/backend/api` (lo arma `app/api.js`): '/ringgroups', '/routes/inbound/12'… */
 export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, createUrl, idKey, deleteUrl, emptyText = 'Sin registros.', icon, color = 'pbx' }) {
-  const [list, setList] = useState([]); const [opened, { open, close }] = useDisclosure(false);
+  const [opened, { open, close }] = useDisclosure(false);
   const [form, setForm] = useState({}); const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true); const [q, setQ] = useState('');
-  async function load() { try { const d = await fetch(fetchUrl).then(r => r.json()); setList(Array.isArray(d) ? d : []); } catch (_) { setList([]); } setLoading(false); }
-  useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t); }, [fetchUrl]);
+  const [q, setQ] = useState('');
+  /* Esta tabla es siempre CONFIGURACIÓN (ring groups, rutas, códigos…): la cambia una
+   * persona desde este mismo panel, y cuando la cambia acá se llama a `load()` a mano.
+   * El poll es sólo por si la tocó otro operador en otra pestaña, así que 30 s sobra;
+   * a 6 s cada pantalla CRUD abierta eran 10 pedidos por minuto para nada. */
+  const { data, error, cargando: loading, recargar: load } = usePoll(fetchUrl, 30000);
+  const list = Array.isArray(data) ? data : [];
+  useEffect(() => { if (error) toast(error.message, 'bad'); }, [error]);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   async function submit() {
     setSaving(true);
     try {
-      const r = await fetch(createUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }).then(x => x.json());
-      if (r.error) toast('Error: ' + r.error, 'bad');
-      else { toast((title || 'Registro') + ' creado', 'ok'); setForm({}); close(); load(); }
-    } catch (e) { toast('Error de red', 'bad'); } finally { setSaving(false); }
+      await apiPost(createUrl, form);
+      toast((title || 'Registro') + ' creado', 'ok'); setForm({}); close(); load();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); } finally { setSaving(false); }
   }
   async function del(row) {
     if (!confirm('¿Eliminar este registro?')) return;
-    await fetch(deleteUrl(row), { method: 'DELETE' }); toast('Eliminado', 'info'); load();
+    try { await apiDel(deleteUrl(row)); toast('Eliminado', 'info'); load(); }
+    catch (e) { toast(e.message, 'bad'); }
   }
   const fl = list.filter(row => !q || columns.some(c => String(row[c.key] ?? '').toLowerCase().includes(q.toLowerCase())));
   return (

@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { Stack, Card, Group, Text, TextInput, Button, FileButton, ThemeIcon } from '@mantine/core';
 import { IconPhoto, IconDeviceFloppy, IconBuildingStore } from '@tabler/icons-react';
 import { toast } from './notify';
+import { api, apiPost } from './api';
 export default function BrandingPanel() {
   const [b, setB] = useState({ name: '', subtitle: '', tagline: '', logo: '' }); const [saving, setSaving] = useState(false);
-  useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then((d) => setB({ name: d.name || '', subtitle: d.subtitle || '', tagline: d.tagline || '', logo: d.logo || '' })).catch(() => {}); }, []);
+  useEffect(() => { api('/branding').then((d) => setB({ name: d.name || '', subtitle: d.subtitle || '', tagline: d.tagline || '', logo: d.logo || '' })).catch((e) => toast(e.message, 'bad')); }, []);
   async function onLogo(file) { if (!file) return; try { const img = new Image(); const url = URL.createObjectURL(file); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; }); const max = 256, sc = Math.min(1, max / Math.max(img.width, img.height)); const cv = document.createElement('canvas'); cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); setB((s) => ({ ...s, logo: cv.toDataURL('image/png') })); URL.revokeObjectURL(url); } catch (_) { toast('No se pudo procesar el logo', 'bad'); } }
-  async function save() { setSaving(true); const r = await fetch('/backend/api/branding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((x) => x.json()).catch(() => ({ error: 1 })); setSaving(false); toast(r.error ? 'Error al guardar' : 'Branding guardado · recargá para verlo aplicado', r.error ? 'bad' : 'ok'); }
+  async function save() { setSaving(true); try { await apiPost('/branding', b); toast('Branding guardado · recargá para verlo aplicado', 'ok'); } catch (e) { toast(e.message, 'bad'); } finally { setSaving(false); } }
   return (
     <Stack gap="md" maw={640}>
       <Card withBorder radius="md" padding="md">

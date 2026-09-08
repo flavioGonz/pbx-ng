@@ -116,7 +116,9 @@ export default function Phone() {
   useEffect(() => { try { setDnd(localStorage.getItem('pbxng_dnd') === '1'); } catch (_) {} }, []);
   function toggleDnd() { const n = !dnd; setDnd(n); localStorage.setItem('pbxng_dnd', n ? '1' : '0'); notify(n ? 'No molestar activado' : 'No molestar desactivado'); }
   async function loadVm() { try { const d = await fetch('/backend/api/vm?ext=' + (sp.creds?.ext || '')).then(r => r.json()); setVm(Array.isArray(d) ? d : []); } catch (_) {} }
-  useEffect(() => { if (!registered) return; loadVm(); const t = setInterval(loadVm, 20000); return () => clearInterval(t); }, [registered, sp.creds]);
+  // En un móvil `document.hidden` es también la pantalla apagada: ahí el buzón no se
+  // consulta (lo que hay nuevo lo avisa el push, y se recarga al volver a abrir).
+  useEffect(() => { if (!registered) return; loadVm(); const t = setInterval(() => { if (!document.hidden) loadVm(); }, 20000); return () => clearInterval(t); }, [registered, sp.creds]);
   async function vmDel(m) { try { await fetch('/backend/api/vm/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ext: sp.creds?.ext, folder: m.folder, id: m.id }) }); } catch (_) {} setVm(v => v.filter(x => x.id !== m.id)); }
   async function doPip() { try { const v = sp.remoteVideoRef.current; if (!v) return; if (document.pictureInPictureElement) await document.exitPictureInPicture(); else if (document.pictureInPictureEnabled) await v.requestPictureInPicture(); } catch (_) {} }
   const vmNew = vm.filter(m => m.new).length;
@@ -151,7 +153,8 @@ export default function Phone() {
     if (!registered) return;
     let live = true;
     const load = () => fetch('/backend/api/directory').then(r => r.json()).then(d => { if (!live) return; const arr = Array.isArray(d) ? d : []; setDirectory(arr); const m = {}; arr.forEach(x => m[x.ext] = x.status); setPresence(m); }).catch(() => {});
-    load(); const t = setInterval(load, 10000);
+    // La libreta con la presencia: config + estado, no hace falta cada 10 s en un móvil.
+    load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000);
     return () => { live = false; clearInterval(t); };
   }, [registered]);
 
