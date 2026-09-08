@@ -77,6 +77,11 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   // de React: son 60 fps y volver a renderizar el arbol seria carisimo).
   const flagRefs = useRef(new Map());
   const lineRefs = useRef(new Map());   // la línea que une el punto con su etiqueta
+  /* Segunda pasada sobre el MISMO arco: un tramo corto que lo recorre de punta a
+   * punta. Es lo que hace que la línea "viaje" hacia Uruguay en vez de quedarse
+   * quieta. Va en un path aparte para poder darle su propio color y grosor sin
+   * cortar la línea de base en pedacitos. */
+  const pulseRefs = useRef(new Map());
   const [webglRoto, setWebglRoto] = useState(false);
 
   /* Tema completo del mapa: panel, planeta, textos y chips.
@@ -133,6 +138,8 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
   const origen = atacando && atacando.top_ip
     ? (bloqueos || []).find((b) => b && b.ip === atacando.top_ip) || null
     : null;
+  const bajoAtaque = !!atacando;
+  const ccOrigen = String((origen && origen.cc) || '').toUpperCase();
 
   // Recreamos el globo sólo cuando cambia el conjunto de puntos (el socket refresca
   // seguido y no queremos reconstruir el planeta en cada tick).
@@ -253,9 +260,11 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
                * cuenta el ataque. Arco suave — la curvatura es una fracción chica de
                * la distancia, así rebota apenas en vez de dispararse hacia arriba. */
               const ln = lineRefs.current.get(el.dataset.cc);
-              if (ln) {
+              const pl = pulseRefs.current.get(el.dataset.cc);
+              if (ln || pl) {
                 const juntos = q.visible && casa.visible;
-                ln.style.opacity = juntos ? '1' : '0';
+                if (ln) ln.style.opacity = juntos ? '1' : '0';
+                if (pl) pl.style.opacity = juntos ? '1' : '0';
                 if (juntos) {
                   const dx = casa.x - q.x, dy = casa.y - q.y;
                   const dist = Math.hypot(dx, dy) || 1;
@@ -264,7 +273,11 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
                   const mx2 = (q.x + casa.x) / 2, my2 = (q.y + casa.y) / 2;
                   if (nx * (mx2 - cx) + ny * (my2 - cy) < 0) { nx = -nx; ny = -ny; }
                   const comba = dist * 0.16;          // rebote suave, no un arco alto
-                  ln.setAttribute('d', `M ${q.x} ${q.y} Q ${mx2 + nx * comba} ${my2 + ny * comba} ${casa.x} ${casa.y}`);
+                  // Un solo trazado para los dos paths: la línea y el pulso que la recorre
+                  // tienen que ser exactamente la misma curva o el pulso se despega.
+                  const trazo = `M ${q.x} ${q.y} Q ${mx2 + nx * comba} ${my2 + ny * comba} ${casa.x} ${casa.y}`;
+                  if (ln) ln.setAttribute('d', trazo);
+                  if (pl) pl.setAttribute('d', trazo);
                 }
               }
             });
@@ -305,10 +318,19 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
       position: 'relative', width: '100%', height: '100%', minHeight: 400, borderRadius: 14, overflow: 'hidden',
       background: TEMA.fondo, border: TEMA.borde, boxShadow: TEMA.sombra,
     }}>
-      <style jsx>{`
+      {/* `global`, no scoped: estas animaciones se aplican desde `style` en línea, y
+          styled-jsx le cambia el nombre a los @keyframes de un bloque scoped — la
+          referencia inline queda apuntando a un nombre que ya no existe y la animación
+          no corre nunca. Por eso el latido del badge "en vivo" no se movía. */}
+      <style jsx global>{`
         @keyframes agLive { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
         @keyframes agIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
         @keyframes agGolpe { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
+        /* El tramo recorre el arco del país atacante hacia Uruguay. El patrón de guiones
+           mide 100 (= pathLength), así que un ciclo entero de dashoffset 100→0 lleva el
+           trazo del principio al final de la curva exactamente una vez. */
+        @keyframes agViaje { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+        @keyframes agLatido { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
       `}</style>
 
       <div ref={wrapRef} style={{ position: 'absolute', inset: 0 }}>
@@ -324,16 +346,56 @@ export default function AttackGlobe({ paises = [], bloqueos = [], geoblock = nul
           planeta. Las líneas van en un SVG y las etiquetas son divs: las dos cosas
           se mueven desde onRender, en cada frame, siguiendo la rotación. */}
       <svg style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none', overflow: 'visible' }}>
-        {pts.map((p) => (
-          <path
-            key={'ln-' + p.cc}
-            ref={(el) => { if (el) lineRefs.current.set(p.cc, el); else lineRefs.current.delete(p.cc); }}
-            fill="none"
-            stroke={dark ? 'rgba(200,215,240,.55)' : 'rgba(15,23,42,.45)'}
-            strokeWidth="1"
-            style={{ opacity: 0, transition: 'opacity .25s' }}
-          />
-        ))}
+        {/* Filtro de brillo: sólo se usa cuando hay ataque, para que la línea roja
+            queme un poco y se despegue del planeta. En reposo no se aplica (cuesta
+            GPU en cada frame y no aporta nada). */}
+        <defs>
+          <filter id="agBrasa" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2.5" result="b" />
+            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        {pts.map((p) => {
+          /* Tres niveles de intensidad, no dos:
+           *   reposo        gris fino, pulso apenas insinuado — el mapa respira.
+           *   bajo ataque   TODAS las líneas en rojo, más gruesas, pulso rápido.
+           *   el culpable   la línea del país de la IP más insistente: la más gruesa,
+           *                 la más rápida y con brillo, para que el ojo caiga ahí. */
+          const culpable = bajoAtaque && String(p.cc || '').toUpperCase() === ccOrigen;
+          const color = culpable ? '#ff3b30' : bajoAtaque ? 'rgba(240,68,56,.75)'
+            : (dark ? 'rgba(200,215,240,.55)' : 'rgba(15,23,42,.45)');
+          const grosor = culpable ? 2.4 : bajoAtaque ? 1.5 : 1;
+          const seg = culpable ? 1.6 : bajoAtaque ? 1.4 : 1;  // duración del viaje, en segundos
+          return (
+            <g key={'arc-' + p.cc}>
+              <path
+                ref={(el) => { if (el) lineRefs.current.set(p.cc, el); else lineRefs.current.delete(p.cc); }}
+                fill="none" stroke={color} strokeWidth={grosor}
+                filter={culpable ? 'url(#agBrasa)' : undefined}
+                style={{
+                  opacity: 0,
+                  transition: 'opacity .25s, stroke .4s, stroke-width .4s',
+                  animation: bajoAtaque ? `agLatido ${seg * 1.5}s ease-in-out infinite` : undefined,
+                }}
+              />
+              {/* El proyectil: un tramo corto que recorre la curva de origen a Uruguay.
+                  pathLength="100" normaliza el largo del arco, así el dash mide lo mismo
+                  en una línea corta que en una que cruza medio planeta, y la velocidad
+                  se ve pareja aunque la curva cambie de tamaño al girar el globo. */}
+              <path
+                ref={(el) => { if (el) pulseRefs.current.set(p.cc, el); else pulseRefs.current.delete(p.cc); }}
+                fill="none" stroke={culpable ? '#fff' : color}
+                strokeWidth={grosor + (bajoAtaque ? 1 : 0.4)} strokeLinecap="round"
+                pathLength="100" strokeDasharray={bajoAtaque ? '14 86' : '8 92'}
+                filter={culpable ? 'url(#agBrasa)' : undefined}
+                style={{
+                  opacity: 0, transition: 'opacity .25s',
+                  animation: `agViaje ${seg}s linear infinite`,
+                }}
+              />
+            </g>
+          );
+        })}
       </svg>
 
       {pts.map((p) => {

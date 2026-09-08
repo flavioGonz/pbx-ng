@@ -17,7 +17,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Group, Text, Badge, Table, Stack, Button, Skeleton, ThemeIcon, TextInput,
   SimpleGrid, Tooltip, Code, Timeline, Tabs, NumberInput, Switch, Alert, Divider,
-  Select, ActionIcon, SegmentedControl, Progress, Grid, Box, Anchor, Modal,
+  Select, ActionIcon, SegmentedControl, Progress, Grid, Box, Anchor, Modal, Pagination,
 } from '@mantine/core';
 import {
   IconShieldCheck, IconSearch, IconAlertTriangle, IconBan, IconActivity,
@@ -57,8 +57,20 @@ function usePoll(path, ms = 5000) {
   const [error, setError] = useState(null);
   const [cargando, setCargando] = useState(true);
   const vivo = useRef(true);
+  /* Firma del último payload. Si lo que llega es idéntico a lo que ya está en pantalla,
+   * NO se toca el estado: cambiar la referencia del objeto rerenderiza la pantalla
+   * entera cada 8 s — tabla de bloqueos, línea de tiempo, banderas y el globo — y eso
+   * es lo que la hacía temblar, perder el scroll y saltar mientras uno leía una fila.
+   * La mayoría de los refrescos no traen nada nuevo, así que la mayoría no repinta. */
+  const firma = useRef(null);
   const recargar = useCallback(async () => {
-    try { const d = await api(path); if (vivo.current) { setData(d); setError(null); } }
+    try {
+      const d = await api(path);
+      if (!vivo.current) return;
+      let f; try { f = JSON.stringify(d); } catch (_) { f = null; }
+      if (f === null || f !== firma.current) { firma.current = f; setData(d); }
+      setError(null);
+    }
     catch (e) { if (vivo.current) setError(e); }
     finally { if (vivo.current) setCargando(false); }
   }, [path]);
@@ -385,12 +397,33 @@ function SOC({ data, error, recargar, admin }) {
   const [q, setQ] = useState('');
   const [ban, setBan] = useState(null);   // objetivo de baneo: {tipo:'ip'|'pais', ...}
   const [enviando, setEnviando] = useState(false);
+  /* Paginación. El backend devuelve hasta 500 bloqueos y hasta 100 eventos: pintarlos
+   * todos de una hacía una tabla de metros de largo que además se repintaba entera en
+   * cada refresco. Las páginas se guardan en estado y NO se reinician solas al
+   * refrescar, así uno puede quedarse leyendo la página 3 sin que lo devuelvan al
+   * principio cada 8 segundos. (Hooks acá arriba: antes de cualquier return.) */
+  const [pag, setPag] = useState(1);
+  const [pagEv, setPagEv] = useState(1);
   if (error && !data) return <Alert color="red" variant="light" icon={<IconAlertTriangle size={16} />}>No se pudo leer el estado de seguridad: {error.message}</Alert>;
   if (!data) return <TableSkeleton />;
 
   const bloqueos = (data.bloqueos || []).filter((b) =>
     !q || `${b.ip} ${b.country || ''} ${b.isp || ''}`.toLowerCase().includes(q.toLowerCase()));
   const maxPais = Math.max(1, ...(data.top_paises || []).map((p) => p.n));
+
+  const POR_PAG = 25;
+  const pags = Math.max(1, Math.ceil(bloqueos.length / POR_PAG));
+  /* Se acota en vez de corregirse con un useEffect: si el filtro (o un desbloqueo)
+   * achica la lista, la página actual puede quedar fuera de rango y la tabla se vería
+   * vacía sin motivo. Acotando, cae sola en la última página que sí existe. */
+  const pagina = Math.min(pag, pags);
+  const bloqueosPag = bloqueos.slice((pagina - 1) * POR_PAG, pagina * POR_PAG);
+
+  const eventos = data.eventos || [];
+  const EV_POR_PAG = 15;
+  const pagsEv = Math.max(1, Math.ceil(eventos.length / EV_POR_PAG));
+  const paginaEv = Math.min(pagEv, pagsEv);
+  const eventosPag = eventos.slice((paginaEv - 1) * EV_POR_PAG, paginaEv * EV_POR_PAG);
 
   const desbloquear = (ip) => toastPromise(
     api('/security/unblock', { method: 'POST', body: { ip } }).then(recargar),
@@ -455,12 +488,12 @@ function SOC({ data, error, recargar, admin }) {
             <ThemeIcon size={30} radius="md" variant="light" color="pbx"><IconActivity size={17} /></ThemeIcon>
             <Text fw={700}>Línea de tiempo de seguridad</Text>
           </Group>
-          {(data.eventos || []).length === 0
+          {eventos.length === 0
             ? <Text size="sm" c="dimmed" ta="center" py="md">Sin eventos de seguridad todavía.</Text>
             : (
-              <Box mah={340} style={{ overflowY: 'auto' }}>
+              <Box mih={340} mah={340} style={{ overflowY: 'auto' }}>
               <Timeline active={-1} bulletSize={18} lineWidth={2}>
-                {(data.eventos || []).slice(0, 40).map((e) => {
+                {eventosPag.map((e) => {
                   const d = (e.detail && typeof e.detail === 'object') ? e.detail : {};
                   return (
                     <Timeline.Item key={e.id}
@@ -479,6 +512,11 @@ function SOC({ data, error, recargar, admin }) {
               </Timeline>
             </Box>
             )}
+          {pagsEv > 1 && (
+            <Group justify="center" mt="sm">
+              <Pagination size="xs" radius="md" color="pbx" total={pagsEv} value={paginaEv} onChange={setPagEv} siblings={0} />
+            </Group>
+          )}
         </Card>
 
         {/* Top atacantes + banear IP (tercera columna) */}
@@ -526,7 +564,7 @@ function SOC({ data, error, recargar, admin }) {
             <Badge size="sm" variant="light" color="gray">{bloqueos.length}</Badge>
           </Group>
           <TextInput size="xs" placeholder="Buscar IP, país o ISP…" leftSection={<IconSearch size={14} />}
-                     value={q} onChange={(e) => setQ(e.currentTarget.value)} w={240} />
+                     value={q} onChange={(e) => { setQ(e.currentTarget.value); setPag(1); }} w={240} />
         </Group>
         <Table.ScrollContainer minWidth={900}>
         <Table highlightOnHover verticalSpacing="sm" fz="sm" stickyHeader>
@@ -538,7 +576,7 @@ function SOC({ data, error, recargar, admin }) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {bloqueos.map((b) => (
+            {bloqueosPag.map((b) => (
               <Table.Tr key={b.ip}>
                 <Table.Td><Flag cc={b.cc} size={20} /></Table.Td>
                 <Table.Td ff="monospace" fw={650}>{b.ip}</Table.Td>
@@ -573,6 +611,14 @@ function SOC({ data, error, recargar, admin }) {
           </Table.Tbody>
         </Table>
         </Table.ScrollContainer>
+        {pags > 1 && (
+          <Group justify="space-between" p="md" pt="sm" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+            <Text size="xs" c="dimmed">
+              Mostrando {(pagina - 1) * POR_PAG + 1}–{Math.min(pagina * POR_PAG, bloqueos.length)} de {bloqueos.length}
+            </Text>
+            <Pagination size="sm" radius="md" color="pbx" total={pags} value={pagina} onChange={setPag} withEdges />
+          </Group>
+        )}
       </Card>
 
       {/* Modal de confirmación de baneo (IP o país entero) */}

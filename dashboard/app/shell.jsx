@@ -49,18 +49,29 @@ function Logo({ logo, name }) {
   if (logo) return <img src={logo} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 8 }} />;
   return <PbxLogo size={32} />;
 }
+/* El Resumen no pertenece a ningún grupo: es la portada. Estaba metido dentro de
+ * "Telefonía", que es de lo que se queja cualquiera que mire el menú dos veces. */
+const inicio = { href: '/', label: 'Resumen', icon: IconLayoutDashboard };
+
+/* Los grupos siguen UN criterio, dicho en una línea cada uno. Antes "Telefonía"
+ * mezclaba infraestructura (Topología, Red) con enrutamiento y con reportes (CDR),
+ * y "Sistema" era un cajón de once cosas sin relación entre sí.
+ *
+ *   Telefonía      el camino que recorre una llamada: de dónde entra, por dónde sale.
+ *   Aplicaciones   lo que la central le ofrece a quien la usa.
+ *   Operación      el día a día de quien atiende: ver, medir, y los aparatos.
+ *   Sistema        cómo está armado el equipo.
+ *   Mantenimiento  cómo se lo cuida: seguridad, respaldos, avisos, documentación.
+ *
+ * Topología ya no está: es una pantalla de SBC-NG. Los dos son productos distintos y
+ * el menú de uno no tiene por qué describir al otro. */
 const groups = [
   { label: 'Telefonía', icon: IconPhoneCall, items: [
-    { href: '/', label: 'Resumen', icon: IconLayoutDashboard },
-    { href: '/topologia', label: 'Topología', icon: IconSitemap },
-    { href: '/red', label: 'Red', icon: IconNetwork },
     { href: '/internos', label: 'Extensiones', icon: IconUsers },
     { href: '/troncales', label: 'Troncales', icon: IconDeviceLandlinePhone },
     { href: '/rutas', label: 'Rutas', icon: IconRoute },
     { href: '/ivr', label: 'IVR', icon: IconArrowsSplit },
-    { href: '/ia-voz', label: 'IA & Voz', icon: IconRobot },
-    { href: '/click-to-call', label: 'Click-to-Call', icon: IconWorldShare },
-    { href: '/cdr', label: 'CDR', icon: IconHistory },
+    { href: '/dialplan', label: 'Dialplan', icon: IconTerminal2 },
   ] },
   { label: 'Aplicaciones', icon: IconApps, items: [
     { href: '/aplicaciones/colas', label: 'Colas', icon: IconHeadset },
@@ -68,27 +79,32 @@ const groups = [
     { href: '/aplicaciones/paging', label: 'Paging', icon: IconBroadcast },
     { href: '/aplicaciones/conf', label: 'Conferencias', icon: IconUsers },
     { href: '/aplicaciones/vm', label: 'Buzones', icon: IconMail },
-    { href: '/aplicaciones/codes', label: 'Códigos', icon: IconAsterisk },
     { href: '/funciones', label: 'Aparcado · Captura · MoH', icon: IconAsterisk },
+    { href: '/aplicaciones/codes', label: 'Códigos', icon: IconAsterisk },
     { href: '/aplicaciones/ai', label: 'AI IVR', icon: IconRobot },
+    { href: '/ia-voz', label: 'IA & Voz', icon: IconMicrophone2 },
+    { href: '/click-to-call', label: 'Click-to-Call', icon: IconWorldShare },
   ] },
   { label: 'Operación', icon: IconDeviceAnalytics, items: [
-    { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
-    { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
     { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
+    { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
+    { href: '/cdr', label: 'CDR', icon: IconHistory },
     { href: '/mapa', label: 'Mapa', icon: IconMap2 },
+    { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
   ] },
   { label: 'Sistema', icon: IconAdjustmentsCog, items: [
-    { href: '/dialplan', label: 'Dialplan', icon: IconTerminal2 },
+    { href: '/red', label: 'Red', icon: IconNetwork },
+    { href: '/sbc', label: 'SBC-NG (conexión)', icon: IconRouteAltLeft },
     { href: '/empresas', label: 'Empresas', icon: IconBuilding },
     { href: '/usuarios', label: 'Usuarios', icon: IconUsersGroup },
-    { href: '/basedatos', label: 'Base de datos', icon: IconDatabase },
-    { href: '/respaldos', label: 'Respaldos', icon: IconDatabaseExport },
+    { href: '/configuracion', label: 'Configuración', icon: IconSettings },
+  ] },
+  { label: 'Mantenimiento', icon: IconShieldCheck, items: [
     { href: '/seguridad', label: 'Seguridad', icon: IconShieldCheck },
     { href: '/certificados', label: 'Certificados TLS', icon: IconCertificate },
     { href: '/notificaciones', label: 'Notificaciones', icon: IconBell },
-    { href: '/configuracion', label: 'Configuración', icon: IconSettings },
-    { href: '/sbc', label: 'SBC-NG (conexión)', icon: IconRouteAltLeft },
+    { href: '/respaldos', label: 'Respaldos', icon: IconDatabaseExport },
+    { href: '/basedatos', label: 'Base de datos', icon: IconDatabase },
     { href: '/manuales', label: 'Manuales', icon: IconBook },
   ] },
 ];
@@ -177,6 +193,8 @@ export default function Shell({ children }) {
 
           {/* navegación */}
           <ScrollArea style={{ flex: 1, marginTop: 14 }} type="hover">
+            {/* La portada, suelta y siempre arriba: no es un ítem de "Telefonía". */}
+            {visibleItem(inicio) && <Box mb={10}>{navItem(inicio)}</Box>}
             {groups.filter(g => g.items.some(visibleItem)).map(g => {
               const opened = rail ? true : abiertos.includes(g.label);
               const GIcon = g.icon;

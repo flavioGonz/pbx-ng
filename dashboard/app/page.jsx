@@ -95,19 +95,49 @@ export default function Resumen() {
   const medidos = Array.isArray(topo?.componentes) ? topo.componentes : [];
   const bordesExt = Array.isArray(topo?.bordes_externos) ? topo.bordes_externos : [];
   const med = (id) => medidos.find((c) => c.id === id) || null;
-  const okMed = (id, fallback) => { const c = med(id); return c ? c.estado === 'ok' : fallback; };
+
+  /* Tres estados, no dos. Antes esto era un booleano y "todavia no se" se contaba como
+   * "caido": `h = snap?.health || {}` deja h.ari/h.ami/h.db en undefined hasta que llega
+   * el primer snapshot del socket, asi que en CADA carga del panel la pantalla acusaba
+   * a Asterisk y a la base de datos de estar caidos durante un segundo y despues se
+   * arrepentia. Una alarma que grita antes de mirar no la cree nadie.
+   *   'ok'      -> medido y responde
+   *   'caido'   -> medido y NO responde
+   *   'esperando' -> todavia no hay dato; no se muestra ni verde ni rojo */
+  const OK = 'ok', CAIDO = 'caido', ESPERANDO = 'esperando';
+  const y = (...partes) => (partes.some((p) => p === CAIDO) ? CAIDO
+    : partes.some((p) => p === ESPERANDO) ? ESPERANDO : OK);
+  const vivo = (v) => (v === undefined || v === null ? ESPERANDO : v ? OK : CAIDO);
+  // estado del nodo segun la medicion por puerto del backend (topology). Si el backend
+  // todavia no contesto, es 'esperando'; si contesto pero no mide ese nodo, no opina.
+  const estMed = (id) => { if (!topo) return ESPERANDO; const c = med(id); return c ? (c.estado === 'ok' ? OK : CAIDO) : null; };
+  const estComp = (rx) => { if (!sys) return ESPERANDO; const c = comps.find((x) => rx.test(x.name)); return c ? (c.status === 'down' ? CAIDO : OK) : null; };
+  const combinar = (...partes) => y(...partes.filter((p) => p !== null));
 
   const svcList = [
-    { n: 'Asterisk (AMI/ARI)', ok: (h.ari && h.ami) && okMed('asterisk', true), ip: topo?.nodes?.asterisk || '-' },
-    { n: 'Base de datos', ok: h.db && okMed('db', true), ip: topo?.nodes?.db || '-' },
-    { n: 'Turn-NG Server', ok: okMed('turn', (comps.find(c => /TURN/i.test(c.name)) || {}).status !== 'down'), ip: topo?.nodes?.turn || '-' },
-    { n: 'Proxy NPM (TLS/WSS)', ok: okMed('proxy', (comps.find(c => /Proxy/i.test(c.name)) || {}).status !== 'down'), ip: topo?.nodes?.npm || '-' },
+    { n: 'Asterisk (AMI/ARI)', est: combinar(vivo(h.ari), vivo(h.ami), estMed('asterisk')), ip: topo?.nodes?.asterisk || '-' },
+    { n: 'Base de datos', est: combinar(vivo(h.db), estMed('db')), ip: topo?.nodes?.db || '-' },
+    { n: 'Turn-NG Server', est: combinar(estMed('turn') ?? estComp(/TURN/i)), ip: topo?.nodes?.turn || '-' },
+    { n: 'Proxy NPM (TLS/WSS)', est: combinar(estMed('proxy') ?? estComp(/Proxy/i)), ip: topo?.nodes?.npm || '-' },
     // Bordes EXTERNOS: otro producto, con su propio panel. Se listan aparte para que
     // se vea que su caida no es una falla de esta central, pero si le corta la salida.
     // Solo aparecen con el modulo "Conexion a SBC-NG" activo (el backend no los manda si no).
-    ...bordesExt.map((b) => ({ n: 'SBC-NG (' + b.nombre + ')', ok: b.estado === 'ok', ip: b.host, detalle: b.motivo, externo: true })),
-  ];
-  const caidos = svcList.filter((s) => !s.ok);
+    ...bordesExt.map((b) => ({ n: 'SBC-NG (' + b.nombre + ')', est: b.estado === 'ok' ? OK : CAIDO, ip: b.host, detalle: b.motivo, externo: true })),
+  ].map((s) => ({ ...s, ok: s.est === OK }));
+
+  /* Y ademas: no alarmar por un parpadeo. Un reinicio de AMI o un socket que se cae y
+   * vuelve dejaba el cartel rojo asomando y desapareciendo. La caida tiene que
+   * SOSTENERSE unos segundos para que el cartel salga; se va apenas vuelve. */
+  const CONFIRMAR_MS = 6000;
+  const caidosAhora = svcList.filter((s) => s.est === CAIDO);
+  const firmaCaidos = caidosAhora.map((s) => s.n).sort().join('|');
+  const [caidosFirmes, setCaidosFirmes] = useState('');
+  useEffect(() => {
+    if (!firmaCaidos) { setCaidosFirmes(''); return; }          // se recupero: sale ya
+    const t = setTimeout(() => setCaidosFirmes(firmaCaidos), CONFIRMAR_MS);
+    return () => clearTimeout(t);
+  }, [firmaCaidos]);
+  const caidos = caidosFirmes === firmaCaidos ? caidosAhora : [];
 
   return (
     <Stack gap="lg">
@@ -186,8 +216,8 @@ export default function Resumen() {
           <Stack gap={2}>
             {svcList.map(s => (
               <Group key={s.n} justify="space-between" py={7} style={{ borderBottom: '1px solid var(--mantine-color-gray-1)' }}>
-                <Group gap={8}><ThemeIcon size={28} radius="md" variant="light" color={s.ok ? 'teal' : 'red'}><IconServer2 size={15} /></ThemeIcon><div><Text size="sm" fw={500} lh={1.1}>{s.n}</Text><Text size="xs" c="dimmed" ff="monospace">{s.ip}</Text></div></Group>
-                <Badge variant="light" color={s.ok ? 'teal' : 'red'}>{s.ok ? 'Operativo' : 'Caído'}</Badge>
+                <Group gap={8}><ThemeIcon size={28} radius="md" variant="light" color={s.est === CAIDO ? 'red' : s.est === OK ? 'teal' : 'gray'}><IconServer2 size={15} /></ThemeIcon><div><Text size="sm" fw={500} lh={1.1}>{s.n}</Text><Text size="xs" c="dimmed" ff="monospace">{s.ip}</Text></div></Group>
+                <Badge variant="light" color={s.est === CAIDO ? 'red' : s.est === OK ? 'teal' : 'gray'}>{s.est === CAIDO ? 'Caído' : s.est === OK ? 'Operativo' : 'Midiendo…'}</Badge>
               </Group>
             ))}
           </Stack>
@@ -211,7 +241,7 @@ export default function Resumen() {
         <Card withBorder radius="lg" padding="lg" shadow="sm">
           <Text fw={600} mb="md">Estado de interfaces</Text>
           <Stack gap={2}>
-            {(comps.length ? comps : svcList.map(s => ({ name: s.n, status: s.ok ? 'ok' : 'down', detail: s.ip }))).slice(0, 8).map((c, i) => (
+            {(comps.length ? comps : svcList.map(s => ({ name: s.n, status: s.est === CAIDO ? 'down' : s.est === OK ? 'ok' : 'wait', detail: s.ip }))).slice(0, 8).map((c, i) => (
               <Group key={i} justify="space-between" py={7} style={{ borderBottom: '1px solid var(--mantine-color-gray-1)' }}>
                 <Group gap={8}><IconCircleFilled size={9} color={c.status === 'ok' ? 'var(--mantine-color-teal-6)' : c.status === 'pending' ? 'var(--mantine-color-yellow-6)' : c.status === 'down' ? 'var(--mantine-color-red-6)' : 'var(--mantine-color-gray-5)'} /><Text size="sm">{c.name}</Text></Group>
                 <Text size="xs" c="dimmed" ff="monospace" truncate maw={150}>{c.detail || ''}</Text>
