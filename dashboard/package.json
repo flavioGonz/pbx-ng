@@ -6,7 +6,8 @@
     "dev": "NODE_ENV=development node server.js",
     "build": "next build",
     "start": "NODE_ENV=production node server.js",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:deps": "node check-deps-inestables.mjs"
   },
   "dependencies": {
     "@mantine/core": "^7.17.8",

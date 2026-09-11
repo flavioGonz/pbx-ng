@@ -119,6 +119,10 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Lint
         run: npm run lint --if-present
+      # Dependencias de hook recreadas en cada render = React #185 en producción.
+      # Ya pasó dos veces (SbcFlow y /troncales); barato de verificar, caro de encontrar.
+      - name: Dependencias de hooks estables
+        run: npm run check:deps --if-present
       - name: Build
         run: npm run build
 

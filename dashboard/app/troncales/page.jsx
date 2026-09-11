@@ -61,9 +61,14 @@ export default function Troncales() {
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   /* Mismo refresco de 8 s que antes, pero por la capa: se pausa con la pestaña
    * escondida y `load()` (botón Refrescar, alta y baja) fuerza las dos consultas. */
-  const { data: trunksData, recargar: recargarTrunks } = usePoll('/trunks', 30000);
+  const { data: trunksData, recargar: recargarTrunks } = usePoll('/trunks', 30000, { inicial: [] });
   const { data: topo, recargar: recargarTopo } = usePoll('/topology', 30000);
-  const trunks = Array.isArray(trunksData) ? trunksData : [];
+  /* Memoizado a propósito (mismo motivo que en SbcFlow.jsx): `trunksData` es null hasta
+   * que contesta la API, y un `: []` suelto devuelve un arreglo NUEVO en cada render.
+   * Como `trunks` es dependencia del useMemo que arma los nodos, y el useEffect de más
+   * abajo hace setRfNodes con el resultado de ese memo, la cadena se realimentaba en
+   * cada render: React #185 («Maximum update depth exceeded») y la pantalla caída. */
+  const trunks = useMemo(() => (Array.isArray(trunksData) ? trunksData : []), [trunksData]);
   const load = () => { recargarTrunks(); recargarTopo(); };
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
   async function onLogo(file) {

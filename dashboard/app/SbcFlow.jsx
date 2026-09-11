@@ -133,8 +133,12 @@ export default function SbcFlow({ fullBleed }) {
   const { data: modsData } = usePoll('/modules', 30000, { inicial: {} });
   const { data: db, error: dbError } = usePoll('/db', 30000);
   const { data: topo } = usePoll('/topology', 30000);
-  const trunks = Array.isArray(trunksData) ? trunksData : [];
-  const mods = modsData || {};
+  /* Memoizados: son dependencias del useMemo que arma los nodos, y un fallback literal
+   * devuelve un objeto nuevo por render (React #185, ver comentario más abajo). Hoy
+   * `inicial` los mantiene como arreglo/objeto, pero si la API llegara a contestar null
+   * la pantalla se caía otra vez; esto lo cierra de raíz. */
+  const trunks = useMemo(() => (Array.isArray(trunksData) ? trunksData : []), [trunksData]);
+  const mods = useMemo(() => modsData || {}, [modsData]);
 
   async function delTrunk(name) {
     if (!confirm('¿Eliminar la troncal ' + name + '?')) return;
