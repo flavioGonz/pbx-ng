@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { usePoll, useApi } from './api';
-import { fmtBytes, fmtUptime, fmtFechaHora } from './fmt';
-import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider, Alert } from '@mantine/core';
+import { fmtBytes, fmtUptime, fmtFechaHora, fmtReloj } from './fmt';
+import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider, Alert, Grid, Tooltip } from '@mantine/core';
 import Slot from './Slot';
-import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard, IconBolt, IconPlugConnected, IconAlertTriangle } from '@tabler/icons-react';
+import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard, IconBolt, IconPlugConnected, IconAlertTriangle, IconArrowRight, IconBan, IconPhoneOff } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import SystemOverview from './SystemOverview';
+import AttackGlobe from './AttackGlobe';
 import { useLive } from './useLive';
 
 // Gráfico de área inline (CPU + Memoria), sin dependencias
@@ -46,6 +47,80 @@ function Bar({ label, value, total, color = 'pbx' }) {
   return <Box mb="sm"><Group justify="space-between" mb={3}><Text size="sm" c="dimmed">{label}</Text><Text size="sm" fw={600}>{value}{total != null ? ' / ' + total : ''}</Text></Group><Progress value={pct} color={color} radius="xl" size="sm" /></Box>;
 }
 
+
+/* Número grande de arriba. Es lo único que el operador mira de lejos, así que va sin
+ * adornos: valor, qué es, y un pie que sólo aparece si dice algo (una troncal caída, un
+ * ataque en curso). El color pasa a rojo únicamente cuando hay que hacer algo. */
+function KpiVivo({ icon, valor, label, pie, color = 'pbx', alerta = false }) {
+  return (
+    <Card withBorder radius="lg" padding="md" shadow="sm" style={alerta ? { borderColor: 'var(--mantine-color-red-5)' } : undefined}>
+      <Group gap={10} wrap="nowrap" align="flex-start">
+        <ThemeIcon size={38} radius="md" variant="light" color={alerta ? 'red' : color}>{icon}</ThemeIcon>
+        <div style={{ minWidth: 0 }}>
+          <Text fw={800} fz={30} lh={1} c={alerta ? 'red.6' : undefined}><Slot value={valor} /></Text>
+          <Text size="xs" c="dimmed" tt="uppercase" fw={700} mt={4} style={{ letterSpacing: '.03em' }}>{label}</Text>
+          {pie && <Text size="xs" c={alerta ? 'red.6' : 'dimmed'} mt={2} truncate>{pie}</Text>}
+        </div>
+      </Group>
+    </Card>
+  );
+}
+
+/* Llamadas en curso. Sale del snapshot del socket (no encuesta nada) y el cronómetro
+ * corre en el navegador: un `tick` por segundo que sólo re-dibuja esta tarjeta. La
+ * duración se calcula recién después de montar para no romper la hidratación —el
+ * servidor no puede saber qué hora es en el navegador (ya nos pasó con el tema). */
+function LlamadasVivas({ canales, montado, ahora }) {
+  const dur = (c) => {
+    if (!montado || !c.started) return null;
+    const t = Math.floor((ahora - new Date(c.started).getTime()) / 1000);
+    return t >= 0 && t < 86400 ? fmtReloj(t) : null;
+  };
+  const est = (c) => (c.state === 'Up' ? { t: 'En conversación', col: 'teal' }
+    : c.state === 'Ringing' || c.state === 'Ring' ? { t: 'Timbrando', col: 'orange' }
+    : { t: c.state || 'En curso', col: 'gray' });
+  return (
+    <Card withBorder radius="lg" padding="lg" shadow="sm" style={{ height: '100%' }}>
+      <Group justify="space-between" mb="sm">
+        <Group gap="sm">
+          <ThemeIcon size={38} radius="md" variant="light" color={canales.length ? 'teal' : 'gray'}><IconPhone size={20} /></ThemeIcon>
+          <div><Text fw={800} lh={1.1}>Llamadas en curso</Text><Text size="xs" c="dimmed">En vivo, por eventos de Asterisk</Text></div>
+        </Group>
+        <Badge size="lg" variant="light" color={canales.length ? 'teal' : 'gray'}>{canales.length}</Badge>
+      </Group>
+      {canales.length === 0 ? (
+        <Stack align="center" gap={6} py={40}>
+          <ThemeIcon size={54} radius="xl" variant="light" color="gray"><IconPhoneOff size={26} /></ThemeIcon>
+          <Text size="sm" c="dimmed">Ninguna llamada en este momento.</Text>
+          <Text size="xs" c="dimmed">Cuando entre o salga una, aparece acá sola.</Text>
+        </Stack>
+      ) : (
+        <Stack gap={2} mah={330} style={{ overflowY: 'auto' }}>
+          {canales.map((c) => {
+            const e = est(c); const d = dur(c);
+            return (
+              <Group key={c.id} justify="space-between" wrap="nowrap" py={9} style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+                <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
+                  <IconCircleFilled size={9} className={c.state === 'Up' ? 'pbx-pulse' : undefined} color={`var(--mantine-color-${e.col}-6)`} />
+                  <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+                    <Text size="sm" fw={650} ff="monospace" truncate>{c.caller || c.ext || '?'}</Text>
+                    <IconArrowRight size={13} style={{ opacity: .45, flex: 'none' }} />
+                    <Text size="sm" ff="monospace" truncate c="dimmed">{c.connected || '—'}</Text>
+                  </Group>
+                </Group>
+                <Group gap={8} wrap="nowrap">
+                  <Badge size="sm" variant="light" color={e.col}>{e.t}</Badge>
+                  <Text size="sm" fw={700} ff="monospace" w={62} ta="right">{d || '—'}</Text>
+                </Group>
+              </Group>
+            );
+          })}
+        </Stack>
+      )}
+    </Card>
+  );
+}
+
 export default function Resumen() {
   const { snap, connected } = useLive();
   /* Presupuesto de pedidos de esta pantalla (era ~44 por minuto: /metrics cada 3 s,
@@ -70,7 +145,29 @@ export default function Resumen() {
    * dibujaba con la medición del momento en que abriste la pestaña y no se
    * enteraba nunca más. Con un minuto de cadencia sigue siendo barato y avisa. */
   const { data: topo } = usePoll('/topology', 60000);
-  const trunks = Array.isArray(trunksData) ? trunksData : [];
+  /* El SOC ya vive en /seguridad; acá se trae lo mismo cada 60 s sólo para el globo y
+   * el número de bloqueos. Es el único pedido que se suma (6 por minuto en total) y es
+   * el que hace que esta pantalla sirva de verdad: un ataque en curso se ve al entrar,
+   * sin tener que acordarse de abrir la otra pestaña. */
+  const { data: soc } = usePoll('/security', 60000);
+  /* `[]` literal como dependencia de un hook es el bug de React #185 que ya nos comió
+   * /troncales dos veces: cada render arma un arreglo nuevo y el efecto se llama solo
+   * para siempre. Memoizado, y `npm run check:deps` lo vigila. */
+  const trunks = useMemo(() => (Array.isArray(trunksData) ? trunksData : []), [trunksData]);
+
+  /* Cronómetro de las llamadas en curso. Corre en el navegador (un `setInterval` de 1 s)
+   * y SÓLO mientras haya una llamada viva: con la central en silencio no hay timer.
+   * `montado` evita que el servidor y el navegador calculen duraciones distintas al
+   * hidratar —la hidratación ya nos rompió el tema una vez. */
+  const [montado, setMontado] = useState(false);
+  const [ahora, setAhora] = useState(0);
+  const hayCanales = (snap?.channels || []).length > 0;
+  useEffect(() => { setMontado(true); setAhora(Date.now()); }, []);
+  useEffect(() => {
+    if (!hayCanales) return;
+    const t = setInterval(() => setAhora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [hayCanales]);
 
   /* Mismos campos que devolvía /api/metrics, armados desde /system/overview para no
    * pedir dos veces lo mismo (el nodo `core` es el host donde corre la API). Va con
@@ -112,6 +209,10 @@ export default function Resumen() {
   const trSbc = trunks.filter(t => t.status === 'sbc').length;
   const trDown = trunks.filter(t => t.status === 'offline').length;
   const trOther = trunks.length - trAvail - trSbc - trDown;
+
+  // SOC: sólo los cuatro números que se miran de lejos. El detalle está en /seguridad.
+  const socK = (soc && soc.kpis) || {};
+  const ataque = (soc && soc.ataque) || null;
 
   const comps = sys?.components || [];
 
@@ -186,31 +287,36 @@ export default function Resumen() {
         </Alert>
       )}
 
-      {/* Núcleo de Asterisk: el estado vivo del motor (versión, canales, endpoints,
-          transportes y módulos) — antes vivía en la pestaña "PBX" del menú. */}
-      <Card withBorder radius="lg" padding="lg" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Group gap="sm">
-            <ThemeIcon size={42} radius="md" variant="light" color="pbx"><IconServer2 size={22} /></ThemeIcon>
-            <div><Text fw={800} lh={1.1}>Núcleo de Asterisk</Text><Text size="xs" c="dimmed">{core?.version || 'Consultando el motor…'}</Text></div>
-          </Group>
-          <Group gap={6}>
-            <Badge variant={h.ami ? 'filled' : 'light'} color={h.ami ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{h.ami ? 'AMI' : 'Sin AMI'}</Badge>
-            <Badge variant="light" color={h.ari ? 'teal' : 'gray'}>{h.ari ? 'ARI' : 'Sin ARI'}</Badge>
-          </Group>
-        </Group>
-        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Versión</Text><Text fw={700} size="sm">{core?.version || '—'}</Text></Card>
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Canales activos</Text><Text fw={800} size="xl">{core?.channels ?? ch.length}</Text></Card>
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Endpoints</Text><Text fw={800} size="xl">{core?.endpoints ?? eps.length}</Text></Card>
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Uptime del motor</Text><Text fw={700} size="sm">{(core?.uptime || '—').replace(/^System uptime:\s*/i, '')}</Text></Card>
-        </SimpleGrid>
-        {core?.transports?.length > 0 && <><Text fw={600} size="sm" mt="md" mb={6}>Transportes PJSIP</Text><Group gap="xs">{core.transports.map(t => <Badge key={t.id} variant="light" color="pbx" leftSection={<IconPlugConnected size={12} />}>{t.id} · {(t.proto || '').toUpperCase()}</Badge>)}</Group></>}
-        {core?.modules && <><Text fw={600} size="sm" mt="md" mb={6}>Módulos clave</Text><Group gap="xs">{Object.entries(core.modules).map(([k, v]) => <Badge key={k} variant="light" color={v ? 'teal' : 'red'}>{k}: {v ? 'cargado' : 'no'}</Badge>)}</Group></>}
-      </Card>
+      {/* Lo vivo arriba y grande: llamadas en curso a la izquierda, el globo del SOC
+          girando a la derecha. Es lo que uno quiere ver al entrar; el inventario de la
+          plataforma (núcleo, nodos, módulos) pasó al final, que es donde se consulta. */}
+      <Grid gutter="lg">
+        <Grid.Col span={{ base: 12, lg: 7 }}>
+          <Stack gap="lg">
+            <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
+              <KpiVivo icon={<IconPhone size={20} />} valor={ch.length} label="Llamadas activas" color="teal"
+                pie={qs.length ? qs.length + (qs.length === 1 ? ' cola' : ' colas') : null} />
+              <KpiVivo icon={<IconHeadset size={20} />} valor={online} label="Extensiones en línea" color="pbx"
+                pie={eps.length ? 'de ' + eps.length + (webrtc ? ' · ' + webrtc + ' WebRTC' : '') : null} />
+              <KpiVivo icon={<IconDeviceLandlinePhone size={20} />} valor={trAvail} label="Troncales activas" color="grape"
+                alerta={trDown > 0}
+                pie={trDown > 0 ? trDown + (trDown === 1 ? ' caída' : ' caídas') : 'de ' + trunks.length} />
+              <KpiVivo icon={<IconBan size={20} />} valor={socK.bloqueados ?? 0} label="IP bloqueadas" color="orange"
+                alerta={!!ataque}
+                pie={ataque ? 'Ataque en curso' : (socK.fallos_24h || 0) + ' intentos en 24 h'} />
+            </SimpleGrid>
+            <LlamadasVivas canales={ch} montado={montado} ahora={ahora} />
+          </Stack>
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, lg: 5 }}>
+          {/* El mismo globo del SOC, con los mismos datos: no se duplica nada, se mira
+              desde acá. El aviso de ataque en curso vive dentro del mapa. */}
+          <AttackGlobe paises={(soc && soc.top_paises) || []} bloqueos={(soc && soc.bloqueos) || []}
+            geoblock={(soc && soc.geoblock) || null} ataque={ataque} kpis={socK}
+            titulo="Ataques en vivo" />
+        </Grid.Col>
+      </Grid>
 
-      {/* Infraestructura completa: cada nodo con sus recursos, interfaces y servicios */}
-      <SystemOverview data={ov} />
 
       {/* Fila 1: espacio · recursos · servicios */}
       <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
@@ -298,6 +404,32 @@ export default function Resumen() {
           </Stack>
         </Card>
       </SimpleGrid>
+
+      {/* Núcleo de Asterisk: el estado vivo del motor (versión, canales, endpoints,
+          transportes y módulos) — antes vivía en la pestaña "PBX" del menú. */}
+      <Card withBorder radius="lg" padding="lg" shadow="sm">
+        <Group justify="space-between" mb="md">
+          <Group gap="sm">
+            <ThemeIcon size={42} radius="md" variant="light" color="pbx"><IconServer2 size={22} /></ThemeIcon>
+            <div><Text fw={800} lh={1.1}>Núcleo de Asterisk</Text><Text size="xs" c="dimmed">{core?.version || 'Consultando el motor…'}</Text></div>
+          </Group>
+          <Group gap={6}>
+            <Badge variant={h.ami ? 'filled' : 'light'} color={h.ami ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{h.ami ? 'AMI' : 'Sin AMI'}</Badge>
+            <Badge variant="light" color={h.ari ? 'teal' : 'gray'}>{h.ari ? 'ARI' : 'Sin ARI'}</Badge>
+          </Group>
+        </Group>
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Versión</Text><Text fw={700} size="sm">{core?.version || '—'}</Text></Card>
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Canales activos</Text><Text fw={800} size="xl">{core?.channels ?? ch.length}</Text></Card>
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Endpoints</Text><Text fw={800} size="xl">{core?.endpoints ?? eps.length}</Text></Card>
+          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Uptime del motor</Text><Text fw={700} size="sm">{(core?.uptime || '—').replace(/^System uptime:\s*/i, '')}</Text></Card>
+        </SimpleGrid>
+        {core?.transports?.length > 0 && <><Text fw={600} size="sm" mt="md" mb={6}>Transportes PJSIP</Text><Group gap="xs">{core.transports.map(t => <Badge key={t.id} variant="light" color="pbx" leftSection={<IconPlugConnected size={12} />}>{t.id} · {(t.proto || '').toUpperCase()}</Badge>)}</Group></>}
+        {core?.modules && <><Text fw={600} size="sm" mt="md" mb={6}>Módulos clave</Text><Group gap="xs">{Object.entries(core.modules).map(([k, v]) => <Badge key={k} variant="light" color={v ? 'teal' : 'red'}>{k}: {v ? 'cargado' : 'no'}</Badge>)}</Group></>}
+      </Card>
+
+      {/* Infraestructura completa: cada nodo con sus recursos, interfaces y servicios */}
+      <SystemOverview data={ov} />
     </Stack>
   );
 }
