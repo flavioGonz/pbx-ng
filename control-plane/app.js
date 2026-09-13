@@ -308,7 +308,31 @@ async function handleAiAgent(channel, agentId) {
 
 const ami = new AsteriskManager(CFG.ami.port, CFG.ami.host, CFG.ami.user, CFG.ami.pass, true);
 ami.keepConnected();
-ami.on('connect', () => { state.ami = true; });
+/* Volcados Postgres → AstDB (los módulos se anotan acá al registrarse: recordings.js con
+ * syncRecFlags y telefonia.js con syncFeatures). Se corren en CADA conexión del AMI, que
+ * es exactamente el evento «Asterisk es nuevo o volvió»: la astdb (astdb.sqlite3) no está
+ * en un volumen, así que un `docker compose up -d --force-recreate asterisk` la deja
+ * vacía y, sin esto, las marcas de grabación y TODOS los desvíos, DND, sígueme, feriados
+ * y el modo noche dejaban de aplicarse en silencio mientras el panel los seguía mostrando
+ * prendidos (la verdad está en Postgres, que no cambió). Los 2 s le dan tiempo a Asterisk
+ * a terminar de cargar func_db antes del primer DBPut.
+ *
+ * El freno es de 5 s y NO de un minuto a propósito: `deploy.sh` levanta la API primero y
+ * recrea Asterisk unos segundos después, así que con una ventana larga el volcado del
+ * arranque se comía el del Asterisk nuevo y la central quedaba con la astdb vacía —los
+ * desvíos apagados en silencio— justo después de cada actualización. Cinco segundos
+ * alcanzan para lo único que el freno tiene que evitar: un AMI que rebota dos veces
+ * seguidas. */
+const resincronizar = [];
+let syncPendiente = null;
+ami.on('connect', () => {
+  state.ami = true;
+  if (syncPendiente) return;                 // ya hay un volcado en camino: no encolar otro
+  syncPendiente = setTimeout(() => {
+    syncPendiente = null;
+    for (const f of resincronizar) { try { Promise.resolve(f()).catch(() => {}); } catch (_) {} }
+  }, 5000);
+});
 ami.on('disconnect', () => { state.ami = false; });
 ami.on('error', (e) => logger('AMI').error(e && e.message));
 
@@ -339,7 +363,7 @@ async function moduleEnabled(id) {
  * arriba (en tiempo de request), el alcance por extensión (mismaExt/exigirExt/extPropia),
  * el freno a la fuerza bruta y las rutas de sesión, usuarios, enrolado y provisión.
  * Va ANTES de callengine.js porque ese módulo recibe `auth` y `mismaExt` al inicializarse. */
-const { auth, isPublicApi, mismaExt, exigirExt, extPropia } = require('./auth')({
+const { auth, isPublicApi, mismaExt, exigirExt, extPropia, clientIp } = require('./auth')({
   app, pool, SECRET, NODES, alerts,
   sbcLink: (...a) => sbcLink(...a), broadcastSoon: (...a) => broadcastSoon(...a),
   createWebrtcEndpoint: (...a) => createWebrtcEndpoint(...a), smtpHint: (...a) => smtpHint(...a),
@@ -505,7 +529,7 @@ pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
  * indexador de /recordings, audio/transcripción/picos, almacenamiento remoto (recstore),
  * historial e informe. Sus rutas se registran acá, DESPUÉS del gate de auth + RBAC;
  * `setRecFlag` lo usan las rutas de internos y `wavToPcm`/`analyzeText` el buzón de voz. */
-const { setRecFlag, wavToPcm, analyzeText } = require('./recordings')({
+const { setRecFlag, syncRecFlags, wavToPcm, analyzeText } = require('./recordings')({
   app, pool, ami, amiAction, amiCommand, getAri: () => ari, state, extPropia, exigirExt, vozBase, errorHttp, logger,
 });
 
@@ -1168,10 +1192,25 @@ app.post('/api/asterisk/hangup', async (req, res) => {
  * salientes/entrantes, el enlace fijo al SBC-NG (`to-sbc`, módulo `sbc`) y el diagnóstico
  * de troncal. Sus rutas se registran acá, DESPUÉS del gate de auth + RBAC; `sbcLink` es lo
  * único que el resto de la PBX mira para saber si hay un SBC adelante. */
-const { sbcLink, invalidarSbcLink, trunkStatuses } = require('./trunks')({
+const { sbcLink, invalidarSbcLink, trunkStatuses, regenerarEntrantes } = require('./trunks')({
   app, pool, NODES, amiCommand, endpointStates, moduleEnabled, setDialplan, astFwd, salud, diagtrunk, errorHttp,
   broadcastSoon: (...a) => broadcastSoon(...a), logger,
 });
+
+/* Telefonía clásica de oficina (telefonia.js): horarios y modo noche, desvíos / DND /
+ * sígueme por interno y el catálogo editable de códigos de función. Sus rutas se
+ * registran acá, DESPUÉS del gate de auth + RBAC, y DESPUÉS de trunks.js porque usa
+ * su `regenerarEntrantes` (los tramos del horario viven en el dialplan de cada DID).
+ * La fuente de verdad es Postgres; el dialplan lee la AstDB (ver el encabezado del módulo). */
+const { syncFeatures } = require('./telefonia')({
+  app, pool, amiAction, setDialplan, exigirExt, clientIp, agentToken: AGENT_TOKEN,
+  errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), regenerarEntrantes, logger,
+});
+/* Desde acá el volcado Postgres → AstDB corre también en cada (re)conexión del AMI: ver
+ * `resincronizar` más arriba. Es lo que salva a los desvíos, el DND, el sígueme, los
+ * feriados y el modo noche cuando se recrea el contenedor de Asterisk (la astdb vive en
+ * la capa de escritura del contenedor, no en un volumen, así que nace vacía). */
+resincronizar.push(syncFeatures, syncRecFlags);
 
 
 // --- Base de datos (PostgreSQL ARA + control plane) ---

@@ -535,6 +535,80 @@ directo) va a la **cola de Ventas**.
 
 ![Rutas entrantes](img/cfg-05-rutas.png)
 
+### 9.1 Horarios y modo noche
+
+» Menú lateral → Telefonía → **Horarios y modo noche**
+
+Acá se contesta la pregunta que hace todo cliente en la primera reunión: *«de 9 a 18 que atienda
+el menú, fuera de hora que vaya al buzón, y los feriados cerrado»*.
+
+La pantalla tiene tres partes: el **control de modo noche** arriba, y abajo dos solapas,
+**Horarios** y **Feriados**.
+
+#### Un horario es una lista de tramos
+
+Creá un horario, ponele nombre (por ejemplo *Oficina*) y agregale los tramos que quieras. Cada
+tramo son **días + desde + hasta**:
+
+| Campo | Qué se pone | Ejemplo |
+|---|---|---|
+| **Días** | Un día, un rango de días, o todos | `mon-fri`, `sat`, `*` |
+| **Desde** / **Hasta** | Hora de 24 h | `09:00` y `18:00` |
+
+Debajo de los tramos hay una **tira de la semana, de lunes a domingo**, que pinta los días que
+quedaron cubiertos. Está justamente para que se vea de un vistazo el día que te olvidaste.
+
+> **Corte del mediodía**: son dos tramos (`09:00`–`13:00` y `14:00`–`18:00`), no uno.
+>
+> **Turno que cruza la medianoche** (de 22:00 a 06:00): también son dos tramos, uno de `22:00` a
+> `23:59` y otro de `00:00` a `06:00`. Un tramo que termina antes de empezar no se guarda.
+
+#### Los feriados siempre cierran
+
+En la solapa **Feriados** hay dos tipos:
+
+- **Se repite todos los años** — 1 de enero, 25 de diciembre. Se guarda el día y el mes, y vale
+  para siempre.
+- **Sólo esta fecha** — el feriado que cae distinto cada año, o un cierre puntual por mudanza.
+
+Un feriado gana siempre: ese día la central atiende como fuera de hora, aunque el horario diga
+que está abierta.
+
+#### El modo noche: el botón de «cerrado»
+
+| Modo | Qué hace |
+|---|---|
+| **Auto** | Manda el horario: dentro de los tramos abierto, fuera cerrado, y los feriados cerrados |
+| **Abierto** | Fuerza abierto, ignora horarios y feriados |
+| **Cerrado** | Fuerza cerrado: todo va al destino de fuera de hora |
+
+El estado que se ve (**«Ahora: abierto»** / **«Modo noche»**) lo calcula la central, no tu
+navegador, y viene con el motivo: *forzado desde el panel*, *feriado*, *dentro del horario
+Oficina*. En el **pie del menú lateral** hay un indicador con lo mismo, para verlo sin entrar a
+esta pantalla; lo ve el administrador.
+
+Y desde cualquier teléfono se alterna marcando **`*28`** — es el «cierro yo cuando me voy» del
+último que apaga la luz.
+
+#### Cómo se usa en una ruta entrante
+
+En **Rutas → Entrantes**, editá el DID (el lápiz de la fila) y completá:
+
+| Campo | Qué es |
+|---|---|
+| **Horario de atención** | Cuál de los horarios manda en este número. Vacío = atiende siempre igual, 24 horas |
+| **Tipo de destino fuera de hora** | Extensión, cola, IVR o aplicación |
+| **Destino fuera de hora** | A dónde va la llamada cuando está cerrado |
+
+Si no ponés destino fuera de hora, la llamada cae al **buzón** del interno de destino (y si el
+destino normal no es un interno, escucha un saludo y se corta).
+
+> **La hora que vale es la de la central, no la de tu computadora.** Si el panel dice «abierto»
+> y las llamadas entran como si estuviera cerrado, lo primero a mirar es la zona horaria del
+> servidor: tiene que ser la misma para la aplicación y para el motor de telefonía.
+
+![Horarios y modo noche](img/cfg-56-horarios.png)
+
 ---
 
 ## 10. Extensiones
@@ -571,6 +645,73 @@ Si en vez de un softphone la persona va a usar un teléfono de escritorio, **no 
 cargá su MAC en **Telefonía → Teléfonos** y el aparato se configura solo al enchufarlo. El capítulo 24
 lo explica completo, incluida la **opción 66 del DHCP**, que es lo que hace que 20 teléfonos nuevos se
 configuren sin que toques ninguno.
+
+---
+
+### 10.4 Desvíos y no molestar
+
+» Menú lateral → Telefonía → Extensiones → clic en el interno → solapa **Desvíos y no molestar**
+» El propio usuario, en su **Panel de Agente** → tarjeta **Mis desvíos**
+
+Cinco cosas, todas por interno, y cada una se puede cambiar **desde el panel o desde el
+teléfono**. Lo que se hace en un lado aparece en el otro.
+
+| Función | Qué hace |
+|---|---|
+| **No molestar (DND)** | El teléfono **no suena**: la llamada va derecho al buzón. Para reuniones |
+| **Desvío incondicional** | *Todas* las llamadas van al destino, el teléfono ni suena |
+| **Desvío si ocupado** | Sólo cuando el interno está en otra llamada |
+| **Desvío si no contesta** | Cuando nadie atiende (por defecto, a los 25 segundos) |
+| **Sígueme** | Primero suena el interno y, si no atienden, suena un número externo (el celular) |
+
+**Reglas que conviene saber antes de configurar:**
+
+- **Destino vacío = desvío apagado.** No hay un interruptor aparte que se pueda quedar prendido
+  sin destino.
+- **El destino son sólo números.** Un interno (`1002`) o un número de afuera. Nada de `*`, `#`
+  ni `+`.
+- **El número del sígueme se escribe como lo marcarías vos desde el teléfono**, con el prefijo
+  de salida que tenga tu ruta saliente. Si para llamar afuera marcás `0` y después el número, el
+  celular `099123456` se carga como `0099123456`.
+- **Los segundos del sígueme** son cuánto suena el interno antes de saltar al celular (15 por
+  defecto; entre 5 y 120).
+- Si hay **desvío si no contesta**, ese gana; el sígueme entra cuando no hay ninguno. Si no hay
+  ni uno ni otro, buzón.
+- Un desvío A→B con otro B→A no gira para siempre: a los cinco saltos la llamada termina en el
+  buzón.
+
+#### Los códigos de teléfono
+
+Se marcan desde el propio interno y la central contesta con un aviso de voz. Donde dice
+*«destino»* va el número, y se termina con `#`.
+
+| Código | Qué hace |
+|---|---|
+| `*78` | Activar no molestar |
+| `*79` | Desactivar no molestar |
+| `*21*`destino`#` | Desviar todas las llamadas |
+| `*21` | Apagar el desvío de todas las llamadas |
+| `*22*`destino`#` | Desviar cuando estás ocupado |
+| `*22` | Apagar el desvío si ocupado |
+| `*23*`destino`#` | Desviar cuando no contestás |
+| `*23` | Apagar el desvío si no contesta |
+| `*24*`destino`#` | Activar el sígueme a un número externo |
+| `*24` | Apagar el sígueme |
+| `*28` | Alternar el modo noche de la central (abierto ↔ cerrado) |
+| `*43` | Prueba de eco: repite tu voz, para probar el audio |
+| `*65` | Te dice tu número de interno |
+| `*97` | Entrar a tu buzón de voz |
+| `*98` | Entrar al buzón de otro interno (pide número y PIN) |
+
+**Estos códigos se pueden cambiar.** Son los de fábrica; el administrador los edita en
+**Funciones → Códigos de función** (ver §13.4). Al lado de cada desvío, el panel muestra el
+código que rige **en esta central**, no el de fábrica: si cambiaste el `*21`, el texto acompaña.
+
+> **Ejemplo de un día normal.** Antes de salir a una reunión, desde el teléfono: `*78`. Al
+> volver: `*79`. Si te vas a la calle y querés que te sigan las llamadas al celular:
+> `*24*0099123456#`, y al volver `*24`.
+
+![Desvíos y no molestar](img/cfg-57-desvios.png)
 
 ---
 
@@ -773,8 +914,23 @@ adjunto y la transcripción automática**.
 
 ### 13.4 Conferencias, grupos de timbrado, paging y códigos
 
-Salas de conferencia con PIN, grupos que suenan a la vez, voceo por parlantes, y los códigos de
-función (`*97`, `*98`, etc.).
+Salas de conferencia con PIN, grupos que suenan a la vez y voceo por parlantes.
+
+Los **códigos de función** tienen su propia solapa en » Menú lateral → Aplicaciones →
+**Funciones** → **Códigos de función**. Ahí está el catálogo completo (no molestar, los tres
+desvíos, sígueme, modo noche, buzón y las pruebas), agrupado por tema, y **cada código se puede
+cambiar**: si en tu empresa el `*21` ya significa otra cosa, se le pone otro. Cada fila tiene
+además un interruptor para apagar una función sin borrarla.
+
+La lista completa de códigos, con qué hace cada uno, está en §10.4.
+
+- **Reinstalar todos** vuelve a publicar el catálogo en el plan de marcado. Se usa después de
+  cambiar varios códigos de una.
+- **Quitar del plan** los saca a todos: dejan de contestar hasta que los reinstales.
+
+> Los cuatro códigos de siempre (`*43`, `*65`, `*97`, `*98`) se muestran en la lista, pero por
+> ahora responden también con su código original aunque los cambies: están escritos en el núcleo
+> de telefonía y ése manda. Si necesitás moverlos, hablalo con soporte.
 
 ### 13.5 Aparcado de llamadas
 

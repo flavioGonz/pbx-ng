@@ -45,8 +45,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libcurl4 libspeex1 libspeexdsp1 libogg0 libvorbis0a libgsm1 libuuid1 \
       openssl ca-certificates gettext-base postgresql-client procps \
       python3 iproute2 tcpdump iputils-ping traceroute \
-      nftables \
+      nftables tzdata \
     && rm -rf /var/lib/apt/lists/*
+# tzdata: debian:12-slim NO lo trae, y sin /usr/share/zoneinfo glibc ignora la
+# variable TZ del compose y vuelve a UTC sin decir nada. Todo el bloque de horarios
+# del dialplan (GotoIfTime, STRFTIME para feriados, modo noche automatico) se evalua
+# con el reloj de este contenedor: en UTC-3 una oficina 09:00-18:00 atenderia de
+# 06:00 a 15:00 y el panel diria "abierto" mientras la central manda al destino de
+# fuera de hora. La zona la fija el compose (TZ, el mismo valor que recibe la api).
 # nftables: el bloqueo de IPs del módulo /seguridad lo hace este contenedor (corre en
 # network_mode host con NET_ADMIN), así que el set "banned" vive en el kernel del host
 # y sobrevive a reinicios del contenedor. Lo administra pbxng-ast-agent.py (/fw/*).

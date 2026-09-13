@@ -4,7 +4,7 @@ import { Card, Group, Title, Text, Button, Table, Modal, TextInput, PasswordInpu
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconSearch, IconPencil } from '@tabler/icons-react';
 import { toast } from './notify';
-import { apiDel, apiPost, usePoll } from './api';
+import { apiDel, apiPost, apiPut, usePoll } from './api';
 import { TableSkeleton } from './Skeletons';
 
 function Field({ f, value, up }) {
@@ -17,10 +17,18 @@ function Field({ f, value, up }) {
 }
 
 /* `fetchUrl` / `createUrl` / `deleteUrl(row)` son rutas de la API SIN el prefijo
-   `/backend/api` (lo arma `app/api.js`): '/ringgroups', '/routes/inbound/12'… */
-export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, createUrl, idKey, deleteUrl, emptyText = 'Sin registros.', icon, color = 'pbx' }) {
+   `/backend/api` (lo arma `app/api.js`): '/ringgroups', '/routes/inbound/12'…
+
+   `editUrl(row)` es OPCIONAL y, cuando está, la tabla deja editar: aparece el lápiz,
+   el formulario se abre con la fila cargada y se guarda con PUT a esa ruta. Antes
+   todo lo que usa este panel era crear-y-borrar, que para una ruta entrante con
+   horario significaba borrarla y rehacerla (y perder el DID unos segundos).
+   `rowToForm(row)` adapta la fila al formulario (por ejemplo un id numérico que el
+   Select necesita como texto). */
+export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, createUrl, idKey, deleteUrl, editUrl, rowToForm, emptyText = 'Sin registros.', icon, color = 'pbx' }) {
   const [opened, { open, close }] = useDisclosure(false);
   const [form, setForm] = useState({}); const [saving, setSaving] = useState(false);
+  const [editRow, setEditRow] = useState(null);
   const [q, setQ] = useState('');
   /* Esta tabla es siempre CONFIGURACIÓN (ring groups, rutas, códigos…): la cambia una
    * persona desde este mismo panel, y cuando la cambia acá se llama a `load()` a mano.
@@ -30,12 +38,25 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
   const list = Array.isArray(data) ? data : [];
   useEffect(() => { if (error) toast(error.message, 'bad'); }, [error]);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
+  function openEdit(row) {
+    setEditRow(row);
+    setForm(rowToForm ? rowToForm(row) : { ...row });
+    open();
+  }
   async function submit() {
     setSaving(true);
     try {
-      await apiPost(createUrl, form);
-      toast((title || 'Registro') + ' creado', 'ok'); setForm({}); close(); load();
-    } catch (e) { toast('Error: ' + e.message, 'bad'); } finally { setSaving(false); }
+      if (editRow) await apiPut(editUrl(editRow), form);
+      else await apiPost(createUrl, form);
+      toast((title || 'Registro') + (editRow ? ' guardado' : ' creado'), 'ok');
+      setForm({}); setEditRow(null); close(); load();
+    } catch (e) {
+      /* Una API vieja no tiene el PUT y contesta 404/405: decirlo así evita que el
+       * usuario crea que el dato que escribió está mal. */
+      const viejo = editRow && (e.status === 404 || e.status === 405);
+      toast(viejo ? 'Esta versión de la API todavía no permite editar acá' : 'Error: ' + e.message, 'bad',
+        viejo ? { description: 'Actualizá la central o borrá y volvé a crear el registro.' } : undefined);
+    } finally { setSaving(false); }
   }
   async function del(row) {
     if (!confirm('¿Eliminar este registro?')) return;
@@ -52,7 +73,7 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
         </Group>
         <Group gap="sm">
           <TextInput placeholder="Buscar" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={200} />
-          <Button leftSection={<IconPlus size={16} />} onClick={() => { setForm({}); open(); }}>Nuevo</Button>
+          <Button leftSection={<IconPlus size={16} />} onClick={() => { setForm({}); setEditRow(null); open(); }}>Nuevo</Button>
         </Group>
       </Group>
       {loading ? <TableSkeleton rows={5} cols={columns.length + 1} /> :
@@ -64,18 +85,23 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
                 {fl.map(row => (
                   <Table.Tr key={row[idKey]}>
                     {columns.map(c => <Table.Td key={c.key}>{c.render ? c.render(row) : (c.mono ? <Text ff="monospace" fw={600}>{row[c.key]}</Text> : (row[c.key] ?? '—'))}</Table.Td>)}
-                    <Table.Td ta="right"><ActionIcon variant="subtle" color="red" onClick={() => del(row)}><IconTrash size={17} /></ActionIcon></Table.Td>
+                    <Table.Td ta="right">
+                      <Group gap={4} justify="flex-end" wrap="nowrap">
+                        {editUrl && <ActionIcon variant="subtle" color="blue" onClick={() => openEdit(row)}><IconPencil size={17} /></ActionIcon>}
+                        <ActionIcon variant="subtle" color="red" onClick={() => del(row)}><IconTrash size={17} /></ActionIcon>
+                      </Group>
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>}
-      <Modal opened={opened} onClose={close} centered radius="lg" size="lg"
-        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color={color}>{icon || <IconPlus size={20} />}</ThemeIcon><div><Text fw={800} lh={1.1}>Nuevo · {title || ''}</Text>{subtitle && <Text size="xs" c="dimmed">{subtitle}</Text>}</div></Group>}>
+      <Modal opened={opened} onClose={() => { setEditRow(null); close(); }} centered radius="lg" size="lg"
+        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color={color}>{icon || <IconPlus size={20} />}</ThemeIcon><div><Text fw={800} lh={1.1}>{editRow ? 'Editar' : 'Nuevo'} · {title || ''}</Text>{subtitle && <Text size="xs" c="dimmed">{subtitle}</Text>}</div></Group>}>
         <Stack gap="md">
           {fields.map(f => <Field key={f.name} f={f} value={form[f.name]} up={up} />)}
           <Divider />
-          <Group justify="flex-end"><Button variant="default" onClick={close}>Cancelar</Button><Button onClick={submit} loading={saving} leftSection={<IconPlus size={16} />}>Crear</Button></Group>
+          <Group justify="flex-end"><Button variant="default" onClick={() => { setEditRow(null); close(); }}>Cancelar</Button><Button onClick={submit} loading={saving} leftSection={editRow ? <IconPencil size={16} /> : <IconPlus size={16} />}>{editRow ? 'Guardar cambios' : 'Crear'}</Button></Group>
         </Stack>
       </Modal>
     </Card>

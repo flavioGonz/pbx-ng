@@ -1,8 +1,8 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
-import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader, Alert, Select } from '@mantine/core';
+import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader, Alert, Select, Tabs } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconPlus, IconTrash, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconArrowForward, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useLive } from '../useLive';
 import { apiGet, apiPost, apiPut, apiDel, usePoll, useApi } from '../api';
@@ -11,6 +11,9 @@ import { toast } from '../notify';
 import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
 import Slot from '../Slot';
+/* Los desvíos son los mismos campos que ve el agente en su propio panel, así que
+ * viven en un componente compartido (app/DesviosPanel.jsx) y no acá adentro. */
+import DesviosPanel from '../DesviosPanel';
 
 const VIA = {
   direct: { label: 'Directo', color: 'blue', icon: <IconServer size={12} /> },
@@ -78,6 +81,14 @@ export default function Extensiones() {
   const { data: enrollments } = usePoll('/enrollments', 30000);
   const acc = useMemo(() => { const m = {}; (Array.isArray(enrollments) ? enrollments : []).forEach(x => { m[String(x.ext)] = x; }); return m; }, [enrollments]);
   const { data: recAllData } = useApi('/extensions/record-all');
+  /* Códigos reales de esta central para mostrarlos al lado de cada desvío: acá sí se
+   * pueden leer (pantalla de admin), en el panel del agente no. */
+  const { data: fcData } = useApi('/featurecodes');
+  const codigosFeat = useMemo(() => {
+    const m = {};
+    (Array.isArray(fcData) ? fcData : []).forEach((f) => { if (f && f.accion) m[f.accion] = f.code; });
+    return m;
+  }, [fcData]);
   const recAll = !!(recAllData && recAllData.enabled);
   // La grabación global se administra en Configuración → SIP; acá sólo se lee para avisar en el editor.
 
@@ -206,6 +217,15 @@ export default function Extensiones() {
           <div><Text fw={800} size="lg" lh={1.1}>{editing ? 'Editar extensión ' + form.id : 'Nuevo extensión'}</Text><Text size="xs" c="dimmed">{form.type === 'webrtc' ? 'Softphone WebRTC (navegador / PWA)' : 'Teléfono SIP físico'}</Text></div>
         </Group>}>
         <Stack>
+          <Tabs defaultValue="datos" variant="pills" radius="md" keepMounted={false}>
+            {editing && (
+              <Tabs.List mb="md">
+                <Tabs.Tab value="datos" leftSection={<IconUser size={14} />}>Datos del interno</Tabs.Tab>
+                <Tabs.Tab value="desvios" leftSection={<IconArrowForward size={14} />}>Desvíos y no molestar</Tabs.Tab>
+              </Tabs.List>
+            )}
+            <Tabs.Panel value="datos">
+              <Stack gap="md">
           <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
             <Stack gap="sm">
               <TextInput label="Número de extensión" placeholder={plan && plan.next ? plan.next : '1006'}
@@ -292,6 +312,14 @@ export default function Extensiones() {
                 </Stack>
               </Group>
             </Card>}
+              </Stack>
+            </Tabs.Panel>
+            {editing && (
+              <Tabs.Panel value="desvios">
+                <DesviosPanel ext={form.id} codigos={codigosFeat} />
+              </Tabs.Panel>
+            )}
+          </Tabs>
 
           <Divider />
           <Group justify="flex-end">

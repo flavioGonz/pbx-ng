@@ -1,6 +1,9 @@
 # Qué le falta a PBX-NG para competir con una Grandstream UCM o una Xorcom
 
-Fecha: 2026-09-13 · Versión analizada: 1.8.0 (`45dd905`)
+Fecha: 2026-09-13 · Versión analizada: 1.8.0 (`45dd905`) · **Actualizado con lo que cerró
+1.9.0** (sprint 6: horarios y modo noche, desvíos / DND / sígueme, catálogo de códigos de
+función). Lo marcado **✅ 1.9.0** se verificó contra el diff de ese sprint; el resto del
+inventario sigue siendo el de 1.8.0.
 Método: inventario real del repo (rutas de la API, pantallas del panel, dialplan que genera
 `apps.js`, códigos de función instalables) contra las listas de características **publicadas
 por los fabricantes**: la hoja de datos de la serie UCM6300 y la lista de funciones de
@@ -12,9 +15,14 @@ PBX-NG ya es mejor que las dos en **seguridad, diagnóstico, IA y verticales pro
 por detrás en **telefonía clásica de oficina**: lo que falta no son cosas difíciles, son cosas
 que todo el mundo espera y que se notan en los primeros diez minutos de una demo.
 
+**Con 1.9.0 esa frase se achicó**: los tres agujeros que más se notaban en la demo —horarios y
+modo noche, desvíos/DND/sígueme y un catálogo de códigos de función de verdad— están cerrados.
+Del bloque A quedan abiertos el control de gasto saliente (COS/PIN), las listas negras y blancas
+y el import/export de internos por CSV, que es el sprint 7.
+
 ## 2. Dónde estamos parados
 
-| Área | PBX-NG 1.8.0 | UCM6300 | CompletePBX 5 |
+| Área | PBX-NG 1.9.0 | UCM6300 | CompletePBX 5 |
 |---|---|---|---|
 | Internos, troncales, rutas | ✅ | ✅ | ✅ |
 | IVR (con diseñador visual) | ✅ | ✅ | ✅ |
@@ -24,14 +32,14 @@ que todo el mundo espera y que se notan en los primeros diez minutos de una demo
 | Supervisión (escuchar / susurrar / irrumpir) | ✅ ARI snoop | ✅ | ✅ |
 | Aprovisionamiento de teléfonos | ✅ Grandstream, Yealink | ✅ (propias) | ✅ muchas marcas |
 | Softphone propio (escritorio + móvil) | ✅ Windows OTA + PWA | ✅ Wave | ✅ Cloudphone |
-| **Horarios / modo noche** | ❌ | ✅ | ✅ |
-| **Desvíos (CFU/CFB/CFNA), DND, sígueme** | ❌ | ✅ | ✅ |
-| **Códigos de función** | ⚠️ 4 | ✅ decenas | ✅ decenas |
+| **Horarios / modo noche** | ✅ **1.9.0** | ✅ | ✅ |
+| **Desvíos (CFU/CFB/CFNA), DND, sígueme** | ✅ **1.9.0** | ✅ | ✅ |
+| **Códigos de función** | ✅ **1.9.0** 15, con el código editable | ✅ decenas | ✅ decenas |
 | **COS / PIN de salida / códigos de autorización** | ❌ | ✅ | ✅ |
 | **Listas negras y blancas de entrantes** | ❌ | ✅ | ✅ |
 | **Fax (T.38, a correo, desde la web)** | ❌ | ✅ | ✅ |
 | **DISA, callback, marcación abreviada, dial-by-name** | ❌ | ✅ | ✅ |
-| **Portal de autoservicio del usuario** | ❌ | ✅ | ✅ |
+| **Portal de autoservicio del usuario** | ⚠️ **1.9.0** el agente cambia sus desvíos desde `/agente` y desde el teléfono; no hay portal aparte | ✅ | ✅ |
 | **Salas de reunión (PIN, agenda)** | ⚠️ ConfBridge básico | ✅ | ✅ |
 | **Reportes de call center (SLA, abandono)** | ⚠️ CDR crudo | ✅ | ✅ |
 | **Alta disponibilidad** | ❌ | ✅ Hot Standby | ✅ TwinStar |
@@ -65,14 +73,26 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
 
 ### Bloque A — sin esto no se vende (lo pregunta el cliente en la primera reunión)
 
-1. **Horarios / condiciones de tiempo / modo noche.** Hoy no existe `GotoIfTime` en ningún
-   lado. «De 9 a 18 al IVR, fuera de hora al buzón, feriados aparte, y un botón de modo noche»
-   es *la* función más pedida de una central. **Es el agujero más grande que tenemos.**
-2. **Desvíos y DND por interno** (incondicional / si ocupado / si no contesta), **sígueme**
-   (suena el interno y después el celular) y el **portal donde el propio usuario los cambia**.
-   Verificado: no hay nada de esto, ni por código ni por panel.
-3. **Códigos de función de verdad.** Hoy son 4 (`*43`, `*65`, `*97`, `*98`). Faltan los de
-   desvío, DND, captura dirigida, grabación bajo demanda, modo noche, marcación abreviada.
+1. **✅ 1.9.0 · Horarios / condiciones de tiempo / modo noche.** Pantalla
+   **Telefonía → Horarios y modo noche**: horarios con tramos (`mon-fri 09:00-18:00`), feriados
+   anuales y puntuales, y el modo noche en `auto | abierto | cerrado` con indicador en el menú.
+   A una ruta entrante se le asigna un horario y un destino fuera de hora, y el DID pasa a
+   ocupar tres extensiones (`<did>` decide, `abierto-<did>`, `cerrado-<did>`) con `GotoIfTime`
+   por tramo y `DB_EXISTS(hol/…)` para el feriado. La decisión sale de la AstDB, así que poner
+   un feriado o apretar el modo noche no recarga dialplan. *Queda*: el estado que muestra el
+   panel mira un solo horario, mientras el dialplan evalúa el de cada DID.
+2. **✅ 1.9.0 · Desvíos y DND por interno**, incondicional / si ocupado / si no contesta, más
+   **sígueme** con tiempo de timbrado configurable. Se cambian desde el panel (solapa «Desvíos y
+   no molestar» en Extensiones, tarjeta «Mis desvíos» en el panel de agente) o **desde el
+   teléfono** con los códigos; las dos vías dejan Postgres y Asterisk al día. *Queda*: no se
+   aplican a llamadas que entran por cola, grupo de timbrado o DID directo a interno, y el
+   portal de autoservicio como pantalla propia sigue siendo del sprint 8.
+3. **✅ 1.9.0 · Códigos de función de verdad.** De 4 a 15, y con el **código editable** desde el
+   panel (la tabla tiene como clave la acción, no el código): `*78`/`*79` no molestar,
+   `*21`/`*22`/`*23` los tres desvíos, `*24` sígueme, `*28` modo noche, más `*43`, `*65`, `*97`
+   y `*98`. *Queda*: esos cuatro últimos siguen en el dialplan estático, que gana contra
+   realtime, así que se muestran editables sin serlo del todo; y faltan captura dirigida en el
+   catálogo, grabación bajo demanda y marcación abreviada.
 4. **Control de gasto saliente**: clase de servicio por interno (quién puede llamar a celular,
    larga distancia o internacional), PIN de salida y códigos de autorización con registro en CDR.
    Esto no es una función: es el argumento de venta de una central a un gerente.
@@ -115,7 +135,7 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
 
 | Sprint | Contenido | Por qué en ese orden |
 |---|---|---|
-| 6 | Horarios + modo noche + desvíos/DND/sígueme + catálogo de códigos de función | Es lo que falta para que sea «una central normal» |
+| ~~6~~ **hecho en 1.9.0** | Horarios + modo noche + desvíos/DND/sígueme + catálogo de códigos de función | Es lo que falta para que sea «una central normal» |
 | 7 | COS/PIN de salida + listas negras/blancas + import/export CSV + DISA, callback, abreviada, dial-by-name | Control de gasto y migraciones; todo Bloque A cerrado |
 | 8 | Portal de autoservicio del usuario + salas de reunión + reportes de call center | Lo que se ve en la demo y lo que firma el supervisor |
 | 9 | Fax (T.38 + a correo + desde el panel) + failover de troncal | Licitaciones |

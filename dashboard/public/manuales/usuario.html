@@ -107,8 +107,8 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
       </div>
       <div class="metatable">
         <div><span>Dirigido a</span><b>Usuario final</b></div>
-        <div><span>Versión del producto</span><b>1.7.0</b></div>
-        <div><span>Actualizado</span><b>06/09/2026</b></div>
+        <div><span>Versión del producto</span><b>1.9.0</b></div>
+        <div><span>Actualizado</span><b>13/09/2026</b></div>
         <div><span>Documento</span><b>USUARIO</b></div>
       </div>
       <div class="foot">© 2026 PBX-NG · Este documento puede actualizarse sin previo aviso.</div>
@@ -204,8 +204,13 @@ footer{padding:26px 60px 40px;color:#94a3b8;font-size:12.5px;border-top:1px soli
 <figure class="shot"><div class="frame"><img src="/backend/api/manuales/img/usr-10-dispositivos.png" alt="Ajustes de dispositivos" onerror="this.parentNode.parentNode.classList.add('ph');this.remove();" /></div><figcaption><span class="fig">Figura 15</span>Ajustes de dispositivos<span class="fn">usr-10-dispositivos.png</span></figcaption></figure>
 <hr />
 <div class="chapter"><span class="num">Capítulo 12</span><h2 id="12-c-digos-tiles">Códigos útiles</h2></div>
-<div class="tw"><table><thead><tr><th>Código</th><th>Para qué</th></tr></thead><tbody><tr><td><code>*97</code></td><td>Escuchar tu buzón de voz</td></tr><tr><td><code>*98</code></td><td>Entrar al buzón de otra extensión</td></tr></tbody></table></div></main>
-  <footer>PBX-NG · Manual de Usuario · versión 1.7.0 · 06/09/2026</footer>
+<p>Se marcan desde tu propio teléfono y la central te contesta con un aviso de voz. Donde dice <em>destino</em> va el número al que querés mandar las llamadas, y se termina con <code>#</code>.</p>
+<div class="tw"><table><thead><tr><th>Código</th><th>Para qué</th></tr></thead><tbody><tr><td><code>*78</code></td><td>Activar <strong>no molestar</strong>: tu teléfono no suena y todo va al buzón</td></tr><tr><td><code>*79</code></td><td>Desactivar no molestar</td></tr><tr><td><code><em>21</em></code>destino<code>#</code></td><td>Desviar <strong>todas</strong> tus llamadas</td></tr><tr><td><code>*21</code></td><td>Apagar ese desvío</td></tr><tr><td><code><em>22</em></code>destino<code>#</code></td><td>Desviar sólo cuando estás <strong>ocupado</strong></td></tr><tr><td><code>*22</code></td><td>Apagar ese desvío</td></tr><tr><td><code><em>23</em></code>destino<code>#</code></td><td>Desviar cuando <strong>no contestás</strong></td></tr><tr><td><code>*23</code></td><td>Apagar ese desvío</td></tr><tr><td><code><em>24</em></code>destino<code>#</code></td><td><strong>Sígueme</strong>: primero suena tu interno y después el número que pongas</td></tr><tr><td><code>*24</code></td><td>Apagar el sígueme</td></tr><tr><td><code>*43</code></td><td>Prueba de eco: repite tu voz, para probar el micrófono y el auricular</td></tr><tr><td><code>*65</code></td><td>Te dice cuál es tu número de interno</td></tr><tr><td><code>*97</code></td><td>Escuchar tu buzón de voz</td></tr><tr><td><code>*98</code></td><td>Entrar al buzón de otra extensión</td></tr></tbody></table></div>
+<p>Lo mismo se puede hacer con el mouse, desde tu <strong>Panel de Agente</strong> → tarjeta <strong>Mis desvíos</strong>; es el mismo estado, así que da igual por dónde lo cambies.</p>
+<blockquote><p>Para llamar a un número de afuera (tu celular, por ejemplo) escribilo **como lo marcarías desde</p><p>el teléfono**, con el <code>0</code> o el prefijo de salida que uses en la empresa.</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>Estos son los códigos de fábrica: si tu administrador los cambió, los que valen son los que</p><p>muestra tu panel.</p></blockquote></main>
+  <footer>PBX-NG · Manual de Usuario · versión 1.9.0 · 13/09/2026</footer>
 </div>
 <button class="top" onclick="window.print()">Descargar PDF</button>
 <script>if(location.search.indexOf("print=1")>=0){window.addEventListener("load",function(){setTimeout(function(){window.print()},400)});}</script>

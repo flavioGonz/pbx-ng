@@ -1,32 +1,13 @@
 'use client';
 /* AplicacionesTab — renderiza UNA aplicación de llamada por su clave (para rutas /aplicaciones/<tab>). */
-import { Card, Group, Text, Table, Badge } from '@mantine/core';
-import { IconUsersGroup, IconBroadcast, IconUsers, IconMail, IconAsterisk, IconTag, IconHash, IconKey, IconUser, IconLock } from '@tabler/icons-react';
+import { Badge } from '@mantine/core';
+import { IconUsersGroup, IconBroadcast, IconUsers, IconMail, IconTag, IconHash, IconKey, IconUser, IconLock } from '@tabler/icons-react';
 import QueuePanel from './QueuePanel';
+/* El catálogo de códigos ya no es una lista escrita a mano acá: lo manda la API y
+ * los códigos son editables, así que esta solapa muestra el MISMO componente que
+ * /funciones → Códigos de función. */
+import FeatureCodes from './FeatureCodes';
 import CrudPanel from './CrudPanel';
-
-function FeatureCodes() {
-  const codes = [
-    { code: '*43', name: 'Prueba de eco', desc: 'Repite tu voz para verificar el audio' },
-    { code: '*44', name: 'Prueba de audio (ES)', desc: 'Reproduce un mensaje en español' },
-    { code: '*65', name: 'Decir mi número', desc: 'Locuta el número del interno' },
-    { code: '*97', name: 'Mi buzón de voz', desc: 'Entra al buzón del interno que llama' },
-    { code: '*98', name: 'Buzón de otro', desc: 'Pide número de buzón y PIN' },
-    { code: '600', name: 'Eco (alias)', desc: 'Igual que *43' },
-  ];
-  return (
-    <Card withBorder radius="lg" padding="lg" shadow="sm">
-      <Group justify="space-between" mb="md"><Group gap="xs"><Text fw={600}>Códigos de función</Text><Badge variant="light" color="teal">Integrados</Badge></Group></Group>
-      <Text size="xs" c="dimmed" mb="sm">Atajos que cualquier interno puede marcar (audios en español). Vienen activos en el plan de marcado interno.</Text>
-      <Table striped highlightOnHover verticalSpacing="sm">
-        <Table.Thead><Table.Tr><Table.Th>Código</Table.Th><Table.Th>Función</Table.Th><Table.Th>Descripción</Table.Th></Table.Tr></Table.Thead>
-        <Table.Tbody>{codes.map(f => (
-          <Table.Tr key={f.code}><Table.Td><Badge variant="light" color="pbx" ff="monospace" leftSection={<IconAsterisk size={11} />}>{f.code}</Badge></Table.Td><Table.Td fw={600}>{f.name}</Table.Td><Table.Td c="dimmed" fz="sm">{f.desc}</Table.Td></Table.Tr>
-        ))}</Table.Tbody>
-      </Table>
-    </Card>
-  );
-}
 
 export default function AplicacionesTab({ tab }) {
   if (tab === 'rg') return (

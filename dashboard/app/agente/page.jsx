@@ -13,11 +13,14 @@ import {
   IconPhone, IconLogout, IconKey, IconPhoneIncoming, IconPhoneOutgoing, IconRefresh,
   IconHeadset, IconPlayerPlay, IconDeviceCctv, IconSparkles, IconUserCheck, IconBuilding,
   IconId, IconMapPin, IconClipboardCheck, IconPlayerPause, IconCircleDot, IconVideoOff,
-  IconUsers, IconVideo,
+  IconUsers, IconVideo, IconArrowForward,
 } from '@tabler/icons-react';
 import { api, apiGet, apiPost, useApi, usePoll } from '../api';
 import { fmtFechaHora, fmtReloj } from '../fmt';
 import { toast } from '../notify';
+/* Mismo componente que usa el administrador en /internos: el agente cambia los
+ * suyos y ve exactamente los mismos textos y los mismos códigos de teléfono. */
+import DesviosPanel from '../DesviosPanel';
 
 const initials = (n) => (n || '?').split(/[\s.]+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 const enc = encodeURIComponent;
@@ -306,6 +309,13 @@ export default function AgentePanel() {
           <SelfCam name={user?.name || user?.username} ext={ext} paused={paused} registered={registered} />
           <Card className="glass ag-fade" padding="lg" style={{ animationDelay: '.05s' }}>
             <Softphone sp={sp} dark={dark} directory={dir} height={470} onIncomingCard={(num) => <div style={{ borderTop: '1px solid var(--mantine-color-default-border)', padding: '12px 6px 2px' }}><Ficha client={client && client.id ? client : null} caller={num} compact /></div>} />
+          </Card>
+          <Card className="glass ag-fade" padding="lg" style={{ animationDelay: '.07s' }}>
+            <Group gap={8} mb="sm">
+              <ThemeIcon size={30} radius="md" variant="light" color="grape"><IconArrowForward size={17} /></ThemeIcon>
+              <div><Text fw={800} fz="lg" lh={1.1}>Mis desvíos</Text><Text fz="xs" c="dimmed">Interno {ext || '—'}</Text></div>
+            </Group>
+            <DesviosPanel ext={ext} propio />
           </Card>
         </Stack>
 

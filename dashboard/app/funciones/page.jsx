@@ -2,7 +2,7 @@
 /* ============================================================================
  *  Funciones de telefonía: aparcado, captura de llamada y música en espera.
  *
- *  Las tres viven en ARCHIVOS de Asterisk (no en la base), así que el panel las
+ *  Las tres primeras viven en ARCHIVOS de Asterisk (no en la base), así que el panel las
  *  genera en un directorio compartido y recarga el módulo correspondiente. Por eso
  *  cada bloque tiene su botón de "Aplicar": guardar no alcanza, hay que recargar.
  * ==========================================================================*/
@@ -12,10 +12,11 @@ import {
   ThemeIcon, Tooltip, ActionIcon, Alert, Tabs, Switch, Code, FileButton, Skeleton,
 } from '@mantine/core';
 import {
-  IconParking, IconHandGrab, IconMusic, IconPlayerPlay, IconTrash, IconUpload,
+  IconParking, IconHandGrab, IconMusic, IconAsterisk, IconPlayerPlay, IconTrash, IconUpload,
   IconInfoCircle, IconPlus, IconDeviceFloppy, IconRefresh, IconPhonePause, IconClock,
 } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
+import FeatureCodes from '../FeatureCodes';
 import { toast, toastPromise } from '../notify';
 import { apiGet, apiPost, apiPut, apiDel, usePoll } from '../api';
 
@@ -284,16 +285,20 @@ export default function Funciones() {
   return (
     <Stack gap="lg">
       <PageHeader icon={<IconParking size={24} />} title="Funciones de telefonía"
-        subtitle="Aparcado de llamadas, captura entre compañeros y música en espera" />
+        subtitle="Aparcado, captura entre compañeros, música en espera y los códigos que se marcan desde el teléfono" />
       <Tabs defaultValue="parking" variant="pills" radius="md" keepMounted={false}>
         <Tabs.List mb="md">
           <Tabs.Tab value="parking" leftSection={<IconParking size={15} />}>Aparcado</Tabs.Tab>
           <Tabs.Tab value="pickup" leftSection={<IconHandGrab size={15} />}>Captura</Tabs.Tab>
           <Tabs.Tab value="moh" leftSection={<IconMusic size={15} />}>Música en espera</Tabs.Tab>
+          <Tabs.Tab value="codigos" leftSection={<IconAsterisk size={15} />}>Códigos de función</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="parking"><Parking /></Tabs.Panel>
         <Tabs.Panel value="pickup"><Pickup /></Tabs.Panel>
         <Tabs.Panel value="moh"><Moh /></Tabs.Panel>
+        {/* El catálogo completo (desvíos, DND, sígueme, modo noche) vive en su propio
+            componente porque también se muestra desde Aplicaciones → Códigos. */}
+        <Tabs.Panel value="codigos"><FeatureCodes /></Tabs.Panel>
       </Tabs>
     </Stack>
   );

@@ -2,6 +2,189 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.9.0] - 2026-09-13
+Sprint 6: cierra el **bloque A** de `docs/BRECHA-UCM-XORCOM.md` en lo que hace a **telefonía
+clásica de oficina** — horarios de atención y modo noche, desvíos / no molestar / sígueme por
+interno, y un catálogo de códigos de función de verdad (4 → 15, con el código editable). Es lo
+que un cliente pregunta en la primera reunión y lo que hasta 1.8.0 no existía: no había un solo
+`GotoIfTime` en el repo. Trae la migración **`0011_telefonia_clasica.sql`** (la corre sola el
+arranque de la API) y **obliga a reconstruir la imagen de Asterisk**: cambian el dialplan
+estático (`extensions.conf`), `modules.conf` y el Dockerfile (`tzdata`).
+
+**Antes de actualizar**, en este orden:
+1. `docker compose build asterisk` (o traer la imagen nueva del release) — `docker compose up -d`
+   a secas NO alcanza: el dialplan de los internos y los `require` de `modules.conf` viven en la
+   imagen.
+2. Revisar que `TZ` esté en el `.env` con la zona de la central. Ahora la reciben **`api` Y
+   `asterisk`** y de ella dependen los horarios, los feriados y el modo noche automático.
+3. Avisar que **los CDR nuevos quedan corridos respecto de los viejos** si la instalación venía
+   sin `TZ` en el contenedor de Asterisk — ver *Known issues*.
+### Added
+- **Horarios de atención y modo noche.** Tablas `pbxng_horarios` (tramos `[{"dias":"mon-fri",
+  "desde":"09:00","hasta":"18:00"}]`, hasta 20 por horario) y `pbxng_feriados` (anuales `MM-DD` o
+  puntuales `YYYY-MM-DD`). Rutas `GET/POST/PUT/DELETE /api/horarios` y `/api/feriados` (admin) y
+  `GET|PUT /api/nightmode` → `{modo, estado, motivo, horario_id}` con `modo` ∈ `auto|abierto|
+  cerrado` y `estado` ∈ `abierto|cerrado` **calculado en la API** (prioridad: modo forzado →
+  feriado de hoy → tramos del horario; sin horario configurado la central queda siempre abierta,
+  para que instalar la actualización no empiece a mandar todo al buzón). `GET` lo ve también el
+  supervisor; forzarlo es admin.
+- **Una ruta entrante con horario genera TRES extensiones en `from-trunk`** (`control-plane/
+  trunks.js`, `filasDecide()`/`filasCerrado()`/`escribirEntrante()`): `<did>` decide, y
+  `abierto-<did>` / `cerrado-<did>` son los dos destinos. La decisión sale **entera de la AstDB**
+  —modo noche forzado, `DB_EXISTS(hol/…)` para el feriado y un `GotoIfTime` por tramo— así que
+  poner un feriado o apretar el modo noche **no regenera dialplan ni recarga nada**. Sin horario
+  asignado la ruta se genera como siempre, con una sola extensión. Columnas nuevas de
+  `pbxng_inbound_routes`: `horario_id`, `dest_cerrado_type`, `dest_cerrado_value`. Nuevo
+  **`PUT /api/routes/inbound/:id`** (faltaba: sin él no se le podía poner horario a un DID ya
+  cargado). Borrar la ruta se lleva las tres extensiones; sacarle el horario borra las ramas.
+- **Desvíos, no molestar y sígueme por interno.** Tabla `pbxng_ext_features` y
+  `GET|PUT /api/extensions/:ext/features` → `{dnd, cfu, cfb, cfnr, fm, fm_seg}` (destino vacío =
+  apagado). Admin y supervisor alcanzan cualquier interno; **agente y token de softphone, sólo el
+  propio** (`exigirExt`, más las entradas nuevas en `FONO_PERMITIDO` y en `rbac.js`). Cada PUT
+  escribe **Postgres (fuente de verdad) y la AstDB por AMI**, igual que ya hacía la grabación.
+- **Bloque de telefonía clásica en el dialplan estático** (`docker/config/asterisk/
+  extensions.conf`, patrón `_[1-9]XXX`), sin tocar nada de lo que ya hacía (wake del softphone
+  con su bucle de reintento, banderas de grabación, buzón por `DIALSTATUS`):
+  1. `DB(dnd/<ext>)=1` → `vm-DND` (extensión nueva, buzón con saludo de ocupado): **el teléfono
+     no suena** y el motivo queda en el log y en el CDR.
+  2. `DB(cfu/<ext>)` con contenido → `Goto(internal,<destino>,1)` **antes** de despertar y de
+     marcar. Va al propio contexto `internal`, así sirve igual un interno que un número externo
+     por la ruta saliente.
+  3. El timbrado es de 25 s como siempre, salvo que haya sígueme: ahí manda `DB(fmt/<ext>)`
+     (default 15 s), pasado por `FILTER(0-9,…)` y acotado a 5–120 s para que un valor raro en la
+     AstDB no deje un `Dial` sin timeout.
+  4. `BUSY` → `cfb` si hay, si no `vm-BUSY`. `NOANSWER` → `cfnr` si hay; si no, sígueme
+     (`Dial(Local/${DB(fm/<ext>)}@internal/n,45)`, que sale por la ruta saliente con el CallerID
+     de siempre); si no, `vm-NOANSWER`. Todo lo demás sigue cayendo en `vm-${DIALSTATUS}`.
+  Además, **guardia de bucle** (variable `SALTOS`, tope 5 → buzón): sin ella un desvío A→B y otro
+  B→A giraba hasta que alguien colgara.
+- **Catálogo de códigos de función, con el código editable** (tabla `pbxng_featurecodes`, PK = la
+  **acción**, no el código). Pasan de 4 a 15: `*78` / `*79` no molestar · `*21*<dest>` / `*21`
+  desvío incondicional · `*22*<dest>` / `*22` si ocupado · `*23*<dest>` / `*23` si no contesta ·
+  `*24*<dest>` / `*24` sígueme · `*28` alternar modo noche · más `*43`, `*65`, `*97` y `*98`, que
+  dejan de estar escritos a mano en `apps.js`. `GET|PUT /api/featurecodes` (el PUT acepta un
+  objeto suelto o `{codes:[…]}`) y se mantienen `POST /api/featurecodes/install|uninstall`.
+  Cambiar un código **borra el dialplan del anterior** antes de publicar el nuevo. Cada código
+  escribe la AstDB, locuta el resultado y avisa a Postgres por CURL.
+- **`POST /api/internal/feature`** (en `PUBLIC_API`): lo llama el dialplan por CURL después de
+  escribir la AstDB, para que lo que la persona hace **desde el teléfono** quede también en la
+  base y se vea en el panel. Sin sesión, pero con **tres candados**: IP de loopback, ninguna
+  cabecera `X-Forwarded-For`/`X-Real-IP`, y el secreto compartido de `/etc/pbxng/agent.token` en
+  el campo `tok` (comparado con `timingSafeEqual`). Cualquiera que falle → `403`.
+- **Panel**: pantalla nueva **Telefonía → Horarios y modo noche** (`/horarios`: ABM de horarios
+  con tira semanal de cobertura, ABM de feriados y el control de modo noche con el estado
+  calculado y su motivo); **chip de modo noche en el pie del menú** (sólo admin, que es quien
+  puede leer `/api/nightmode`); solapa **«Desvíos y no molestar»** dentro del modal de edición de
+  `/internos` y tarjeta **«Mis desvíos»** en `/agente`, las dos con el código de teléfono
+  equivalente al lado de cada función; **Funciones → Códigos de función** con el catálogo real
+  (reemplaza la lista escrita a mano de Aplicaciones → Códigos, que nombraba códigos
+  inexistentes); campos de **horario y destino fuera de hora** en Rutas → Entrantes, con edición
+  en la fila (`CrudPanel` acepta ahora `editUrl(row)` + `rowToForm(row)`, opcional y
+  retrocompatible).
+- `modules.conf`: `require = func_db.so` y `require = func_strings.so`. `DB`/`DB_EXISTS` y
+  `STRFTIME`/`FILTER` son de esos dos módulos y **sin ellos el dialplan no falla: devuelve
+  vacío**, o sea que todo desvío quedaría apagado y toda llamada entraría como si fuera horario
+  de oficina. Preferimos que Asterisk no arranque a que la central mienta. (Ojo: **no existe**
+  ningún `func_strftime.so`; `STRFTIME` vive en `func_strings.so`, junto con `FILTER`.)
+- Variable de entorno opcional **`AST_API_URL`**: con qué URL ve Asterisk a la API para el CURL
+  de los códigos de función (default `http://127.0.0.1:3000`, que es el caso normal porque
+  Asterisk corre en la red del host).
+- Pruebas: `control-plane/test/telefonia.test.js`. La suite pasa de **36 a 44** pruebas (~22 s):
+  features con validación de destino y 403 del agente sobre otro interno, ABM de horarios,
+  modo noche forzado / por feriado / por tramo, las tres extensiones de un DID con horario y su
+  limpieza, catálogo de códigos (instalación, edición que borra el viejo, apagado), el
+  `internal/feature` desde loopback y los cuatro `403` de la ruta pública.
+### Changed
+- **La imagen de Asterisk se reconstruye.** Es el único componente del sprint que lo obliga:
+  cambian `docker/config/asterisk/extensions.conf` (el bloque de telefonía clásica y la extensión
+  `vm-DND`), `docker/config/asterisk/modules.conf` (los dos `require` nuevos) y
+  `docker/images/asterisk/Dockerfile` (paquete `tzdata`). `docker compose build asterisk &&
+  docker compose up -d asterisk`.
+- **`TZ` va ahora a los DOS servicios, `api` y `asterisk`, con el mismo valor** (default
+  `America/Montevideo` en los dos compose). Hasta 1.8.0 estaba sólo en `api`: el `GotoIfTime` de
+  los tramos y el `STRFTIME` de las claves de feriado corrían en UTC mientras
+  `GET /api/nightmode` usaba la hora local, o sea que **el panel decía «abierto» con la central
+  atendiendo como cerrada**, sin un solo error en el log. La imagen instala `tzdata` porque
+  `debian:12-slim` no lo trae y sin `/usr/share/zoneinfo` glibc ignora `TZ` y vuelve a UTC en
+  silencio. Comprobación: `docker compose exec asterisk date` y `docker compose exec api date`
+  tienen que dar la misma hora.
+- **El volcado Postgres → AstDB corre en cada (re)conexión del AMI**, no sólo una vez al arrancar
+  la API (`control-plane/app.js`, array `resincronizar` con `syncFeatures` y `syncRecFlags`; 2 s
+  de gracia para que Asterisk termine de cargar `func_db` y freno de 60 s por si el AMI flapea).
+  Sin esto, recrear el contenedor de Asterisk —que **este mismo release obliga a hacer**— dejaba
+  la AstDB vacía y con ella todos los desvíos, el DND, el sígueme, los feriados y el modo noche
+  sin aplicarse, mientras el panel los seguía mostrando prendidos porque Postgres no había
+  cambiado.
+- `apps.js` deja de tener el `FEATURE_CODES` fijo: el catálogo y el dialplan de los códigos de
+  función los sirve ahora `control-plane/telefonia.js`. `GET /api/featurecodes` sigue devolviendo
+  `name`/`desc`/`installed` para no romper paneles 1.8.0.
+- `control-plane/app.js` registra un módulo más. Orden efectivo: gate → `auth.js` → `sipconf.js`
+  → `callengine.js` → `recordings.js` → `apps.js` → `trunks.js` → **`telefonia.js`** → `guard.js`
+  → 404 → errores. Va después de `trunks.js` porque usa su `regenerarEntrantes`.
+- **Desviación del contrato del sprint, a propósito**: donde el contrato decía `DB(nightmode)` se
+  implementó **`DB(nightmode/modo)`**, porque la función `DB()` de Asterisk exige familia/clave
+  (`func_db.c`: *"DB requires an argument, DB(<family>/<key>)"*) y la forma corta habría sido
+  siempre vacía, con un WARNING por llamada y las dos ramas de modo noche forzado muertas en
+  silencio. Está aplicada igual en los dos lados (`telefonia.js` y `trunks.js`).
+- El destino de `cfu`/`cfb`/`cfnr`/`fm` acepta **sólo dígitos** (hasta 32), tanto por la API como
+  por el teclado del teléfono (`FILTER(0-9,…)` en los códigos con patrón). `*` y `#` están
+  prohibidos porque el destino termina dentro de un `Goto(internal,…)` y en ese contexto viven
+  los códigos de función, que toman la identidad del canal **en curso**: con `cfu=*78` el que te
+  llamaba se llevaba el no molestar puesto a él, y con un `*21*` se llevaba el desvío.
+- El número del sígueme se guarda **tal como hay que marcarlo desde un interno**, o sea con el
+  prefijo de la ruta saliente (si la ruta es `_0.`, el celular `099123456` se guarda
+  `0099123456`): el dialplan marca `Local/<lo que haya>@internal` y no adivina prefijos.
+- `docker/.env.example`: el comentario de `TZ` dice ahora que la reciben los dos servicios y qué
+  depende de ella.
+### Known issues
+- **Los CDR nuevos quedan corridos respecto de los viejos** en toda instalación que hasta ahora
+  tenía el contenedor de Asterisk en UTC: `cdr.start/answer/end` son `timestamp without time
+  zone` (`docker/config/initdb/01-schema.sql`) y se escriben con el reloj del contenedor, que
+  ahora es local. Es deuda preexistente (el CDR ya se mostraba mal), pero este release la vuelve
+  visible. Queda por decidir si se migran los históricos o si la columna pasa a `timestamptz`.
+- **La AstDB sigue sin volumen propio.** `astdbdir` apunta a `/var/lib/asterisk`, que no está
+  montado, así que recrear el contenedor la borra. Con el re-volcado por AMI el daño ya no es
+  permanente ni silencioso, pero **hay una ventana de ~30–40 s** tras recrear Asterisk en la que
+  los desvíos, el DND, el sígueme, los feriados y el modo noche no aplican. El arreglo de fondo
+  (`astdbdir => /var/lib/asterisk/db` + volumen `asterisk_db` en los dos compose) queda para
+  `empaquetado`: montar el volumen sobre `/var/lib/asterisk` a secas taparía los sonidos.
+- **`*43`, `*65`, `*97` y `*98` se muestran como editables y no lo son del todo**: siguen
+  escritos en el dialplan estático de `extensions.conf`, que **gana** contra la tabla realtime.
+  Si el administrador le cambia el código a `*97`, el nuevo empieza a contestar **y el `*97`
+  viejo sigue contestando igual**; apagar la acción con el interruptor tampoco apaga el estático.
+  Sacarlos del `.conf` es condición para que sean realmente editables, y hay que hacerlo con
+  cuidado: la versión estática de `*97` saca la identidad de `CHANNEL(endpoint)` (por eso puede
+  entrar sin PIN con seguridad) y la de realtime pide PIN.
+- **DND y desvíos no se aplican** a una llamada que entra por **ruta entrante directa a interno**
+  (`Dial(PJSIP/<ext>,30)`), ni por **grupo de timbrado o cola** (interfaces PJSIP directas):
+  esos caminos no pasan por el contexto `internal`. Pasarlos a `Goto(internal,<ext>,1)` /
+  `Local/<ext>@internal` cambia el CDR y el comportamiento de las estrategias de cola, así que es
+  decisión de producto y queda para el sprint siguiente.
+- **El `estado` de `GET /api/nightmode` mira un solo horario** (el de `nightmode_horario_id`, o el
+  primer horario activo), mientras el dialplan evalúa el horario asignado a **cada DID**. Con dos
+  o más horarios el chip del menú puede decir «Abierto» mientras un DID concreto ya entra por su
+  rama de fuera de hora.
+- Un código de función **puede empezar con un dígito** (`CODE_OK` lo permite) y publicarlo pisa
+  esa extensión del contexto `internal`: escribir `_0.` en el catálogo borraría la ruta saliente
+  `_0.` y la central se queda sin salida a la calle, sin aviso.
+- `DELETE /api/endpoints/:id` **no limpia** `pbxng_ext_features` ni las claves de la AstDB del
+  interno borrado: si más adelante se da de alta a otra persona con el mismo número, hereda el
+  desvío del ocupante anterior. (El comentario de la migración 0011 afirma lo contrario.)
+- `syncFeatures()` reescribe los feriados vigentes pero **no borra los que ya no están** en
+  Postgres: un feriado dado de baja mientras el AMI estaba caído queda en la AstDB y esa fecha
+  cierra la central todos los años.
+- El dialplan **confía en el valor que lee de la AstDB** (`Goto(internal,${DB(cfu/…)},1)` sin
+  `FILTER`). Los dos caminos de escritura (API y teclado del teléfono) filtran, así que sólo
+  queda expuesto quien tenga el CLI de Asterisk —que ya es dueño de la central—, pero falta la
+  tercera capa en el punto de uso.
+- Una llamada desviada por `cfu` **no se graba**: el salto ocurre antes del bloque de
+  `MixMonitor`. Para un call center es un agujero de auditoría.
+- `dashboard/app/DesviosPanel.jsx` deja tipear `*`, `#` y `+` en el destino y la API los rechaza
+  con 400; y el formulario de edición de una ruta entrante muestra el campo **DID**, que el
+  `PUT` no actualiza (se edita, dice «guardado» y no cambia nada).
+- Cada alta, edición o baja de feriado **regenera el dialplan de todas las rutas entrantes**, que
+  es trabajo al pedo: los feriados se leen de la AstDB, no del dialplan.
+
 ## [1.8.0] - 2026-09-06
 Sprint 5: **bloque 6** de `docs/EVALUACION-2026-09.md` (panel). Aparece la capa de acceso `dashboard/app/api.js` —un solo lugar para la URL base, el `r.ok`, el JSON y los mensajes de error— y el módulo de formateo `dashboard/app/fmt.js`; 33 archivos del panel se migran a ellos (los `fetch` sueltos de `dashboard/app` bajan de 251 a 94), el encuestado se reduce apoyándose en el `snapshot` del socket (el Resumen pasa de ~44 a 5 pedidos por minuto, y a **cero** con la pestaña en segundo plano) y el panel gana una **CSP completa** con `script-src`. Sin migraciones, sin cambios de esquema y sin cambios en la API: es todo del lado del panel. Nada que hacer al actualizar más allá de la imagen nueva del dashboard.
 ### Added

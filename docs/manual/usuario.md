@@ -229,7 +229,31 @@ Tu panel muestra las llamadas en espera, tus estadísticas del día y tu histori
 
 ## 12. Códigos útiles
 
+Se marcan desde tu propio teléfono y la central te contesta con un aviso de voz. Donde dice
+*destino* va el número al que querés mandar las llamadas, y se termina con `#`.
+
 | Código | Para qué |
 |---|---|
+| `*78` | Activar **no molestar**: tu teléfono no suena y todo va al buzón |
+| `*79` | Desactivar no molestar |
+| `*21*`destino`#` | Desviar **todas** tus llamadas |
+| `*21` | Apagar ese desvío |
+| `*22*`destino`#` | Desviar sólo cuando estás **ocupado** |
+| `*22` | Apagar ese desvío |
+| `*23*`destino`#` | Desviar cuando **no contestás** |
+| `*23` | Apagar ese desvío |
+| `*24*`destino`#` | **Sígueme**: primero suena tu interno y después el número que pongas |
+| `*24` | Apagar el sígueme |
+| `*43` | Prueba de eco: repite tu voz, para probar el micrófono y el auricular |
+| `*65` | Te dice cuál es tu número de interno |
 | `*97` | Escuchar tu buzón de voz |
 | `*98` | Entrar al buzón de otra extensión |
+
+Lo mismo se puede hacer con el mouse, desde tu **Panel de Agente** → tarjeta **Mis desvíos**;
+es el mismo estado, así que da igual por dónde lo cambies.
+
+> Para llamar a un número de afuera (tu celular, por ejemplo) escribilo **como lo marcarías desde
+> el teléfono**, con el `0` o el prefijo de salida que uses en la empresa.
+>
+> Estos son los códigos de fábrica: si tu administrador los cambió, los que valen son los que
+> muestra tu panel.

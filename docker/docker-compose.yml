@@ -123,6 +123,12 @@ services:
       AMI_PASS: ${AMI_PASS:?set AMI_PASS in .env}
       API_URL: ${API_URL:-127.0.0.1:3000}
       DOMAIN: ${DOMAIN:-pbx.local}
+      # Zona horaria: TIENE que ser la MISMA que la de la api. GotoIfTime() y
+      # STRFTIME() del dialplan (horarios, feriados, modo noche) se evaluan con el
+      # reloj de ESTE contenedor; sin esto corre en UTC y el panel, que calcula
+      # "abierto/cerrado" con la hora de la api, dice lo contrario de lo que hace la
+      # central. La imagen trae tzdata: sin /usr/share/zoneinfo glibc ignora TZ.
+      TZ: ${TZ:-America/Montevideo}
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
       - recordings:/var/spool/asterisk/monitor

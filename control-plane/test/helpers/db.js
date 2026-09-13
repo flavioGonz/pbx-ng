@@ -230,7 +230,8 @@ async function baseEfimera() {
 
 /**
  * Arranca la API (app.js) como proceso hijo contra `db.env`. Devuelve
- * { base, port, api(), stop(), log }.
+ * { base, port, confDir, api(), stop(), log }. `confDir` es el CONF_DIR de esa API
+ * (ahí genera agent.token, el secreto compartido con el dialplan).
  *   api(method, path, {body, token, headers}) → { status, json, headers }
  */
 async function apiEfimera(db, extraEnv) {
@@ -304,7 +305,7 @@ async function apiEfimera(db, extraEnv) {
     return r.json;
   }
 
-  return { base, port, api, login, stop, log: () => log.join('') };
+  return { base, port, confDir, api, login, stop, log: () => log.join('') };
 }
 
 /**

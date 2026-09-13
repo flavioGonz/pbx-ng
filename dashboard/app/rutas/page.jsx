@@ -1,6 +1,6 @@
 'use client';
 import { Stack, Title, Text, Badge, Tabs, Alert, Code, Button, Group } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconTag, IconPhoneIncoming, IconArrowsSplit, IconTarget, IconAsterisk, IconDeviceLandlinePhone, IconBackspace, IconPlus, IconId, IconRoute, IconRouteAltLeft, IconShieldLock } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconTag, IconPhoneIncoming, IconArrowsSplit, IconTarget, IconAsterisk, IconDeviceLandlinePhone, IconBackspace, IconPlus, IconId, IconRoute, IconRouteAltLeft, IconShieldLock, IconClockHour4, IconMoonStars } from '@tabler/icons-react';
 import CrudPanel from '../CrudPanel';
 import { toast } from '../notify';
 import { apiGet, apiPost, useApi } from '../api';
@@ -33,6 +33,21 @@ export default function Rutas({ embedded } = {}) {
     } catch (e) { toast('No se pudo generar: ' + e.message, 'bad'); }
     setGen(false);
   }
+  /* Horarios para la ruta entrante: una ruta con horario entra por el destino
+   * normal mientras la central está abierta y por el de fuera de hora cuando está
+   * cerrada (o es feriado, o alguien forzó el modo noche). El '0' es «sin horario»
+   * porque el Select de Mantine no puede tener un valor vacío. */
+  const { data: horariosData } = useApi('/horarios');
+  const horarioOpts = useMemo(() => [{ value: '0', label: 'Sin horario · siempre al mismo destino' }]
+    .concat((Array.isArray(horariosData) ? horariosData : [])
+      .filter((h) => h.activo !== false)
+      .map((h) => ({ value: String(h.id), label: h.nombre || ('Horario ' + h.id) }))), [horariosData]);
+  const horarioNombre = useMemo(() => {
+    const m = {};
+    (Array.isArray(horariosData) ? horariosData : []).forEach((h) => { m[String(h.id)] = h.nombre || ('Horario ' + h.id); });
+    return m;
+  }, [horariosData]);
+
   const { data: trunksData } = useApi('/trunks');
   const trunkOpts = useMemo(() => (Array.isArray(trunksData) ? trunksData : [])
     .filter((t) => t.kind !== 'webrtc')
@@ -61,12 +76,19 @@ export default function Rutas({ embedded } = {}) {
               { key: 'name', label: 'Nombre', icon: <IconTag size={13} /> },
               { key: 'dest_type', label: 'Tipo', icon: <IconArrowsSplit size={13} />, render: (r) => <Badge variant="dot" color="grape">{destLabel[r.dest_type] || r.dest_type}</Badge> },
               { key: 'dest_value', label: 'Destino', mono: true, icon: <IconTarget size={13} /> },
+              { key: 'horario_id', label: 'Horario', icon: <IconClockHour4 size={13} />, render: (r) => (r.horario_id ? <Badge variant="light" color="indigo">{horarioNombre[String(r.horario_id)] || ('#' + r.horario_id)}</Badge> : <Text size="sm" c="dimmed">siempre</Text>) },
+              { key: 'dest_cerrado_value', label: 'Fuera de hora', icon: <IconMoonStars size={13} />, render: (r) => (r.horario_id ? <Text size="sm" ff="monospace">{r.dest_cerrado_value ? ((destLabel[r.dest_cerrado_type] || r.dest_cerrado_type || 'interno') + ' · ' + r.dest_cerrado_value) : 'buzón'}</Text> : <Text size="sm" c="dimmed">—</Text>) },
             ]}
+            editUrl={(r) => '/routes/inbound/' + r.id}
+            rowToForm={(r) => ({ ...r, horario_id: String(r.horario_id || '0'), dest_cerrado_type: r.dest_cerrado_type || 'interno', dest_cerrado_value: r.dest_cerrado_value || '' })}
             fields={[
               { name: 'did', label: 'DID / Número entrante', required: true, icon: <IconPhoneIncoming size={15} />, placeholder: '59824000000', description: 'El número que te entrega el operador. Ej: 59824000000 (o el formato que envía tu proveedor).' },
               { name: 'name', label: 'Nombre', icon: <IconTag size={15} />, placeholder: 'Línea principal', description: 'Etiqueta para identificar la ruta. Ej: Línea principal, Ventas.' },
               { name: 'dest_type', label: 'Tipo de destino', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'A dónde se manda la llamada entrante.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }] },
               { name: 'dest_value', label: 'Destino', required: true, icon: <IconTarget size={15} />, placeholder: '1001', description: 'Según el tipo: Interno → 1001 · IVR → 9000 · Cola → soporte · Aplicación → su número de acceso.' },
+              { name: 'horario_id', label: 'Horario de atención', type: 'select', icon: <IconClockHour4 size={15} />, data: horarioOpts, description: 'Dentro del horario la llamada va al destino de arriba; fuera de él, al de abajo. Los horarios y los feriados se cargan en Telefonía → Horarios.' },
+              { name: 'dest_cerrado_type', label: 'Tipo de destino fuera de hora', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'Sólo se usa si elegiste un horario.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }] },
+              { name: 'dest_cerrado_value', label: 'Destino fuera de hora', icon: <IconMoonStars size={15} />, placeholder: '9001', description: 'A dónde entra la llamada con la central cerrada (feriado, fuera de horario o modo noche). Vacío = al buzón.' },
             ]} emptyText="Sin rutas de entrada. Creá una para recibir llamadas de la troncal." />
         </Tabs.Panel>
 

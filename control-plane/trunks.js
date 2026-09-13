@@ -37,7 +37,9 @@ const _dgram = require('dgram');
  *   broadcastSoon     refresca el snapshot del socket tras cambiar troncales o rutas
  *   logger            fábrica de loggers de log.js (logger('TRK'), logger('SBC'))
  *
- * Devuelve: { sbcLink, upsertSbcLink, invalidarSbcLink, trunkStatuses, defaultOutTrunk, SBC_TRUNK }.
+ * Devuelve: { sbcLink, upsertSbcLink, invalidarSbcLink, trunkStatuses, defaultOutTrunk,
+ *             regenerarEntrantes, SBC_TRUNK }. `regenerarEntrantes` lo usa telefonia.js
+ *             cuando cambia un horario o un feriado (los tramos viven en el dialplan del DID).
  */
 module.exports = function init(deps) {
   const { app, pool, NODES, amiCommand, endpointStates, moduleEnabled, setDialplan, astFwd, salud, diagtrunk, errorHttp, broadcastSoon, logger } = deps;
@@ -269,33 +271,130 @@ module.exports = function init(deps) {
   });
 
   // ---------------- Rutas ENTRANTES (DID) ----------------
+  /* Modo noche en la AstDB. Es la MISMA clave que escribe telefonia.js; el contrato del
+   * sprint 6 la llamó `DB(nightmode)` a secas, pero la función DB() de Asterisk exige
+   * familia/clave (func_db.c), así que acá y allá se usa `DB(nightmode/modo)`. */
+  const NIGHTMODE = 'DB(nightmode/modo)';
+  const DEST_OK = ['interno', 'ivr', 'cola', 'app'];
+
   function inboundRows(dest_type, v) {
     if (dest_type === 'ivr') return [[1, 'Goto', 'ivr,' + v + ',1']];
     if (dest_type === 'cola') return [[1, 'Answer', ''], [2, 'Queue', v], [3, 'Hangup', '']];
     if (dest_type === 'app') return [[1, 'Goto', 'internal,' + v + ',1']];
     return [[1, 'Dial', 'PJSIP/' + v + ',30'], [2, 'Voicemail', v + '@default,u'], [3, 'Hangup', '']];
   }
+
+  /* Dialplan de la extensión que DECIDE (sólo cuando la ruta tiene horario). Orden: modo
+   * noche forzado desde el panel o el *28 → feriado (anual MM-DD o puntual YYYY-MM-DD) →
+   * los tramos del horario; lo que no entró en ningún tramo cae a la rama cerrada.
+   * Todo sale de la AstDB y no de la base a propósito: así cambiar el modo noche o poner
+   * un feriado NO obliga a regenerar el dialplan ni a recargar nada. */
+  function filasDecide(did, tramos) {
+    const rows = [];
+    let p = 1;
+    rows.push([p++, 'NoOp', 'entrante ' + did]);
+    rows.push([p++, 'ExecIf', '$["${' + NIGHTMODE + '}"="cerrado"]?Goto(from-trunk,cerrado-' + did + ',1)']);
+    rows.push([p++, 'ExecIf', '$["${' + NIGHTMODE + '}"="abierto"]?Goto(from-trunk,abierto-' + did + ',1)']);
+    rows.push([p++, 'GotoIf', '$[${DB_EXISTS(hol/${STRFTIME(${EPOCH},,%m-%d)})} | ${DB_EXISTS(hol/${STRFTIME(${EPOCH},,%Y-%m-%d)})}]?from-trunk,cerrado-' + did + ',1']);
+    for (const t of tramos) rows.push([p++, 'GotoIfTime', t.desde + '-' + t.hasta + ',' + t.dias + ',*,*?from-trunk,abierto-' + did + ',1']);
+    rows.push([p++, 'Goto', 'from-trunk,cerrado-' + did + ',1']);
+    return rows;
+  }
+
+  /* Fuera de hora: el destino configurado o, si no hay ninguno, el buzón del interno
+   * (y un saludo + colgar cuando el destino normal no es un interno). */
+  function filasCerrado(r) {
+    if (r.dest_cerrado_type && r.dest_cerrado_value) return inboundRows(r.dest_cerrado_type, r.dest_cerrado_value);
+    if ((r.dest_type || 'interno') === 'interno') return [[1, 'Answer', ''], [2, 'Voicemail', r.dest_value + '@default,u'], [3, 'Hangup', '']];
+    return [[1, 'Answer', ''], [2, 'Playback', 'vm-goodbye'], [3, 'Hangup', '']];
+  }
+
+  /* Escribe (o reescribe) el dialplan de UNA ruta entrante. Sin horario asignado queda
+   * como siempre: una sola extensión. Las ramas `abierto-<did>` / `cerrado-<did>` se
+   * borran primero para que sacarle el horario a una ruta no deje huérfanos marcables. */
+  async function escribirEntrante(c, r) {
+    const did = String(r.did);
+    await c.query("DELETE FROM extensions WHERE context='from-trunk' AND exten = ANY($1)", [['abierto-' + did, 'cerrado-' + did]]);
+    let tramos = [];
+    if (r.horario_id) {
+      const { rows } = await c.query('SELECT tramos, activo FROM pbxng_horarios WHERE id=$1', [r.horario_id]);
+      if (rows[0] && rows[0].activo !== false && Array.isArray(rows[0].tramos)) tramos = rows[0].tramos;
+    }
+    if (!tramos.length) { await setDialplan(c, 'from-trunk', did, inboundRows(r.dest_type, r.dest_value)); return; }
+    await setDialplan(c, 'from-trunk', did, filasDecide(did, tramos));
+    await setDialplan(c, 'from-trunk', 'abierto-' + did, inboundRows(r.dest_type, r.dest_value));
+    await setDialplan(c, 'from-trunk', 'cerrado-' + did, filasCerrado(r));
+  }
+
+  /* Regenera el dialplan de las rutas entrantes. Lo llama telefonia.js cuando cambia un
+   * horario (los tramos están DENTRO del dialplan del DID) o un feriado. Con
+   * {horario_id} sólo las que usan ese horario; sin filtro, todas. */
+  async function regenerarEntrantes(filtro) {
+    const f = filtro || {};
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      const { rows } = f.horario_id
+        ? await c.query('SELECT * FROM pbxng_inbound_routes WHERE horario_id=$1 ORDER BY id', [f.horario_id])
+        : await c.query('SELECT * FROM pbxng_inbound_routes ORDER BY id');
+      for (const r of rows) await escribirEntrante(c, r);
+      await c.query('COMMIT');
+      if (rows.length) broadcastSoon();
+      return rows.length;
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
+  }
+
+  const COLS_IN = 'id,did,name,dest_type,dest_value,horario_id,dest_cerrado_type,dest_cerrado_value';
+  function validarEntrante(b) {
+    if (b.dest_type && !DEST_OK.includes(b.dest_type)) throw Object.assign(new Error('destino inválido: ' + b.dest_type), { status: 400 });
+    if (b.dest_cerrado_type && !DEST_OK.includes(b.dest_cerrado_type)) throw Object.assign(new Error('destino fuera de hora inválido: ' + b.dest_cerrado_type), { status: 400 });
+  }
+
   app.get('/api/routes/inbound', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id,did,name,dest_type,dest_value FROM pbxng_inbound_routes ORDER BY id'); res.json(rows); }
+    try { const { rows } = await pool.query('SELECT ' + COLS_IN + ' FROM pbxng_inbound_routes ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   app.post('/api/routes/inbound', async (req, res) => {
-    const { did, name, dest_type = 'interno', dest_value } = req.body || {};
+    const b = req.body || {};
+    const { did, name, dest_type = 'interno', dest_value } = b;
     if (!did || !dest_value) return res.status(400).json({ error: 'DID y destino requeridos' });
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
+      validarEntrante(b);
       await c.query('BEGIN');
-      await c.query('INSERT INTO pbxng_inbound_routes (did,name,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [did, name || did, dest_type, dest_value]);
-      await setDialplan(c, 'from-trunk', did, inboundRows(dest_type, dest_value));
-      await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: did });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+      const { rows } = await c.query(
+        'INSERT INTO pbxng_inbound_routes (did,name,dest_type,dest_value,horario_id,dest_cerrado_type,dest_cerrado_value) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING ' + COLS_IN,
+        [did, name || did, dest_type, dest_value, parseInt(b.horario_id, 10) || null, b.dest_cerrado_type || null, b.dest_cerrado_value || null]);
+      await escribirEntrante(c, rows[0]);
+      await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: did, id: rows[0].id });
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
+  });
+  app.put('/api/routes/inbound/:id', async (req, res) => {
+    const b = req.body || {};
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }
+    try {
+      validarEntrante(b);
+      await c.query('BEGIN');
+      const { rows: viejo } = await c.query('SELECT ' + COLS_IN + ' FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
+      if (!viejo[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'ruta inexistente' }); }
+      const { rows } = await c.query(
+        `UPDATE pbxng_inbound_routes SET name=COALESCE($2,name), dest_type=COALESCE($3,dest_type), dest_value=COALESCE($4,dest_value),
+           horario_id=$5, dest_cerrado_type=$6, dest_cerrado_value=$7 WHERE id=$1 RETURNING ` + COLS_IN,
+        [req.params.id, b.name === undefined ? null : String(b.name), b.dest_type || null, b.dest_value || null,
+          b.horario_id === undefined ? viejo[0].horario_id : (parseInt(b.horario_id, 10) || null),
+          b.dest_cerrado_type === undefined ? viejo[0].dest_cerrado_type : (b.dest_cerrado_type || null),
+          b.dest_cerrado_value === undefined ? viejo[0].dest_cerrado_value : (b.dest_cerrado_value || null)]);
+      await escribirEntrante(c, rows[0]);
+      await c.query('COMMIT'); broadcastSoon(); res.json(rows[0]);
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.delete('/api/routes/inbound/:id', async (req, res) => {
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows } = await c.query('SELECT did FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
-      if (rows[0]) await c.query("DELETE FROM extensions WHERE context='from-trunk' AND exten=$1", [rows[0].did]);
+      // Con horario el DID ocupa tres extensiones: se van las tres o queda dialplan muerto.
+      if (rows[0]) await c.query("DELETE FROM extensions WHERE context='from-trunk' AND exten = ANY($1)", [[rows[0].did, 'abierto-' + rows[0].did, 'cerrado-' + rows[0].did]]);
       await c.query('DELETE FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
       await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
@@ -492,5 +591,5 @@ module.exports = function init(deps) {
    * para que la próxima consulta lo refleje. */
   function invalidarSbcLink() { _sbcLinkCache.v = null; }
 
-  return { sbcLink, upsertSbcLink, invalidarSbcLink, trunkStatuses, defaultOutTrunk, SBC_TRUNK };
+  return { sbcLink, upsertSbcLink, invalidarSbcLink, trunkStatuses, defaultOutTrunk, regenerarEntrantes, SBC_TRUNK };
 };

@@ -5,9 +5,9 @@
  *  interno: colas (tabla realtime `queues` + pbxng_queues con lo nuestro), grupos de
  *  timbrado, paging, IVR clásico (pbxng_ivr + opciones) e IVR con IA (pbxng_ai_agents
  *  → Stasis pbxng,ai,<id>, lo atiende ai-pipeline.js), buzones (voicemail realtime +
- *  pbxng_mailboxes, lectura directa del volumen /voicemail y buzón → correo), códigos
- *  de función (*43, *65, *97, *98), aparcado y música en espera (estas dos NO viven
- *  en la base: astconf.js genera el archivo y se recarga por AMI).
+ *  pbxng_mailboxes, lectura directa del volumen /voicemail y buzón → correo), aparcado y
+ *  música en espera (estas dos NO viven en la base: astconf.js genera el archivo y se
+ *  recarga por AMI). Los códigos de función se fueron a telefonia.js en el sprint 6.
  *
  *  Cada aplicación se publica en el dialplan realtime del contexto `ivr` (o `internal`
  *  para los códigos de función) con `setDialplan` de app.js, en la misma transacción
@@ -579,31 +579,10 @@ module.exports = function init(deps) {
   });
   app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 
-  const FEATURE_CODES = [
-    { code: '*43', name: 'Prueba de eco', desc: 'Repite tu voz para probar audio', rows: [[1, 'Answer', ''], [2, 'Echo', ''], [3, 'Hangup', '']] },
-    { code: '*65', name: 'Decir mi número', desc: 'Locuta el número del interno', rows: [[1, 'Answer', ''], [2, 'SayDigits', '${CALLERID(num)}'], [3, 'Hangup', '']] },
-    { code: '*97', name: 'Mi buzón de voz', desc: 'Entra al buzón del interno que llama', rows: [[1, 'Answer', ''], [2, 'VoiceMailMain', '${CALLERID(num)}@default'], [3, 'Hangup', '']] },
-    { code: '*98', name: 'Buzón (otro)', desc: 'Pide número de buzón y PIN', rows: [[1, 'Answer', ''], [2, 'VoiceMailMain', ''], [3, 'Hangup', '']] },
-  ];
-  app.get('/api/featurecodes', async (req, res) => {
-    try {
-      const { rows } = await pool.query("SELECT exten FROM extensions WHERE context='internal' AND exten = ANY($1)", [FEATURE_CODES.map(f => f.code)]);
-      const installed = new Set(rows.map(r => r.exten));
-      res.json(FEATURE_CODES.map(f => ({ code: f.code, name: f.name, desc: f.desc, installed: installed.has(f.code) })));
-    } catch (e) { errorHttp(res, e); }
-  });
-  app.post('/api/featurecodes/install', async (req, res) => {
-    const c = await pool.connect();
-    try {
-      await c.query('BEGIN');
-      for (const f of FEATURE_CODES) await setDialplan(c, 'internal', f.code, f.rows);
-      await c.query('COMMIT'); broadcastSoon(); res.json({ ok: true, count: FEATURE_CODES.length });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-  });
-  app.post('/api/featurecodes/uninstall', async (req, res) => {
-    try { await pool.query("DELETE FROM extensions WHERE context='internal' AND exten = ANY($1)", [FEATURE_CODES.map(f => f.code)]); broadcastSoon(); res.json({ ok: true }); }
-    catch (e) { errorHttp(res, e); }
-  });
+  /* Los códigos de función se movieron a telefonia.js (sprint 6): ahora salen de la
+   * tabla pbxng_featurecodes, cada acción tiene su código EDITABLE y hay muchos más
+   * (DND, desvíos, sígueme, modo noche). Las rutas /api/featurecodes* siguen siendo
+   * las mismas, las registra ese módulo. */
 
   /* ═══════════════ Aparcado y música en espera ═══════════════════════════════
    *

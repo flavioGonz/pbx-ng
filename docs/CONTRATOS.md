@@ -25,7 +25,8 @@ wallboard, conferencias, pickup-groups). El resto vive en módulos con el patró
 TODO por `deps` (nada global) y **se registran en `app.js` después del gate de auth y de
 `rbac.middleware`** (Express resuelve en orden: un módulo registrado antes queda sin token ni
 rol). Orden efectivo hoy: gate → `auth.js` → `sipconf.js` → `callengine.js` → `recordings.js`
-→ `apps.js` → `trunks.js` → `guard.js` → 404 JSON + `errores.js`.
+→ `apps.js` → `trunks.js` → `telefonia.js` → `guard.js` → 404 JSON + `errores.js`
+(`telefonia.js` va después de `trunks.js` porque usa su `regenerarEntrantes`).
 
 | Archivo | Dominio (rutas `/api/…`) | Devuelve a `app.js` |
 |---|---|---|
@@ -35,6 +36,7 @@ rol). Orden efectivo hoy: gate → `auth.js` → `sipconf.js` → `callengine.js
 | `recordings.js` | `recordings/*`, `cdr`, `cdr/report`, `calls/record`, `extensions/record-all`; marca `rec/<ext>` en la AstDB, indexador de `/recordings`, transcripción y picos; inicializa `recstore.js` y `report.js` | `setRecFlag`, `setRecAll`, `syncRecFlags`, `wavToPcm`, `analyzeText`, `indexRecordings` |
 | `apps.js` | `queues/*`, `ringgroups/*`, `paging/*`, `ivr/*` (+ `ivr/audios`, `ivr/gen-audio`), `ai-agents/*`, `featurecodes/*`, `parking/*`, `moh/*`, `mailboxes/*`, `vm/*` (volumen `/voicemail`, transcripción, poller buzón → correo) | `aiAgentDialplan`, `buildIvrDialplan`, `vmList` |
 | `trunks.js` | `trunks/*`, `routes/inbound|outbound`, `sbc-link`, `registrations`; sondeo OPTIONS, semillas `to-sbc` / `mod_sbc` | `sbcLink`, `upsertSbcLink`, `invalidarSbcLink`, `trunkStatuses`, `defaultOutTrunk`, `SBC_TRUNK` |
+| `telefonia.js` | telefonía clásica de oficina (1.9.0): `extensions/:ext/features` (desvíos, DND, sígueme), `horarios/*`, `feriados/*`, `nightmode`, `featurecodes/*` (catálogo editable, reemplaza al `FEATURE_CODES` fijo de `apps.js`) y `internal/feature` (lo que el usuario marca en el teléfono → Postgres). Escribe Postgres **y** la AstDB por AMI; le pide a `trunks.js` que regenere las rutas entrantes cuando cambia un horario o un feriado | `syncFeatures`, `estadoNightmode`, `filasCodigo`, `tramoAhora`, `leerFeat`, `guardarFeat` |
 | `guard.js` | centro de seguridad: `security/*`, `ipgeo`, eventos AMI `security`, nftables vía el agente | (ver §3, familia `security`) |
 | `rbac.js` | tabla deny-by-default método+ruta → rol | `middleware` |
 
@@ -64,6 +66,9 @@ de cada archivo y en `.claude/agents/api.md`.
   un mensaje claro (no se emite JWT); `migrations/0008_roles.sql` y el bootstrap de la API
   convierten los roles viejos (`operator` → `supervisor`, `viewer` → `agente`) y dejan el
   default de la columna en `agente`.
+- Token de softphone (`scope:'phone'`): además de lo que ya tenía, `FONO_PERMITIDO` incluye
+  desde 1.9.0 `GET|PUT /api/extensions/:ext/features` — el aparato cambia sus propios desvíos,
+  y la ruta comprueba con `exigirExt` que sea su interno.
 - Roles: `admin` (todo), `supervisor` (operación + call center, sin configuración de sistema),
   `agente` (solo su panel de agente y su extensión). **Regla desde 1.4.0:** el middleware de
   `control-plane/rbac.js` (montado en `/api` justo después del gate de auth) decide por
@@ -89,6 +94,7 @@ de cada archivo y en `.claude/agents/api.md`.
   | `calls/dial`, `calls/transfer`, `calls/park`, `calls/record`, `calls/conference` | POST | TODOS | la ruta compara `from`/`ext` con `req.user.ext` (`403 'no podés operar llamadas de otra extensión'`) |
   | `cdr` | GET | TODOS | agente y token phone: se fuerza `ext` propia (`403` si no tiene interno) |
   | `recordings/match`, `recordings/:id/audio` | GET | TODOS | agente: sólo llamadas en las que participó su interno |
+  | `extensions/:ext/features` | GET\|PUT | TODOS | desvíos, DND y sígueme del **propio** interno: la ruta exige la ext con `exigirExt`, así que el agente sólo alcanza el suyo y admin/supervisor cualquiera. Va ANTES de la regla general de `extensions` |
   | `clients/lookup` | GET | TODOS | screen-pop |
   | `survey/fields` · `survey` | GET · POST | TODOS | encuesta post-llamada |
   | `calls/*` (live, `:id/hangup|hold|unhold`, spy…) | * | SUP | |
@@ -104,6 +110,7 @@ de cada archivo y en `.claude/agents/api.md`.
   | `provision` | GET | SUP | config completa de un teléfono |
   | `enrollments` · `enroll`, `enroll/email` | GET · POST | SUP | enrolar un interno / mandar el QR por correo |
   | `phones` | GET | SUP | |
+  | `nightmode` | GET | SUP | el supervisor VE si la central está abierta o cerrada; forzarlo (PUT), los horarios, los feriados y los códigos de función son `admin` |
   | `security` · `security/live` | GET | SUP | centro de seguridad: resumen y registro en vivo (sólo lectura); bloquear/desbloquear, listas, geo-bloqueo, ajustes y `apply` son `admin` |
   | Todo lo demás | * | admin | users, settings, trunks, routes, sbc-link, modules (escritura), backup, asterisk, net, system, turn, acme, npm, integrations, branding (escritura), extensions/endpoints (escritura), ivr, queues/ringgroups (escritura), recordings (borrado y almacenamiento), vm/email, security (escritura, whitelist, geoblock, settings, apply), ipgeo, email, voz, prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, geo, push/devices… |
 
@@ -188,8 +195,20 @@ de cada archivo y en `.claude/agents/api.md`.
   porqué largo está comentado en `next.config.js`.
 - Rutas públicas (sin token) = exactamente `PUBLIC_API` en `control-plane/auth.js`. Hoy: `auth/login`,
   `phone/token`, `auth/setup`, `ice`, `branding`, `enroll/:token`, `prompts/:id/audio`,
-  `push/vapid`, `push/(subscribe|register|unsubscribe)`, `internal/wake`, `c2c/public/*`,
-  `softphone/latest`, `geo/report`, `manuales/img/*`.
+  `push/vapid`, `push/(subscribe|register|unsubscribe)`, `internal/wake`, `internal/feature`,
+  `c2c/public/*`, `softphone/latest`, `geo/report`, `manuales/img/*`.
+  **`POST /api/internal/feature` la llama el dialplan por CURL** (lo que el usuario marca en
+  el teléfono: DND, desvíos, sígueme, modo noche) y por eso no tiene sesión, pero `telefonia.js`
+  la cierra con tres candados: la IP tiene que ser **loopback**, el pedido **no puede traer
+  `X-Forwarded-For` ni `X-Real-IP`**, y tiene que venir con el secreto compartido de
+  `/etc/pbxng/agent.token` en el campo `tok` (comparado con `timingSafeEqual`). Cualquiera de
+  los tres que falle → `403 {error:'sólo desde la central'}`. **Un filtro de "red privada" no
+  sirve para nada acá y no se vuelve a usar**: el panel proxya `/backend/**` (cualquier método,
+  cualquier ruta) y deja la IP real del navegador como último `X-Forwarded-For`, que con
+  `trust proxy = 1` es lo que la API ve como `req.ip` — o sea una IP privada de la LAN. Con el
+  criterio viejo, cualquiera en la oficina, sin usuario ni clave, ponía un desvío en el interno
+  ajeno (escucha de llamadas ajenas), dejaba a un compañero en no molestar o desviaba a la calle
+  por la ruta saliente (fraude de tarifación).
 
 ## 3. API HTTP (`/api`, servida por control-plane :3000; el panel la ve en `/backend/api`)
 
@@ -201,6 +220,8 @@ de cada archivo y en `.claude/agents/api.md`.
 | `extensions`, `endpoints`, `directory`, `presence` | internos y presencia | `/internos` |
 | `trunks`, `routes`, `sbc-link`, `registrations` | troncales, rutas entrantes/salientes, conexión a SBC-NG, diagnóstico de troncal (`control-plane/trunks.js`, mismo patrón `init(deps)` que `auth.js`; `sbcLink()` es lo único que el resto de la API mira para saber si hay SBC adelante) | `/troncales`, `/rutas`, `/sbc` |
 | `queues`, `ringgroups`, `paging`, `ivr`, `ai-agents`, `featurecodes`, `parking`, `moh`, `mailboxes`, `vm` | aplicaciones: colas (tabla realtime `queues` + `pbxng_queues`), grupos de timbrado, paging, IVR clásico y con IA (`Stasis pbxng,ai,<id>` → `ai-pipeline.js`), códigos de función, aparcado y música en espera (archivos vía `astconf.js`), buzones y buzón → correo (`control-plane/apps.js`, mismo patrón `init(deps)` que `auth.js`/`trunks.js`/`recordings.js`; devuelve `aiAgentDialplan`, `buildIvrDialplan`, `vmList`; `wallboard`, `conferences` y `pickup-groups` siguen en `app.js`) | `/aplicaciones/*`, `/funciones`, `/ivr`, `/voz` |
+| `extensions/:ext/features`, `horarios`, `feriados`, `nightmode`, `featurecodes` | telefonía clásica de oficina (`control-plane/telefonia.js`, 1.9.0): desvíos / DND / sígueme por interno, horarios de atención, feriados, modo noche y el catálogo editable de códigos de función. Detalle abajo | `/internos` (solapa «Desvíos y no molestar»), `/agente` («Mis desvíos»), `/horarios`, `/funciones` |
+| `internal/feature` | el dialplan avisa por CURL qué marcó el usuario en el teléfono (§2: loopback + sin cabecera de proxy + `agent.token`) | — |
 | `calls` | control de llamadas (dial, hangup, hold, transfer, park, spy, live) | agente, supervisor, monitor |
 | `recordings`, `cdr`, `calls/record`, `extensions/record-all` | grabaciones e historial: marca de grabación (AstDB `rec`), grabar en vivo, indexador de `/recordings`, audio/transcripción/picos, almacenamiento remoto (`recstore.js`) e informe (`report.js`) (`control-plane/recordings.js`, mismo patrón `init(deps)` que `auth.js`/`trunks.js`; devuelve `setRecFlag`, `setRecAll`, `syncRecFlags`, `wavToPcm`, `analyzeText`, `indexRecordings`) | `/grabaciones`, `/cdr` |
 | `clients`, `survey` | CRM propio | `/clientes` |
@@ -214,6 +235,51 @@ de cada archivo y en `.claude/agents/api.md`.
 | `softphone` | instalador y feed OTA del softphone | login |
 | `manuales` | manuales in-panel | `/manuales` |
 | `security`, `ipgeo` | centro de seguridad (`control-plane/guard.js`): bloqueos por IP en nftables, registro en vivo, lista blanca, filtro por país, ajustes anti fuerza bruta | `/seguridad` |
+
+Telefonía clásica de oficina (`control-plane/telefonia.js`, 1.9.0; migración
+`0011_telefonia_clasica.sql`). **La fuente de verdad es PostgreSQL y el dialplan lee la AstDB**:
+cada escritura de estas rutas toca las dos cosas (la AstDB por AMI `DBPut`/`DBDel`), y
+`syncFeatures()` vuelca Postgres → AstDB al arrancar la API y en **cada (re)conexión del AMI**
+(§5). Los errores de AMI se tragan a propósito: sin Asterisk el panel tiene que poder guardar.
+
+- `GET|PUT /api/extensions/:ext/features` (**TODOS**, la ruta acota con `exigirExt`: agente y
+  token de softphone sólo su propio interno) → `{dnd:bool, cfu, cfb, cfnr, fm, fm_seg}`. Los
+  cuatro destinos son **sólo dígitos, hasta 32** (`400 {error}` si no; ni `*` ni `#` ni `+`) y
+  **vacío = apagado**. `fm` va **con el prefijo de la ruta saliente** (el dialplan marca
+  `Local/<fm>@internal` y no adivina prefijos); `fm_seg` se acota a 5–120, default 15. El PUT es
+  parcial (sólo pisa los campos presentes), pero el panel manda siempre los seis.
+- `GET|POST|PUT|DELETE /api/horarios` (admin) → `[{id, nombre, tramos, activo}]`; `tramos` es
+  `[{dias, desde, hasta}]` en el formato de `GotoIfTime`: `dias` = `*` o `mon-fri` (rangos con
+  vuelta de semana incluidos), `desde`/`hasta` = `HH:MM` 24 h, máximo 20 tramos. Cruzar
+  medianoche se hace con **dos tramos**. Cambiar o borrar un horario **regenera el dialplan de
+  las rutas entrantes que lo usan**; borrarlo deja esas rutas en `horario_id = NULL` (24 h).
+- `GET|POST|PUT|DELETE /api/feriados` (admin) → `[{id, md, fecha, nombre, anual}]`. Anual: `md` =
+  `MM-DD`. Puntual: `anual:false` + `fecha` = `YYYY-MM-DD`. Se reflejan en la AstDB como
+  `hol/<clave> = 1`.
+- `GET|PUT /api/nightmode` (**GET = SUP**, PUT = admin) → `{modo, estado, motivo, horario_id}`.
+  `modo` ∈ `auto|abierto|cerrado` (se guarda en `pbxng_settings.nightmode` y en
+  `DB(nightmode/modo)`); `estado` ∈ `abierto|cerrado` **calculado ahora por la API** con el reloj
+  de su contenedor (§6, `TZ`), en este orden: modo forzado → feriado de hoy (siempre cerrado) →
+  tramos del horario. **Sin horario configurado el estado es `abierto`**: instalar la
+  actualización no puede empezar a mandar todo al buzón. El PUT acepta `{modo, horario_id}`
+  (`horario_id` elige qué horario gobierna el indicador, en `pbxng_settings.nightmode_horario_id`;
+  el panel manda `'0'` como «sin horario» y la API lo resuelve a `NULL`).
+- `GET|PUT /api/featurecodes` (admin) → `[{accion, code, nombre, name, desc, enabled, installed}]`
+  (`name`/`desc` se mantienen por compatibilidad con el panel 1.8.0). La **PK del catálogo es la
+  acción**, no el código: el código lo edita el administrador. El PUT acepta un objeto suelto, una
+  lista o `{codes:[{accion, code?, enabled?, nombre?}]}`; cambiar un código **borra el dialplan
+  del anterior** antes de publicar el nuevo, y sólo reescribe el dialplan si los códigos ya
+  estaban instalados. Se mantienen `POST /api/featurecodes/install|uninstall`. Acciones:
+  `dnd_on dnd_off cfu_set cfu_off cfb_set cfb_off cfnr_set cfnr_off fm_set fm_off night eco
+  midigito vm_propio vm_otro`. **Ojo con las dos formas del código**: lo que se ve y se edita va
+  sin `_` (`*21*.`), pero a la tabla realtime `extensions` se escribe **con** `_` cuando es un
+  patrón, porque `pbx_realtime` sólo corre `ast_extension_match` sobre las filas cuyo `exten`
+  empieza con `_` (misma convención que `outExten()` de `trunks.js`).
+- `POST /api/routes/inbound/:id` → ver `PUT /api/routes/inbound/:id` y las columnas nuevas
+  `horario_id`, `dest_cerrado_type`, `dest_cerrado_value` de `pbxng_inbound_routes` (§5).
+- `POST /api/internal/feature` (pública, §2): `{tok, ext, accion, valor}` como **formulario**
+  (`func_curl` no manda JSON). `accion` ∈ `dnd_on | dnd_off | cfu | cfb | cfnr | fm | off |
+  night`; con `off`, `valor` dice qué apagar (`cfu|cfb|cfnr|fm|dnd`, o vacío = todo).
 
 Centro de seguridad (`control-plane/guard.js`, clon funcional del SOC de SBC-NG; desde 1.6.0
 reemplaza a `/api/security` de fail2ban, `security/ban` y `security/unban`, que ya no existen):
@@ -377,11 +443,69 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   `spyjoin,<id>` para supervisión. AMI (`:5038`): acciones (Originate, Redirect, MixMonitor,
   QueuePause, Command…) y eventos. AudioSocket: la API escucha en `:9092`.
 - Dialplan estático (`extensions.conf`): el paso `wake` de los internos pide
-  `GET /api/internal/wake?ext=&from=` con `URIENCODE()` en los dos valores (`modules.conf` tiene
-  `require = func_curl.so` y `func_uriencode.so`: un build sin ellos no arranca). Buzón de voz:
+  `GET /api/internal/wake?ext=&from=` con `URIENCODE()` en los dos valores. `modules.conf` exige
+  cuatro módulos (`require = …`, o sea que un build sin ellos **no arranca**, que es lo buscado):
+  `func_curl.so`, `func_uri.so` (ahí viven `URIENCODE`/`URIDECODE`; **no existe**
+  `func_uriencode.so`), `func_db.so` (`DB`, `DB_EXISTS`, `DB_DELETE`) y `func_strings.so`
+  (`STRFTIME` **y** `FILTER`; tampoco existe ningún `func_strftime.so`). Los dos últimos son de
+  1.9.0: sin ellos el dialplan no falla, devuelve vacío — o sea que todo desvío queda apagado y
+  toda llamada entra como si fuera horario de oficina. Buzón de voz:
   `*97` usa `VoiceMailMain(${CHANNEL(endpoint)}@default,s)` sólo en canales PJSIP (la identidad
   es el endpoint que autenticó, no el `CALLERID(num)` que manda el teléfono); otros canales y
   `*98` (buzón ajeno) piden clave, nunca llevan `s`. Mailbox = id del endpoint = interno.
+  **Telefonía clásica (1.9.0)**, en el patrón `_[1-9]XXX` del contexto `internal` y por lo tanto
+  **dentro de la imagen** (cambiarlo obliga a reconstruirla): guardia de bucle (`SALTOS`, tope 5 →
+  buzón, porque un desvío A→B y otro B→A giraban sin fin) → `DB(dnd/<ext>)=1` va a la extensión
+  nueva `vm-DND` (`VoiceMail(…,b)`, el teléfono **no suena** y el motivo queda en el log y en el
+  CDR) → `DB(cfu/<ext>)` con contenido salta a `Goto(internal,<destino>,1)` **antes** del wake y
+  del `Dial` → el timeout del `Dial` es 25 s salvo que haya sígueme, y ahí sale de
+  `FILTER(0-9,${DB(fmt/<ext>)})` acotado a 5–120 (default 15) → por `DIALSTATUS`: `BUSY` → `cfb`
+  o `vm-BUSY`; `NOANSWER` → `cfnr`, si no sígueme (`Dial(Local/${DB(fm/<ext>)}@internal/n,45)`,
+  que sale por la ruta saliente del propio contexto `internal` con el CallerID de siempre), si no
+  `vm-NOANSWER`; todo lo demás sigue cayendo en `vm-${DIALSTATUS}`. El dialplan **lee la AstDB y
+  no la base** a propósito: no puede pagar una consulta por timbrazo y estas banderas cambian
+  todo el tiempo.
+- **AstDB (base interna de Asterisk): quién escribe y quién lee.** La escribe **sólo la API**
+  (por AMI `DBPut`/`DBDel`) y el **dialplan de los códigos de función** (que después avisa a la
+  API por `POST /api/internal/feature`, §3). La lee el dialplan, estático y generado.
+
+  | Clave | Valor | La escribe | La lee |
+  |---|---|---|---|
+  | `rec/<ext>`, `rec/_ALL_` | `1` | `recordings.js` (`setRecFlag`, `setRecAll`) | `extensions.conf`, bloque de grabación |
+  | `dnd/<ext>` | `1` (ausente = apagado) | `telefonia.js`, código `*78`/`*79` | `extensions.conf`, `_[1-9]XXX` |
+  | `cfu/<ext>` | destino (sólo dígitos) | `telefonia.js`, código `*21*<dest>` / `*21` | `extensions.conf` |
+  | `cfb/<ext>` | destino si ocupado | `telefonia.js`, código `*22*<dest>` / `*22` | `extensions.conf` |
+  | `cfnr/<ext>` | destino si no contesta | `telefonia.js`, código `*23*<dest>` / `*23` | `extensions.conf` |
+  | `fm/<ext>` | número del sígueme, **con prefijo de salida** | `telefonia.js`, código `*24*<dest>` / `*24` | `extensions.conf` |
+  | `fmt/<ext>` | segundos antes del sígueme (5–120, default 15) | `telefonia.js` | `extensions.conf` (pasado por `FILTER(0-9,…)`) |
+  | `hol/<MM-DD>`, `hol/<YYYY-MM-DD>` | `1` | `telefonia.js` (feriados) | dialplan de ruta entrante con horario (realtime) |
+  | `nightmode/modo` | `auto` \| `abierto` \| `cerrado` | `telefonia.js`, código `*28` | dialplan de ruta entrante con horario (realtime) |
+
+  **`nightmode/modo`, no `nightmode` a secas**: la función `DB()` exige familia/clave
+  (`func_db.c`: *"DB requires an argument, DB(<family>/<key>)"*), así que la forma corta sería
+  siempre vacía y con un WARNING por llamada. El contrato del sprint 6 decía `DB(nightmode)`; la
+  desviación es deliberada y está aplicada igual en `telefonia.js` y en `trunks.js`.
+
+  **La AstDB no está en un volumen** (`astdbdir` apunta a `/var/lib/asterisk`, y los compose sólo
+  montan `…/sounds/custom`): recrear el contenedor de Asterisk la deja vacía. Por eso el volcado
+  Postgres → AstDB (`syncFeatures` de `telefonia.js` + `syncRecFlags` de `recordings.js`) corre en
+  **cada conexión del AMI** y no sólo a los 9 s del arranque de la API (`app.js`, array
+  `resincronizar`; 2 s de gracia para que Asterisk cargue `func_db`, freno de 60 s si el AMI
+  flapea). Aun así queda una ventana de ~30–40 s tras recrear Asterisk en la que nada de esto
+  aplica; el arreglo de fondo es darle volumen propio.
+- **Dialplan que genera la API para una ruta entrante CON horario** (contexto realtime
+  `from-trunk`, `trunks.js`): el DID ocupa **tres extensiones**, `<did>` (decide),
+  `abierto-<did>` (destino normal) y `cerrado-<did>` (destino fuera de hora, o el buzón del
+  interno si no se configuró ninguno). La extensión que decide hace, en orden: modo noche forzado
+  (`ExecIf` sobre `DB(nightmode/modo)`, primero `cerrado` y después `abierto`) → feriado
+  (`GotoIf` con `DB_EXISTS(hol/${STRFTIME(${EPOCH},,%m-%d)})` o la misma con `%Y-%m-%d`) → un
+  `GotoIfTime(<desde>-<hasta>,<dias>,*,*?from-trunk,abierto-<did>,1)` **por tramo** → lo que no
+  entró en ninguno cae en `cerrado-<did>`. Todo sale de la AstDB, así que poner un feriado o
+  apretar el modo noche **no regenera dialplan ni recarga nada**; lo único que obliga a regenerar
+  son los **tramos** (viven en el dialplan de cada DID), y eso lo dispara `telefonia.js` llamando
+  a `regenerarEntrantes({horario_id})`. **Sin horario asignado la ruta se genera como siempre**,
+  con una sola extensión. Borrar la ruta, o sacarle el horario, borra las tres. La zona horaria
+  que usan `GotoIfTime` y `STRFTIME` es la del contenedor de Asterisk (§6, `TZ`).
 - Config generada por el panel: `pbxng.d/{parking,features,moh,pjsip,rtp,pjsip-security}.conf`
   (volumen `asterisk_conf`) incluida por `#include` desde los `.conf` base. Dialplan de
   aplicaciones: tabla realtime `extensions`. Contextos: `from-trunk` (entrantes), `internal`
@@ -465,9 +589,9 @@ guarda en `pbxng_settings.vapid_*`, §3 familia `push`; `VAPID_SUBJECT` default
 `mailto:soporte@example.com`) · `GO2RTC_MGMT` (intercom, default `http://go2rtc:1984`)
 · `ENROLL_REUSE_SECONDS` (opcional, default 120) · `LOG_LEVEL` (`debug|info|warn|error`,
 default `info`; **ojo:** `LOG_LEVEL`, `LOG_FORMAT`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`,
-`CORS_ORIGINS` y `TZ` los lee la API de su entorno, pero en 1.5.0 ningún compose los reenvía
-desde el `.env` al servicio `api`: para cambiarlos en producción hay que agregarlos al
-`environment:` del servicio — pendiente de `empaquetado`) · `LOG_FORMAT` (`json` default, `text` para desarrollo) · `PG_POOL_MAX`
+`CORS_ORIGINS` y `TZ` los lee la API de su entorno y desde 1.8.0 los dos compose sí los
+reenvían en el `environment:` del servicio `api`; `TZ` va además al servicio `asterisk`,
+ver su entrada más abajo) · `LOG_FORMAT` (`json` default, `text` para desarrollo) · `PG_POOL_MAX`
 (conexiones máximas del pool de la API, default 10; además el pool fija `idleTimeoutMillis`
 30 s y `connectionTimeoutMillis` 5 s) · `PG_STATEMENT_TIMEOUT_MS` (default 30000: Postgres
 cancela toda consulta que pase de ahí; el cliente la corta 5 s después si el servidor no
@@ -478,9 +602,20 @@ MEM_DASHBOARD MEM_COTURN MEM_VOZ MEM_GO2RTC MEM_NPM` (límite de memoria de cada
 `mem_limit` = `memswap_limit`; defaults `1g 1g 768m 512m 256m 4g 512m 512m`, solo los lee el
 compose) · `BACKUP_KEEP` (cuántos respaldos programados conserva `backup-cli.js` y el planificador
 interno, default 14; el compose se lo pasa a la API y `docker/backup-cron.sh` lo manda además
-como `--keep=N`) · `TZ` (opcional; la hora del respaldo programado interno se compara con el
-reloj del contenedor de la API, que sin `TZ` es UTC: el campo `tz` de `backup/schedule` dice
-cuál está usando) ·
+como `--keep=N`) · **`TZ`** (opcional, default `America/Montevideo` en los dos compose; va al
+`environment:` de **los dos servicios, `api` Y `asterisk`, con el MISMO valor**, y no es
+decorativo en ninguno de los dos. En la API: la hora del respaldo programado interno y el
+`estado` ('abierto'/'cerrado') que devuelve `GET /api/nightmode` salen del reloj de ese
+contenedor (el campo `tz` de `backup/schedule` dice cuál está usando). En Asterisk: el bloque
+de telefonía clásica del dialplan —`GotoIfTime()` de los tramos de horario, `STRFTIME()` de
+las claves `hol/<MM-DD>` y `hol/<YYYY-MM-DD>` de feriados y, por lo tanto, el modo noche
+automático— se evalúa con `ast_localtime()`, o sea con el reloj del contenedor de Asterisk.
+Si las dos zonas no coinciden **el panel miente sin un solo error en el log**: dice «abierto»
+mientras la central manda las entrantes al destino de fuera de hora. La imagen de Asterisk
+instala `tzdata` (`docker/images/asterisk/Dockerfile`) porque `debian:12-slim` no lo trae y
+sin `/usr/share/zoneinfo` glibc ignora `TZ` y vuelve a UTC en silencio: poner la variable sin
+el paquete parece arreglado y no lo está. Comprobación: `docker compose exec asterisk date` y
+`docker compose exec api date` tienen que dar la misma hora local) ·
 `PBXNG_COMPOSE_FILE` (qué compose usa la instalación, lo fija `install.sh`; lo leen
 `pbxng-ctl` y `backup-cron.sh`, no los contenedores) · `CONF_DIR` (directorio de
 configuración persistente de la API, default `/etc/pbxng`; el compose lo fija ahí: ACME,
@@ -523,9 +658,9 @@ excedan `--keep`/`BACKUP_KEEP`, nunca los manuales del panel; si la creación fa
 nada). Además, la API trae un planificador interno equivalente (§3, `backup/schedule`), activo
 por defecto a las 03:00 del reloj del contenedor, así que el cron del host es opcional. Los dos
 escriben `backup_last_run` al empezar y el planificador salta si hoy ya hay marca, pero como el
-cron usa la hora local del host y el planificador la del contenedor (UTC sin `TZ`), en un host
-con zona distinta de UTC pueden caer en momentos distintos del mismo día y salir DOS respaldos
-diarios (la retención se consume al doble): fijar `TZ` en el servicio `api` o apagar uno de
+cron usa la hora local del host y el planificador la del contenedor, en un host con zona
+distinta de la de `TZ` pueden caer en momentos distintos del mismo día y salir DOS respaldos
+diarios (la retención se consume al doble): alinear `TZ` con la zona del host o apagar uno de
 los dos.
 
 ## 8. Puertos publicados al host
@@ -568,6 +703,10 @@ réplicas no migren a la vez); `deploy.sh` lo corre además antes del `up -d` (c
 `run --rm --no-deps --entrypoint node api migrate.js`: el entrypoint de la imagen ignora los
 argumentos y terminaría levantando la API, hay que pisarlo) para que un esquema roto frene el
 deploy en vez de dejar la API en crash-loop; al arrancar no hace nada la segunda vez.
+`0011_telefonia_clasica.sql` (1.9.0) crea `pbxng_ext_features`, `pbxng_horarios`,
+`pbxng_feriados` y `pbxng_featurecodes`, le agrega a `pbxng_inbound_routes` las columnas
+`horario_id`, `dest_cerrado_type` y `dest_cerrado_value`, y siembra los 15 códigos de función
+con `ON CONFLICT DO NOTHING` (no pisa un código ya editado).
 `0010_soc.sql` crea `pbxng_blocked`, `pbxng_sec_events`, `pbxng_geoblock` (y `pbxng_f2b_whitelist`
 si faltara) y **borra** `pbxng_fail2ban` / `pbxng_fail2ban_cmd` (nadie las llenaba).
 Desde `0009_schema_runtime.sql` **ningún módulo crea tablas ni columnas en tiempo de
@@ -585,7 +724,8 @@ no rompe porque las tablas ya existen, pero la próxima migración no se aplicar
   flat config en `eslint.config.js`, ESLint 10 + `@eslint/js` + `globals` como devDependencies).
   Hay dos clases de prueba en `test/`:
   - **unitarias con mocks** (`guard.test.js`): sin base ni Asterisk, corren siempre.
-  - **de integración** (`auth`, `rbac`, `users`, `trunks`, `sbc-link`, `calls` `.test.js`):
+  - **de integración** (`auth`, `rbac`, `users`, `trunks`, `sbc-link`, `calls`, `telefonia`
+    `.test.js`; 44 pruebas en total con `guard.test.js` desde 1.9.0, ~22 s):
     levantan la API REAL (`app.js` como proceso hijo en un puerto libre, `JWT_SECRET` de
     prueba, `ADMIN_DEFAULT_PASS=admin`, ARI/AMI/agente apuntando a puertos cerrados de
     loopback, `CONF_DIR`/`REC_DIR`/`VM_DIR`/`BACKUP_DIR` en un temporal) contra un

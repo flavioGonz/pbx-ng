@@ -56,6 +56,10 @@ const PERMISOS = [
   ['GET',      /^\/api\/cdr$/,                              TODOS],
   ['GET',      /^\/api\/recordings\/match$/,                TODOS],
   ['GET',      /^\/api\/recordings\/\d+\/audio$/,           TODOS],
+  // Desvíos, DND y sígueme del PROPIO interno: la ruta exige la ext propia (exigirExt),
+  // así que un agente sólo alcanza el suyo y admin/supervisor cualquiera. Va ANTES de
+  // la regla general de `extensions`, que es SUP para GET y admin para el resto.
+  ['GET|PUT',  /^\/api\/extensions\/[^/]+\/features$/,      TODOS],
   // Screen-pop y encuesta post-llamada del panel de agente (lectura del CRM, alta de encuesta).
   ['GET',      /^\/api\/clients\/lookup$/,                  TODOS],
   ['GET',      /^\/api\/survey\/fields$/,                   TODOS],
@@ -84,6 +88,9 @@ const PERMISOS = [
   // Centro de seguridad (/seguridad): el supervisor VE el estado y el registro en vivo;
   // bloquear, listas y ajustes quedan en admin (caen al default).
   ['GET',      /^\/api\/security(\/live)?$/,                 SUP],
+  // Modo noche: el supervisor VE si la central está abierta o cerrada; forzarlo (PUT),
+  // los horarios, los feriados y los códigos de función son admin (caen al default).
+  ['GET',      /^\/api\/nightmode$/,                       SUP],
 
   /* ── Todo lo demás (configuración del sistema) queda en ADMIN por defecto:
    *    users, settings, trunks, routes, sbc-link, modules (escritura), backup,

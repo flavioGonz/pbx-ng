@@ -105,6 +105,7 @@ La seguridad perimetral, el LCR con failover, la salud de operadores, la manipul
 **Aplicaciones**
 - IVR visual (React Flow) + **IVR conversacional con IA** (STT→LLM→TTS).
 - Colas/ACD, conferencias, grupos de timbrado, buzón visual, paging.
+- **Telefonía clásica de oficina (desde 1.9.0)**: horarios de atención con tramos, feriados (anuales y puntuales) y modo noche `auto|abierto|cerrado` aplicados a cada ruta entrante (`GotoIfTime` generado desde el panel); **desvíos** incondicional / si ocupado / si no contesta, **no molestar** y **sígueme** por interno, configurables desde el panel o desde el teléfono; y un **catálogo de 15 códigos de función con el código editable** (`*78`, `*21*…`, `*24*…`, `*28`…). La verdad vive en PostgreSQL y Asterisk la lee en caliente de la AstDB: cambiar un desvío no recarga el dialplan.
 - Grabación por interno o global (local/NAS/S3) con transcripción y análisis.
 - **Buzón de voz activado por defecto** en cada interno (PIN inicial = número de interno, `*97` para escucharlo), con MWI vía SUBSCRIBE/NOTIFY y buzón visual en el softphone.
 - **Audios de la central en español rioplatense (voz uruguaya)**: los 326 prompts de Asterisk (buzón, números, fechas, colas, conferencias, directorio, agentes) generados con el TTS propio. Se regeneran con otra voz en un comando: `scripts/gen-sounds.py --voice es-UY-MateoNeural`.

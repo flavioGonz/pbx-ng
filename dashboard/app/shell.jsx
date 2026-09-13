@@ -7,11 +7,12 @@ import {
   IconSitemap, IconServer2, IconDatabase, IconRouteAltLeft, IconDatabaseExport, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
   IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk,
-  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff } from '@tabler/icons-react';
+  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconClockHour4, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, logout } from './auth';
 import PbxLogo from './PbxLogo';
 import ErrorBoundary from './ErrorBoundary';
+import { NightModeChip } from './NightMode';
 
 /* Cada cuánto se consulta /backend/health cuando el socket está caído. Con el socket
  * vivo no hace falta: el snapshot ya trae health.db y llega cada 15 s como mucho. */
@@ -70,6 +71,7 @@ const groups = [
     { href: '/internos', label: 'Extensiones', icon: IconUsers },
     { href: '/troncales', label: 'Troncales', icon: IconDeviceLandlinePhone },
     { href: '/rutas', label: 'Rutas', icon: IconRoute },
+    { href: '/horarios', label: 'Horarios y modo noche', icon: IconClockHour4 },
     { href: '/ivr', label: 'IVR', icon: IconArrowsSplit },
     { href: '/dialplan', label: 'Dialplan', icon: IconTerminal2 },
   ] },
@@ -215,6 +217,10 @@ export default function Shell({ children }) {
           {/* pie: estado + tema + usuario */}
           <Box pt="xs" mt="xs" style={{ borderTop: '1px solid rgba(120,130,150,.16)' }}>
             <Group justify={rail ? 'center' : 'space-between'} wrap="nowrap" gap={6}>
+              {/* El modo noche se mira mucho más seguido de lo que se cambia: el chip lo
+                * muestra sin entrar a ninguna pantalla. Sólo para admin, que es el único
+                * rol al que la API le deja leer /nightmode (si no, sería un 403 por minuto). */}
+              {!rail && user?.role === 'admin' && <NightModeChip />}
               {!rail && <Tooltip label={connected ? 'Conexión en vivo activa' : 'Sin conexión en vivo'}><Badge size="sm" radius="sm" variant="light" color={connected ? 'teal' : 'gray'} leftSection={<span className="pbx-pip pbx-pulse" style={{ background: connected ? 'var(--mantine-color-teal-6)' : 'var(--mantine-color-gray-5)' }} />}>{connected ? 'En vivo' : 'Offline'}</Badge></Tooltip>}
               <Tooltip label={scheme === 'dark' ? 'Modo claro' : 'Modo oscuro'} position="top"><ActionIcon variant="subtle" color="gray" onClick={toggleScheme}>{scheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}</ActionIcon></Tooltip>
             </Group>

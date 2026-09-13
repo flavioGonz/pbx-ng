@@ -79,6 +79,9 @@ module.exports = function init(deps) {
     ['GET',  /^\/api\/ice$/],
     ['GET',  /^\/api\/branding$/],
     ['POST', /^\/api\/calls\/(record|conference)$/],
+    // Desvíos / DND / sígueme del PROPIO interno (la ruta verifica la ext con exigirExt).
+    ['GET',  /^\/api\/extensions\/[^/]+\/features$/],
+    ['PUT',  /^\/api\/extensions\/[^/]+\/features$/],
     // Sólo lo que necesita el propio aparato para sus notificaciones: el comodín push/*
     // dejaba leer GET push/devices (inventario push de todas las extensiones, sólo admin).
     ['POST', /^\/api\/push\/(subscribe|register|unsubscribe|test)$/],
@@ -128,6 +131,13 @@ module.exports = function init(deps) {
     ['GET',  /^\/api\/push\/vapid$/],
     ['POST', /^\/api\/push\/(subscribe|register|unsubscribe)$/],
     ['GET',  /^\/api\/internal\/wake$/],
+    // El dialplan avisa por CURL qué hizo el usuario desde el teléfono (DND, desvíos,
+    // modo noche) para que Postgres y el panel queden al día. Pública porque el CURL no
+    // tiene sesión, pero la ruta sólo acepta LOOPBACK, sin cabecera de proxy y con el
+    // token de /etc/pbxng/agent.token (telefonia.js). "Red privada" NO servía de filtro:
+    // el panel proxya /backend/** y con trust proxy = 1 la IP que ve la API es la del
+    // navegador de cualquiera en la LAN, que también es privada.
+    ['POST', /^\/api\/internal\/feature$/],
     ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
     ['GET',  /^\/api\/softphone\/latest$/],       // el login muestra la version descargable sin sesion
     ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
