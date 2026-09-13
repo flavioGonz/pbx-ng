@@ -15,6 +15,12 @@ export const metadata = {
   manifest: '/manifest.json',
   icons: { icon: [{ url: '/favicon.ico', sizes: 'any' }, { url: '/icon-192.png', type: 'image/png' }], apple: '/icon-192.png' },
   appleWebApp: { capable: true, title: 'PBX-NG', statusBarStyle: 'black-translucent' },
+  /* Chrome avisa que `apple-mobile-web-app-capable` esta deprecado y pide el estandar
+   * `mobile-web-app-capable`. Van los DOS a proposito: Safari en iOS sigue mirando solo
+   * el de Apple para abrir el panel a pantalla completa, y si lo sacamos el softphone
+   * instalado en un iPhone vuelve a abrirse con la barra de Safari encima. El aviso de
+   * la consola es informativo, no un error. */
+  other: { 'mobile-web-app-capable': 'yes' },
 };
 export const viewport = { themeColor: '#0d1117', width: 'device-width', initialScale: 1, viewportFit: 'cover' };
 export default function RootLayout({ children }) {
