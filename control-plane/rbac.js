@@ -60,6 +60,11 @@ const PERMISOS = [
   // así que un agente sólo alcanza el suyo y admin/supervisor cualquiera. Va ANTES de
   // la regla general de `extensions`, que es SUP para GET y admin para el resto.
   ['GET|PUT',  /^\/api\/extensions\/[^/]+\/features$/,      TODOS],
+  // Marcación abreviada PERSONAL del interno: misma idea que `features`. La ruta exige la
+  // ext propia con `exigirExt`, así que un agente sólo toca su libreta de dos dígitos.
+  // Los números cortos GLOBALES (`/api/abreviados`), la DISA, el callback y el directorio
+  // por nombre son configuración de la central y caen al default (admin).
+  ['GET|PUT',  /^\/api\/extensions\/[^/]+\/abreviados$/,    TODOS],
   // Screen-pop y encuesta post-llamada del panel de agente (lectura del CRM, alta de encuesta).
   ['GET',      /^\/api\/clients\/lookup$/,                  TODOS],
   ['GET',      /^\/api\/survey\/fields$/,                   TODOS],
@@ -74,6 +79,9 @@ const PERMISOS = [
   ['POST',     /^\/api\/queues\/[^/]+\/members$/,           SUP],     // meter / sacar agentes de una cola
   ['DELETE',   /^\/api\/queues\/[^/]+\/members\/[^/]+$/,    SUP],
   ['GET',      /^\/api\/cdr\/report$/,                      SUP],
+  // Reportes de call center: ver y exportar es operación (el informe lo firma el
+  // supervisor); programar el envío por correo es configuración y cae al default admin.
+  ['GET',      /^\/api\/ccreport(\/(csv|report))?$/,         SUP],
   ['GET',      /^\/api\/recordings$/,                       SUP],
   ['GET',      /^\/api\/recordings\/\d+\/(transcript|peaks)$/, SUP],
   ['POST',     /^\/api\/recordings\/\d+\/transcribe$/,      SUP],
@@ -88,15 +96,57 @@ const PERMISOS = [
   // Centro de seguridad (/seguridad): el supervisor VE el estado y el registro en vivo;
   // bloquear, listas y ajustes quedan en admin (caen al default).
   ['GET',      /^\/api\/security(\/live)?$/,                 SUP],
+  // Salas de reunión: ver la lista, la vista en vivo, silenciar y expulsar es OPERACIÓN
+  // (es lo que hace el que modera la reunión desde el panel, y el supervisor ya puede
+  // colgar y espiar llamadas). Crear, editar, borrar e INVITAR (manda PIN por correo)
+  // son configuración y caen al default admin. Las tres van ANTES de cualquier regla
+  // general para que no las tape nada.
+  // El LISTADO ya no trae los dos PIN (sólo `tiene_pin`): el PIN de moderador silencia y
+  // expulsa, así que verlo en una lista es lo mismo que ser moderador de todas las salas,
+  // y sin dejar rastro. Los PIN salen únicamente por el DETALLE, que es admin y por eso
+  // lleva regla explícita acá (aunque el default ya sería admin).
+  ['GET',      /^\/api\/salas$/,                            SUP],
+  ['GET',      /^\/api\/salas\/[^/]+$/,                     ADMIN],
+  ['GET',      /^\/api\/salas\/[^/]+\/live$/,                SUP],
+  ['POST',     /^\/api\/salas\/[^/]+\/(mute|kick)$/,         SUP],
   // Modo noche: el supervisor VE si la central está abierta o cerrada; forzarlo (PUT),
   // los horarios, los feriados y los códigos de función son admin (caen al default).
   ['GET',      /^\/api\/nightmode$/,                       SUP],
+  // Failover de troncal. Esta regla decía SUP —«el supervisor VE por qué troncal está
+  // saliendo cada ruta»— pero era una promesa que ninguna pantalla cumple: el único lugar
+  // que pide esta ruta es <FailoverSalida/>, que vive DENTRO de /rutas, y /rutas es la
+  // pantalla donde se crean y se borran las rutas salientes: es configuración entera, no
+  // está en `SUP_OK` (dashboard/app/auth.jsx) y no se le va a abrir al supervisor por un
+  // panel de sólo lectura que está adentro. Se revisó al arreglar el redirect de auth.jsx
+  // —el supervisor ya entra a las pantallas de SUP_OK— y sigue sin haber una que muestre
+  // esto. Mejor que la tabla diga la verdad: hoy es admin (el mínimo que realmente la
+  // usa). Si algún día el failover sale de /rutas a una pantalla de operación, se vuelve
+  // a SUP acá y en docs/CONTRATOS.md §2 en el mismo cambio.
+  ['GET',      /^\/api\/routes\/outbound\/failover$/,       ADMIN],
+  // Registro de uso de DISA y callback: el supervisor VE quién entró, desde qué CallerID y
+  // a qué número se llamó. Es operación pura —es lo que explica una factura rara o un
+  // barrido de PINes— y es sólo lectura. Configurar la DISA (PIN, rutas habilitadas,
+  // encenderla) es otra cosa y cae al default: admin.
+  ['GET',      /^\/api\/(disa|callback)\/registro$/,        SUP],
+
+  // Fax: ver las dos bandejas, bajar el documento y MANDAR un fax es operación —es lo que
+  // hace todos los días la secretaría de un estudio contable, y el supervisor ya puede
+  // originar llamadas (`calls/dial`)—. Configurar las cajas, el T.38 de las troncales y
+  // BORRAR un fax recibido es otra cosa y cae al default (admin): un fax recibido es un
+  // documento, y borrarlo es la misma decisión que borrar una grabación.
+  ['GET',      /^\/api\/fax\/(estado|config)$/,             SUP],
+  ['GET',      /^\/api\/fax\/boxes$/,                       SUP],
+  ['GET',      /^\/api\/fax\/(in|out)$/,                    SUP],
+  ['GET',      /^\/api\/fax\/(in|out)\/\d+\/pdf$/,          SUP],
+  ['POST',     /^\/api\/fax\/out$/,                         SUP],
+  ['POST',     /^\/api\/fax\/out\/\d+\/retry$/,             SUP],
+  ['DELETE',   /^\/api\/fax\/out\/\d+$/,                    SUP],
 
   /* ── Todo lo demás (configuración del sistema) queda en ADMIN por defecto:
    *    users, settings, trunks, routes, sbc-link, modules (escritura), backup,
    *    asterisk, net, system, turn, acme, npm, integrations, branding (escritura),
    *    extensions/endpoints (escritura), ivr, queues/ringgroups (escritura),
-   *    recordings (borrado y almacenamiento), vm/email, security (escritura, whitelist, geoblock, settings), email, voz,
+   *    recordings (borrado y almacenamiento), fax (cajas, config y borrado de recibidos), vm/email, security (escritura, whitelist, geoblock, settings), email, voz,
    *    prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, etc. */
 ];
 

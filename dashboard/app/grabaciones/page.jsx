@@ -6,6 +6,7 @@ import { TableSkeleton } from '../Skeletons';
 import { api, apiDel, apiPost, useApi, usePoll } from '../api';
 import { fmtBytes, fmtReloj } from '../fmt';
 import { toast } from '../notify';
+import { useEsAdmin } from '../auth';
 import RecordingPlayer from '../RecordingPlayer';
 import MiniWave from '../MiniWave';
 
@@ -94,12 +95,17 @@ const Th = ({ icon, children, tip }) => <Table.Th><Tooltip label={tip} disabled=
 export default function Grabaciones({ embedded = false, section = 'list' }) {
   const [q, setQ] = useState('');
   const [cfg, setCfg] = useState(null); const [savingCfg, setSavingCfg] = useState(false); const [playId, setPlayId] = useState(null);
+  /* El listado es SUP (el supervisor llega acá por la solapa «Grabaciones» de /cdr), pero
+   * la ocupación del disco, la configuración de almacenamiento y el borrado son admin
+   * (rbac.js, docs/CONTRATOS.md §2). Se pregunta antes de pedir: si no, el supervisor se
+   * comía dos 403 en cada carga de /cdr sin haber apretado nada. */
+  const admin = useEsAdmin();
   // Listado y ocupación se refrescaban cada 12 s con `setInterval`; misma cadencia, ahora con pausa.
   const { data: listData, cargando, recargar: load } = usePoll('/recordings', 30000);
-  const { data: usage, recargar: loadUsage } = usePoll('/recordings/storage/usage', 60000);
+  const { data: usage, recargar: loadUsage } = usePoll(admin ? '/recordings/storage/usage' : null, 60000);
   /* La configuración se edita en pantalla, así que la respuesta de la API sólo siembra el
    * formulario: si se recargara sola pisaría lo que el usuario está tipeando. */
-  const { data: cfgSrv, recargar: loadCfg } = useApi('/recordings/config');
+  const { data: cfgSrv, recargar: loadCfg } = useApi(admin ? '/recordings/config' : null);
   useEffect(() => { if (cfgSrv) setCfg(cfgSrv); }, [cfgSrv]);
   const list = Array.isArray(listData) ? listData : [];
   const loading = cargando && !listData;
@@ -177,7 +183,8 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
                     <Table.Td><MiniWave recId={r.id} /></Table.Td><Table.Td><Button size="compact-xs" variant={playId === r.id ? 'filled' : 'light'} color="teal" leftSection={playId === r.id ? <IconPlayerPause size={13} /> : <IconPlayerPlay size={13} />} onClick={() => setPlayId(playId === r.id ? null : r.id)}>{playId === r.id ? 'Cerrar' : 'Reproducir'}</Button></Table.Td>
                     <Table.Td ta="right"><Group gap={4} justify="flex-end">
                       <Tooltip label="Descargar WAV"><ActionIcon variant="subtle" onClick={() => descargar(r)}><IconDownload size={17} /></ActionIcon></Tooltip>
-                      <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>
+                      {/* Borrar una grabación es admin: al supervisor no se le muestra el botón. */}
+                      {admin && <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>}
                     </Group></Table.Td>
                   </Table.Tr>
                   {playId === r.id && <Table.Tr><Table.Td colSpan={9} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Grabación #' + r.id + ' · Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}

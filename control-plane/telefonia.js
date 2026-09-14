@@ -33,6 +33,9 @@
 
 const express = require('express');
 const crypto = require('crypto');
+/* Quién ocupa cada extensión del contexto compartido `internal`: la lista es única y la
+ * comparten marcacion.js y este módulo (ver el encabezado de dueno-internal.js). */
+const dueno = require('./dueno-internal');
 
 /**
  * deps:
@@ -556,15 +559,44 @@ module.exports = function init(deps) {
     return rows;
   }
 
-  /* Publica en el dialplan realtime los códigos habilitados y borra los apagados. */
+  /* Publica en el dialplan realtime los códigos habilitados y borra los apagados.
+   *
+   * `internal` es un contexto COMPARTIDO y `setDialplan` es DELETE + INSERT: publicar un
+   * código de función sobre una extensión que ya usa una DISA le borraba el dialplan sin
+   * avisar. Es el mismo error que marcacion.js ya no comete contra estos códigos, en
+   * espejo, así que la pregunta la contesta el MISMO lugar para los dos
+   * (`dueno-internal.js`).
+   *
+   * DOS PASADAS, Y SIGUE SIENDO TODO O NADA. La primera pregunta por TODOS los códigos y no
+   * escribe; si alguno choca, no se instala ninguno y el 409 los nombra a TODOS, con el
+   * código, la función y quién ocupa el número. Antes se cortaba en el primero: el que
+   * apretaba «Reinstalar todos» se quedaba sin catálogo y con un mensaje que no decía cuál
+   * era el código culpable, y con dos choques había que descubrirlos de a uno.
+   *
+   * Por qué no se instala «lo que se puede» y se listan los que quedaron afuera: la pantalla
+   * de códigos de función no muestra cuáles están publicados —sólo el catálogo y su
+   * interruptor—, así que una instalación parcial es invisible para el que la está mirando y
+   * lo deja creyendo que quedó todo. Entre media central publicada en silencio y un mensaje
+   * que dice exactamente qué arreglar, sobre una central que cursa llamadas reales, preferimos
+   * lo segundo. Si algún día el panel muestra el estado por fila, esto se puede revisar. */
   async function publicar(c, codes) {
+    const chocan = [];
+    const listos = [];
     for (const f of codes) {
       const exten = extenDp(f.code);
       const filas = filasCodigo(f.accion, f.code, f.nombre);
       if (!filas) continue;                                        // acción desconocida: no se inventa dialplan
-      if (f.enabled) await setDialplan(c, 'internal', exten, numerar(filas));
-      else await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [exten]);
+      if (!f.enabled) { await dueno.borrarPropio(c, exten, 'featurecode', f.accion, log); continue; }
+      const d = await dueno.duenoDeInternal(c, exten, 'featurecode', f.accion);
+      if (d) chocan.push(f.code + ' «' + (f.nombre || f.accion) + '», que ocupa ' + d.que);
+      else listos.push([exten, filas]);
     }
+    if (chocan.length) {
+      throw err(409, 'no se instaló ningún código para no pisar lo que ya está publicado: '
+        + chocan.join('; ') + '. Cambiá ' + (chocan.length > 1 ? 'esos códigos' : 'ese código')
+        + ' (o la aplicación que los ocupa) y volvé a instalar.');
+    }
+    for (const [exten, filas] of listos) await setDialplan(c, 'internal', exten, numerar(filas));
   }
 
   app.get('/api/featurecodes', async (req, res) => {
@@ -598,7 +630,15 @@ module.exports = function init(deps) {
         const code = item.code === undefined ? viejo.code : String(item.code).trim();
         if (!CODE_OK.test(code)) throw err(400, 'código inválido: ' + code);
         const enabled = item.enabled === undefined ? viejo.enabled : !!item.enabled;
-        if (code !== viejo.code) await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [extenDp(viejo.code)]);
+        /* Mover un código encima de una DISA, un callback o un número corto se rechaza acá
+         * aunque el código todavía no esté instalado: el catálogo es la fuente, y el
+         * `install` de mañana habría publicado encima sin que nadie eligiera eso. Es la
+         * misma regla —y el mismo chequeo— que aplica marcacion.js cuando el que llega
+         * segundo es él. */
+        await dueno.exigirLibre(c, extenDp(code), 'featurecode', accion);
+        // El código viejo se saca del dialplan ANTES de mover el catálogo (si no, quedaba
+        // marcando el anterior para siempre), y sólo si ahí está publicado lo nuestro.
+        if (code !== viejo.code) await dueno.borrarPropio(c, extenDp(viejo.code), 'featurecode', accion, log);
         await c.query('UPDATE pbxng_featurecodes SET code=$2, enabled=$3, nombre=COALESCE($4,nombre) WHERE accion=$1',
           [accion, code, enabled, item.nombre === undefined ? null : String(item.nombre).slice(0, 80)]);
       }
@@ -625,7 +665,9 @@ module.exports = function init(deps) {
   app.post('/api/featurecodes/uninstall', async (req, res) => {
     try {
       const codes = await catalogo();
-      await pool.query("DELETE FROM extensions WHERE context='internal' AND exten = ANY($1)", [codes.map((f) => extenDp(f.code))]);
+      // Uno por uno y sólo lo propio: un DELETE por lista se llevaba puesto el dialplan de
+      // quien hubiera quedado en esa extensión (una DISA, un abreviado) además del nuestro.
+      for (const f of codes) await dueno.borrarPropio(pool, extenDp(f.code), 'featurecode', f.accion, log);
       broadcastSoon();
       res.json({ ok: true });
     } catch (e) { errorHttp(res, e); }

@@ -13,7 +13,8 @@ cd docker
    Usa `docker-compose.yml` con perfiles: `core` (DB/Asterisk/API/Dashboard), `turn` (Coturn), `ai` (Voz), `intercom` (go2rtc), `proxy` (Nginx Proxy Manager). Cada servicio aislado y escalable. `docker-compose.release.yml` es su espejo por imagen (sin `build:`).
 
 2. **Todo en un contenedor** (experimental, demos)
-   `Dockerfile.allinone` corre todo el stack con supervisord en un único contenedor. Rápido para probar; no recomendado en producción.
+   `Dockerfile.allinone` corre todo el stack con supervisord en un único contenedor. Rápido para probar el **panel y la API**; no recomendado en producción.
+   **No sirve para probar telefonía**: su Asterisk es el de Debian sin nuestro `config/asterisk/` (sin `modules.conf` con los `require =`, sin dialplan, sin realtime, sin ARI/AMI). Módulos, dialplan, troncales y failover se prueban con `docker-compose.yml`. El porqué, en el encabezado de `Dockerfile.allinone`.
 
 3. **Bare-metal / LXC** (sin Docker)
    Instalación nativa por componente (ver `docs/`).

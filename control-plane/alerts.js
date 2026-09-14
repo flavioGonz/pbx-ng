@@ -58,8 +58,13 @@ async function panelUrl(path = '') {
 
 const LABEL = { info: 'Informativo', warn: 'Atención', crit: 'Crítico' };
 
+/* Los dos valores especiales del failover de troncal (trunks.js los escribe en la AstDB
+ * y los devuelve en `failoverStates()`): el enlace al SBC-NG y «se agotó la cadena». */
+const SBC_TRUNK = 'to-sbc';
+const SIN_SALIDA = '!sin-salida';
+
 /** Dispara una alerta (respeta enabled + throttle). key = identidad para el throttle. */
-async function raise(event, { severity = 'warn', title, lines = [], foot = '', key = '', force = false } = {}) {
+async function raise(event, { severity = 'warn', title, lines = [], foot = '', key = '', force = false, to: destino = '' } = {}) {
   try {
     const r = await rule(event);
     if (!r) return false;
@@ -70,19 +75,31 @@ async function raise(event, { severity = 'warn', title, lines = [], foot = '', k
       const st = await getState(tk, {});
       if (st.at && nowMin() - st.at < th) return false;   // ya avisamos hace poco
     }
-    const to = (r.recipients || '').trim() || await defaultTo();
+    /* Prioridad del destinatario: el que pide quien dispara (los informes de call center
+     * tienen su propia lista por programación) → el de la regla → el global. Sin esto
+     * todos los informes irían a la casilla de alertas de seguridad. */
+    const to = String(destino || '').trim() || (r.recipients || '').trim() || await defaultTo();
     if (!to) return false;
     const cfg = await smtp();
     if (!cfg) return false;
     const brandName = await brand();
     const tx = nodemailer.createTransport({ host: cfg.host, port: cfg.port || 587, secure: !!cfg.secure, auth: cfg.username ? { user: cfg.username, pass: cfg.password } : undefined });
     const subject = `[${brandName}] ${severity === 'crit' ? '🔴 ' : severity === 'warn' ? '🟠 ' : ''}${title}`;
-    const link = await panelUrl(event === 'security.ban' || event === 'security.attack' ? '/seguridad' : event.startsWith('fraud') ? '/historial' : event === 'digest.daily' ? '/' : '/monitor');
-    const isDigest = event === 'digest.daily';
-    const kpis = isDigest ? lines.filter(([k]) => !/^Top interno/.test(k)).slice(0, 6).map(([k, v]) => ({ label: k, value: v })) : [];
-    const rest = isDigest ? lines.filter(([k]) => /^Top interno/.test(k)) : lines;
+    const link = await panelUrl(event === 'security.ban' || event === 'security.attack' ? '/seguridad' : event.startsWith('fraud') ? '/historial' : event.startsWith('ccreport') ? '/reportes' : event === 'digest.daily' ? '/' : event === 'trunk.failover' ? '/rutas' : '/monitor');
+    /* Los resúmenes (el diario y los informes de call center programados) van con el
+     * layout de números grandes; las alertas, con la tabla clave→valor. */
+    const isDigest = event === 'digest.daily' || event.startsWith('ccreport');
+    const esTop = ([k]) => /^Top (interno|cola|agente) /.test(k);
+    /* TODAS las líneas que no son un "Top …" son tarjetas: las arma el que dispara y
+     * son justamente los números por los que se pidió el informe. Antes había un
+     * `.slice(0, 6)` acá que se comía en silencio las que sobraran, y tanto el resumen
+     * diario como el informe de call center mandan OCHO: el correo llegaba sin "espera
+     * máxima" ni "fuera de horario". `kpiGrid()` las acomoda de a dos, así que no hay
+     * ningún motivo de maqueta para cortarlas. */
+    const kpis = isDigest ? lines.filter((l) => !esTop(l)).map(([k, v]) => ({ label: k, value: v })) : [];
+    const rest = isDigest ? lines.filter(esTop) : lines;
     const htmlBody = isDigest
-      ? emails.digestEmail({ brand: brandName, title, kpis, rows: rest, panelUrl: link })
+      ? emails.digestEmail({ brand: brandName, title, kpis, rows: rest, panelUrl: link, subtitle: event === 'digest.daily' ? undefined : 'Informe del período, generado por la central.', foot })
       : emails.alertEmail({ brand: brandName, event, severity, title, lines, foot, panelUrl: link });
     await tx.sendMail({
       from: cfg.from_addr || cfg.username, to, subject,
@@ -157,6 +174,7 @@ async function geo(ip) {
 async function tick() {
   await checkSecurity();
   await checkTrunks();
+  await checkFailover();
   await checkServices();
   await checkFraud();
   await checkQueues();
@@ -214,6 +232,65 @@ async function checkTrunks() {
     st[name] = up;
   }
   await setState('trunks', st);
+}
+
+/** Failover de troncal: una ruta saliente se fue al respaldo, o volvió a la principal.
+ *
+ *  El aviso es por TRANSICIÓN, no por llamada: el dialplan deja en la AstDB qué troncal
+ *  cursó la última llamada de cada ruta (`rutasal/<id>`, ver trunks.js) y acá se compara
+ *  contra lo que vimos la vuelta anterior. Una central con 300 llamadas por día saliendo
+ *  por el respaldo tiene que generar UN correo, no 300: si mandamos uno por llamada, el
+ *  aviso que importa —«se cayó la principal»— queda enterrado y se ignora.
+ *
+ *  La primera vuelta sólo aprende el estado (mismo criterio que checkTrunks): al arrancar
+ *  la API no sabemos si ya venía en respaldo desde antes y no tiene sentido avisar de algo
+ *  que pasó la semana pasada. */
+async function checkFailover() {
+  const r = await rule('trunk.failover');
+  if (!r || !r.enabled || !deps.rutasFailover) return;
+  let rutas = [];
+  try { rutas = await deps.rutasFailover(); } catch (_) { return; }
+  const st = await getState('failover', {});
+  const vistas = {};
+  for (const ru of (rutas || [])) {
+    if (!ru || !Array.isArray(ru.backups) || !ru.backups.length) continue;   // sin respaldos no hay failover del que avisar
+    const k = 'r' + ru.id;
+    const ahora = ru.sin_salida ? SIN_SALIDA : (ru.en_uso || '');
+    vistas[k] = ahora;
+    const antes = st[k];
+    if (!ahora || antes === undefined || antes === ahora) continue;          // primera vuelta o nada cambió
+    const nombre = ru.name || ('_' + ru.pattern);
+    /* Que la salida deje de pasar por el SBC-NG no es «una troncal más»: el SBC es OTRO
+     * producto y es el que normaliza el número, elige operador y aplica seguridad. Si la
+     * ruta se va directo al operador, el que atiende tiene que saberlo. */
+    const dejaSbc = antes === SBC_TRUNK && ahora !== SBC_TRUNK;
+    const comun = [['Ruta', nombre + ' (_' + ru.pattern + ')'], ['Principal', ru.principal],
+      ['Respaldos', ru.backups.join(' → ') || '—'], ['Fecha', new Date().toLocaleString('es-UY')]];
+    if (ahora === SIN_SALIDA) {
+      await raise('trunk.failover', {
+        severity: 'crit', title: `Sin salida: la ruta ${nombre} agotó todas sus troncales`,
+        lines: comun.concat([['Estado', 'ninguna troncal pudo cursar la llamada']]),
+        foot: 'Las llamadas de esta ruta están dando congestión. Revisá el estado de las troncales en Troncales.',
+        key: k,
+      });
+    } else if (ahora === ru.principal) {
+      await raise('trunk.failover', {
+        severity: 'info', title: `Ruta ${nombre}: volvió a la troncal principal`,
+        lines: comun.concat([['Sale por', ahora], ['Venía saliendo por', antes === SIN_SALIDA ? 'ninguna' : antes]]),
+        key: k + ':up',
+      });
+    } else {
+      await raise('trunk.failover', {
+        severity: 'warn', title: `Ruta ${nombre}: saliendo por el respaldo ${ahora}`,
+        lines: comun.concat([['Sale por', ahora], ['Venía saliendo por', antes === SIN_SALIDA ? 'ninguna' : antes]]),
+        foot: dejaSbc
+          ? 'Las llamadas de esta ruta YA NO pasan por el SBC-NG: salen directo al operador, sin su normalización de numeración ni su selección de ruta. Revisá el enlace con el SBC.'
+          : 'La troncal principal no está cursando llamadas. El respaldo puede tener otra tarifa y otro número saliente.',
+        key: k,
+      });
+    }
+  }
+  await setState('failover', vistas);
 }
 
 /** Servicios del núcleo caídos (DB / ARI / AMI). */

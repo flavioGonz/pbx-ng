@@ -104,8 +104,9 @@ La seguridad perimetral, el LCR con failover, la salud de operadores, la manipul
 
 **Aplicaciones**
 - IVR visual (React Flow) + **IVR conversacional con IA** (STT→LLM→TTS).
-- Colas/ACD, conferencias, grupos de timbrado, buzón visual, paging.
+- Colas/ACD, salas de reunión, grupos de timbrado, buzón visual, paging.
 - **Telefonía clásica de oficina (desde 1.9.0)**: horarios de atención con tramos, feriados (anuales y puntuales) y modo noche `auto|abierto|cerrado` aplicados a cada ruta entrante (`GotoIfTime` generado desde el panel); **desvíos** incondicional / si ocupado / si no contesta, **no molestar** y **sígueme** por interno, configurables desde el panel o desde el teléfono; y un **catálogo de 15 códigos de función con el código editable** (`*78`, `*21*…`, `*24*…`, `*28`…). La verdad vive en PostgreSQL y Asterisk la lee en caliente de la AstDB: cambiar un desvío no recarga el dialplan.
+- **Licitaciones y clientes medianos (desde 1.10.0)**: **reportes de call center** (nivel de servicio, abandono, esperas y conversación por cola y por agente, con CSV, informe A4 y envío programado por correo, calculados sobre los eventos de cola del AMI y no sobre el CDR); **failover de troncal** (una principal más una lista ordenada de respaldos, que salta sólo cuando el corte es de la troncal y no cuando lo dijo el destino); **DISA, callback, directorio por nombre y marcación abreviada** (el PIN en bcrypt en Postgres, nunca en el dialplan; DISA y callback nacen apagados); **salas de reunión** con dos PIN, agenda, invitación por correo y moderación en vivo; y **fax T.38** entrante y saliente, a correo y desde el panel.
 - Grabación por interno o global (local/NAS/S3) con transcripción y análisis.
 - **Buzón de voz activado por defecto** en cada interno (PIN inicial = número de interno, `*97` para escucharlo), con MWI vía SUBSCRIBE/NOTIFY y buzón visual en el softphone.
 - **Audios de la central en español rioplatense (voz uruguaya)**: los 326 prompts de Asterisk (buzón, números, fechas, colas, conferencias, directorio, agentes) generados con el TTS propio. Se regeneran con otra voz en un comando: `scripts/gen-sounds.py --voice es-UY-MateoNeural`.
@@ -199,6 +200,7 @@ Desde el **panel** (Módulos), el toggle escribe `pbxng_settings.mod_<id>` y un 
 ### Opción B — Docker, todo en un contenedor (demo/pruebas)
 
 Para levantar rápido en un solo contenedor (no recomendado para producción). El instalador lo ofrece como opción; usa `Dockerfile.allinone`.
+Sirve para mostrar el panel y la API. **No es equivalente a la de producción y no sirve para validar telefonía**: usa el Asterisk de Debian sin `docker/config/asterisk/` (sin los `require =` de `modules.conf`, sin dialplan PBX-NG, sin realtime ni ARI/AMI). Ver el encabezado de `docker/Dockerfile.allinone`.
 
 ### Opción C — Bare-metal / LXC (sin Docker)
 

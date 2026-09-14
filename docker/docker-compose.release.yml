@@ -210,6 +210,21 @@ services:
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
       PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-30000}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # --- fax (docs/CONTRATOS.md §6) ---
+      # FAX_DIR y FAX_DIR_AST son LOS DOS NOMBRES DEL MISMO DIRECTORIO: la API lo ve en
+      # /recordings/fax y Asterisk en /var/spool/asterisk/monitor/fax, porque los dos montan
+      # el volumen `recordings`. Por eso el spool sobrevive a un `up -d` sin volumen propio.
+      # Van vacías a propósito: vacío = el default de fax.js, que ya es ese par. Se declaran
+      # igual para que se puedan cambiar desde el .env sin tocar el compose — y si se cambia
+      # una HAY QUE CAMBIAR LA OTRA, o Asterisk escribe el TIFF donde la API no lo encuentra.
+      FAX_DIR: ${FAX_DIR:-}
+      FAX_DIR_AST: ${FAX_DIR_AST:-}
+      # Tope DURO del PDF que se sube (lo aplica express.raw al registrar la ruta, así que
+      # no se puede subir desde el panel), cada cuánto corre la cola/barrido, y cuánto puede
+      # tardar ghostscript antes de que lo maten.
+      FAX_MAX_MB: ${FAX_MAX_MB:-}
+      FAX_TICK_MS: ${FAX_TICK_MS:-}
+      FAX_CONVERT_MS: ${FAX_CONVERT_MS:-}
     volumes:
       - recordings:/recordings        # rw: la API indexa Y borra grabaciones
       - voicemail:/voicemail

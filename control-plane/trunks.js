@@ -26,7 +26,9 @@ const _dgram = require('dgram');
  *   app               Express (las rutas se registran acá, DESPUÉS del gate)
  *   pool              pg.Pool
  *   NODES             direcciones del despliegue (domain para el enlace WSS de troncales WebRTC)
- *   amiCommand        (cmd) => salida del CLI de Asterisk por AMI (pjsip show registrations/contacts)
+ *   amiCommand        (cmd) => salida del CLI de Asterisk por AMI (pjsip show registrations/contacts,
+ *                     `database show rutasal` para saber por qué troncal está saliendo cada ruta)
+ *   amiAction         (action) => respuesta AMI; DBPut de `trunkup/<troncal>` (failover de troncal)
  *   endpointStates    () => estado de los endpoints pjsip según el motor ARI (callengine.js)
  *   moduleEnabled     (id) => si el módulo `mod_<id>` está encendido (app.js, Configuración → Módulos)
  *   setDialplan       (client, context, exten, rows) escribe una extensión en el dialplan realtime (app.js)
@@ -38,11 +40,23 @@ const _dgram = require('dgram');
  *   logger            fábrica de loggers de log.js (logger('TRK'), logger('SBC'))
  *
  * Devuelve: { sbcLink, upsertSbcLink, invalidarSbcLink, trunkStatuses, defaultOutTrunk,
- *             regenerarEntrantes, SBC_TRUNK }. `regenerarEntrantes` lo usa telefonia.js
+ *             regenerarEntrantes, failoverStates, filasSalida, SBC_TRUNK }.
+ *             `failoverStates()` lo consume el motor de alertas (aviso de failover) y el panel;
+ *             `filasSalida()` se exporta sólo para poder probar la escalera sin base ni Asterisk. `regenerarEntrantes` lo usa telefonia.js
  *             cuando cambia un horario o un feriado (los tramos viven en el dialplan del DID).
  */
+/* `internal` es un contexto COMPARTIDO (códigos de función, DISA, abreviados, fax) y
+ * `setDialplan()` es DELETE + INSERT: quién puede ocupar cada extensión lo contesta un solo
+ * lugar, el mismo que usan telefonia.js y marcacion.js (ver el encabezado de
+ * `dueno-internal.js`). Este módulo publica dos cosas ahí: las rutas salientes y la salida
+ * directa de cada troncal. */
+const dueno = require('./dueno-internal');
+
 module.exports = function init(deps) {
-  const { app, pool, NODES, amiCommand, endpointStates, moduleEnabled, setDialplan, astFwd, salud, diagtrunk, errorHttp, broadcastSoon, logger } = deps;
+  const { app, pool, NODES, amiCommand, amiAction, endpointStates, moduleEnabled, setDialplan, astFwd, salud, diagtrunk, errorHttp, broadcastSoon, logger } = deps;
+  /* Lo usa `dueno.borrarPropio()` para dejar dicho en el log cuándo NO borró: una extensión
+   * vieja colgada se ve con `dialplan show`, el dialplan de otro borrado en silencio no. */
+  const log = logger('TRK');
 
   /* ============================================================
    *  Enlace con SBC-NG (modulo "Conexion a SBC-NG").
@@ -103,8 +117,15 @@ module.exports = function init(deps) {
         const rc = await c.query('SELECT count(*)::int AS n FROM pbxng_outbound_routes');
         if (!rc.rows[0] || rc.rows[0].n === 0) {
           const pat = '0X.'; const strip = 1;
-          await c.query("INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ('Salida por el SBC-NG (marca 0)',$1,$2,$3,NULL,NULL)", [pat, SBC_TRUNK, strip]);
-          await setDialplan(c, 'internal', outExten(pat), [[1, 'Dial', 'PJSIP/${EXTEN:' + strip + '}@' + SBC_TRUNK + ',60'], [2, 'Hangup', '']]);
+          /* La semilla escribe el dialplan con el MISMO generador que el resto de las rutas
+           * salientes (y no una copia a mano): así lleva la firma `NoOp(ruta <id>: …)` que
+           * después permite reconocerla como propia, y no se puede publicar encima de un
+           * código de función o una DISA que ya esté en ese número. */
+          const { rows: sem } = await c.query(
+            "INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ('Salida por el SBC-NG (marca 0)',$1,$2,$3,NULL,NULL) RETURNING " + COLS_OUT,
+            [pat, SBC_TRUNK, strip]);
+          await dueno.exigirLibre(c, outExten(pat), 'outbound', sem[0].id);
+          await escribirSaliente(c, sem[0]);
           ruta = pat;
         }
       }
@@ -145,11 +166,27 @@ module.exports = function init(deps) {
     const ok = await sipOptionsProbe(host, port, 1500);
     _sipProbeCache[key] = { t: Date.now(), ok }; return ok;
   }
+  /* ¿El último sondeo sirve para tomar decisiones, o sólo para pintar la pantalla?
+   *
+   * `endpointStates()` devuelve `{}` SIN lanzar cuando ARI no está conectado (callengine.js)
+   * y `amiCommand` puede fallar en silencio: con eso TODAS las troncales salen 'offline'.
+   * Para la pantalla da igual (se ve un rato en rojo y se arregla solo), pero el failover
+   * llegó a apagar la cadena entera durante una reconexión de ARI y dejar la central sin
+   * salida con las dos troncales sanas. Así que el que decide (`refrescarTrunkUp`) mira
+   * esto antes de escribir nada en la AstDB. */
+  let _sondeoFiable = false;
+
   // Estado real de troncales: registro saliente (pjsip show registrations) + alcanzabilidad
   async function trunkStatuses(trunks) {
     let reg = '';
-    try { reg = await amiCommand('pjsip show registrations'); } catch (_) {}
+    let amiOk = true;
+    try { reg = await amiCommand('pjsip show registrations'); } catch (_) { amiOk = false; }
     const eps = await endpointStates();
+    /* `firme` = hay evidencia POSITIVA de que la troncal está caída (el proveedor nos
+     * rechazó el registro, o el sondeo OPTIONS salió y no volvió). El 'offline' derivado
+     * de `endpointStates` NO es evidencia: sale igual con ARI caído o con una troncal
+     * IP-auth cuyo proveedor no contesta OPTIONS aunque curse llamadas perfecto. */
+    _sondeoFiable = amiOk && !!Object.keys(eps || {}).length;
     const lines = String(reg).split('\n');
     const out = {};
     const rttMap = {};
@@ -168,7 +205,7 @@ module.exports = function init(deps) {
       }
       if (t.kind === 'kamailio') {
         const up = await sipProbeCached(t.provider_host, t.provider_port);
-        out[t.name] = up ? { status: 'online', detail: 'Alcanzable (OPTIONS) · vía SBC-NG' } : { status: 'offline', detail: 'No responde · vía SBC-NG' };
+        out[t.name] = up ? { status: 'online', detail: 'Alcanzable (OPTIONS) · vía SBC-NG' } : { status: 'offline', detail: 'No responde · vía SBC-NG', firme: true };
         continue;
       }
       const ep = eps[t.name]; const reachable = ep && ep.state === 'online';
@@ -176,9 +213,12 @@ module.exports = function init(deps) {
         const rx = new RegExp('^\\s*' + t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/');
         const line = lines.find(l => rx.test(l)) || '';
         if (/Registered/i.test(line)) out[t.name] = { status: 'online', detail: 'Registrada' + ((line.match(/exp\.?\s*(\d+)/i) || [])[1] ? ' (exp ' + line.match(/exp\.?\s*(\d+)/i)[1] + 's)' : '') };
-        else if (/Rejected/i.test(line)) out[t.name] = { status: 'offline', detail: 'Rechazada por el proveedor' };
+        /* Rechazada / sin registrar = el proveedor nos contestó que no: eso sí es evidencia
+         * para saltarse la troncal. «Autenticando…» es un estado de paso (el REGISTER está
+         * en vuelo) y no se marca: apagarla ahí es cortar la salida por medio segundo. */
+        else if (/Rejected/i.test(line)) out[t.name] = { status: 'offline', detail: 'Rechazada por el proveedor', firme: true };
         else if (/Auth/i.test(line)) out[t.name] = { status: 'offline', detail: 'Autenticando…' };
-        else if (line) out[t.name] = { status: 'offline', detail: 'Sin registrar' };
+        else if (line) out[t.name] = { status: 'offline', detail: 'Sin registrar', firme: true };
         else out[t.name] = { status: reachable ? 'online' : 'offline', detail: reachable ? 'Alcanzable' : 'Sin registro' };
       } else {
         out[t.name] = { status: reachable ? 'online' : 'offline', detail: reachable ? 'Alcanzable (qualify)' : 'No responde' };
@@ -212,7 +252,9 @@ module.exports = function init(deps) {
     try {
       await c.query('BEGIN');
       const { rows: rutas } = await c.query('SELECT id, pattern FROM pbxng_outbound_routes WHERE trunk=$1', [SBC_TRUNK]);
-      for (const r of rutas) { await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [outExten(r.pattern)]); await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [r.id]); }
+      /* El dialplan se borra ANTES que la fila y sólo si es nuestro: si alguien publicó otra
+       * cosa en ese patrón, desconectar el SBC no tiene por qué dejarlo sin dialplan. */
+      for (const r of rutas) { await dueno.borrarPropio(c, outExten(r.pattern), 'outbound', r.id, log); await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [r.id]); }
       for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [SBC_TRUNK]);
       await c.query('DELETE FROM pbxng_trunks WHERE kind=$1', ['sbc']);
       await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'");
@@ -227,8 +269,225 @@ module.exports = function init(deps) {
 
   // ---------------- Rutas SALIENTES ----------------
   function outExten(p) { return p && p[0] === '_' ? p : '_' + p; }
+  const COLS_OUT = 'id,name,pattern,trunk,strip,prepend,callerid,backups,intento_seg,total_seg';
+  const malPedido = (msg) => Object.assign(new Error(msg), { status: 400 });
+
+  /* Listas blancas de TODO lo que termina adentro del dialplan generado.
+   * Ya nos pasó con los desvíos (ver telefonia.js): un destino con '*' dejaba al que
+   * LLAMABA ejecutar códigos de función con su propia identidad. Acá el riesgo es el
+   * mismo con otra cara: el nombre de la troncal y el prefijo se pegan dentro de
+   * `Dial(PJSIP/<prefijo>${EXTEN:n}@<troncal>,<seg>)`, así que una coma, un '&' o una '@'
+   * agregan argumentos al Dial o un segundo destino que nadie configuró. */
+  const TRONCAL_OK = /^[A-Za-z0-9_.-]{1,64}$/;
+  const PATRON_OK = /^[0-9A-Za-z*#+.!XZN[\]-]{1,38}$/;
+  const PREPEND_OK = /^[0-9+*#]{0,16}$/;
+  const CID_OK = /^[0-9+]{0,24}$/;
+  const NO_SALEN = ['webrtc', 'webrtc-client'];   // troncales de cliente WebRTC: no van a la calle
+
+  /* AstDB del failover (DB() SIEMPRE con familia y clave, ver telefonia.js):
+   *   rutasal/<id ruta>  = troncal que cursó la última llamada de esa ruta, o `!sin-salida`
+   *                        si se agotaron todas. Es lo que el panel muestra como «en uso» y
+   *                        de lo que salen las transiciones que se avisan por correo.
+   *   trunkup/<troncal>  = '0' cuando el sondeo la da por caída. Lo escribe esta API cada
+   *                        minuto y lo lee el dialplan para SALTARLA sin gastar el timeout. */
+  const FAM_RUTA = 'rutasal';
+  const FAM_UP = 'trunkup';
+  const SIN_SALIDA = '!sin-salida';
+
+  /* LA distinción del failover. Un corte puede venir de la TRONCAL (no responde, 503, sin
+   * circuitos) o del DESTINO (486 ocupado, 480 no contesta, 603 rechazada, 404 número
+   * inexistente). Sólo el primero justifica salir por otra troncal: reintentar un 486 le
+   * hace sonar el teléfono dos veces al destinatario y, si la segunda entra, el cliente
+   * paga dos llamadas. Asterisk mapea 486 → BUSY y 503 → CONGESTION, pero también manda a
+   * CONGESTION cosas del destino (404), así que además de DIALSTATUS se mira HANGUPCAUSE:
+   * 1/2/3 número inexistente, 17 ocupado, 19 no contesta, 20 abonado ausente, 22 número
+   * cambiado. Comparación como TEXTO a propósito: con la troncal sin registrar
+   * HANGUPCAUSE puede venir vacío y `$[ = 17]` sería un error de sintaxis por llamada.
+   *
+   * La 21 (call rejected) NO va en esta lista, pero NO alcanza con dejarla afuera. Lo que
+   * dice el código de Asterisk 20, comprobado línea por línea:
+   *   - `ast_sip_hangup_sip2cause()` (res/res_pjsip.c) manda a 21 CUATRO respuestas:
+   *     401, 403, 407 y 603. Las tres primeras son «la troncal nos rechaza» (cuenta
+   *     suspendida por saldo, clave rotada, IP fuera de la lista blanca) y ahí el respaldo
+   *     es justo lo que hay que usar; la 603 Decline es «el que llamamos cortó», y ahí el
+   *     respaldo es plata tirada.
+   *   - `handle_cause()` (apps/app_dial.c) NO tiene un `case` para la 21: cae en el
+   *     `default`, que hace `num->nochan++`, y con un solo destino eso deja
+   *     DIALSTATUS=CHANUNAVAIL (app_dial.c: `else if (num.nochan) strcpy(pa->status,
+   *     "CHANUNAVAIL")`). O sea que la 603 del destino prende FALLA=1 igual que un corte de
+   *     troncal — lo contrario de lo que decía el comentario viejo, que daba por hecho un
+   *     DIALSTATUS=BUSY que app_dial nunca pone acá. Costo real del error: un 603 del
+   *     destino recorría la cadena entera (un intento facturado por troncal) y encima
+   *     disparaba el correo de failover con la troncal principal sana.
+   *   - Para 486 y 403 el mapeo confirma lo demás: 486 → AST_CAUSE_BUSY (17), que sí está
+   *     en la lista y ya cancelaba bien; 403 → 21, igual que 401/407.
+   * Como la causa 21 sola no distingue, el dialplan mira ADEMÁS el código SIP crudo, que
+   * Asterisk guarda por canal marcado (`HANGUPCAUSE(<canal>,tech)` → «SIP 603 Decline»,
+   * chan_pjsip lo escribe con `ast_channel_hangupcause_hash_set`): 603 = destino (no se
+   * reintenta), 401/403/407 y cualquier otra = troncal (se reintenta, que es el
+   * comportamiento de siempre). La ambigüedad que queda es el 403: un operador lo usa para
+   * «no te autorizo» y algún destino para «no me llames», y elegimos que SIGA saltando al
+   * respaldo porque equivocarse ahí del otro lado deja a la central sin salida.
+   * Comparación como TEXTO a propósito: con la troncal sin registrar HANGUPCAUSE puede venir
+   * vacío y `$[ = 17]` sería un error de sintaxis por llamada. */
+  const CAUSAS_DESTINO = ['1', '2', '3', '17', '19', '20', '22'];
+  const COND_DESTINO = '$[' + CAUSAS_DESTINO.map((c) => '"${CAUSA}"="' + c + '"').join('|') + ']';
+  /* Códigos SIP que, con HANGUPCAUSE=21, son del DESTINO y no de la troncal (ver arriba). */
+  const SIP_DESTINO = ['603'];
+  /* Los paréntesis no sobran: en el expr de Asterisk `&` liga más fuerte que `|`, así que
+   * sin ellos un segundo código SIP quedaría fuera del "CAUSA=21". */
+  const COND_SIP_DESTINO = '$["${CAUSA}"="21" & (' + SIP_DESTINO.map((c) => '"${SIPCODE}"="' + c + '"').join('|') + ')]';
+  const LINEAS_INTENTO = 19;   // tiene que coincidir con lo que empuja filasSalida()
+
+  /* Dialplan de UNA ruta saliente.
+   *
+   * Sin respaldos queda EXACTAMENTE el de siempre (un Dial de 60 s y Hangup): la
+   * instalación que no usa failover no paga la escalera ni cambia una línea al actualizar.
+   *
+   * Con respaldos se arma una escalera de intentos en la misma extensión. Tres cuidados,
+   * que son los que hacen que esto se pueda usar con clientes de verdad:
+   *  1. No hay bucles: cada intento sólo puede saltar HACIA ADELANTE (a una prioridad
+   *     mayor, calculada acá), y el último cae en «se agotaron».
+   *  2. El tiempo total está acotado: `TOPE` se fija una vez al entrar y se chequea ANTES
+   *     de cada Dial, así que tres troncales no son tres timeouts encadenados. Un cliente
+   *     no espera 90 s escuchando silencio.
+   *  3. Cada intento termina antes del siguiente: `Dial` con timeout corta la pata saliente
+   *     al vencer, y cuando la troncal contesta con congestión ya la cortó el propio Dial.
+   *     Nunca hay dos troncales marcando el mismo número a la vez (eso sí sería cobrar dos).
+   */
+  function filasSalida(r) {
+    const strip = Math.min(20, Math.max(0, parseInt(r.strip, 10) || 0));
+    const num = (r.prepend || '') + '${EXTEN:' + strip + '}';
+    const cadena = [r.trunk].concat(Array.isArray(r.backups) ? r.backups : []);
+    const rows = [];
+    let p = 1;
+    /* La firma va PRIMERA y en TODAS las rutas, también en la de una sola troncal. Antes
+     * sólo la escribía la escalera de failover, así que `dueno-internal.js` no tenía forma
+     * de reconocer como propia la ruta simple y el candado del contexto compartido se caía
+     * justo en el caso más común de una central chica. */
+    rows.push([p++, 'NoOp', 'ruta ' + r.id + ': ' + cadena.join(' > ')]);
+    if (r.callerid) rows.push([p++, 'Set', 'CALLERID(num)=' + r.callerid]);
+    if (cadena.length < 2) {
+      rows.push([p++, 'Dial', 'PJSIP/' + num + '@' + cadena[0] + ',60']);
+      rows.push([p++, 'Hangup', '']);
+      return rows;
+    }
+    const intento = Math.min(120, Math.max(5, parseInt(r.intento_seg, 10) || 20));
+    const total = Math.min(300, Math.max(intento, parseInt(r.total_seg, 10) || 45));
+    rows.push([p++, 'Set', 'TOPE=$[${EPOCH} + ' + total + ']']);
+    const base = p;                                        // prioridad de la primera línea del primer intento
+    const agotado = base + LINEAS_INTENTO * cadena.length;  // única salida cuando ninguna sirvió
+    cadena.forEach((t, i) => {
+      const b = base + LINEAS_INTENTO * i;
+      const sig = (i + 1 < cadena.length) ? b + LINEAS_INTENTO : agotado;
+      rows.push([b + 0, 'NoOp', 'intento ' + (i + 1) + '/' + cadena.length + ' por ' + t]);
+      rows.push([b + 1, 'ExecIf', '$[${EPOCH} >= ${TOPE}]?Goto(' + agotado + ')']);
+      rows.push([b + 2, 'GotoIf', '$["${DB(' + FAM_UP + '/' + t + ')}"="0"]?' + sig]);
+      /* La marca va ANTES del Dial. Estaba después y sólo se escribía cuando la llamada
+       * terminaba por el lado del destino: si colgaba el que llamó —la mayoría de las
+       * llamadas— Asterisk destruía el canal sin ejecutar las prioridades siguientes y
+       * `rutasal/<id>` se quedaba con la troncal vieja. Resultado: la central entera
+       * saliendo por el respaldo y alerts.js sin ver transición, o sea sin mandar NUNCA el
+       * aviso de failover, que es la razón de ser de toda esta escalera. Si el intento
+       * falla, el intento siguiente pisa la marca, y si fallan todos la pisa `!sin-salida`. */
+      rows.push([b + 3, 'Set', 'DB(' + FAM_RUTA + '/' + r.id + ')=' + t]);
+      /* Las causas por canal se ACUMULAN en el canal que llama, así que sin limpiarlas el
+       * intento 2 leería el código SIP del intento 1 (o, con dos claves, ninguno). */
+      rows.push([b + 4, 'HangupCauseClear', '']);
+      rows.push([b + 5, 'Dial', 'PJSIP/' + num + '@' + t + ',' + intento]);
+      rows.push([b + 6, 'Set', 'FALLA=0']);
+      rows.push([b + 7, 'Set', 'CAUSA=${HANGUPCAUSE}']);
+      rows.push([b + 8, 'ExecIf', '$["${CAUSA}"=""]?Set(CAUSA=0)']);
+      rows.push([b + 9, 'ExecIf', '$["${DIALSTATUS}"="CONGESTION"|"${DIALSTATUS}"="CHANUNAVAIL"]?Set(FALLA=1)']);
+      rows.push([b + 10, 'ExecIf', COND_DESTINO + '?Set(FALLA=0)']);
+      /* El código SIP crudo («SIP 603 Decline») en dos pasos y con Set, no dentro del
+       * ExecIf: el texto del motivo lo escribe el otro extremo y un ')' suelto ahí adentro
+       * rompería el parseo del ExecIf y con él la llamada. Acá se queda en SIPRESP y lo
+       * único que llega a la condición son los tres dígitos.
+       *
+       * Y la lectura se SALTEA cuando no hay ninguna clave. Si el Dial no llegó a crear
+       * canal saliente (troncal caída, sin contacto, rechazo inmediato) la lista de causas
+       * por canal queda vacía, y `HANGUPCAUSE(,tech)` no es una lectura vacía: son dos
+       * argumentos válidos con un nombre de canal que no existe, así que func_hangupcause
+       * no encuentra la información y escribe un WARNING en el log por cada intento —
+       * justo en el camino que más nos importa, el del failover, que es el que después hay
+       * que leer para entender por qué la central se fue al respaldo. El resultado
+       * funcional es el mismo de antes (SIPCODE vacío ⇒ se reintenta); lo que cambia es
+       * que el log queda limpio. Como ahora la lectura se puede saltear, SIPCODE se limpia
+       * ANTES: las variables de canal sobreviven al intento anterior y sin limpiarlo el
+       * intento 2 podría cancelar el failover con el código SIP del intento 1. */
+      rows.push([b + 11, 'Set', 'CLAVES=${HANGUPCAUSE_KEYS()}']);
+      rows.push([b + 12, 'Set', 'SIPCODE=']);
+      rows.push([b + 13, 'GotoIf', '$["${CLAVES}"=""]?' + (b + 16)]);
+      rows.push([b + 14, 'Set', 'SIPRESP=${HANGUPCAUSE(${CLAVES},tech)}']);
+      rows.push([b + 15, 'Set', 'SIPCODE=${SIPRESP:4:3}']);
+      rows.push([b + 16, 'ExecIf', COND_SIP_DESTINO + '?Set(FALLA=0)']);
+      rows.push([b + 17, 'GotoIf', '$["${FALLA}"="1"]?' + sig]);
+      rows.push([b + 18, 'Hangup', '']);
+    });
+    rows.push([agotado + 0, 'NoOp', 'ruta ' + r.id + ': ninguna troncal pudo cursar la llamada']);
+    rows.push([agotado + 1, 'Set', 'DB(' + FAM_RUTA + '/' + r.id + ')=' + SIN_SALIDA]);
+    rows.push([agotado + 2, 'Congestion', '3']);
+    rows.push([agotado + 3, 'Hangup', '']);
+    return rows;
+  }
+
+  const escribirSaliente = (c, r) => setDialplan(c, 'internal', outExten(r.pattern), filasSalida(r));
+
+  async function troncalesPorNombre(q) {
+    const { rows } = await q.query("SELECT name, COALESCE(kind,'asterisk') AS kind FROM pbxng_trunks");
+    const m = {};
+    for (const t of rows) m[t.name] = t.kind;
+    return m;
+  }
+
+  /* Valida y completa una ruta saliente ANTES de que toque la base o el dialplan.
+   * `actual` = la fila que ya estaba (PUT parcial); null en el alta. */
+  async function normalizarSalida(q, b, actual) {
+    const r = Object.assign({ name: '', pattern: '', trunk: '', strip: 0, prepend: '', callerid: '', backups: [], intento_seg: 20, total_seg: 45 }, actual || {});
+    for (const k of ['name', 'pattern', 'trunk', 'prepend', 'callerid']) if (b[k] !== undefined) r[k] = b[k] == null ? '' : String(b[k]).trim();
+    if (b.strip !== undefined) r.strip = parseInt(b.strip, 10) || 0;
+    if (b.intento_seg !== undefined) r.intento_seg = parseInt(b.intento_seg, 10) || 20;
+    if (b.total_seg !== undefined) r.total_seg = parseInt(b.total_seg, 10) || 45;
+    if (b.backups !== undefined) r.backups = Array.isArray(b.backups) ? b.backups : String(b.backups || '').split(',');
+    r.backups = (Array.isArray(r.backups) ? r.backups : []).map((x) => String(x || '').trim()).filter(Boolean);
+    /* El '_' es de la tabla realtime (`pbx_realtime` sólo hace match de patrón sobre las
+     * filas que empiezan con '_'), no del dato: se guarda sin él, como hasta ahora. */
+    r.pattern = String(r.pattern || '').replace(/^_/, '');
+    if (!r.pattern) throw malPedido('patrón requerido');
+    if (!PATRON_OK.test(r.pattern)) throw malPedido('patrón inválido: sólo dígitos, letras de patrón (X Z N), . ! * # + y [rangos]');
+    if (r.prepend && !PREPEND_OK.test(r.prepend)) throw malPedido('lo que se antepone sólo puede ser dígitos, +, * o #');
+    if (r.callerid && !CID_OK.test(r.callerid)) throw malPedido('el CallerID saliente sólo puede ser dígitos y +');
+    r.strip = Math.min(20, Math.max(0, r.strip));
+    r.intento_seg = Math.min(120, Math.max(5, r.intento_seg));
+    r.total_seg = Math.min(300, Math.max(r.intento_seg, r.total_seg));
+    if (!r.trunk) r.trunk = await defaultOutTrunk(q);
+    if (!r.trunk) throw malPedido('No hay ninguna troncal por donde salir: creá una troncal de operador primero (o conectá un SBC-NG en Configuración → SBC-NG).');
+    const conocidas = await troncalesPorNombre(q);
+    const vistas = new Set();
+    const revisar = (n, quees) => {
+      if (!TRONCAL_OK.test(n)) throw malPedido(quees + ' inválida: el nombre sólo puede tener letras, dígitos, punto, guion y guion bajo');
+      if (!(n in conocidas)) throw malPedido('la troncal «' + n + '» no existe');
+      if (NO_SALEN.includes(conocidas[n])) throw malPedido('la troncal «' + n + '» es de cliente WebRTC: no sirve para salir a la calle');
+      if (vistas.has(n)) throw malPedido('la troncal «' + n + '» está repetida en la ruta');
+      vistas.add(n);
+    };
+    revisar(r.trunk, 'troncal principal');
+    if (r.backups.length > 5) throw malPedido('como máximo 5 troncales de respaldo');
+    for (const n of r.backups) revisar(n, 'troncal de respaldo');
+    /* Último paso, y ACÁ y no en `escribirSaliente()`: la pregunta se hace con el patrón ya
+     * normalizado y ANTES de que la fila entre (o se mueva) en `pbxng_outbound_routes`, así
+     * que el único que puede reclamar ese número es OTRO —un código de función, una DISA, un
+     * abreviado global, el fax, la salida directa de una troncal, otra ruta saliente—. Sin
+     * esto, `escribirSaliente()` (DELETE + INSERT) le borraba el dialplan al otro en
+     * silencio: se borraba una ruta `_*21*.`, el admin publicaba ahí el código de desvío
+     * porque el número figuraba libre, y al recrear la ruta el código desaparecía. */
+    await dueno.exigirLibre(q, outExten(r.pattern), 'outbound', actual ? actual.id : null);
+    return r;
+  }
+
   app.get('/api/routes/outbound', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id,name,pattern,trunk,strip,prepend,callerid FROM pbxng_outbound_routes ORDER BY id'); res.json(rows); }
+    try { const { rows } = await pool.query('SELECT ' + COLS_OUT + ' FROM pbxng_outbound_routes ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   // Troncal de salida por defecto. Con el modulo "Conexion a SBC-NG" activo y la troncal
@@ -242,31 +501,154 @@ module.exports = function init(deps) {
       return r.rows[0] ? r.rows[0].name : null;
     } catch (_) { return null; }
   }
+
+  /* Qué troncal cursó la última llamada de cada ruta, según la AstDB. Se lee por CLI y no
+   * por evento: el dialplan escribe la marca en cada llamada y acá sólo interesa el ÚLTIMO
+   * valor, así que una lectura cada tanto alcanza y no depende de haber estado escuchando. */
+  async function leerEnUso() {
+    const out = {};
+    try {
+      const txt = await amiCommand('database show ' + FAM_RUTA);
+      const rx = new RegExp('^/' + FAM_RUTA + '/(\\S+)\\s*:\\s*(\\S+)');
+      for (const line of String(txt).split('\n')) {
+        const m = rx.exec(line.trim());
+        if (m) out[m[1]] = m[2];
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  /* Estado del failover de cada ruta saliente: la cadena ordenada de troncales, el estado
+   * real de cada una y cuál está cursando ahora. Lo usa el panel (pantalla de rutas) y el
+   * motor de alertas, así que va con un cache corto: las dos cosas preguntan cada minuto o
+   * menos y por debajo hay comandos AMI y sondeos OPTIONS. */
+  let _foCache = { t: 0, v: null };
+  async function failoverStates(fresh) {
+    if (!fresh && _foCache.v && Date.now() - _foCache.t < 8000) return _foCache.v;
+    const { rows } = await pool.query('SELECT ' + COLS_OUT + ' FROM pbxng_outbound_routes ORDER BY id');
+    let est = {};
+    if (rows.length) {
+      const { rows: tk } = await pool.query("SELECT id,name,provider_host,provider_port,username,do_register,tenant_id,COALESCE(kind,'asterisk') AS kind,adv_config FROM pbxng_trunks ORDER BY id");
+      try { est = await trunkStatuses(tk); } catch (_) { est = {}; }
+    }
+    const conResp = rows.filter((r) => Array.isArray(r.backups) && r.backups.length);
+    const uso = conResp.length ? await leerEnUso() : {};
+    const salida = rows.map((r) => {
+      const backups = Array.isArray(r.backups) ? r.backups : [];
+      const marca = uso[String(r.id)] || '';
+      const cadena = [r.trunk].concat(backups).map((n, i) => ({
+        trunk: n, rol: i === 0 ? 'principal' : 'respaldo',
+        estado: (est[n] && est[n].status) || 'desconocido',
+        detalle: (est[n] && est[n].detail) || '',
+        /* `estado` es para la pantalla; `caida` es lo único con lo que se puede apagar una
+         * troncal en el dialplan (ver `firme` en trunkStatuses). No los mezcles. */
+        caida: !!(est[n] && est[n].firme),
+        sbc: n === SBC_TRUNK,
+        en_uso: n === marca,
+      }));
+      const enUso = cadena.some((x) => x.en_uso) ? marca : null;
+      /* Sin llamadas desde el último arranque no hay marca: mostramos por cuál SALDRÍA
+       * hoy (la primera de la cadena que el sondeo ve viva) en vez de dejar el campo
+       * vacío, que en el panel se lee como «no sé» y no como «todavía nadie llamó». */
+      const prevista = (cadena.find((x) => x.estado === 'online') || cadena[0] || {}).trunk || null;
+      return {
+        id: r.id, name: r.name, pattern: r.pattern, principal: r.trunk, backups,
+        intento_seg: r.intento_seg, total_seg: r.total_seg,
+        en_uso: enUso, prevista, en_respaldo: !!(enUso && enUso !== r.trunk),
+        sin_salida: marca === SIN_SALIDA, cadena,
+      };
+    });
+    _foCache = { t: Date.now(), v: salida };
+    return salida;
+  }
+
+  /* Vuelca a la AstDB qué troncales da por caídas el sondeo (`trunkup/<troncal>`).
+   * Sin esto el dialplan descubre que la principal está muerta pagando el timeout del
+   * Dial: con dos respaldos eso es medio minuto de silencio antes de la primera troncal
+   * que de verdad podía cursar. Fail-open a propósito: si la clave no está (Asterisk recién
+   * arrancado, AMI caído) se intenta igual, que es el comportamiento seguro.
+   *
+   * Escribir '0' es apagar una troncal para TODAS las llamadas salientes, así que se hace
+   * sólo con evidencia positiva de caída (`caida`, no el 'offline' de pantalla) y sólo si el
+   * sondeo de esta vuelta sirvió. Antes esto miraba `estado === 'offline'`, que con ARI
+   * reconectando o con una troncal IP-auth sin qualify da 'offline' para todo: se apagaba la
+   * cadena entera y el dialplan caía derecho en Congestion con las dos troncales sanas.
+   * Y aunque haya evidencia de todas, la principal queda en '1': que el dialplan pague el
+   * timeout de un intento es mucho más barato que dejar la central sin salida por un sondeo
+   * equivocado. */
+  async function refrescarTrunkUp() {
+    const { rows } = await pool.query('SELECT 1 FROM pbxng_outbound_routes WHERE jsonb_array_length(backups) > 0 LIMIT 1');
+    if (!rows.length) return 0;                       // nadie usa failover: no molestamos al AMI
+    const est = await failoverStates(true);
+    const marcas = new Map();                         // troncal → '0' (saltarla) | '1' (intentarla)
+    for (const r of est) {
+      if (!r.backups.length) continue;
+      const todas = r.cadena.every((t) => t.caida);
+      r.cadena.forEach((t, i) => {
+        const apagar = _sondeoFiable && t.caida && !(todas && i === 0);
+        /* Una misma troncal puede ser principal de una ruta y respaldo de otra: si en
+         * alguna hay que intentarla, gana el '1'. */
+        if (!apagar || !marcas.has(t.trunk)) marcas.set(t.trunk, apagar ? '0' : '1');
+      });
+    }
+    for (const [trunk, val] of marcas) {
+      try { await amiAction({ Action: 'DBPut', Family: FAM_UP, Key: trunk, Val: val }); } catch (_) {}
+    }
+    return marcas.size;
+  }
+  const _tUp = setInterval(() => { refrescarTrunkUp().catch(() => {}); }, 60000);
+  if (_tUp.unref) _tUp.unref();                       // que no mantenga vivo el proceso (pruebas)
+  setTimeout(() => { refrescarTrunkUp().catch(() => {}); }, 20000).unref?.();
+
+  /* Literal ANTES que `:id`: Express resuelve en orden y `/failover` no puede quedar
+   * tapada por una ruta con parámetro (mismo criterio que el resto de app.js). */
+  app.get('/api/routes/outbound/failover', async (req, res) => {
+    try { res.json(await failoverStates()); } catch (e) { errorHttp(res, e); }
+  });
+
   app.post('/api/routes/outbound', async (req, res) => {
-    const { name, pattern, trunk, strip = 0, prepend = '', callerid = '' } = req.body || {};
-    if (!pattern) return res.status(400).json({ error: 'patrón requerido' });
+    const b = req.body || {};
+    if (!b.pattern) return res.status(400).json({ error: 'patrón requerido' });
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
-      const tk = (trunk && String(trunk).trim()) || (await defaultOutTrunk(c));
-      if (!tk) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'No hay ninguna troncal por donde salir: creá una troncal de operador primero (o conectá un SBC-NG en Configuración → SBC-NG).' }); }
-      await c.query('INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid) VALUES ($1,$2,$3,$4,$5,$6)', [name || pattern, pattern, tk, +strip || 0, prepend || null, callerid || null]);
-      const rows = []; let p = 1;
-      if (callerid) rows.push([p++, 'Set', 'CALLERID(num)=' + callerid]);
-      rows.push([p++, 'Dial', 'PJSIP/' + (prepend || '') + '${EXTEN:' + (+strip || 0) + '}@' + tk + ',60']);
-      rows.push([p++, 'Hangup', '']);
-      await setDialplan(c, 'internal', outExten(pattern), rows);
-      await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: pattern, trunk: tk });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+      const r = await normalizarSalida(c, b, null);
+      const { rows } = await c.query(
+        'INSERT INTO pbxng_outbound_routes (name,pattern,trunk,strip,prepend,callerid,backups,intento_seg,total_seg) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING ' + COLS_OUT,
+        [r.name || r.pattern, r.pattern, r.trunk, r.strip, r.prepend || null, r.callerid || null, JSON.stringify(r.backups), r.intento_seg, r.total_seg]);
+      await escribirSaliente(c, rows[0]);
+      await c.query('COMMIT'); _foCache.v = null; broadcastSoon();
+      res.status(201).json({ created: r.pattern, trunk: r.trunk, id: rows[0].id, backups: r.backups });
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
+  });
+  /* Editar en vez de borrar y rehacer: reordenar los respaldos desde el panel no puede
+   * dejar el patrón unos segundos sin dialplan (en esos segundos nadie sale a la calle). */
+  app.put('/api/routes/outbound/:id', async (req, res) => {
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }
+    try {
+      await c.query('BEGIN');
+      const { rows: viejo } = await c.query('SELECT ' + COLS_OUT + ' FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
+      if (!viejo[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'ruta inexistente' }); }
+      const r = await normalizarSalida(c, req.body || {}, viejo[0]);
+      // El patrón ES la extensión: si cambió hay que borrar la vieja o queda marcable.
+      if (outExten(viejo[0].pattern) !== outExten(r.pattern)) await dueno.borrarPropio(c, outExten(viejo[0].pattern), 'outbound', viejo[0].id, log);
+      const { rows } = await c.query(
+        'UPDATE pbxng_outbound_routes SET name=$2, pattern=$3, trunk=$4, strip=$5, prepend=$6, callerid=$7, backups=$8, intento_seg=$9, total_seg=$10 WHERE id=$1 RETURNING ' + COLS_OUT,
+        [req.params.id, r.name || r.pattern, r.pattern, r.trunk, r.strip, r.prepend || null, r.callerid || null, JSON.stringify(r.backups), r.intento_seg, r.total_seg]);
+      await escribirSaliente(c, rows[0]);
+      await c.query('COMMIT'); _foCache.v = null; broadcastSoon(); res.json(rows[0]);
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.delete('/api/routes/outbound/:id', async (req, res) => {
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
-      const { rows } = await c.query('SELECT pattern FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
-      if (rows[0]) await c.query("DELETE FROM extensions WHERE context='internal' AND exten=$1", [outExten(rows[0].pattern)]);
+      const { rows } = await c.query('SELECT id, pattern FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
+      // Primero el dialplan (y sólo el propio), después la fila: `borrarPropio` necesita que
+      // la fila siga estando para reconocer la extensión como nuestra.
+      if (rows[0]) await dueno.borrarPropio(c, outExten(rows[0].pattern), 'outbound', rows[0].id, log);
       await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
-      await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
+      await c.query('COMMIT'); _foCache.v = null; broadcastSoon(); res.json({ deleted: req.params.id });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
 
@@ -275,10 +657,15 @@ module.exports = function init(deps) {
    * sprint 6 la llamó `DB(nightmode)` a secas, pero la función DB() de Asterisk exige
    * familia/clave (func_db.c), así que acá y allá se usa `DB(nightmode/modo)`. */
   const NIGHTMODE = 'DB(nightmode/modo)';
-  const DEST_OK = ['interno', 'ivr', 'cola', 'app'];
+  /* `fax` (sprint 10, fax.js): el DID entra directo a una caja de fax. El destino es el id
+   * de la caja y el dialplan de `fax-rx-<id>` (ReceiveFAX + aviso a la API) lo escribe
+   * fax.js, que es el dueño de esa extensión: acá sólo se salta a ella. */
+  const DEST_OK = ['interno', 'ivr', 'cola', 'app', 'fax'];
 
   function inboundRows(dest_type, v) {
     if (dest_type === 'ivr') return [[1, 'Goto', 'ivr,' + v + ',1']];
+    // Sólo dígitos: el id de la caja va crudo al Goto (mismo criterio que el resto del módulo).
+    if (dest_type === 'fax') return [[1, 'Goto', 'from-trunk,fax-rx-' + String(v).replace(/[^0-9]/g, '') + ',1']];
     if (dest_type === 'cola') return [[1, 'Answer', ''], [2, 'Queue', v], [3, 'Hangup', '']];
     if (dest_type === 'app') return [[1, 'Goto', 'internal,' + v + ',1']];
     return [[1, 'Dial', 'PJSIP/' + v + ',30'], [2, 'Voicemail', v + '@default,u'], [3, 'Hangup', '']];
@@ -348,6 +735,9 @@ module.exports = function init(deps) {
   function validarEntrante(b) {
     if (b.dest_type && !DEST_OK.includes(b.dest_type)) throw Object.assign(new Error('destino inválido: ' + b.dest_type), { status: 400 });
     if (b.dest_cerrado_type && !DEST_OK.includes(b.dest_cerrado_type)) throw Object.assign(new Error('destino fuera de hora inválido: ' + b.dest_cerrado_type), { status: 400 });
+    // El destino de fax es el id de una caja: sin dígitos el Goto quedaría apuntando a `fax-rx-`.
+    if (b.dest_type === 'fax' && !/^[0-9]+$/.test(String(b.dest_value || ''))) throw Object.assign(new Error('elegí a qué caja de fax entra el DID'), { status: 400 });
+    if (b.dest_cerrado_type === 'fax' && !/^[0-9]+$/.test(String(b.dest_cerrado_value || ''))) throw Object.assign(new Error('elegí a qué caja de fax va fuera de hora'), { status: 400 });
   }
 
   app.get('/api/routes/inbound', async (req, res) => {
@@ -421,6 +811,12 @@ module.exports = function init(deps) {
       gateway: o.gateway || (o.adv_config && o.adv_config.gateway) || '',
     };
   }
+  /* La extensión que publica la salida directa de una troncal. Tiene que dar EXACTAMENTE lo
+   * mismo que la expresión de `pbxng_trunks` en `dueno-internal.js`, porque las dos hablan
+   * del mismo número: acá desde `adv_config` ya parseado, allá desde el JSON en SQL. */
+  const extenSalida = (a) => '_' + ((a && a.outbound_prefix) || 'X') + '.';
+  const publicaSalida = (a) => !!a && a.outbound_enabled !== false;
+
   async function writeAsteriskTrunk(c, name, a, password, tenant_id) {
     for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]);
     const tr = TRUNK_TRANSPORT[a.transport] || 'transport-udp';
@@ -442,9 +838,14 @@ module.exports = function init(deps) {
         [name, `sip:${a.provider_host}:${a.provider_port}${tsuf}`, cli, hasAuth ? name : null, a.retry_interval, a.expiration, tr]);
     }
     if (a.outbound_enabled) {
-      const pre = a.outbound_prefix || '';
-      const exten = '_' + (pre ? pre : 'X') + '.';
+      const exten = extenSalida(a);
       const dialNum = a.outbound_strip ? `${'${EXTEN:' + a.outbound_strip + '}'}` : '${EXTEN}';
+      /* «Crear ruta de salida automática» publica en el contexto compartido como cualquier
+       * otro: si el prefijo ya lo usa otra troncal, un código de función o una aplicación,
+       * se corta con 409 diciendo quién en vez de borrarle el dialplan. El prefijo y el
+       * interruptor están los dos en el formulario de la troncal, así que el que mira la
+       * pantalla puede arreglarlo sin salir de ahí. */
+      await dueno.exigirLibre(c, exten, 'troncal', name);
       await setDialplan(c, 'internal', exten, [[1, 'NoOp', 'Salida ' + name], [2, 'Dial', 'PJSIP/' + dialNum + '@' + name + ',60'], [3, 'Hangup', '']]);
     }
   }
@@ -546,7 +947,7 @@ module.exports = function init(deps) {
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
-      const { rows: ex } = await c.query("SELECT COALESCE(kind,'asterisk') AS kind FROM pbxng_trunks WHERE name=$1", [name]);
+      const { rows: ex } = await c.query("SELECT COALESCE(kind,'asterisk') AS kind, adv_config FROM pbxng_trunks WHERE name=$1", [name]);
       if (!ex[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'troncal no existe' }); }
       const { rows: oldAuth } = await c.query('SELECT password FROM ps_auths WHERE id=$1', [name]);
       const oldPass = oldAuth[0] ? oldAuth[0].password : null;
@@ -561,6 +962,15 @@ module.exports = function init(deps) {
       const a = trunkDefaults(b);
       const pass = password || oldPass;
       if (a.mode === 'register' && !(a.username && pass)) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'usuario y contraseña requeridos en modo Registro' }); }
+      /* Cambiar el prefijo de salida (o apagar la ruta automática) tiene que llevarse el
+       * dialplan VIEJO, y sólo si sigue siendo el nuestro: hasta ahora quedaba publicado para
+       * siempre, marcando por una troncal que el administrador creía que ya no usaba ese
+       * prefijo. Va ANTES del UPDATE para que la fila todavía reclame la extensión vieja. */
+      const viejoAdv = ex[0].adv_config;
+      if (publicaSalida(viejoAdv)) {
+        const anterior = extenSalida(viejoAdv);
+        if (!a.outbound_enabled || anterior !== extenSalida(a)) await dueno.borrarPropio(c, anterior, 'troncal', name, log);
+      }
       await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='asterisk', kam_config=NULL, adv_config=$5 WHERE name=$6", [a.provider_host, a.provider_port, a.username || null, a.mode === 'register', JSON.stringify(a), name]);
       await writeAsteriskTrunk(c, name, a, pass, tenant_id);
       await c.query('COMMIT'); res.json({ updated: name, mode: a.mode });
@@ -569,7 +979,34 @@ module.exports = function init(deps) {
 
   app.delete('/api/trunks/:name', async (req, res) => {
     const { name } = req.params; const c = await pool.connect();
-    try { await c.query('BEGIN'); for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]); await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]); if (name === SBC_TRUNK) { await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'"); _sbcLinkCache.v = null; } await c.query('COMMIT'); res.json({ deleted: name }); }
+    try {
+      await c.query('BEGIN');
+      /* Su salida directa se va con ella: si no, el `_<prefijo>.` seguía publicado marcando
+       * contra un endpoint que ya no existe (el mismo problema que este handler ya arregla
+       * unas líneas más abajo para los respaldos de las rutas). Antes de borrar la fila,
+       * para que `borrarPropio` pueda reconocer la extensión como nuestra. */
+      const { rows: quedaba } = await c.query('SELECT adv_config FROM pbxng_trunks WHERE name=$1', [name]);
+      if (quedaba[0] && publicaSalida(quedaba[0].adv_config)) await dueno.borrarPropio(c, extenSalida(quedaba[0].adv_config), 'troncal', name, log);
+      for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]);
+      await c.query('DELETE FROM pbxng_trunks WHERE name=$1', [name]);
+      if (name === SBC_TRUNK) { await c.query("INSERT INTO pbxng_settings(key,value) VALUES('sbc_link_removed','1') ON CONFLICT(key) DO UPDATE SET value='1'"); _sbcLinkCache.v = null; }
+      /* Sacarla de los respaldos de las rutas que la nombraban y reescribir su dialplan.
+       * Si no, el failover seguiría marcando contra un endpoint que ya no existe: un salto
+       * perdido y unos segundos de silencio en cada llamada, sin nada en el panel que lo
+       * explique (la troncal ya no está en la lista). */
+      const { rows: afect } = await c.query('SELECT ' + COLS_OUT + ' FROM pbxng_outbound_routes WHERE backups @> to_jsonb($1::text)', [name]);
+      for (const r of afect) {
+        r.backups = (r.backups || []).filter((x) => x !== name);
+        await c.query('UPDATE pbxng_outbound_routes SET backups=$2 WHERE id=$1', [r.id, JSON.stringify(r.backups)]);
+        /* Acá NO se vuelve a preguntar quién ocupa la extensión: la ruta está reescribiendo su
+         * propio dialplan, en su propio patrón, sin que nadie haya elegido un número nuevo. Un
+         * 409 en este punto sólo lograría que no se pueda borrar una troncal. */
+        await escribirSaliente(c, r);
+      }
+      await c.query('COMMIT'); _foCache.v = null;
+      if (afect.length) broadcastSoon();
+      res.json({ deleted: name, rutas_sin_respaldo: afect.length });
+    }
     catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
 
@@ -591,5 +1028,5 @@ module.exports = function init(deps) {
    * para que la próxima consulta lo refleje. */
   function invalidarSbcLink() { _sbcLinkCache.v = null; }
 
-  return { sbcLink, upsertSbcLink, invalidarSbcLink, trunkStatuses, defaultOutTrunk, regenerarEntrantes, SBC_TRUNK };
+  return { sbcLink, upsertSbcLink, invalidarSbcLink, trunkStatuses, defaultOutTrunk, regenerarEntrantes, failoverStates, filasSalida, SBC_TRUNK };
 };

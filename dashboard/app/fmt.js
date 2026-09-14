@@ -66,11 +66,30 @@ export function fmtBytes(n) {
   return (+n < 0 ? '-' : '') + v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
 }
 
+/** Porcentaje en es-UY (`82,5 %`). `null`/`undefined` es «no se pudo calcular» y
+ *  devuelve el guion, que no es lo mismo que 0 %: los informes de call center
+ *  distinguen «nadie llamó» de «no hay con qué medirlo». */
+export function fmtPct(v, { decimales = 1 } = {}) {
+  if (v == null || v === '' || isNaN(+v)) return VACIO;
+  return (+v).toLocaleString(LOCALE, { minimumFractionDigits: 0, maximumFractionDigits: decimales }) + ' %';
+}
+
 /** Uptime en segundos como `3d 4h 12m`. */
 export function fmtUptime(segundos) {
   const s = Math.max(0, parseInt(segundos, 10) || 0);
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
   return (d ? d + 'd ' : '') + h + 'h ' + m + 'm';
+}
+
+/** Fecha y hora para un `<input type="datetime-local">` (`2026-09-22T10:30`).
+ *  No es lo mismo que mostrar una fecha: el input EXIGE ese formato y en hora LOCAL
+ *  (un ISO con `Z` lo deja vacío sin decir por qué). Devuelve '' cuando no hay fecha,
+ *  que es lo que el input entiende como «sin valor». */
+export function fmtInputFechaHora(v) {
+  const d = aFecha(v);
+  if (!d) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /* Nombre comercial del códec: en la interfaz el usuario reconoce «G.711 µ-law»,

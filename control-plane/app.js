@@ -754,6 +754,10 @@ alerts.init(pool, {
     return rows.length ? await trunkStatuses(rows) : {};
   },
   getQueues,
+  /* Failover de troncal: la cadena de cada ruta saliente y por cuál está saliendo ahora.
+     El motor compara contra lo que vio la vez anterior y avisa UNA vez por transición
+     (cae al respaldo / vuelve a la principal), no una por llamada. */
+  rutasFailover: async () => await failoverStates(),
   state,
   /* Estado medido de los nodos, para que las alertas vean lo mismo que el panel.
      Antes checkServices() solo miraba la base y AMI/ARI —el estado interno del
@@ -1192,8 +1196,8 @@ app.post('/api/asterisk/hangup', async (req, res) => {
  * salientes/entrantes, el enlace fijo al SBC-NG (`to-sbc`, módulo `sbc`) y el diagnóstico
  * de troncal. Sus rutas se registran acá, DESPUÉS del gate de auth + RBAC; `sbcLink` es lo
  * único que el resto de la PBX mira para saber si hay un SBC adelante. */
-const { sbcLink, invalidarSbcLink, trunkStatuses, regenerarEntrantes } = require('./trunks')({
-  app, pool, NODES, amiCommand, endpointStates, moduleEnabled, setDialplan, astFwd, salud, diagtrunk, errorHttp,
+const { sbcLink, invalidarSbcLink, trunkStatuses, regenerarEntrantes, failoverStates } = require('./trunks')({
+  app, pool, NODES, amiCommand, amiAction, endpointStates, moduleEnabled, setDialplan, astFwd, salud, diagtrunk, errorHttp,
   broadcastSoon: (...a) => broadcastSoon(...a), logger,
 });
 
@@ -1211,6 +1215,50 @@ const { syncFeatures } = require('./telefonia')({
  * feriados y el modo noche cuando se recrea el contenedor de Asterisk (la astdb vive en
  * la capa de escritura del contenedor, no en un volumen, así que nace vacía). */
 resincronizar.push(syncFeatures, syncRecFlags);
+
+/* Marcación (marcacion.js): DISA, callback, dial-by-name y marcación abreviada. Va
+ * DESPUÉS de telefonia.js porque comparte con él la forma de hablarle al dialplan (AstDB
+ * por AMI + un CURL de vuelta contra 127.0.0.1) y porque sus números cortos no pueden
+ * pisar los códigos de función, que son del catálogo de aquel. DISA y callback nacen
+ * APAGADOS: son la puerta clásica del fraude de tarifación y no se encienden solos. */
+const { syncAbreviados } = require('./marcacion')({
+  app, pool, amiAction, setDialplan, exigirExt, clientIp, agentToken: AGENT_TOKEN,
+  errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), logger,
+});
+resincronizar.push(syncAbreviados);
+
+/* Salas de reunión (salas.js): la sala como objeto administrable —dos PIN, tope de
+ * participantes, música hasta que entra el moderador, anuncios, grabación, agenda,
+ * invitación por correo y la vista en vivo (AMI Confbridge*)—. Mismo reparto que
+ * telefonia.js: Postgres manda, el dialplan lee DB(sala|salapin|salamod/<nombre>), así que
+ * su volcado también entra en `resincronizar`. */
+const { syncSalas } = require('./salas')({
+  app, pool, amiAction, setDialplan, smtpHint, errorHttp,
+  broadcastSoon: (...a) => broadcastSoon(...a), logger,
+});
+resincronizar.push(syncSalas);
+
+/* Fax (fax.js): T.38 entrante y saliente, fax a correo y envío desde el panel. Va DESPUÉS
+ * de trunks.js porque el envío sale por las rutas salientes que aquél publica en `internal`
+ * (`Local/<numero>@internal`), y comparte con telefonia.js / marcacion.js la forma de
+ * hablarle al dialplan: dialplan realtime + un CURL de vuelta contra 127.0.0.1 con el token
+ * del agente. Su `syncFax` entra en `resincronizar` porque además de reescribir el dialplan
+ * reconcilia las columnas de T.38 del endpoint de cada troncal. */
+const { syncFax } = require('./fax')({
+  app, pool, amiAction, amiCommand, setDialplan, clientIp, agentToken: AGENT_TOKEN,
+  smtpHint, errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), logger,
+});
+resincronizar.push(syncFax);
+
+/* Reportes de call center (ccreport.js): métricas por cola y por agente sobre un rango de
+ * fechas, export CSV, informe A4 y envío programado por correo. Lee el MISMO horario de
+ * atención que el modo noche (`pbxng_horarios` + `nightmode_horario_id`) para decidir qué
+ * llamadas entraron fuera de hora, pero lo evalúa dentro del SQL en vez de pedirle el
+ * `tramoAhora` a telefonia.js: contarlo en JavaScript obligaba a traer una fila por minuto
+ * sin ninguna cota. Engancha además su propio consumidor de eventos AMI de cola:
+ * `pbxng_queue_events` es la fuente del informe, porque el CDR no sabe nada de lo que pasa
+ * DENTRO de una cola. */
+require('./ccreport')({ app, pool, ami, alerts, errorHttp, logger });
 
 
 // --- Base de datos (PostgreSQL ARA + control plane) ---
@@ -1675,15 +1723,8 @@ app.get('/api/wallboard', async (req, res) => {
 });
 
 
-app.get('/api/conferences', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,pin FROM pbxng_conferences ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
-app.post('/api/conferences', async (req, res) => {
-  const { name, label, access_exten, pin } = req.body || {};
-  if (!name || !access_exten) return res.status(400).json({ error: 'name y access_exten son obligatorios' });
-  const c = await pool.connect();
-  try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_conferences (name,label,access_exten,pin) VALUES ($1,$2,$3,$4)', [name, label || name, access_exten, pin || null]); const rows = [[1, 'Answer', '']]; let p = 2; if (pin) rows.push([p++, 'Authenticate', String(pin)]); rows.push([p++, 'ConfBridge', name]); rows.push([p++, 'Hangup', '']); await setDialplan(c, 'ivr', access_exten, rows); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name, access_exten }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
-});
-app.delete('/api/conferences/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_conferences WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_conferences WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
+/* Las salas de reunión (antes `conferences`: nombre, número y un PIN opcional) se fueron
+ * a salas.js con el resto de lo que pide el ítem 9 de docs/BRECHA-UCM-XORCOM.md. */
 
 // --- Captura de llamada: grupo por interno (ps_endpoints; el aparcado y la MOH están en apps.js) ---
 app.get('/api/pickup-groups', async (req, res) => {

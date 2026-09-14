@@ -2,6 +2,212 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.10.0] - 2026-09-14
+Sprint 7: cierra el **bloque B** de `docs/BRECHA-UCM-XORCOM.md` —lo que se pide en una
+licitación y lo que firma un supervisor— salvo la alta disponibilidad, que sigue pendiente.
+Entran **reportes de call center**, **failover de troncal**, **DISA / callback / dial-by-name /
+marcación abreviada**, **salas de reunión con PIN y agenda** y **fax T.38**. Cinco módulos
+nuevos en la API (`ccreport.js`, `marcacion.js`, `salas.js`, `fax.js`, más el failover dentro de
+`trunks.js`), cuatro pantallas nuevas en el panel (`/reportes`, `/salas`, `/fax` y la tarjeta de
+failover en Rutas → Salientes) y **seis migraciones** (`0012` a `0017`), que las corre sola la
+API al arrancar.
+
+**Antes de actualizar**, en este orden:
+1. `docker compose build asterisk` — `up -d` a secas NO alcanza: `modules.conf` está **adentro
+   de la imagen** y ahora exige `app_directory.so` y `app_read.so` (dial-by-name y los `Read()`
+   de DISA y callback) y `func_hangupcause.so` (la escalera de failover de troncal). Una imagen
+   vieja no tiene el `require` y una nueva sin esos módulos no arranca, que es exactamente lo
+   que se busca: una DISA que atiende y corta sin decir nada es de lo más caro de diagnosticar
+   por teléfono. El build corta solo si alguno falta: los tres están en la lista de REQUERIDOS
+   del gate de `docker/images/asterisk/Dockerfile`, y el entrypoint lo vuelve a avisar al
+   arrancar.
+2. **El fax no funciona hasta que empaquetado ponga los paquetes** (ver *Known issues*). Todo lo
+   demás sí. La pantalla `/fax` lo dice en rojo, con el nombre exacto de lo que falta.
+3. Si venís usando **callback en modo PIN**, la migración `0017` lo **apaga**: leé por qué en
+   *Changed*.
+### Added
+- **Reportes de call center** (`control-plane/ccreport.js`, migración `0012_ccreport.sql`,
+  pantalla **Operación → Reportes de call center**). Nivel de servicio, abandono, espera media
+  y máxima, conversación media y total, por **cola** y por **agente**, con CSV e informe A4 para
+  imprimir a PDF, y **envío programado por correo** (diario, semanal o mensual, con sus
+  destinatarios y un botón de «probar envío»). La fuente **no es el CDR** sino una tabla nueva,
+  `pbxng_queue_events`, que llena un consumidor AMI (`QueueCallerJoin`, `AgentConnect`,
+  `AgentComplete`, `QueueCallerAbandon`, `AgentRingNoAnswer`): el CDR no distingue «esperó 40 s
+  en cola y colgó» de «sonó 40 s en un interno», y sin esa distinción no hay nivel de servicio
+  ni abandono. `QueueCallerLeave` **no** se guarda —Asterisk también lo emite cuando la llamada
+  sale porque la atendieron— así que las salidas por desborde o timeout se deducen y se muestran
+  aparte, como «otras salidas». Los porcentajes son `null` (guion en pantalla) y **no 0** cuando
+  no hubo llamadas, el rango está acotado a 92 días y las llamadas fuera de horario se cuentan
+  aparte usando el horario de atención de 1.9.0. Retención configurable en
+  `pbxng_settings.cc_retencion_dias` (365 días; 0 = nunca).
+- **Failover de troncal** (`control-plane/trunks.js`, migración `0013_trunk_failover.sql`,
+  tarjeta **«Failover de troncal»** en Rutas → Salientes). Cada ruta saliente pasa a tener una
+  troncal principal **más una lista ordenada de respaldos** (`pbxng_outbound_routes.backups`),
+  con `intento_seg` (20 s, acotado 5–120) y `total_seg` (45 s, acotado hasta 300) para que el
+  que llama no escuche timbrar tres veces. Salta a la siguiente **sólo** con `DIALSTATUS`
+  `CONGESTION` o `CHANUNAVAIL`, y **anula el salto** si `HANGUPCAUSE` dice que el corte lo puso
+  el destino (1/2/3 número inexistente, 17 ocupado, 19, 20, 22): Asterisk mapea al
+  mismo `CONGESTION` un 503 de la troncal y un 404 del destino, y saltar en el segundo caso es
+  hacer sonar el teléfono dos veces y pagar dos llamadas. La causa **21** necesita además el
+  código SIP: es la misma para el 401/403/407 del proveedor (salta) y para el **603 Decline del
+  destino** (no salta), así que el dialplan lee `HANGUPCAUSE(${HANGUPCAUSE_KEYS()},tech)`.
+  Nuevo `PUT /api/routes/outbound/:id`
+  (faltaba: una ruta saliente sólo se podía crear y borrar) y
+  `GET /api/routes/outbound/failover` (admin), que es lo que muestra **por cuál troncal está
+  saliendo cada ruta ahora mismo**. Aviso por correo `trunk.failover` **una vez por transición**,
+  no una por llamada.
+- **DISA, callback, dial-by-name y marcación abreviada** (`control-plane/marcacion.js`,
+  migraciones `0015_marcacion.sql` y `0017_callback_rutas.sql`). **DISA y callback nacen
+  apagados**: son la puerta clásica del fraude de tarifación. El **PIN vive en bcrypt en
+  Postgres y nunca en el dialplan** —ahí lo lee cualquiera con `dialplan show` o con acceso a la
+  tabla realtime `extensions`, y `Authenticate()` tampoco sabe contar intentos—: el dialplan
+  pregunta por CURL a **`POST /api/internal/disa`** (loopback + sin cabecera de proxy + el
+  secreto de `/etc/pbxng/agent.token`, el mismo candado de tres llaves que `internal/feature`) y
+  la API compara, cuenta los fallos por CallerID de origen, bloquea y registra cada uso en
+  `pbxng_marcacion_log`. **Qué se puede marcar lo decide la API, no el dialplan**: cada DISA
+  (y cada callback en modo PIN) lleva la lista de rutas salientes que tiene habilitadas. El PIN
+  no puede ser el número de un interno, ni dígitos repetidos, ni una secuencia. El dial-by-name
+  es `Directory()` con los prompts `dir-*` que ya venían en el paquete de audios en español
+  uruguayo, y la marcación abreviada tiene números cortos **globales** y una libreta **personal**
+  por interno (`GET|PUT /api/extensions/:ext/abreviados`, que el agente cambia solo para sí
+  mismo, igual que sus desvíos). **Todavía no tiene pantalla**: se configura por API (pedido a
+  `panel`).
+- **Salas de reunión** (`control-plane/salas.js`, migración `0014_salas_reunion.sql`, pantalla
+  **Aplicaciones → Salas de reunión**; reemplaza a las «Conferencias» sueltas de `app.js`). Una
+  sala es un número, **dos PIN** —participante y moderador, distintos y generados al azar si no
+  se escriben—, tope de participantes, **música en espera hasta que entra el moderador**,
+  anuncio de entradas y salidas, grabación opcional y, si la reunión está agendada, una ventana
+  fuera de la cual la sala no abre. Vista **en vivo** de quién está adentro con silenciar y
+  expulsar (AMI `Confbridge*`) e **invitación por correo** con el PIN que corresponda. Todos los
+  perfiles se fijan con la función `CONFBRIDGE()` en el dialplan y no con un archivo por sala:
+  un perfil en `pbxng.d/` obligaría a `module reload app_confbridge` en cada cambio, que desarma
+  las reuniones en curso. El listado **no devuelve los PIN** (sólo `tiene_pin`): el de moderador
+  silencia y expulsa, así que verlo en una lista es ser moderador de todas las salas sin dejar
+  rastro. **Las salas que ya existían no se tocan**: la migración `0014` no le pone PIN a
+  ninguna (ver *Changed*).
+- **Fax T.38** (`control-plane/fax.js`, migración `0016_fax.sql`, pantalla **Aplicaciones →
+  Fax** con *Recibidos · Enviados · Enviar · Configuración*). Una ruta entrante se marca como
+  **Fax** y entra a una **caja**, que tiene su correo de destino, su CSID y su cabecera:
+  `ReceiveFAX` → TIFF → PDF → correo, con el TIFF guardado. La detección de tono (CNG) en rutas
+  de voz se hace con `fax_detect` del endpoint de la troncal. El envío es una **cola con
+  reintentos** (un fax que no entra a la primera es lo normal) y sale por la ruta saliente de
+  siempre, con su prefijo, su CallerID y su failover. T.38 se pide con `z` pero **siempre** con
+  respaldo en audio (`f`): con SBC-NG en el medio o sin él, el fax sale. El PDF se manda como
+  **cuerpo crudo** (`Content-Type: application/pdf`) y se valida antes de tocar nada: tope de
+  tamaño, firma `%PDF-`/`%%EOF` y tope de páginas; el número admite separadores pero
+  **cualquier otro carácter se rechaza en vez de limpiarse** (un `*21*099…` «limpiado» a dígitos
+  sería marcar un número que nadie pidió). **`GET /api/fax/estado`** dice qué falta en el
+  servidor con nombre y apellido —ghostscript, tiff2pdf, `res_fax_spandsp`, permiso de escritura
+  del spool— en vez de dejar que el fax falle en medio de una llamada. Hay además un barrido del
+  spool que importa el TIFF que quedó sin aviso (el que llamaba colgó dos segundos antes): saca
+  la caja del **nombre del archivo** y, si no la puede deducir, el fax entra **sin correo** y con
+  el motivo a la vista — adivinar el destinatario filtraba el documento a otra área.
+- `modules.conf`: `require = app_directory.so` y `require = app_read.so` (ver *Antes de
+  actualizar*).
+- Variables de entorno nuevas, todas opcionales y con default: **`FAX_DIR`** (`/recordings/fax`)
+  y **`FAX_DIR_AST`** (`/var/spool/asterisk/monitor/fax`) —los dos nombres del **mismo**
+  directorio, el de la API y el de Asterisk—, `FAX_MAX_MB` (tope duro del PDF), `FAX_TICK_MS`,
+  `FAX_CONVERT_MS` y `SALAS_AGENDA_MS` (cada cuánto el reloj abre y cierra las salas agendadas).
+- Reglas de RBAC explícitas para todo lo nuevo (`control-plane/rbac.js`, que sigue siendo
+  deny-by-default). Lo que es **operación** llega a supervisor: ver y exportar los reportes, ver
+  por qué troncal sale cada ruta, ver el registro de uso de DISA y callback, moderar una sala
+  (ver quién está, silenciar, expulsar) y las dos bandejas de fax **incluido mandar un fax**.
+  Lo que es **configuración** queda en admin y cae al default: programar los envíos por correo,
+  reordenar los respaldos, crear salas e **invitar** (la invitación lleva el PIN), configurar
+  DISA, callback, abreviados globales, cajas de fax y T.38, y **borrar un fax recibido** (es un
+  documento: borrarlo es la misma decisión que borrar una grabación).
+- Pruebas: `ccreport`, `marcacion`, `salas`, `fax` y `fax-barrido` `.test.js`, más las nuevas de
+  `trunks.test.js`. La suite pasa de **44 a 91** pruebas de integración (~51 s) contra un
+  PostgreSQL efímero, como las anteriores. Entre otras cosas se verifica explícitamente que
+  **el PIN de la DISA no aparece en el dialplan generado**.
+### Changed
+- **Salas que venían de 1.9.x: se quedan como estaban, y su plan de marcado se republica.**
+  Una versión anterior de la migración `0014` le ponía un **PIN al azar** a toda sala que no
+  tenía. Estaba mal por dos motivos y se sacó: (1) la migración **no reescribe el dialplan**, así
+  que la base quedaba diciendo un PIN que el dialplan no pedía —el administrador veía en el panel
+  un PIN que no rige, se lo dictaba a un invitado y la reunión no abría—; (2) que una sala no
+  pida PIN es una **decisión que alguien tomó** (recepción, soporte) y una actualización no es el
+  lugar para cambiarle la política de acceso a una central que está andando. En su lugar, al
+  arrancar la API **republica el dialplan de todas las salas** desde lo que dice Postgres —sólo
+  si difiere del publicado—, para que las funciones nuevas (tope de participantes, grabación,
+  música hasta el moderador, anuncios, agenda) les apliquen **sin editarlas una por una**. El
+  plan generado refleja la fila tal cual: una sala **sin PIN sigue sin pedir PIN** y, sin PIN de
+  moderador, **no** se pone `wait_marked` —nadie podría entrar como moderador y la reunión entera
+  se quedaría escuchando música para siempre—. El panel las nombra en un aviso arriba de la tabla
+  y la columna PIN pasa a tener tres estados: «Configurado», «Sin moderador» y «Sin PIN»
+  (`GET /api/salas` devuelve ahora `tiene_pin` **y** `tiene_pin_mod`). **Qué mirar después de
+  actualizar:** la pantalla **Aplicaciones → Salas de reunión**; si hay un aviso naranja, esas
+  salas se siguen usando sin PIN igual que antes — editalas sólo si querés que pidan uno.
+- **El consumidor de eventos de cola del informe ya no le puede ganar el pool a las llamadas.**
+  `ccreport.js` hacía un `INSERT` por evento de cola, sin `await` y sin ninguna cota, sobre el
+  **mismo pool de 10 conexiones** (`PG_POOL_MAX`) que usan los `CURL()` del dialplan: el PIN de
+  la DISA, el aviso de código de función y el fin de un fax. Con un pico de cola —o con la base
+  lenta un rato por un vacuum, el respaldo nocturno o la poda de `pbxng_sec_events`— las
+  adquisiciones de conexión se encolaban sin límite dentro de `pg.Pool`, y las que quedaban atrás
+  eran las del **camino de llamada**: el `CURL()` volvía vacío y la DISA rechazaba la llamada.
+  Ahora los eventos se juntan en memoria y se vuelcan en un **INSERT multi-fila cada dos
+  segundos**, de a **un volcado por vez**: el informe ocupa como máximo **1 conexión de las 10**
+  y hace como mucho **1 adquisición cada `CC_LOTE_MS`**, pase lo que pase con el volumen. El
+  buffer tiene tope (`CC_LOTE_TOPE`, 2000 eventos) y pasado ese tope **descarta** con aviso en el
+  log: perder filas del informe se ve y se aguanta, frenar una llamada no. El `ts` se toma cuando
+  llega el evento, no en el INSERT, así el informe sigue midiendo la hora de la llamada. Ajustable
+  con `CC_LOTE_MS`, `CC_LOTE_TOPE` y `CC_LOTE_FILAS` (ver `docs/CONTRATOS.md` §6).
+- **La imagen de Asterisk se reconstruye** (`docker/config/asterisk/modules.conf`). Es el único
+  componente del sprint que lo obliga; el dialplan de fax, salas, DISA, callback, dial-by-name y
+  abreviados es **realtime**, generado desde el panel, y no toca `extensions.conf`.
+- **Las «Conferencias» dejan de vivir en `app.js`** y pasan a `salas.js` como salas de reunión.
+  `/api/conferences` ya no existe: el menú **Aplicaciones → Conferencias** ahora es
+  **Aplicaciones → Salas de reunión** y `/aplicaciones/conf` muestra la pantalla nueva, así que
+  un enlace guardado sigue funcionando.
+- **Un callback en modo PIN que estuviera encendido queda apagado** (migración
+  `0017_callback_rutas.sql`). El callback devuelve la llamada al CallerID de quien llamó, y el
+  CallerID se falsea con dos líneas en cualquier softphone: en modo lista blanca eso lo frena la
+  lista, pero en modo PIN no había **nada** —quien adivinara el PIN se anunciaba como un número
+  premium internacional y la central lo llamaba, con el tope diario como único freno—. Ahora un
+  callback en modo PIN **exige** la lista de rutas habilitadas para poder encenderse, y no hay
+  forma de adivinar cuál quería el administrador de los que ya existían.
+- `control-plane/app.js` registra cuatro módulos más. Orden efectivo: gate → `auth.js` →
+  `sipconf.js` → `callengine.js` → `recordings.js` → `apps.js` → `trunks.js` → `telefonia.js` →
+  **`marcacion.js`** → **`salas.js`** → **`fax.js`** → **`ccreport.js`** → `guard.js` → 404 →
+  errores. `marcacion.js` va después de `telefonia.js` porque sus números cortos no pueden pisar
+  los códigos de función; `fax.js` después de `trunks.js` porque el envío sale por las rutas
+  salientes que aquél publica; y `ccreport.js` después de `telefonia.js` porque usa su
+  `tramoAhora` para separar las llamadas fuera de hora.
+- El volcado Postgres → AstDB de cada (re)conexión del AMI (`resincronizar`, 1.9.0) suma
+  `syncSalas`, `syncAbreviados` y `syncFax`.
+- `control-plane/report.js` expone su hoja de estilo y sus ayudantes (`CSS`, `barras`, `dona`,
+  `branding`…) para que el informe de call center sea **el mismo informe ejecutivo** que el del
+  CDR y no una copia con otra marca. El resumen diario por correo muestra ahora el pie que antes
+  se descartaba (`emails.js`).
+- Rutas → Entrantes acepta **Fax** como tipo de destino (entrante normal y fuera de hora).
+### Known issues
+- **El fax no funciona con las imágenes de hoy.** La de Asterisk compila sin `libspandsp-dev`,
+  así que **no se construye `res_fax_spandsp`** y `ReceiveFAX`/`SendFAX` no existen; la de la
+  API (node:20-slim) **no trae `ghostscript` ni `libtiff-tools`**, así que no hay conversión
+  PDF ⇄ TIFF. Nada se instaló a mano: el código lo detecta (`GET /api/fax/estado`) y la pantalla
+  lo muestra en rojo con el nombre del paquete. **Pedido a `empaquetado`**, y hasta que esté, el
+  fax es la única función del release que no se puede demostrar.
+- **El fax todavía no tiene volumen propio**: usa un subdirectorio del volumen `recordings`
+  (`/recordings/fax` para la API, `/var/spool/asterisk/monitor/fax` para Asterisk), que es el
+  único ya montado en los dos contenedores. Funciona sin tocar el compose, pero un fax recibido
+  queda mezclado con las grabaciones y hereda su política de retención. También es pedido a
+  `empaquetado`.
+- **Alta disponibilidad sigue sin empezar** (ítem 11 del bloque B). Es lo que UCM vende como
+  «Hot Standby» y Xorcom como «TwinStar», y aparece en todo pliego de licitación.
+- **DISA, callback, dial-by-name y marcación abreviada no tienen pantalla.** La API, el dialplan
+  y las validaciones están y tienen pruebas, pero hoy se configuran con `curl`. Pedido a `panel`.
+- **No hay reportes de call center anteriores a esta versión.** `pbxng_queue_events` empieza a
+  llenarse al actualizar: el informe lo dice (`fuente.rango_incompleto`) y la pantalla lo avisa,
+  pero un supervisor que pida «el mes pasado» el primer día no va a ver nada. Tampoco se mide
+  todavía el tiempo de pausa ni de sesión del agente.
+- **El menú no le muestra `/salas` al supervisor**, aunque la API lo deja ver la lista, entrar a
+  la vista en vivo, silenciar y expulsar: en `dashboard/app/shell.jsx` la lista `SUP_OK` no
+  incluye la pantalla. Llega escribiendo la dirección. Pedido a `panel`.
+- La **AstDB sigue sin volumen propio** (conocido desde 1.9.0) y ahora además sostiene el estado
+  de las salas (`sala/`, `salapin/`, `salamod/`) y la marcación abreviada: recrear el contenedor
+  de Asterisk —que este release obliga a hacer— deja una ventana de ~30–40 s hasta que el
+  re-volcado por AMI las repone. Pedido a `empaquetado`.
+
 ## [1.9.0] - 2026-09-13
 Sprint 6: cierra el **bloque A** de `docs/BRECHA-UCM-XORCOM.md` en lo que hace a **telefonía
 clásica de oficina** — horarios de atención y modo noche, desvíos / no molestar / sígueme por

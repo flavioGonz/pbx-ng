@@ -138,6 +138,16 @@ module.exports = function init(deps) {
     // el panel proxya /backend/** y con trust proxy = 1 la IP que ve la API es la del
     // navegador de cualquiera en la LAN, que también es privada.
     ['POST', /^\/api\/internal\/feature$/],
+    /* Mismo caso y mismo guard que la de arriba (marcacion.js): el dialplan de una DISA
+     * pregunta por CURL si el PIN es correcto y si puede marcar ese número, y el del
+     * callback avisa a quién hay que devolverle la llamada. El PIN NO está en el dialplan
+     * a propósito —ahí lo vería cualquiera con `dialplan show` o con la base—, así que
+     * esta ruta es la que compara el bcrypt, cuenta los intentos y bloquea. */
+    ['POST', /^\/api\/internal\/(disa|callback)$/],
+    /* Mismo caso otra vez (fax.js): al terminar un ReceiveFAX / SendFAX el dialplan avisa
+     * cómo salió (`FAXOPT(status|pages|error…)` sólo existe en el canal). Sin este aviso no
+     * hay forma de saber si el fax entró, ni de mandar por correo el que se recibió. */
+    ['POST', /^\/api\/internal\/fax$/],
     ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
     ['GET',  /^\/api\/softphone\/latest$/],       // el login muestra la version descargable sin sesion
     ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],

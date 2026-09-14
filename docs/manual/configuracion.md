@@ -511,6 +511,76 @@ cual. Si el operador exige formato internacional, ponés `strip=1` y `prepend=59
 
 ![Rutas salientes](img/cfg-32-rutas-salientes.png)
 
+### 8.1 Failover de troncal · qué pasa si el operador se cae
+
+» Menú lateral → Telefonía → Rutas → **Salientes** → tarjeta **Failover de troncal**
+
+Una ruta saliente puede tener una troncal **principal** y una **lista ordenada de respaldos**. Si
+la principal no contesta, la llamada se vuelve a intentar por la siguiente, sin que el usuario
+haga nada y sin que nadie tenga que entrar al panel a la madrugada.
+
+La tarjeta muestra, para cada ruta: la **cadena de salida** en orden, el estado de cada troncal y
+—en la columna *Saliendo ahora por*— **por cuál está cursando en este momento**. Es la respuesta a
+la pregunta del gerente: *"¿por qué las llamadas están saliendo con el otro número?"*.
+
+Con **Respaldos y tiempos** se ordena la cadena (↑ / ↓), se agregan o se quitan respaldos y se
+ajustan los dos tiempos:
+
+| Campo | Qué hace | Valor por defecto |
+|---|---|---|
+| **Por intento** | Cuánto espera en cada troncal antes de pasar a la siguiente | `20` s (entre 5 y 120) |
+| **Tope total** | Cuánto aguanta la cadena entera antes de rendirse | `45` s (hasta 300) |
+
+> **El tope total importa más de lo que parece.** Tres troncales a 20 segundos cada una son
+> sesenta segundos de silencio para el que llama, que ya colgó y volvió a marcar.
+
+**Cuándo salta y cuándo no.** Ésta es la parte que hay que entender antes de armar la cadena:
+
+- **Salta** cuando el corte lo puso la **troncal**: no responde, está congestionada, el operador
+  devuelve un 503.
+- **NO salta** cuando el corte lo puso el **destino**: ocupado, no contesta, número inexistente o
+  llamada rechazada. Si saltara, el teléfono del otro lado sonaría **dos veces** y la llamada se
+  pagaría **dos veces**.
+
+> Asterisk reporta como «congestión» tanto un problema del operador como un número que no existe,
+> así que la central mira además la causa de corte. Es a propósito: preferimos no reintentar de
+> más antes que facturar de más.
+
+**El aviso llega una vez.** Cuando una ruta empieza a salir por un respaldo (o vuelve a la
+principal) sale un correo `trunk.failover`. Es **una alerta por cambio de estado**, no una por
+llamada: con la troncal caída y cien llamadas por hora, la casilla recibe un correo, no cien.
+Activalo en **Alertas**.
+
+### 8.2 DISA, callback, directorio por nombre y marcación abreviada
+
+Desde 1.10.0 la central tiene cuatro funciones más de marcación. **Todavía no tienen pantalla en
+el panel**: existen en la API y en el plan de marcado, con sus validaciones y sus pruebas, pero
+se configuran por API. Si las necesitás en una instalación, pedilas por soporte; acá quedan
+descritas para que sepas qué esperar.
+
+| Función | Qué hace | Cómo nace |
+|---|---|---|
+| **DISA** | Se llama a un número de la central, se marca un PIN y se obtiene **tono de la central para llamar afuera**, con el CallerID de la empresa | **Apagada** |
+| **Callback** | Se llama, la central **corta y devuelve la llamada**; el que llamó no paga | **Apagado** |
+| **Directorio por nombre** | El que llama deletrea el apellido en el teclado y la central lo comunica con el interno | Se enciende y listo |
+| **Marcación abreviada** | Números cortos: una libreta **de la empresa** y una **personal** por interno | Se enciende y listo |
+
+> **DISA y callback nacen apagadas a propósito.** Son la puerta clásica del fraude de tarifación:
+> una DISA sin PIN o con un PIN débil es un teléfono público internacional pago por la empresa.
+> Una actualización de la central no enciende sola algo que gasta plata.
+
+Lo que conviene saber al venderlas o al auditarlas:
+
+- **El PIN no está en el plan de marcado.** Se guarda cifrado (bcrypt) en la base y el plan de
+  marcado se lo **pregunta a la API**, que compara, cuenta los intentos fallidos, bloquea y deja
+  registro. Un PIN escrito en el dialplan lo ve cualquiera que pueda mirar la configuración de
+  Asterisk, y además el dialplan no sabe contar intentos.
+- **El PIN no puede ser el número de un interno**, ni dígitos repetidos, ni una secuencia.
+- **Qué se puede marcar lo decide la central, no el usuario**: a cada DISA se le habilitan rutas
+  salientes concretas (por ejemplo, nacional sí, internacional no).
+- **Queda registro de todo uso**: quién entró, desde qué número y a qué número se llamó. Lo puede
+  mirar el **supervisor** (es lo que explica una factura rara), y configurarlo es de administrador.
+
 ---
 
 ## 9. Rutas entrantes · qué pasa cuando te llaman
@@ -524,7 +594,7 @@ un destino.
 |---|---|
 | **DID** | El número que te asignó el operador |
 | **Nombre** | Para identificarla en la lista |
-| **Destino** | Extensión, cola, IVR, buzón o conferencia |
+| **Destino** | Extensión, cola, IVR, buzón, sala de reunión o **caja de fax** |
 
 **Ejemplo:** el `24001234` (línea principal) va al **IVR** de bienvenida; el `24001299` (ventas
 directo) va a la **cola de Ventas**.
@@ -912,9 +982,10 @@ adjunto y la transcripción automática**.
 
 ![Buzón de voz al correo](img/cfg-09-buzon-email.png)
 
-### 13.4 Conferencias, grupos de timbrado, paging y códigos
+### 13.4 Grupos de timbrado, paging y códigos
 
-Salas de conferencia con PIN, grupos que suenan a la vez y voceo por parlantes.
+Grupos que suenan a la vez y voceo por parlantes. Las salas de conferencia se administran ahora
+desde su propia pantalla: §13.8.
 
 Los **códigos de función** tienen su propia solapa en » Menú lateral → Aplicaciones →
 **Funciones** → **Códigos de función**. Ahí está el catálogo completo (no molestar, los tres
@@ -1019,6 +1090,95 @@ la clase). Para armar una:
 
 La clase `default` es la de fábrica y no se toca desde el panel: si borrás una clase propia, se
 borran también sus audios.
+
+### 13.8 Salas de reunión
+
+» Menú lateral → Aplicaciones → **Salas de reunión**
+
+Reemplaza a las «Conferencias» sueltas de antes. Una sala es **un número al que se llama**, y
+todo lo demás son reglas de esa sala.
+
+**El alta, campo por campo:**
+
+| Campo | Qué hace |
+|---|---|
+| **Nombre** / **Etiqueta** | Cómo se identifica en la lista y en la invitación |
+| **Número de la sala** | El interno que se marca para entrar (desde adentro o desde un DID) |
+| **Máximo de participantes** | Tope de la sala: el que llega de más no entra (0 = sin tope) |
+| **PIN de participantes** | El que se reparte a los invitados |
+| **PIN del moderador** | El que entra **como moderador**: silencia, expulsa y, si está puesto, abre la sala |
+| **Música en espera hasta que entre el moderador** | Los demás escuchan música y no se oyen entre ellos hasta que llega quien conduce |
+| **Anunciar entradas y salidas** | La central avisa en voz cuando alguien entra o se va |
+| **Grabar la reunión** | Queda el audio, como una llamada grabada |
+| **Agenda** (opcional) | Fecha, hora y duración: **fuera de esa ventana la sala no abre** |
+
+> **Los dos PIN son obligatorios y distintos.** Si no los escribís, la central **genera dos al
+> azar**: es a propósito, porque una sala sin PIN es una sala a la que entra cualquiera que
+> marque el número, incluido quien llegue desde afuera por un DID.
+
+> **El listado nunca muestra los PIN**, sólo si la sala tiene. Se ven al abrir la sala, y eso es
+> de administrador: con el PIN de moderador se silencia y se expulsa a cualquiera, así que verlo
+> en una lista es ser moderador de todas las salas sin que quede rastro.
+
+**Invitar por correo.** El botón de invitación manda el número de la sala y el PIN que
+corresponda a una o varias direcciones, con un mensaje libre opcional. La casilla **Invitar como
+moderador** manda el PIN de moderador — usala sólo con quien va a conducir la reunión.
+
+**Ver quién está adentro.** La vista en vivo lista a los participantes, marca quién es moderador
+y quién está silenciado, y permite **silenciar** o **expulsar** a cualquiera. La puede usar el
+supervisor, no hace falta ser administrador: es lo que hace quien modera la reunión desde la
+computadora mientras habla por teléfono.
+
+> **Las salas viejas cambiaron.** Al actualizar a 1.10.0, toda conferencia que no tenía PIN
+> recibió uno generado al azar. Si tu cliente entraba a una sala «sin nada», ahora necesita el
+> PIN: abrí la sala en el panel y pasáselo.
+
+### 13.9 Fax
+
+» Menú lateral → Aplicaciones → **Fax**
+
+Recibir faxes **en el correo** y mandarlos **desde el panel**, sin aparato de fax ni línea
+analógica. Tiene cuatro solapas: **Recibidos**, **Enviados**, **Enviar** y **Configuración**
+(esta última, sólo administrador).
+
+**Antes que nada, mirá que esté en verde.** La pantalla consulta al servidor si están las piezas
+que hacen falta (los módulos de fax de Asterisk y los conversores de documento de la API) y, si
+falta algo, lo dice en rojo **con el nombre exacto de lo que falta**. Es mejor enterarse ahí que
+en medio de una llamada.
+
+> **En esta versión el fax puede no estar operativo todavía.** Las imágenes que se publicaron con
+> 1.10.0 no incluyen esas piezas: el módulo de fax de Asterisk y los conversores de la API se
+> agregan en un release de empaquetado. Todo lo demás del panel funciona igual; el fax queda en
+> rojo hasta entonces. Preguntá antes de prometerlo en una demo.
+
+**Recibir.** Se crea una **caja de fax** (nombre, a qué correo van los faxes, la identificación
+que se anuncia y la cabecera) y después, en **Rutas → Entrantes**, se apunta un DID con tipo de
+destino **Fax** a esa caja. Lo que llega se convierte a PDF y sale por correo; el original se
+guarda y se puede bajar desde **Recibidos**. La caja admite **varias direcciones** separadas por
+coma.
+
+- **Detectar tono de fax en llamadas de voz**: para el caso clásico de un número que recibe voz y
+  a veces un fax. La central escucha el tono y desvía esa llamada a la caja.
+- Borrar un fax recibido es de **administrador**: es un documento, y borrarlo es la misma
+  decisión que borrar una grabación.
+
+**Enviar.** En la solapa **Enviar**: el número, un asunto y un PDF. El envío es una **cola con
+reintentos** (un fax que no entra a la primera es lo normal, no un error) y sale por la **ruta
+saliente de siempre**, con su prefijo, su CallerID y su failover. En **Enviados** se ve el estado
+y los intentos de cada uno, se baja el PDF que se mandó y se puede **reintentar sin volver a
+subir el archivo**.
+
+> **El número se rechaza, no se limpia.** Se aceptan espacios, puntos, guiones y paréntesis como
+> separadores; cualquier otra cosa da error. Un número «arreglado» a la fuerza sería marcar un
+> número que nadie pidió.
+
+**Configuración** (administrador): identificación y cabecera por defecto, **a qué troncales se
+les activa T.38**, corrección de errores, cantidad de reintentos y minutos entre ellos, y los
+topes de páginas y de tamaño del PDF.
+
+> **T.38 con red de seguridad.** La central pide T.38 —el fax «digital», que es el que funciona
+> de verdad sobre internet— pero **deja siempre el respaldo en audio**. Con eso el fax sale igual
+> si el operador no lo soporta.
 
 ---
 
@@ -1339,7 +1499,7 @@ teléfono, qué historial y qué buzón son "los suyos".
 | Rol | Qué puede hacer |
 |---|---|
 | **Administrador** | Todo |
-| **Supervisor** | Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, grabaciones, clientes (CRM completo), intercom, aprovisionar y enrolar internos. **Nada** de configuración del sistema (troncales, rutas, usuarios, respaldos…) |
+| **Supervisor** | Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, **reportes de call center** (verlos y exportarlos), grabaciones, clientes (CRM completo), intercom, aprovisionar y enrolar internos. Desde 1.10.0 también: **moderar una sala de reunión** (ver quién está, silenciar, expulsar), **las dos bandejas de fax y mandar un fax**, **ver por qué troncal está saliendo cada ruta** y **el registro de uso de DISA y callback**. **Nada** de configuración del sistema (troncales, rutas, usuarios, respaldos…), ni programar los envíos de informes, ni crear salas o invitar (la invitación lleva el PIN), ni configurar cajas de fax, ni borrar un fax recibido |
 | **Agente** | Su softphone, su historial, su buzón, sus grabaciones (sólo las llamadas en las que participó), la ficha del cliente y la encuesta de la llamada — todo sobre **su** extensión |
 
 Reglas que aplica la central (no sólo el panel: la API rechaza con *"no tenés permiso para esta
@@ -1522,6 +1682,55 @@ cliente?"* y *"¿por qué esa llamada no entró?"*.
 > el operador. Miralo en **SBC → SIP debug**.
 
 ![Historial de llamadas (CDR)](img/cfg-40-historial.png)
+
+### 21.1 Reportes de call center
+
+» Menú lateral → Operación → **Reportes de call center**
+
+El historial de arriba dice qué pasó con **cada llamada**. Esta pantalla dice cómo viene
+**la operación**, que es otra pregunta y la que firma un supervisor: si se está atendiendo a
+tiempo, cuánta gente se cansa de esperar y cómo rinde cada agente.
+
+Se elige **Desde**, **Hasta**, la **cola** (o todas) y el **nivel de servicio** en segundos, y se
+toca **Generar**.
+
+**Por cola:**
+
+| Columna | Qué mide |
+|---|---|
+| **Ofrecidas** | Llamadas que entraron a la cola |
+| **Atendidas** | Las que tomó un agente |
+| **Abandonadas** | El que llamaba cortó mientras esperaba |
+| **Otras salidas** | Se fueron de la cola sin ser atendidas ni abandonar (desborde, tiempo máximo) |
+| **Nivel de servicio** | Qué porcentaje se atendió **dentro** de los segundos que pusiste arriba |
+| **Espera media / máxima** | Cuánto se espera, en promedio y en el peor caso |
+| **Conv. media** | Cuánto dura la conversación |
+| **Fuera de hora** | Cuántas entraron con la central cerrada (usa el horario de atención de §9.1) |
+
+**Por agente:** atendidas, cuántas veces le sonó y no contestó, espera media de quien lo esperaba
+a él, y conversación media, máxima y total.
+
+**Para llevarlo a una reunión:**
+
+- **CSV** baja todo, sin recortar la lista de agentes, con separador `;` — abre derecho en Excel
+  en español.
+- **Informe PDF** abre el informe A4 en otra pestaña; desde ahí, *Imprimir → Guardar como PDF*.
+  Es el mismo informe ejecutivo del historial de llamadas, con la marca del cliente.
+
+**Envío programado por correo.** Arriba, *Envío programado*: se arma una programación con nombre,
+cola, cada cuánto (**diario**, **semanal** o **mensual**), la hora, el nivel de servicio y las
+direcciones que lo reciben. **Probar envío** manda en el momento el informe que le tocaría, para
+verificar el correo sin esperar a mañana. Programar envíos es de administrador; **ver y exportar
+alcanza con supervisor**.
+
+> **Ojo con el primer mes.** Estos números salen de una tabla que la central empieza a llenar
+> **cuando se instala esta versión**: no hay historia anterior, y un informe de «el mes pasado»
+> pedido el primer día sale vacío. La propia pantalla avisa cuando el período pedido arranca
+> antes del primer dato.
+
+> **Los porcentajes vacíos son un guion, no un cero.** Una cola sin llamadas en el período no
+> tiene «0 % de nivel de servicio»: no tiene dato. Es la diferencia entre *"atendimos mal"* y
+> *"no entró nadie"*.
 
 ---
 

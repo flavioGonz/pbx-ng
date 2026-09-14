@@ -7,8 +7,9 @@ import { apiGet, apiPost, useApi } from '../api';
 import { useMemo, useState } from 'react';
 import PageHeader from '../PageHeader';
 import DidOverview from '../DidOverview';
+import FailoverSalida from '../FailoverSalida';
 
-const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación' };
+const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación', fax: 'Fax' };
 
 export default function Rutas({ embedded } = {}) {
   const { data: sbcLink } = useApi('/sbc-link');
@@ -84,10 +85,10 @@ export default function Rutas({ embedded } = {}) {
             fields={[
               { name: 'did', label: 'DID / Número entrante', required: true, icon: <IconPhoneIncoming size={15} />, placeholder: '59824000000', description: 'El número que te entrega el operador. Ej: 59824000000 (o el formato que envía tu proveedor).' },
               { name: 'name', label: 'Nombre', icon: <IconTag size={15} />, placeholder: 'Línea principal', description: 'Etiqueta para identificar la ruta. Ej: Línea principal, Ventas.' },
-              { name: 'dest_type', label: 'Tipo de destino', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'A dónde se manda la llamada entrante.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }] },
-              { name: 'dest_value', label: 'Destino', required: true, icon: <IconTarget size={15} />, placeholder: '1001', description: 'Según el tipo: Interno → 1001 · IVR → 9000 · Cola → soporte · Aplicación → su número de acceso.' },
+              { name: 'dest_type', label: 'Tipo de destino', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'A dónde se manda la llamada entrante.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }, { value: 'fax', label: 'Fax (caja de fax)' }] },
+              { name: 'dest_value', label: 'Destino', required: true, icon: <IconTarget size={15} />, placeholder: '1001', description: 'Según el tipo: Interno → 1001 · IVR → 9000 · Cola → soporte · Aplicación → su número de acceso · Fax → el número de la caja (Aplicaciones → Fax).' },
               { name: 'horario_id', label: 'Horario de atención', type: 'select', icon: <IconClockHour4 size={15} />, data: horarioOpts, description: 'Dentro del horario la llamada va al destino de arriba; fuera de él, al de abajo. Los horarios y los feriados se cargan en Telefonía → Horarios.' },
-              { name: 'dest_cerrado_type', label: 'Tipo de destino fuera de hora', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'Sólo se usa si elegiste un horario.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }] },
+              { name: 'dest_cerrado_type', label: 'Tipo de destino fuera de hora', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'Sólo se usa si elegiste un horario.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }, { value: 'fax', label: 'Fax (caja de fax)' }] },
               { name: 'dest_cerrado_value', label: 'Destino fuera de hora', icon: <IconMoonStars size={15} />, placeholder: '9001', description: 'A dónde entra la llamada con la central cerrada (feriado, fuera de horario o modo noche). Vacío = al buzón.' },
             ]} emptyText="Sin rutas de entrada. Creá una para recibir llamadas de la troncal." />
         </Tabs.Panel>
@@ -95,6 +96,7 @@ export default function Rutas({ embedded } = {}) {
         <Tabs.Panel value="salientes">
           <CrudPanel key={"out-" + rk} title="Rutas salientes" subtitle={hasSbc ? "Patrón de marcado → salida por el SBC. El operador se elige en SBC → Operadores." : "Patrón de marcado → salida por la troncal de operador que elijas."} color="teal" icon={<IconArrowUpRight size={18} />}
             idKey="id" fetchUrl="/routes/outbound" createUrl="/routes/outbound" deleteUrl={(r) => '/routes/outbound/' + r.id}
+            editUrl={(r) => '/routes/outbound/' + r.id}
             columns={[
               { key: 'name', label: 'Nombre', icon: <IconTag size={13} /> },
               { key: 'pattern', label: 'Patrón', icon: <IconAsterisk size={13} />, render: (r) => <Badge variant="light" color="pbx" ff="monospace">_{r.pattern}</Badge> },
@@ -102,6 +104,7 @@ export default function Rutas({ embedded } = {}) {
               { key: 'strip', label: 'Quita', icon: <IconBackspace size={13} /> },
               { key: 'prepend', label: 'Antepone', icon: <IconPlus size={13} /> },
               { key: 'callerid', label: 'CallerID', icon: <IconId size={13} /> },
+              { key: 'backups', label: 'Respaldo', icon: <IconRouteAltLeft size={13} />, render: (r) => ((r.backups || []).length ? <Badge variant="light" color="orange" style={{ textTransform: 'none' }}>{(r.backups || []).join(' → ')}</Badge> : <Text size="sm" c="dimmed">—</Text>) },
             ]}
             fields={[
               { name: 'name', label: 'Nombre', icon: <IconTag size={15} />, placeholder: 'Salida nacional', description: 'Etiqueta de la regla. Ej: Salida nacional, Celulares.' },
@@ -111,6 +114,9 @@ export default function Rutas({ embedded } = {}) {
               { name: 'prepend', label: 'Anteponer (opcional)', icon: <IconPlus size={15} />, placeholder: '+598', description: 'Opcional. Para el formato del operador usá SBC → Operadores y evitá transformar el número en dos lugares.' },
               { name: 'callerid', label: 'CallerID saliente (opcional)', icon: <IconId size={15} />, placeholder: '59824000000', description: 'Número que verá el destinatario. Ej: 59824000000.' },
             ]} emptyText="Sin rutas de salida. Creá una para llamar a números externos." />
+          {/* El orden de los respaldos y por cuál troncal está saliendo cada ruta ahora
+              mismo: es lo que se mira cuando las llamadas empiezan a salir con otro número. */}
+          <FailoverSalida />
         </Tabs.Panel>
       </Tabs>
     </Stack>

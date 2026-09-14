@@ -5,12 +5,17 @@ import { IconMapPin, IconRefresh, IconArrowDownLeft, IconArrowUpRight, IconPhone
 
 let leafletP;
 function loadLeaflet() {
+/* Leaflet servido por la propia central (`public/vendor/leaflet/`, versión 1.9.4) y no
+ * desde unpkg: una central on-prem puede estar sin salida a internet —es lo normal en un
+ * organismo público— y el mapa quedaba en blanco sin decir por qué. Además era código de
+ * terceros entrando al panel de administración en cada carga. Para actualizarlo:
+ * `npm pack leaflet@<versión>` y copiar dist/ (js, css e images/) a public/vendor/leaflet/. */
   if (leafletP) return leafletP;
   leafletP = new Promise((resolve, reject) => {
     if (typeof window === 'undefined') return reject();
     if (window.L) return resolve(window.L);
-    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
-    const js = document.createElement('script'); js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/vendor/leaflet/leaflet.css'; document.head.appendChild(css);
+    const js = document.createElement('script'); js.src = '/vendor/leaflet/leaflet.js';
     js.onload = () => resolve(window.L); js.onerror = reject; document.body.appendChild(js);
   });
   return leafletP;

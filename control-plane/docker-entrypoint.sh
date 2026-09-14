@@ -17,4 +17,15 @@ echo "[entrypoint] Postgres OK, aplicando migraciones"
 # `set -e` ya corta si migrate.js sale con 1; el `||` es para dejar un mensaje claro en el log.
 node migrate.js || { echo "[entrypoint] las migraciones fallaron: la API NO arranca (ver el error de arriba)"; exit 1; }
 echo "[entrypoint] esquema al dia, iniciando API"
+
+# --- herramientas del modulo de fax (control-plane/fax.js) ---
+# Se AVISA, no se corta: el fax es un modulo mas y una central que no lo usa tiene que
+# arrancar igual. Pero el aviso va aca y no cuando alguien aprieta "enviar": el sintoma de
+# que falten es un 503 en medio de un envio, o un fax recibido que llega como TIFF, y eso
+# se descubre el dia de la demo. Con esto queda en el log del arranque, que es lo primero
+# que se mira. El panel lo vuelve a decir en /fax con GET /api/fax/estado.
+for bin in gs tiff2pdf; do
+  command -v "$bin" >/dev/null 2>&1 || echo "[entrypoint] AVISO: falta '$bin' en esta imagen; el modulo de fax no va a poder convertir PDF <-> TIFF (instalar ghostscript / libtiff-tools en control-plane/Dockerfile)"
+done
+
 exec node app.js

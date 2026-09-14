@@ -32,7 +32,7 @@ import AttackGlobe from '../AttackGlobe';
 import { TableSkeleton } from '../Skeletons';
 import Slot from '../Slot';
 import { getSocket } from '../useLive';
-import { useAuth } from '../auth';
+import { useEsAdmin } from '../auth';
 import { toast, toastPromise } from '../notify';
 
 /* ── Mini capa de API local (el panel no tiene helper común): fetch al mismo origen,
@@ -774,8 +774,7 @@ function EnforcementBadge({ e }) {
 }
 
 export default function Seguridad() {
-  const { user } = useAuth();
-  const admin = !!user && user.role === 'admin';
+  const admin = useEsAdmin();
   const { data, error, recargar } = usePoll('/security', 8000);
   const k = (data && data.kpis) || {};
   const enf = data && data.enforcement;

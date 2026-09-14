@@ -43,6 +43,10 @@ test('rbac: agente, supervisor y admin sobre users/settings/trunks/security', as
     assert.equal((await api('GET', '/api/users', { token: sup })).status, 403);
     assert.equal((await api('GET', '/api/settings', { token: sup })).status, 403);
     assert.equal((await api('GET', '/api/trunks', { token: sup })).status, 403);
+    /* El estado del failover es configuración de troncales y la única pantalla que lo
+     * muestra es /rutas, que es admin entera y no está en el SUP_OK del panel: la tabla
+     * dice admin. */
+    assert.equal((await api('GET', '/api/routes/outbound/failover', { token: sup })).status, 403);
   });
 
   await t.test('admin: 200 en todo eso', async () => {

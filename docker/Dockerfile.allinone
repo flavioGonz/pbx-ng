@@ -1,19 +1,59 @@
 # ============================================================
-#  PBX-NG · Imagen all-in-one (EXPERIMENTAL / DEMO)
+#  PBX-NG · Imagen all-in-one (EXPERIMENTAL / DEMO DEL PANEL)
 #  Corre TODO el stack en un solo contenedor via supervisord.
 #  Pensado para pruebas/demos rapidas. Para produccion usa la
 #  topologia "un contenedor por servicio" (docker-compose).
 #  Usa las versiones de Asterisk/Kamailio del repo de Debian.
+#
+#  DECIDIDO Y ESCRITO (no es un olvido): esta imagen NO es equivalente a la de
+#  produccion y NO sirve para validar NADA de telefonia. Concretamente, su
+#  Asterisk es el de Debian tal cual viene:
+#    - no copia docker/config/asterisk/, asi que usa el modules.conf de Debian y
+#      no recibe NINGUN "require =" nuestro (ni func_curl/func_uri/func_db/
+#      func_strings ni app_directory/app_read/func_hangupcause);
+#    - tampoco recibe extensions.conf, pjsip.conf, extconfig.conf ni sorcery.conf,
+#      o sea que no hay dialplan PBX-NG ni endpoints por realtime;
+#    - su entrypoint (docker/entrypoint.allinone.sh) no genera res_pgsql.conf,
+#      cdr_pgsql.conf, ari.conf, manager.conf ni el cert TLS, que es lo que hace
+#      images/asterisk/docker-entrypoint.sh. Sin ARI ni AMI la API no maneja llamadas.
+#  Copiar solo config/asterisk/ aca la dejaria PEOR, no mejor: extconfig.conf
+#  mandaria PJSIP a realtime sin res_pgsql.conf y extensions.conf quedaria con el
+#  literal @@API_URL@@ sin resolver. Hacerla equivalente de verdad es duplicar el
+#  entrypoint de produccion entero, que es justo lo que la topologia por servicio
+#  ya hace bien.
+#  Por eso el verificador de modulos de abajo cubre solo lo que esta imagen SI usa
+#  (el fax de la API y confbridge) y no la lista de "require =" de produccion: esa
+#  se verifica donde vive, en images/asterisk/Dockerfile.
+#  Si alguna vez hay que probar modulos, dialplan, troncales o failover: se prueba
+#  con docker-compose.yml, no aca.
 # ============================================================
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive DOMAIN=pbx.local
+# ghostscript + libtiff-tools: el modulo de fax (control-plane/fax.js) convierte PDF <-> TIFF
+# con estos dos binarios. Aca corren en el MISMO contenedor que Asterisk, pero el que
+# convierte sigue siendo la API.
+# El asterisk EMPAQUETADO de Debian trae res_fax_spandsp en asterisk-modules (a diferencia
+# del que compilamos en images/asterisk/Dockerfile, donde hay que pedirlo explicito en el
+# menuselect), pero eso es una promesa del empaquetador, no algo que esta imagen controle:
+# se VERIFICA abajo en vez de darlo por sentado.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       postgresql asterisk coturn \
       curl ca-certificates gnupg supervisor openssl \
+      ghostscript libtiff-tools \
  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && apt-get install -y nodejs \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Lo que el panel da por hecho tiene que estar EN LA IMAGEN, no "por lo general": /fax
+# pregunta por res_fax_spandsp en GET /api/fax/estado y sin el modulo el fax falla recien
+# en medio de una llamada. Mismo test que corta el build en images/asterisk/Dockerfile,
+# por la misma razon: es preferible no poder publicar la imagen que publicar una rota.
+RUN set -e; \
+    for m in res_fax.so res_fax_spandsp.so app_confbridge.so; do \
+      find /usr/lib/asterisk/modules -name "$m" -print -quit | grep -q . \
+        || { echo "FALTA el modulo $m en el asterisk de Debian: instalar el paquete que lo traiga (asterisk-modules) o sacar el fax de esta imagen"; exit 1; }; \
+    done
 
 # --- Control plane (API) ---
 WORKDIR /opt/api

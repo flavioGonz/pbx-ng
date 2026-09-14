@@ -16,7 +16,10 @@ function loadWS() {
   if (window.WaveSurfer) return Promise.resolve(window.WaveSurfer);
   if (!wsPromise) wsPromise = new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js';
+    /* Servido por la central (`public/vendor/wavesurfer/`, 7.8.6), no desde unpkg: sin
+     * internet no se dibujaba la onda, y es código de terceros dentro del panel de
+     * administración. Actualizar: `npm pack wavesurfer.js@<versión>` → dist/wavesurfer.min.js. */
+    s.src = '/vendor/wavesurfer/wavesurfer.min.js';
     s.async = true; s.onload = () => res(window.WaveSurfer); s.onerror = rej;
     document.head.appendChild(s);
   });

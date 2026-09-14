@@ -30,12 +30,17 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleString('es-UY', { day: '2-digit'
 let leafletP;
 function loadLeaflet() {
   if (leafletP) return leafletP;
+/* Leaflet servido por la propia central (`public/vendor/leaflet/`, versión 1.9.4) y no
+ * desde unpkg: una central on-prem puede estar sin salida a internet —es lo normal en un
+ * organismo público— y el mapa quedaba en blanco sin decir por qué. Además era código de
+ * terceros entrando al panel de administración en cada carga. Para actualizarlo:
+ * `npm pack leaflet@<versión>` y copiar dist/ (js, css e images/) a public/vendor/leaflet/. */
   leafletP = new Promise((resolve, reject) => {
     if (typeof window === 'undefined') return reject();
     if (window.L) return resolve(window.L);
     const css = document.createElement('link'); css.rel = 'stylesheet';
-    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
-    const s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    css.href = '/vendor/leaflet/leaflet.css'; document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = '/vendor/leaflet/leaflet.js';
     s.onload = () => resolve(window.L); s.onerror = reject; document.head.appendChild(s);
   });
   return leafletP;

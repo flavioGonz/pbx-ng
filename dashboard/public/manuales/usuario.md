@@ -257,3 +257,31 @@ es el mismo estado, así que da igual por dónde lo cambies.
 >
 > Estos son los códigos de fábrica: si tu administrador los cambió, los que valen son los que
 > muestra tu panel.
+
+---
+
+## 13. Entrar a una sala de reunión
+
+Una **sala de reunión** es un número de la central al que llaman varias personas para hablar
+todas juntas. La invitación te llega por correo con dos datos: **el número de la sala** y **un
+PIN**.
+
+1. Marcá el número de la sala desde tu teléfono o desde el softphone.
+2. Cuando la central te lo pida, marcá el **PIN** y terminá con `#`.
+3. Listo, ya estás adentro.
+
+Qué puede pasar, y qué significa:
+
+| Lo que escuchás | Qué está pasando |
+|---|---|
+| Música | La reunión todavía no empezó: estás esperando a quien la conduce |
+| Un aviso de que la conferencia está cerrada, y se corta | La reunión está **agendada** y todavía no es la hora, o ya terminó |
+| Un aviso de PIN incorrecto, y se corta | Marcaste mal el PIN. Hay **dos intentos**; después hay que volver a llamar |
+| La central anuncia cada entrada y salida | Está activado el aviso de entradas: es normal |
+
+> **El PIN del moderador no es el mismo.** Si te mandaron el PIN de moderador es porque vos
+> conducís la reunión: con ese PIN se puede silenciar y expulsar participantes. No lo reenvíes
+> con la invitación.
+
+> Si la reunión se graba, la central lo avisa. La grabación queda en la central, como cualquier
+> llamada grabada.

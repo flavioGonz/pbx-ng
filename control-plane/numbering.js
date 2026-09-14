@@ -37,7 +37,7 @@ async function ocupados() {
   for (const r of await q("SELECT id FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension'")) push(r.id, 'extension', 'Extensión');
   for (const r of await q('SELECT access_exten, label, name FROM pbxng_queues')) push(r.access_exten, 'cola', 'Cola ' + (r.label || r.name));
   for (const r of await q('SELECT exten, name FROM pbxng_ivr')) push(r.exten, 'ivr', 'IVR ' + (r.name || ''));
-  for (const r of await q('SELECT access_exten, label, name FROM pbxng_conferences')) push(r.access_exten, 'conferencia', 'Conferencia ' + (r.label || r.name));
+  for (const r of await q('SELECT access_exten, label, name FROM pbxng_conferences')) push(r.access_exten, 'conferencia', 'Sala de reunión ' + (r.label || r.name));
   for (const r of await q('SELECT access_exten, label, name FROM pbxng_ringgroups')) push(r.access_exten, 'grupo', 'Grupo de timbrado ' + (r.label || r.name));
   for (const r of await q('SELECT access_exten, label, name FROM pbxng_paging')) push(r.access_exten, 'voceo', 'Voceo ' + (r.label || r.name));
   for (const r of await q('SELECT exten, name FROM pbxng_ai_agents WHERE enabled')) push(r.exten, 'ia', 'Agente IA ' + (r.name || ''));

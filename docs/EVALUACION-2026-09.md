@@ -220,7 +220,8 @@ Como producto, hay pocas funciones de central que no tenga. Lo que falta está e
 - **Softphone**: firma de código (hoy el instalador Windows no está firmado: SmartScreen lo
   frena), y una versión macOS/Linux si el mercado la pide.
 - **Manuales**: faltan capturas en varios capítulos; y documentación de API (OpenAPI) para
-  integradores.
+  integradores. (Los capítulos de las pantallas nuevas de 1.10.0 —salas de reunión, fax,
+  reportes de call center y failover— están escritos, pero también sin capturas.)
 
 ## 5. Qué le falta para ser robusta
 
@@ -285,7 +286,10 @@ un tag con la CI roja no publica). Partir `app.js` por dominio siguiendo el patr
 (incluye `cdr`) y `apps` (colas, IVR, ring groups, paging, buzones, MOH, aparcado, códigos,
 agentes IA): 3.980 → ≈2.200 líneas, código movido sin reescribir (285 rutas antes y después).
 Quedan en `app.js` internos/endpoints, push/click-to-call, teléfonos físicos (`prov`, `phones`),
-red/TURN/NPM/captura, `backup`, CRM/encuesta, wallboard, conferencias y pickup-groups. Sigue
+red/TURN/NPM/captura, `backup`, CRM/encuesta, wallboard y pickup-groups (las conferencias se
+fueron a `salas.js` en 1.10.0, ya como salas de reunión). En 1.10.0 se sumaron cuatro módulos
+más con el mismo patrón —`marcacion.js`, `salas.js`, `fax.js` y `ccreport.js`— y ninguna ruta
+nueva quedó en `app.js`. Sigue
 pendiente: Prettier y la prueba e2e de humo del panel (login → topología → troncales) con
 Playwright.
 

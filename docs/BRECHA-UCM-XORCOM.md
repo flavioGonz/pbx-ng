@@ -1,9 +1,11 @@
 # Qué le falta a PBX-NG para competir con una Grandstream UCM o una Xorcom
 
-Fecha: 2026-09-13 · Versión analizada: 1.8.0 (`45dd905`) · **Actualizado con lo que cerró
+Fecha: 2026-09-13 · Versión analizada: 1.8.0 (`45dd905`) · **Actualizado con lo que cerraron
 1.9.0** (sprint 6: horarios y modo noche, desvíos / DND / sígueme, catálogo de códigos de
-función). Lo marcado **✅ 1.9.0** se verificó contra el diff de ese sprint; el resto del
-inventario sigue siendo el de 1.8.0.
+función) **y 1.10.0** (sprint 7: reportes de call center, failover de troncal, DISA / callback /
+dial-by-name / marcación abreviada, salas de reunión y fax T.38). Lo marcado **✅ 1.9.0** y
+**✅ 1.10.0** se verificó contra el código de cada sprint, no contra el informe de quien lo
+hizo; el resto del inventario sigue siendo el de 1.8.0.
 Método: inventario real del repo (rutas de la API, pantallas del panel, dialplan que genera
 `apps.js`, códigos de función instalables) contra las listas de características **publicadas
 por los fabricantes**: la hoja de datos de la serie UCM6300 y la lista de funciones de
@@ -17,12 +19,15 @@ que todo el mundo espera y que se notan en los primeros diez minutos de una demo
 
 **Con 1.9.0 esa frase se achicó**: los tres agujeros que más se notaban en la demo —horarios y
 modo noche, desvíos/DND/sígueme y un catálogo de códigos de función de verdad— están cerrados.
-Del bloque A quedan abiertos el control de gasto saliente (COS/PIN), las listas negras y blancas
-y el import/export de internos por CSV, que es el sprint 7.
+**Con 1.10.0 se cerró casi todo el bloque B**, que es el que se pide por escrito: reportes de
+call center, failover de troncal, DISA/callback/dial-by-name/marcación abreviada, salas de
+reunión y fax. Queda abierto lo que sigue pesando en un pliego: **alta disponibilidad** (ítem 11,
+sin empezar) y, del bloque A, el **control de gasto saliente** (COS/PIN), las **listas negras y
+blancas** y el **import/export de internos por CSV**.
 
 ## 2. Dónde estamos parados
 
-| Área | PBX-NG 1.9.0 | UCM6300 | CompletePBX 5 |
+| Área | PBX-NG 1.10.0 | UCM6300 | CompletePBX 5 |
 |---|---|---|---|
 | Internos, troncales, rutas | ✅ | ✅ | ✅ |
 | IVR (con diseñador visual) | ✅ | ✅ | ✅ |
@@ -37,14 +42,14 @@ y el import/export de internos por CSV, que es el sprint 7.
 | **Códigos de función** | ✅ **1.9.0** 15, con el código editable | ✅ decenas | ✅ decenas |
 | **COS / PIN de salida / códigos de autorización** | ❌ | ✅ | ✅ |
 | **Listas negras y blancas de entrantes** | ❌ | ✅ | ✅ |
-| **Fax (T.38, a correo, desde la web)** | ❌ | ✅ | ✅ |
-| **DISA, callback, marcación abreviada, dial-by-name** | ❌ | ✅ | ✅ |
+| **Fax (T.38, a correo, desde la web)** | ✅ **1.10.0** · el servidor todavía necesita paquetes (ver ítem 7) | ✅ | ✅ |
+| **DISA, callback, marcación abreviada, dial-by-name** | ✅ **1.10.0** (API y dialplan; falta la pantalla) | ✅ | ✅ |
 | **Portal de autoservicio del usuario** | ⚠️ **1.9.0** el agente cambia sus desvíos desde `/agente` y desde el teléfono; no hay portal aparte | ✅ | ✅ |
-| **Salas de reunión (PIN, agenda)** | ⚠️ ConfBridge básico | ✅ | ✅ |
-| **Reportes de call center (SLA, abandono)** | ⚠️ CDR crudo | ✅ | ✅ |
-| **Alta disponibilidad** | ❌ | ✅ Hot Standby | ✅ TwinStar |
+| **Salas de reunión (PIN, agenda)** | ✅ **1.10.0** | ✅ | ✅ |
+| **Reportes de call center (SLA, abandono)** | ✅ **1.10.0** (sin histórico previo a la actualización) | ✅ | ✅ |
+| **Alta disponibilidad** | ❌ **sigue pendiente** | ✅ Hot Standby | ✅ TwinStar |
 | **Multi-tenant real** | ⚠️ `tenant_id` decorativo | — | ✅ MT Manager |
-| **Failover de troncal / LCR** | ❌ (el LCR es del SBC-NG) | ✅ | ✅ |
+| **Failover de troncal / LCR** | ✅ **1.10.0** el failover; el LCR sigue siendo del SBC-NG | ✅ | ✅ |
 | **Importar/exportar internos (CSV)** | ❌ | ✅ | ✅ |
 | **Idiomas** | ⚠️ sólo español | ✅ | ✅ |
 | **Interfaces TDM (E1/PRI, FXO/FXS)** | ❌ sólo SIP | ✅ hardware | ✅ hardware |
@@ -86,7 +91,7 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
    no molestar» en Extensiones, tarjeta «Mis desvíos» en el panel de agente) o **desde el
    teléfono** con los códigos; las dos vías dejan Postgres y Asterisk al día. *Queda*: no se
    aplican a llamadas que entran por cola, grupo de timbrado o DID directo a interno, y el
-   portal de autoservicio como pantalla propia sigue siendo del sprint 8.
+   portal de autoservicio como pantalla propia sigue pendiente (§6, sprint 9).
 3. **✅ 1.9.0 · Códigos de función de verdad.** De 4 a 15, y con el **código editable** desde el
    panel (la tabla tiene como clave la acción, no el código): `*78`/`*79` no molestar,
    `*21`/`*22`/`*23` los tres desvíos, `*24` sígueme, `*28` modo noche, más `*43`, `*65`, `*97`
@@ -101,16 +106,67 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
 
 ### Bloque B — cierra licitaciones y clientes medianos
 
-7. **Fax**: T.38 entrante/saliente, fax a correo y enviar desde el panel. En Uruguay todavía
-   lo piden estudios contables, escribanías y organismos públicos.
-8. **Reportes de call center**: nivel de servicio, abandono, tiempo medio de espera y de
-   conversación, por cola y por agente, con export PDF/CSV y envío programado por correo.
-   Hoy hay CDR crudo y métricas en vivo, pero no el informe que firma un supervisor.
-9. **Salas de reunión** con PIN, agenda e invitación por correo (hoy hay ConfBridge suelto).
-10. **Failover de troncal**: si la principal no responde, salir por la otra, con aviso.
-11. **Alta disponibilidad** (un segundo nodo en espera con la base replicada). UCM la vende
-    como «Hot Standby» y Xorcom como «TwinStar»; en todo pliego de licitación aparece.
-12. **DISA, callback, dial-by-name y marcación abreviada** — baratos y muy visibles en demo.
+7. **✅ 1.10.0 · Fax**: T.38 entrante/saliente, fax a correo y enviar desde el panel.
+   `control-plane/fax.js`, migración `0016_fax.sql`, pantalla `/fax` (bandeja de recibidos y de
+   enviados con descarga del PDF, formulario de envío y configuración de cajas y T.38). Una ruta
+   entrante se marca como **Fax** y entra a una caja: `ReceiveFAX` → TIFF → PDF → correo, con el
+   TIFF guardado. Detección de tono (CNG) en rutas de voz por `fax_detect` del endpoint, que manda
+   la llamada a la extensión `fax` del contexto. El envío es una **cola con reintentos** (un fax
+   que no entra a la primera es lo normal) y sale por la ruta saliente de siempre, con su troncal,
+   su prefijo y su failover. T.38 se pide con `z` pero siempre con respaldo en audio (`f`): con
+   SBC-NG en el medio o sin él, el fax sale. Contrato en `docs/CONTRATOS.md` §3 y §5.
+   *Queda, y es lo que hay que decir en una demo*: **el fax todavía no funciona en el servidor**.
+   La imagen de la API (node:20-slim) no trae `ghostscript` ni `libtiff-tools`, y la de Asterisk
+   compila sin `libspandsp-dev`, así que `res_fax_spandsp` no se construye y
+   `ReceiveFAX`/`SendFAX` no existen (verificado en `control-plane/Dockerfile` y
+   `docker/images/asterisk/Dockerfile`). **Pedido a `empaquetado`**, junto con un volumen de fax
+   propio: hoy usa un subdirectorio del volumen `recordings`. Mientras no estén, `GET
+   /api/fax/estado` lo detecta y la pantalla lo muestra en rojo con el nombre del paquete. El fax
+   por interno (un DID directo a un aparato de fax analógico detrás de un ATA) sigue siendo del
+   gateway, no de esto.
+8. **✅ 1.10.0 · Reportes de call center**: nivel de servicio, abandono, espera media y máxima
+   y conversación media y total, por cola y por agente, con CSV, informe A4 (Imprimir → Guardar
+   como PDF, con la misma marca que el informe del CDR) y envío programado por correo diario,
+   semanal o mensual. Pantalla **Operación → Reportes de call center**. La fuente **no es el
+   CDR** —que no distingue «esperó 40 s en cola y colgó» de «sonó 40 s en un interno»— sino
+   `pbxng_queue_events`, que llena un consumidor de eventos AMI de cola. *Queda*: no hay datos
+   anteriores a la actualización (la tabla empieza vacía y el informe lo avisa), y no se mide
+   todavía el tiempo de pausa ni de sesión del agente.
+9. **✅ 1.10.0 · Salas de reunión** con PIN, agenda e invitación por correo (antes había un
+   ConfBridge suelto): `control-plane/salas.js`, migración `0014_salas_reunion.sql`, pantalla
+   `/salas` (dos PIN, tope de participantes, MoH hasta el moderador, anuncios, grabación,
+   agenda, invitación por correo y vista en vivo con silenciar y expulsar). Contrato en
+   `docs/CONTRATOS.md` §3. *Queda*: el menú no le muestra la pantalla al supervisor aunque la
+   API lo deje moderar (pedido a `panel`).
+10. **✅ 1.10.0 · Failover de troncal**: cada ruta saliente tiene una principal y una lista ordenada de
+    respaldos. Salta a la siguiente sólo cuando el corte es de la troncal (no responde, congestión,
+    503) y **no** cuando lo dijo el destino (486 ocupado, no contesta, número inexistente): eso
+    sería hacer sonar el teléfono dos veces y cobrar dos llamadas. El tiempo total está acotado
+    (20 s por intento, 45 s de tope) y el aviso por correo (`trunk.failover`) sale **una vez por
+    transición**, no una por llamada. En el panel, en Rutas → Salientes, se ordenan los respaldos y
+    se ve por cuál troncal está saliendo cada ruta ahora mismo. *Queda*: el LCR de verdad (elegir
+    operador por costo y prefijo) sigue siendo del SBC-NG.
+11. **❌ SIGUE PENDIENTE · Alta disponibilidad** (un segundo nodo en espera con la base
+    replicada). UCM la vende como «Hot Standby» y Xorcom como «TwinStar»; en todo pliego de
+    licitación aparece. **Es lo único del bloque B que 1.10.0 no tocó**: no hay una línea de
+    código al respecto en el repo, y la respuesta honesta hoy es el procedimiento escrito de
+    §7, no una función del producto.
+12. **✅ 1.10.0 · DISA, callback, dial-by-name y marcación abreviada** (`control-plane/marcacion.js`,
+    migración `0015_marcacion.sql`). **DISA y callback nacen apagados**: son la puerta clásica del
+    fraude de tarifación. El PIN vive en bcrypt en Postgres y **nunca** en el dialplan (ahí lo vería
+    cualquiera con `dialplan show` o con acceso a la base): el dialplan pregunta por CURL a
+    `/api/internal/disa` —loopback + token del agente, el mismo candado que `/api/internal/feature`—
+    y la API compara, cuenta intentos por CallerID de origen, bloquea y registra cada uso en
+    `pbxng_marcacion_log`. El PIN no puede ser el número de un interno. Qué puede marcar una DISA se
+    decide contra la lista de rutas salientes que tiene habilitadas, la duración está acotada con
+    `TIMEOUT(absolute)` y se marca con `Local/<num>@internal` para reusar las rutas salientes con su
+    prefijo, su CallerID y su failover. El callback exige lista blanca de números (o PIN), con
+    tiempo de espera entre llamadas y tope diario. El dial-by-name es `Directory()` con los prompts
+    `dir-*`, que ya venían en el paquete de audios en español uruguayo. El callback en modo PIN
+    exige además su propia lista de rutas habilitadas (migración `0017_callback_rutas.sql`), que
+    **apaga** los que ya estuvieran encendidos: el CallerID al que se devuelve la llamada se
+    falsea en cualquier softphone. *Queda, y es lo que impide demostrarlo*: **no hay pantalla en
+    el panel**; hoy se configura por API (pedido a `panel`).
 
 ### Bloque C — abre mercados nuevos
 
@@ -136,14 +192,16 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
 | Sprint | Contenido | Por qué en ese orden |
 |---|---|---|
 | ~~6~~ **hecho en 1.9.0** | Horarios + modo noche + desvíos/DND/sígueme + catálogo de códigos de función | Es lo que falta para que sea «una central normal» |
-| 7 | COS/PIN de salida + listas negras/blancas + import/export CSV + DISA, callback, abreviada, dial-by-name | Control de gasto y migraciones; todo Bloque A cerrado |
-| 8 | Portal de autoservicio del usuario + salas de reunión + reportes de call center | Lo que se ve en la demo y lo que firma el supervisor |
-| 9 | Fax (T.38 + a correo + desde el panel) + failover de troncal | Licitaciones |
-| 10 | Alta disponibilidad | Pliegos de cliente mediano |
+| ~~7~~ **hecho en 1.10.0** | Reportes de call center + failover de troncal + DISA/callback/dial-by-name/abreviada + salas de reunión + fax T.38 | Bloque B: es lo que se pide por escrito en una licitación y lo que firma un supervisor |
+| 8 | Pantalla de DISA/callback/abreviada + los paquetes de fax + COS/PIN de salida + listas negras/blancas + import/export CSV | Cierra lo que 1.10.0 dejó a medias y lo que queda del Bloque A (control de gasto y migraciones desde otra central) |
+| 9 | Portal de autoservicio del usuario | Lo que se ve en la demo |
+| 10 | Alta disponibilidad | Pliegos de cliente mediano; es lo único del Bloque B sin empezar |
 | 11+ | Multi-tenant real, i18n (pt-BR/en), hotelería | Cambian el mercado, no el producto |
 
-Los sprints 6 y 7 son los que más mueven la aguja y son, casi todos, dialplan generado desde
-el panel: la maquinaria (`apps.js`, `setDialplan`, realtime) ya está, hay que usarla.
+Los sprints 6 y 7 son los que más movieron la aguja y fueron, casi todos, dialplan generado
+desde el panel: la maquinaria (`apps.js`, `setDialplan`, realtime) ya estaba, había que usarla.
+El 8 es más barato de lo que parece —dos pantallas y dos `apt-get`— y es lo que convierte tres
+funciones que hoy existen sólo en la API en algo que se puede mostrar.
 
 ## 7. La parte incómoda
 

@@ -12,7 +12,16 @@ WORKDIR /app
 # a propósito una versión POR ENCIMA de la del servidor: un cliente nuevo puede volcar
 # servidores viejos, al revés no. Si algún día el motor sube de la 17, hay que subir
 # esto también.
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg socat openssl \
+#
+# ghostscript + libtiff-tools son el motor de fax de ESTE contenedor (control-plane/fax.js):
+# Asterisk habla con el otro módem y manda/recibe un TIFF G3, pero el que sube y baja el
+# usuario es un PDF. `gs` convierte PDF → TIFF G3 (204x196) para SendFAX y `tiff2pdf` hace el
+# camino de vuelta para adjuntar lo recibido al correo. Sin ellos `POST /api/fax/out`
+# devuelve 503 y el fax recibido sale como TIFF, que medio mundo no sabe abrir.
+# Van con --no-install-recommends: suman ~72 MiB a la imagen (~23 MiB de .deb, la mayor parte
+# libgs10, las fuentes urw-base35 y poppler-data, que son dependencias duras de libgs10 y no
+# se pueden sacar). Es el precio de tener fax; no hay alternativa liviana que renderice PDF.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg socat openssl ghostscript libtiff-tools \
  && install -d /usr/share/postgresql-common/pgdg \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
  && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \

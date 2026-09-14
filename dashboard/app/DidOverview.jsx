@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Card, Group, Text, Badge, Table, ThemeIcon } from '@mantine/core';
 import { IconPhoneIncoming, IconAlertTriangle, IconCircleCheck, IconDeviceLandlinePhone } from '@tabler/icons-react';
 
-const destLabel = { extensión: 'Extensión', ivr: 'IVR', cola: 'Cola', app: 'Aplicación' };
+const destLabel = { interno: 'Interno', extensión: 'Extensión', ivr: 'IVR', cola: 'Cola', app: 'Aplicación', fax: 'Fax' };
 
 export default function DidOverview() {
   const [trunks, setTrunks] = useState([]);

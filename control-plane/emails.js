@@ -25,14 +25,16 @@ const THEMES = {
   voicemail: { accent: '#4f46e5', soft: '#eef2ff', icon: '📩', kicker: 'Nuevo mensaje de voz' },
   digest:    { accent: '#0d9488', soft: '#f0fdfa', icon: '📊', kicker: 'Resumen diario' },
   access:    { accent: '#1d4ed8', soft: '#eff6ff', icon: '📱', kicker: 'Tu acceso al softphone' },
+  meeting:   { accent: '#0891b2', soft: '#ecfeff', icon: '📅', kicker: 'Invitación a una reunión' },
+  fax:       { accent: '#0f766e', soft: '#f0fdfa', icon: '📠', kicker: 'Fax recibido' },
   info:      { accent: '#475569', soft: '#f8fafc', icon: 'ℹ️', kicker: 'Aviso' },
 };
 const THEME_BY_EVENT = {
   'security.attack': 'attack', 'security.ban': 'security',
   'auth.login': 'auth', 'auth.login_failed': 'security',
-  'trunk.down': 'infra', 'service.down': 'infra', 'extension.offline': 'infra',
+  'trunk.down': 'infra', 'trunk.failover': 'infra', 'service.down': 'infra', 'extension.offline': 'infra',
   'fraud.long_call': 'fraud', 'fraud.after_hours': 'fraud', 'fraud.international': 'fraud',
-  'queue.no_agents': 'queue', 'digest.daily': 'digest',
+  'queue.no_agents': 'queue', 'digest.daily': 'digest', 'ccreport.scheduled': 'digest',
 };
 const themeFor = (kind) => THEMES[kind] || THEMES.info;
 const esc = (t) => String(t == null ? '' : t).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
@@ -133,7 +135,7 @@ function kpiGrid(kpis = [], accent = '#0d9488') {
 /** Alerta genérica del motor (seguridad, acceso, infra, fraude, colas). */
 function alertEmail({ brand, event, severity, title, lines = [], foot = '', panelUrl = '' }) {
   let kind = THEME_BY_EVENT[event] || 'info';
-  if (severity === 'info' && (event === 'trunk.down' || event === 'service.down')) kind = 'recovered';
+  if (severity === 'info' && (event === 'trunk.down' || event === 'trunk.failover' || event === 'service.down')) kind = 'recovered';
   const t = themeFor(kind);
   const sub = severity === 'crit' ? 'Requiere tu atención ahora.' : severity === 'warn' ? 'Conviene revisarlo.' : '';
   const body = rowsTable(lines, t.accent) + (foot ? callout(foot, kind) : '');
@@ -146,16 +148,18 @@ function alertEmail({ brand, event, severity, title, lines = [], foot = '', pane
 }
 
 /** Resumen diario: números grandes + top internos. */
-function digestEmail({ brand, title, kpis = [], rows = [], panelUrl = '' }) {
+function digestEmail({ brand, title, kpis = [], rows = [], panelUrl = '', subtitle, foot = '' }) {
   const t = themeFor('digest');
   const body = kpiGrid(kpis, t.accent)
     + (rows.length ? `<div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#94a3b8;margin:18px 0 8px;">Detalle</div>` + rowsTable(rows, t.accent) : '');
   return shell({
     brand, kind: 'digest', title,
-    subtitle: 'Así estuvo la central ayer.',
+    // El resumen diario dice "ayer"; los informes de call center traen su propio período.
+    subtitle: subtitle === undefined ? 'Así estuvo la central ayer.' : subtitle,
     preheader: title,
     body,
     cta: panelUrl ? { url: panelUrl, label: 'Abrir el panel' } : null,
+    foot,
   });
 }
 
@@ -189,6 +193,33 @@ function voicemailEmail({ brand, mailbox, fullname, from, when, duration, transc
   });
 }
 
+/** Fax recibido: de quién, cuántas páginas y el documento adjunto. */
+function faxEmail({ brand, caja, de, remoto, did, cuando, paginas, estado, detalle, adjuntos = [], panelUrl = '' }) {
+  const t = themeFor('fax');
+  const rows = [
+    ['De', de || 'desconocido'],
+    remoto ? ['Identificación del aparato', remoto] : null,
+    did ? ['Número llamado', did] : null,
+    ['Caja', caja || '—'],
+    ['Fecha', cuando],
+    ['Páginas', String(paginas || 0)],
+  ].filter(Boolean);
+  let body = rowsTable(rows, t.accent);
+  /* Un fax incompleto se avisa arriba y con todas las letras: el que lo recibe tiene que
+   * saber que le faltan páginas ANTES de archivarlo, no cuando el cliente reclama. */
+  if (estado !== 'ok') body += callout('⚠️ La transmisión <b>no terminó bien</b>' + (detalle ? ': ' + esc(detalle) : '') + '. Puede faltar parte del documento; conviene pedir que lo reenvíen.', 'security');
+  if (adjuntos.length) body += callout('📎 Va adjunto: <b>' + adjuntos.map(esc).join('</b>, <b>') + '</b>.', 'fax');
+  return shell({
+    brand, kind: 'fax',
+    title: 'Fax de ' + (de || 'desconocido') + ' · ' + (paginas || 0) + (paginas === 1 ? ' página' : ' páginas'),
+    subtitle: caja ? 'Recibido en «' + caja + '»' : '',
+    preheader: 'Fax de ' + (de || 'desconocido') + ' (' + (paginas || 0) + ' pág.)',
+    body,
+    cta: panelUrl ? { url: panelUrl, label: 'Ver la bandeja de faxes' } : null,
+    foot: 'El documento también queda guardado en el panel, en Aplicaciones → Fax.',
+  });
+}
+
 /** Alta de softphone: QR grande + link. */
 function enrollEmail({ brand, ext, url }) {
   const t = themeFor('access');
@@ -214,6 +245,42 @@ function enrollEmail({ brand, ext, url }) {
   });
 }
 
+/** Invitación a una sala de reunión: cómo entrar, con qué PIN y cuándo.
+ *  El PIN que llega acá es el del ROL del invitado (salas.js nunca manda el de
+ *  moderador a un participante): este layout sólo lo muestra grande, porque es el
+ *  dato que el invitado va a buscar con el teléfono ya marcando. */
+function meetingEmail({ brand, sala, numero, externo = '', pin, moderador = false, cuando = null, duracion = null, nota = '', panelUrl = '' }) {
+  const t = themeFor('meeting');
+  const filas = [['Sala', sala], ['Marcá', numero]];
+  if (externo) filas.push(['Desde afuera', externo]);
+  filas.push(['Cuándo', cuando ? (cuando + (duracion ? ' · ' + duracion + ' min' : '')) : 'Disponible en cualquier momento']);
+  if (moderador) filas.push(['Tu rol', 'Moderador']);
+  const body = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eef1f7;border-radius:14px;">
+      <tr><td align="center" style="padding:20px 18px 16px;">
+        <div style="font-size:12px;color:#64748b;">Marcá desde tu teléfono</div>
+        <div style="font-size:30px;font-weight:800;color:${t.accent};letter-spacing:2px;">${esc(numero)}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:12px;">y cuando te lo pida, tu PIN</div>
+        <div style="font-size:30px;font-weight:800;color:#0f172a;letter-spacing:6px;">${esc(pin)}</div>
+      </td></tr>
+    </table>
+    <div style="height:14px;"></div>
+    ${rowsTable(filas, t.accent)}
+    ${nota ? callout(esc(nota), 'meeting') : ''}
+    ${moderador
+      ? callout('Sos <b>moderador</b>: este PIN silencia, expulsa y abre la sala. No lo reenvíes a los demás participantes, que tienen el suyo.', 'meeting')
+      : callout('La música de espera suena hasta que entra el moderador. Si la reunión está agendada, la sala <b>sólo abre en esa franja</b>.', 'meeting')}`;
+  return shell({
+    brand, kind: 'meeting',
+    title: 'Reunión: ' + sala,
+    subtitle: cuando ? ('Te esperamos el ' + cuando + '.') : 'Podés entrar cuando quieras.',
+    preheader: 'Marcá ' + numero + ' · PIN ' + pin,
+    body,
+    cta: panelUrl ? { url: panelUrl, label: 'Ver la sala en el panel' } : null,
+    foot: 'Tu PIN es personal: con él entrás a la reunión sin que nadie te abra la puerta.',
+  });
+}
+
 /** Prueba de SMTP. */
 function testEmail({ brand }) {
   return shell({
@@ -225,4 +292,4 @@ function testEmail({ brand }) {
   });
 }
 
-module.exports = { shell, rowsTable, callout, kpiGrid, alertEmail, digestEmail, voicemailEmail, enrollEmail, testEmail, THEMES, THEME_BY_EVENT };
+module.exports = { shell, rowsTable, callout, kpiGrid, alertEmail, digestEmail, voicemailEmail, faxEmail, enrollEmail, meetingEmail, testEmail, THEMES, THEME_BY_EVENT };

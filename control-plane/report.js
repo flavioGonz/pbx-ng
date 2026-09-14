@@ -36,6 +36,26 @@ function clasificar(r, internos) {
 }
 const nombreClid = (clid) => { const m = (clid || '').match(/"?([^"<]*)"?\s*</); const n = (m && m[1] || '').trim(); return n && !/^\d+$/.test(n) ? n : ''; };
 
+/* Marca del informe (nombre, subtitulo y logo que configura el panel). Sale de `build`
+ * y queda exportada porque ccreport.js genera SU propio informe y tiene que salir con la
+ * misma marca; recibe el pool por parametro para no depender del init() de este modulo. */
+async function branding(p) {
+  const b = {};
+  try {
+    const { rows } = await (p || pool).query("SELECT key,value FROM pbxng_settings WHERE key IN ('brand_name','brand_subtitle','brand_tagline','brand_logo')");
+    for (const r of rows) b[r.key.replace('brand_', '')] = r.value;
+  } catch (_) {}
+  return { ...b, name: b.name || 'PBX-NG', subtitle: b.subtitle || 'Comunicaciones unificadas' };
+}
+/* Logo de la tapa: la imagen de la marca si hay una utilizable, y si no las dos primeras
+ * letras del nombre (nunca un hueco: el informe se imprime y se firma). */
+function logoHtml(brand) {
+  const marca = (brand && brand.name) || 'PBX-NG';
+  return brand && brand.logo && /^(https?:|data:)/.test(brand.logo)
+    ? `<img src="${esc(brand.logo)}" alt="">`
+    : `<div class="mono-logo">${esc(marca.slice(0, 2).toUpperCase())}</div>`;
+}
+
 /* ─────────────── graficos (SVG a mano) ─────────────── */
 function barras(datos, { w = 700, h = 190, color = '#2f80ff', sufijo = '' } = {}) {
   if (!datos.length) return '<p class="vacio">Sin datos en el período.</p>';
@@ -67,18 +87,79 @@ function dona(partes, { size = 168 } = {}) {
   return `<div class="donut"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${segs}<text x="${cx}" y="${cy - 2}" text-anchor="middle" class="dn">${tot}</text><text x="${cx}" y="${cy + 14}" text-anchor="middle" class="ds">llamadas</text></svg><div class="legend">${leg}</div></div>`;
 }
 
+/* Hoja de estilo A4 del informe. Vive suelta porque ccreport.js (reportes de call
+ * center) arma sus propias páginas con la MISMA identidad visual: si cada informe se
+ * copiara el CSS, el día que cambie la marca quedarían dos informes distintos. */
+const CSS = `  @page { size: A4; margin: 16mm 14mm; }
+  :root { --ink:#0f172a; --sub:#64748b; --line:#e2e8f0; --brand:#0f2f5c; --acc:#2f80ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:#f1f5f9; font-size:11.5px; line-height:1.5; }
+  .page { width:210mm; min-height:297mm; margin:0 auto 10mm; background:#fff; padding:16mm 14mm; box-shadow:0 8px 30px rgba(15,23,42,.13); }
+  .barra { position:sticky; top:0; z-index:9; background:var(--brand); color:#fff; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; }
+  .barra button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 16px; font-weight:700; font-size:13px; cursor:pointer; }
+  /* tapa */
+  .tapa { display:flex; flex-direction:column; justify-content:space-between; min-height:265mm; background:linear-gradient(155deg,#0b1f3f 0%,#12356b 55%,#1c4f9c 100%); color:#fff; margin:-16mm -14mm; padding:22mm 18mm; }
+  .tapa .hd { display:flex; align-items:center; gap:14px; }
+  .tapa img { max-height:52px; max-width:190px; filter:brightness(0) invert(1); }
+  .mono-logo { width:52px; height:52px; border-radius:12px; background:rgba(255,255,255,.16); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; letter-spacing:1px; }
+  .tapa .marca { font-size:19px; font-weight:800; letter-spacing:.3px; }
+  .tapa .sub { font-size:12px; opacity:.72; }
+  .tapa h1 { font-size:42px; line-height:1.08; margin:0 0 10px; font-weight:800; letter-spacing:-.6px; }
+  .tapa .rule { width:78px; height:5px; background:#4d9dff; border-radius:3px; margin-bottom:20px; }
+  .tapa .peri { font-size:16px; opacity:.9; }
+  .tapa .meta { border-top:1px solid rgba(255,255,255,.22); padding-top:14px; display:flex; gap:32px; font-size:11px; opacity:.85; }
+  .tapa .meta b { display:block; font-size:12.5px; opacity:1; font-weight:600; }
+  h2 { font-size:17px; margin:0 0 3px; color:var(--brand); letter-spacing:-.2px; }
+  h2 .n { color:var(--acc); font-weight:800; margin-right:7px; }
+  .dsc { color:var(--sub); font-size:11px; margin:0 0 12px; }
+  section { margin-bottom:20px; page-break-inside:avoid; }
+  .kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:16px; }
+  .kpi { border:1px solid var(--line); border-radius:10px; padding:11px 10px; background:#f8fafc; }
+  .kv { font-size:23px; font-weight:800; line-height:1.1; letter-spacing:-.5px; }
+  .kl { font-size:10px; color:var(--sub); text-transform:uppercase; letter-spacing:.4px; margin-top:2px; }
+  .ks { font-size:10px; color:#94a3b8; margin-top:2px; }
+  .chart { width:100%; height:auto; }
+  .grid { stroke:#eef2f7; stroke-width:1; }
+  .ax { font-size:8.5px; fill:#94a3b8; font-family:inherit; }
+  .val { font-size:8.5px; fill:#64748b; font-weight:700; font-family:inherit; }
+  .dn { font-size:22px; font-weight:800; fill:var(--ink); }
+  .ds { font-size:9px; fill:#94a3b8; }
+  .donut { display:flex; gap:20px; align-items:center; }
+  .legend { flex:1; }
+  .lg { display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px dashed var(--line); font-size:11px; }
+  .lg i { width:10px; height:10px; border-radius:3px; }
+  .lg span { flex:1; }
+  .lg b { font-weight:700; }
+  .lg em { font-style:normal; color:var(--sub); width:38px; text-align:right; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--sub); border-bottom:2px solid var(--line); padding:6px 5px; }
+  td { padding:5px; border-bottom:1px solid #f1f5f9; font-size:10.5px; vertical-align:middle; }
+  tbody tr:nth-child(even) { background:#fafbfc; }
+  .mono { font-family:'JetBrains Mono',Consolas,monospace; }
+  .sm { display:block; font-size:9px; color:#94a3b8; }
+  .tag { border:1px solid var(--c); color:var(--c); border-radius:20px; padding:1px 7px; font-size:9px; font-weight:600; white-space:nowrap; }
+  .chip { border-radius:20px; padding:1px 8px; font-size:9px; font-weight:600; }
+  .chip.ok { background:#dcfce7; color:#166534; }
+  .chip.no { background:#fee2e2; color:#991b1b; }
+  .chip.rec-si { background:#ede9fe; color:#5b21b6; }
+  .chip.rec-no { background:#f1f5f9; color:#94a3b8; }
+  td.rec { text-align:center; }
+  .box { border-left:3px solid var(--acc); background:#f6f9ff; padding:11px 14px; border-radius:0 8px 8px 0; }
+  .box li { margin-bottom:5px; }
+  .box ul { margin:0; padding-left:16px; }
+  .vacio { color:#94a3b8; text-align:center; padding:24px; font-style:italic; }
+  .pie { border-top:1px solid var(--line); margin-top:18px; padding-top:8px; color:#94a3b8; font-size:9.5px; display:flex; justify-content:space-between; }
+  @media print { body { background:#fff; } .barra { display:none; } .page { box-shadow:none; margin:0; width:auto; min-height:0; padding:0; } .tapa { margin:0; page-break-after:always; min-height:250mm; } .pbreak { page-break-before:always; } }`;
+
 /* ─────────────── informe ─────────────── */
 async function build({ from, to, tipo, q, usuario }) {
   const desde = from ? new Date(from + 'T00:00:00') : new Date(Date.now() - 29 * 864e5);
   const hasta = to ? new Date(to + 'T23:59:59') : new Date();
 
-  const brand = {};
-  try {
-    const { rows } = await pool.query("SELECT key,value FROM pbxng_settings WHERE key IN ('brand_name','brand_subtitle','brand_tagline','brand_logo')");
-    for (const r of rows) brand[r.key.replace('brand_', '')] = r.value;
-  } catch (_) {}
-  const marca = brand.name || 'PBX-NG';
-  const sub = brand.subtitle || 'Comunicaciones unificadas';
+  const brand = await branding(pool);
+  const marca = brand.name;
+  const sub = brand.subtitle;
 
   let internos = new Set();
   try { const { rows } = await pool.query('SELECT id FROM ps_endpoints'); internos = new Set(rows.map(r => String(r.id))); } catch (_) {}
@@ -171,72 +252,12 @@ async function build({ from, to, tipo, q, usuario }) {
 
   if (total) conclusiones.push(`Hay audio guardado de <b>${conRec}</b> llamadas (<b>${pct(conRec, total)}%</b>): el resto no se grabó o la grabación ya se eliminó.`);
 
-  const logo = brand.logo && /^(https?:|data:)/.test(brand.logo) ? `<img src="${esc(brand.logo)}" alt="">` : `<div class="mono-logo">${esc(marca.slice(0, 2).toUpperCase())}</div>`;
+  const logo = logoHtml(brand);
 
   return `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <title>Informe ejecutivo de llamadas · ${esc(marca)}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm; }
-  :root { --ink:#0f172a; --sub:#64748b; --line:#e2e8f0; --brand:#0f2f5c; --acc:#2f80ff; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family:'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:#f1f5f9; font-size:11.5px; line-height:1.5; }
-  .page { width:210mm; min-height:297mm; margin:0 auto 10mm; background:#fff; padding:16mm 14mm; box-shadow:0 8px 30px rgba(15,23,42,.13); }
-  .barra { position:sticky; top:0; z-index:9; background:var(--brand); color:#fff; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; }
-  .barra button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 16px; font-weight:700; font-size:13px; cursor:pointer; }
-  /* tapa */
-  .tapa { display:flex; flex-direction:column; justify-content:space-between; min-height:265mm; background:linear-gradient(155deg,#0b1f3f 0%,#12356b 55%,#1c4f9c 100%); color:#fff; margin:-16mm -14mm; padding:22mm 18mm; }
-  .tapa .hd { display:flex; align-items:center; gap:14px; }
-  .tapa img { max-height:52px; max-width:190px; filter:brightness(0) invert(1); }
-  .mono-logo { width:52px; height:52px; border-radius:12px; background:rgba(255,255,255,.16); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; letter-spacing:1px; }
-  .tapa .marca { font-size:19px; font-weight:800; letter-spacing:.3px; }
-  .tapa .sub { font-size:12px; opacity:.72; }
-  .tapa h1 { font-size:42px; line-height:1.08; margin:0 0 10px; font-weight:800; letter-spacing:-.6px; }
-  .tapa .rule { width:78px; height:5px; background:#4d9dff; border-radius:3px; margin-bottom:20px; }
-  .tapa .peri { font-size:16px; opacity:.9; }
-  .tapa .meta { border-top:1px solid rgba(255,255,255,.22); padding-top:14px; display:flex; gap:32px; font-size:11px; opacity:.85; }
-  .tapa .meta b { display:block; font-size:12.5px; opacity:1; font-weight:600; }
-  h2 { font-size:17px; margin:0 0 3px; color:var(--brand); letter-spacing:-.2px; }
-  h2 .n { color:var(--acc); font-weight:800; margin-right:7px; }
-  .dsc { color:var(--sub); font-size:11px; margin:0 0 12px; }
-  section { margin-bottom:20px; page-break-inside:avoid; }
-  .kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:16px; }
-  .kpi { border:1px solid var(--line); border-radius:10px; padding:11px 10px; background:#f8fafc; }
-  .kv { font-size:23px; font-weight:800; line-height:1.1; letter-spacing:-.5px; }
-  .kl { font-size:10px; color:var(--sub); text-transform:uppercase; letter-spacing:.4px; margin-top:2px; }
-  .ks { font-size:10px; color:#94a3b8; margin-top:2px; }
-  .chart { width:100%; height:auto; }
-  .grid { stroke:#eef2f7; stroke-width:1; }
-  .ax { font-size:8.5px; fill:#94a3b8; font-family:inherit; }
-  .val { font-size:8.5px; fill:#64748b; font-weight:700; font-family:inherit; }
-  .dn { font-size:22px; font-weight:800; fill:var(--ink); }
-  .ds { font-size:9px; fill:#94a3b8; }
-  .donut { display:flex; gap:20px; align-items:center; }
-  .legend { flex:1; }
-  .lg { display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px dashed var(--line); font-size:11px; }
-  .lg i { width:10px; height:10px; border-radius:3px; }
-  .lg span { flex:1; }
-  .lg b { font-weight:700; }
-  .lg em { font-style:normal; color:var(--sub); width:38px; text-align:right; }
-  .cols { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
-  table { width:100%; border-collapse:collapse; }
-  th { text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--sub); border-bottom:2px solid var(--line); padding:6px 5px; }
-  td { padding:5px; border-bottom:1px solid #f1f5f9; font-size:10.5px; vertical-align:middle; }
-  tbody tr:nth-child(even) { background:#fafbfc; }
-  .mono { font-family:'JetBrains Mono',Consolas,monospace; }
-  .sm { display:block; font-size:9px; color:#94a3b8; }
-  .tag { border:1px solid var(--c); color:var(--c); border-radius:20px; padding:1px 7px; font-size:9px; font-weight:600; white-space:nowrap; }
-  .chip { border-radius:20px; padding:1px 8px; font-size:9px; font-weight:600; }
-  .chip.ok { background:#dcfce7; color:#166534; }
-  .chip.no { background:#fee2e2; color:#991b1b; }
-  .chip.rec-si { background:#ede9fe; color:#5b21b6; }
-  .chip.rec-no { background:#f1f5f9; color:#94a3b8; }
-  td.rec { text-align:center; }
-  .box { border-left:3px solid var(--acc); background:#f6f9ff; padding:11px 14px; border-radius:0 8px 8px 0; }
-  .box li { margin-bottom:5px; }
-  .box ul { margin:0; padding-left:16px; }
-  .vacio { color:#94a3b8; text-align:center; padding:24px; font-style:italic; }
-  .pie { border-top:1px solid var(--line); margin-top:18px; padding-top:8px; color:#94a3b8; font-size:9.5px; display:flex; justify-content:space-between; }
-  @media print { body { background:#fff; } .barra { display:none; } .page { box-shadow:none; margin:0; width:auto; min-height:0; padding:0; } .tapa { margin:0; page-break-after:always; min-height:250mm; } .pbreak { page-break-before:always; } }
+${CSS}
 </style></head><body>
 <div class="barra"><span>Informe listo · usá <b>Imprimir → Guardar como PDF</b> (tamaño A4, márgenes por defecto)</span><button onclick="window.print()">Imprimir / Guardar PDF</button></div>
 
@@ -338,4 +359,4 @@ async function build({ from, to, tipo, q, usuario }) {
 </body></html>`;
 }
 
-module.exports = { init, build };
+module.exports = { init, build, CSS, esc, pad, dur, pct, fLargo, fCorto, fHora, barras, dona, branding, logoHtml };

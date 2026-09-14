@@ -1,13 +1,14 @@
 'use client';
 /* AplicacionesTab — renderiza UNA aplicación de llamada por su clave (para rutas /aplicaciones/<tab>). */
 import { Badge } from '@mantine/core';
-import { IconUsersGroup, IconBroadcast, IconUsers, IconMail, IconTag, IconHash, IconKey, IconUser, IconLock } from '@tabler/icons-react';
+import { IconUsersGroup, IconBroadcast, IconUsers, IconMail, IconTag, IconHash, IconKey, IconUser } from '@tabler/icons-react';
 import QueuePanel from './QueuePanel';
 /* El catálogo de códigos ya no es una lista escrita a mano acá: lo manda la API y
  * los códigos son editables, así que esta solapa muestra el MISMO componente que
  * /funciones → Códigos de función. */
 import FeatureCodes from './FeatureCodes';
 import CrudPanel from './CrudPanel';
+import SalasPanel from './SalasPanel';
 
 export default function AplicacionesTab({ tab }) {
   if (tab === 'rg') return (
@@ -30,16 +31,10 @@ export default function AplicacionesTab({ tab }) {
         { name: 'members', label: 'Internos (separados por coma)', required: true, icon: <IconUsers size={15} />, placeholder: '1001,1002', description: 'Internos que reciben el aviso con auto-respuesta. Ej: 1001,1002.' },
       ]} emptyText="Sin grupos de paging." />
   );
-  if (tab === 'conf') return (
-    <CrudPanel icon={<IconUsers size={18} />} color="grape" title="Salas de conferencia" subtitle="ConfBridge · PIN opcional" idKey="name" fetchUrl="/conferences" createUrl="/conferences" deleteUrl={(r) => '/conferences/' + r.name}
-      columns={[{ key: 'name', label: 'Nombre', mono: true, icon: <IconTag size={13} /> }, { key: 'label', label: 'Etiqueta' }, { key: 'access_exten', label: 'Acceso', icon: <IconHash size={13} /> }, { key: 'pin', label: 'PIN' }]}
-      fields={[
-        { name: 'name', label: 'Nombre', required: true, icon: <IconTag size={15} />, placeholder: 'sala1', description: 'Identificador de la sala. Ej: sala1, directorio.' },
-        { name: 'label', label: 'Etiqueta', icon: <IconTag size={15} />, description: 'Texto descriptivo opcional. Ej: Reunión semanal.' },
-        { name: 'access_exten', label: 'Número de acceso', required: true, icon: <IconHash size={15} />, placeholder: '9001', description: 'Número que se marca para entrar a la sala. Ej: 9001.' },
-        { name: 'pin', label: 'PIN (opcional)', icon: <IconLock size={15} />, placeholder: '1234', description: 'Clave para ingresar a la sala. Dejalo vacío para sala abierta. Ej: 1234.' },
-      ]} emptyText="Sin salas de conferencia." />
-  );
+  /* La solapa vieja era un CRUD de cuatro campos contra /conferences. Las salas de
+   * reunión son su propia pantalla (/salas): acá se muestra la MISMA, sin el encabezado,
+   * para que el enlace de Aplicaciones que ya está en uso siga llevando a algún lado. */
+  if (tab === 'conf') return <SalasPanel conEncabezado={false} />;
   if (tab === 'vm') return (
     <CrudPanel icon={<IconMail size={18} />} color="indigo" title="Buzones de voz" subtitle="Marcá *97 desde el interno para escuchar mensajes" idKey="mailbox" fetchUrl="/mailboxes" createUrl="/mailboxes" deleteUrl={(r) => '/mailboxes/' + r.mailbox}
       columns={[{ key: 'mailbox', label: 'Buzón', mono: true }, { key: 'fullname', label: 'Nombre' }, { key: 'email', label: 'Email' }]}

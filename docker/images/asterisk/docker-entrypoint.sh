@@ -98,6 +98,31 @@ else
   echo "aviso: nft no está instalado, el bloqueo de IPs de /seguridad queda deshabilitado"
 fi
 
+# --- modulos que el panel da por hechos ---
+# Dos listas, igual que el gate de images/asterisk/Dockerfile, porque no cuestan lo mismo.
+#
+# REQUERIDOS: son EXACTAMENTE los que modules.conf pide con "require =". Si falta uno,
+# Asterisk sale con codigo 2 apenas arranque y el contenedor queda en crash-loop; el log de
+# Asterisk nombra el modulo, pero recien despues de que la central se quedo sin telefonos.
+# Avisamos ANTES de exec, con el nombre y la consecuencia, para que el que mira el log del
+# contenedor vea por que no levanta sin tener que leer modules.conf. No cortamos aca a
+# proposito: si el modulo esta pero el .so no se puede cargar, el que manda es Asterisk.
+# Esta lista y los "require =" de modules.conf se mueven SIEMPRE juntos (y con el gate del
+# Dockerfile): asi se escapo func_hangupcause.so, que estaba en el require y en ninguna
+# verificacion.
+for m in func_curl.so func_uri.so func_db.so func_strings.so \
+         app_directory.so app_read.so func_hangupcause.so; do
+  [ -f "/usr/lib/asterisk/modules/$m" ] || echo "AVISO GRAVE: falta el modulo $m y modules.conf lo pide con 'require =': Asterisk va a salir con codigo 2 y el contenedor queda en crash-loop (central sin telefonos). Hay que reconstruir la imagen de Asterisk."
+done
+# ESPERADOS: se avisa y se sigue. Que falte el fax no puede dejar sin telefonos a toda la
+# central, asi que NO van como "require" en modules.conf. El build ya corta si el modulo no
+# se compilo (ver images/asterisk/Dockerfile); esto es la red de seguridad para una imagen
+# vieja o armada a mano: el aviso queda en el log del arranque en vez de aparecer como
+# "no such application ReceiveFAX" en medio de una llamada de fax.
+for m in res_fax.so res_fax_spandsp.so app_disa.so app_confbridge.so; do
+  [ -f "/usr/lib/asterisk/modules/$m" ] || echo "aviso: falta el modulo $m en esta imagen; las funciones que lo usan van a fallar en tiempo de llamada"
+done
+
 # --- agente HTTP PBX-NG (:8092) en background ---
 # Todo POST y los GET de configuración (/net, /route, /fw/bans) validan X-PBXNG-Token
 # (/etc/pbxng/agent.token, mismo volumen que la API); sin token configurado acepta sólo

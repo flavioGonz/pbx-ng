@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Card, Group, Text, Switch, TextInput, NumberInput, Button, Badge, Stack, ThemeIcon, Divider, Table, Loader, Center, Tooltip, ActionIcon, Collapse } from '@mantine/core';
-import { IconBellRinging, IconDeviceFloppy, IconSend, IconChevronDown, IconShieldLock, IconLogin, IconPhoneOff, IconServerBolt, IconCurrencyDollar, IconHeadset, IconMail, IconRefresh } from '@tabler/icons-react';
+import { IconBellRinging, IconDeviceFloppy, IconSend, IconChevronDown, IconShieldLock, IconLogin, IconPhoneOff, IconServerBolt, IconCurrencyDollar, IconHeadset, IconMail, IconRefresh, IconRouteAltLeft } from '@tabler/icons-react';
 import { toast } from './notify';
 import { api, apiPost } from './api';
 import { fmtFecha, fmtHora } from './fmt';
@@ -13,6 +13,7 @@ const META = {
   'auth.login':          { icon: <IconLogin size={17} />,      color: 'blue',   title: 'Inicio de sesión al panel', desc: 'Aviso al entrar al panel. Recomendado: solo desde una IP nueva.' },
   'auth.login_failed':   { icon: <IconLogin size={17} />,      color: 'red',    title: 'Intentos fallidos al panel', desc: 'Varios intentos de acceso fallidos: posible fuerza bruta.' },
   'trunk.down':          { icon: <IconPhoneOff size={17} />,   color: 'red',    title: 'Troncal caída / recuperada', desc: 'Si la troncal se cae, dejás de recibir llamadas. Avisa también al recuperarse.' },
+  'trunk.failover':      { icon: <IconRouteAltLeft size={17} />, color: 'orange', title: 'Failover de troncal', desc: 'Una ruta saliente pasó a su troncal de respaldo, o volvió a la principal. Un aviso por transición, no uno por llamada.' },
   'service.down':        { icon: <IconServerBolt size={17} />, color: 'red',    title: 'Servicio caído', desc: 'Base de datos, ARI o AMI sin conexión.' },
   'extension.offline':   { icon: <IconPhoneOff size={17} />,   color: 'orange', title: 'Extensión crítico desregistrado', desc: 'Avisa si una extensión clave (ej. recepción) se cae.' },
   'fraud.long_call':     { icon: <IconCurrencyDollar size={17} />, color: 'grape', title: 'Llamada saliente muy larga', desc: 'Primer síntoma habitual de fraude telefónico.' },

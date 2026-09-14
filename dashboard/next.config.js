@@ -18,9 +18,10 @@
  * 'unsafe-inline' si hay nonce, así que no se puede dejar como respaldo).
  *
  * Las excepciones a 'self' son todas cosas que ya existen en el panel:
- *  - unpkg.com en script/style: leaflet (`/mapa`, `/clientes/[id]`) y wavesurfer
- *    (`RecordingPlayer`) se cargan por CDN a demanda. Deuda: bajarlos a `public/vendor`
- *    y sacar el CDN de la política (ver informe).
+ *  - (SIN unpkg desde 1.10.0: leaflet y wavesurfer se sirven de `public/vendor/`. Se
+ *    bajaron del CDN porque una central on-prem puede no tener salida a internet —el
+ *    mapa y la onda de audio quedaban en blanco sin decir por qué— y porque era código
+ *    de terceros entrando al panel de administración en cada carga.)
  *  - fonts.googleapis.com (hoja) + fonts.gstatic.com (woff2): Inter y JetBrains Mono
  *    del `layout.jsx`, y el `@import` de la pantalla de login.
  *  - img-src https:: banderas de flagcdn, favicons de ISP de `/seguridad`, tiles de
@@ -30,9 +31,10 @@
  *  - worker-src blob:: `/sw.js` es 'self', pero el blob: cubre a cualquier lib que se
  *    arme un worker en memoria (cobe no lo hace: dibuja WebGL en el canvas principal,
  *    y WebGL no lo mira la CSP).
- * connect-src queda en 'self' porque todo va por el mismo origen: la API por /backend,
+ * connect-src es 'self' + blob: porque todo va por el mismo origen: la API por /backend,
  * el socket por /socket.io y el SIP del softphone por wss://<host>/ws (CSP3 hace que
- * 'self' matchee ws/wss del mismo host y puerto). */
+ * 'self' matchee ws/wss del mismo host y puerto); el blob: es para las libs que se
+ * buscan por fetch la URL que uno les pasó (wavesurfer), no para salir a la red. */
 const dev = process.env.NODE_ENV === 'development';
 const CSP = [
   "default-src 'self'",
@@ -40,12 +42,19 @@ const CSP = [
   "object-src 'none'",
   "frame-ancestors 'none'",
   // 'unsafe-eval' sólo en `next dev`: el HMR de webpack evalúa los módulos.
-  `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ''} https://unpkg.com`,
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+  `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ''}`,
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://fonts.gstatic.com",
   "media-src 'self' blob:",
-  "connect-src 'self'",
+  /* `blob:` no abre nada hacia afuera: son URLs que crea esta misma página con
+   * URL.createObjectURL y viven sólo en esta pestaña. Hace falta porque wavesurfer
+   * hace su PROPIO fetch() de la URL que se le pasa, y a /grabaciones le pasamos un
+   * blob (el audio se baja antes por fetch para que el parche global le ponga el
+   * token: las grabaciones dejaron de ser públicas y meter el token en la URL lo
+   * dejaría escrito en los logs del proxy). Sin esto, en producción la onda de audio
+   * no se dibujaba nunca y la consola tiraba un CSP por cada grabación. */
+  "connect-src 'self' blob:",
   "worker-src 'self' blob:",
 ].join('; ');
 

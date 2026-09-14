@@ -4,11 +4,17 @@
 import { useState } from 'react';
 import { Stack, Tabs, ThemeIcon, Title, Text, Group } from '@mantine/core';
 import { IconPhone, IconMicrophone2, IconCloud, IconListDetails } from '@tabler/icons-react';
+import { useEsAdmin } from '../auth';
 import Historial from '../historial/page';
 import Grabaciones from '../grabaciones/page';
 
 export default function Cdr() {
   const [tab, setTab] = useState('llamadas');
+  /* Llamadas y Grabaciones son SUP (`/cdr` está en `SUP_OK` de `app/auth.jsx`), pero
+   * «Almacenamiento» es la configuración de dónde se guardan los WAV: `/recordings/config`
+   * y `/recordings/storage/*` son admin. Al supervisor no se le ofrece la solapa en vez de
+   * dejarlo entrar a una pantalla que sólo sabe contestar 403. */
+  const esAdmin = useEsAdmin();
   return (
     <Stack gap="lg">
       <div className="pbx-pagehead"><span className="pbx-acc-bar" style={{ background: 'linear-gradient(180deg,var(--mantine-color-cyan-5),var(--mantine-color-cyan-8))' }} /><ThemeIcon size={44} radius="md" variant="gradient" gradient={{ from: 'cyan.5', to: 'cyan.8', deg: 135 }}><IconListDetails size={24} /></ThemeIcon><div><Title order={2} lh={1.1}>CDR</Title><Text c="dimmed" size="sm">Registro de llamadas, grabaciones y almacenamiento</Text></div></div>
@@ -16,12 +22,12 @@ export default function Cdr() {
         <Tabs.List>
           <Tabs.Tab value="llamadas" leftSection={<IconPhone size={16} />}>Llamadas</Tabs.Tab>
           <Tabs.Tab value="grabaciones" leftSection={<IconMicrophone2 size={16} />}>Grabaciones</Tabs.Tab>
-          <Tabs.Tab value="almacenamiento" leftSection={<IconCloud size={16} />}>Almacenamiento</Tabs.Tab>
+          {esAdmin && <Tabs.Tab value="almacenamiento" leftSection={<IconCloud size={16} />}>Almacenamiento</Tabs.Tab>}
         </Tabs.List>
       </Tabs>
       {tab === 'llamadas' && <Historial embedded />}
       {tab === 'grabaciones' && <Grabaciones embedded section="list" />}
-      {tab === 'almacenamiento' && <Grabaciones embedded section="cfg" />}
+      {tab === 'almacenamiento' && esAdmin && <Grabaciones embedded section="cfg" />}
     </Stack>
   );
 }

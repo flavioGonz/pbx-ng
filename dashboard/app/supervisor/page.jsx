@@ -6,8 +6,19 @@ import { useAuth, logout } from '../auth';
 import Softphone from '../Softphone';
 import ClientesLibreta from '../ClientesLibreta';
 import { Card, Text, Group, Badge, Button, ThemeIcon, Stack, ActionIcon, Tooltip, ScrollArea, Table, useComputedColorScheme } from '@mantine/core';
-import { IconLogout, IconEar, IconMicrophone, IconUrgent, IconRefresh, IconUsersGroup, IconPhoneOff, IconAddressBook } from '@tabler/icons-react';
+import { IconLogout, IconEar, IconMicrophone, IconUrgent, IconRefresh, IconUsersGroup, IconPhoneOff, IconAddressBook, IconUsers, IconPrinter, IconReportAnalytics, IconDeviceAnalytics, IconHistory } from '@tabler/icons-react';
 import { toast } from '../notify';
+import Link from 'next/link';
+
+/* Espejo de SUP_OK (app/auth.jsx) menos /monitor, que es lo que esta misma pantalla ya
+ * hace —escuchar, susurrar, irrumpir— y mandarlo ahí sería sacarlo de donde está. */
+const ATAJOS = [
+  { href: '/salas', label: 'Salas', icon: IconUsers },
+  { href: '/fax', label: 'Fax', icon: IconPrinter },
+  { href: '/reportes', label: 'Reportes', icon: IconReportAnalytics },
+  { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
+  { href: '/cdr', label: 'CDR', icon: IconHistory },
+];
 
 export default function SupervisorPanel() {
   const { user } = useAuth();
@@ -80,6 +91,14 @@ export default function SupervisorPanel() {
           <div><Text fw={800} fz="lg" lh={1.1}>Panel de Supervisor</Text><Text fz="xs" c="dimmed">{user?.name || user?.username} · extensión {ext || '—'}</Text></div>
         </Group>
         <Group gap="xs">
+          {/* Las pantallas que rbac.js le da al supervisor. Sin estos links no había NINGÚN
+              camino hacia ellas: la lista SUP_OK, las reglas del backend y todo el
+              esconder-por-rol de /fax y /salas eran código que con rol supervisor no se
+              ejecutaba nunca, porque para llegar había que escribir la URL a mano. */}
+          {ATAJOS.map((a) => (
+            <Button key={a.href} size="sm" variant="subtle" color="gray" component={Link} href={a.href}
+              leftSection={<a.icon size={16} />}>{a.label}</Button>
+          ))}
           <Button size="sm" variant="light" color="grape" leftSection={<IconAddressBook size={16} />} onClick={() => setLibreta(true)}>Libreta de clientes</Button>
           <Badge size="lg" variant="dot" color={registered ? 'teal' : 'orange'}>{registered ? 'Softphone en línea' : 'Conectando…'}</Badge>
           {sp.call && <Button size="sm" color="red" variant="light" leftSection={<IconPhoneOff size={16} />} onClick={sp.hangup}>Cortar escucha</Button>}

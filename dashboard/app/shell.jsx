@@ -6,10 +6,10 @@ import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, Action
 import {
   IconSitemap, IconServer2, IconDatabase, IconRouteAltLeft, IconDatabaseExport, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
-  IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk,
-  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconClockHour4, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff } from '@tabler/icons-react';
+  IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk, IconReportAnalytics,
+  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconClockHour4, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff, IconPrinter } from '@tabler/icons-react';
 import { useLive } from './useLive';
-import { useAuth, logout } from './auth';
+import { useAuth, esAdmin, SUP_OK, logout } from './auth';
 import PbxLogo from './PbxLogo';
 import ErrorBoundary from './ErrorBoundary';
 import { NightModeChip } from './NightMode';
@@ -53,6 +53,12 @@ function Logo({ logo, name }) {
 /* El Resumen no pertenece a ningún grupo: es la portada. Estaba metido dentro de
  * "Telefonía", que es de lo que se queja cualquiera que mire el menú dos veces. */
 const inicio = { href: '/', label: 'Resumen', icon: IconLayoutDashboard };
+/* El «inicio» de un supervisor no es el Resumen (que es de admin) sino su propia pantalla,
+ * y necesita estar en el menú por una razón muy concreta: entrando a /cdr o a /salas, sin
+ * este ítem no había NINGÚN link de vuelta a /supervisor —el único camino era cerrar
+ * sesión—. `/supervisor` se dibuja sin este shell (tiene su propio encabezado a pantalla
+ * completa), así que acá sólo aparece el link. */
+const inicioSup = { href: '/supervisor', label: 'Panel de supervisión', icon: IconHeadphones };
 
 /* Los grupos siguen UN criterio, dicho en una línea cada uno. Antes "Telefonía"
  * mezclaba infraestructura (Topología, Red) con enrutamiento y con reportes (CDR),
@@ -79,8 +85,9 @@ const groups = [
     { href: '/aplicaciones/colas', label: 'Colas', icon: IconHeadset },
     { href: '/aplicaciones/rg', label: 'Ring Groups', icon: IconUsersGroup },
     { href: '/aplicaciones/paging', label: 'Paging', icon: IconBroadcast },
-    { href: '/aplicaciones/conf', label: 'Conferencias', icon: IconUsers },
+    { href: '/salas', label: 'Salas de reunión', icon: IconUsers },
     { href: '/aplicaciones/vm', label: 'Buzones', icon: IconMail },
+    { href: '/fax', label: 'Fax', icon: IconPrinter },
     { href: '/funciones', label: 'Aparcado · Captura · MoH', icon: IconAsterisk },
     { href: '/aplicaciones/codes', label: 'Códigos', icon: IconAsterisk },
     { href: '/aplicaciones/ai', label: 'AI IVR', icon: IconRobot },
@@ -91,6 +98,7 @@ const groups = [
     { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
     { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
     { href: '/cdr', label: 'CDR', icon: IconHistory },
+    { href: '/reportes', label: 'Reportes de call center', icon: IconReportAnalytics },
     { href: '/mapa', label: 'Mapa', icon: IconMap2 },
     { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
   ] },
@@ -126,16 +134,21 @@ export default function Shell({ children }) {
   }, [path]);
   const { user } = useAuth();
   const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/sbc': 'sbc' };
-  /* Menú por rol (espejo de control-plane/rbac.js, docs/CONTRATOS.md §2). Lo que no está
-   * en SUP_OK es sólo admin; 'agente' no ve nada porque no tiene ninguna pantalla de este
-   * shell (auth.jsx lo manda a /agente). Mientras no se conoce el usuario (user === undefined,
-   * igual en servidor y primer render) se muestra todo, como antes, para no parpadear. */
-  const SUP_OK = ['/cdr', '/wallboard', '/monitor', '/mapa', '/telefonos'];
+  /* Menú por rol. La lista de lo que ve un supervisor es `SUP_OK` de `app/auth.jsx`
+   * (espejo de control-plane/rbac.js, docs/CONTRATOS.md §2), la MISMA que usa el redirect
+   * de esa pantalla: si el menú ofreciera un ítem que el redirect rebota, el supervisor
+   * apretaría un botón que lo saca de donde está. Lo que no está en SUP_OK es sólo admin;
+   * 'agente' no ve nada porque no tiene ninguna pantalla de este shell (auth.jsx lo manda
+   * a /agente).
+   *
+   * El limbo de `user` (`undefined`, «todavía no sé quién entró») se resuelve del lado
+   * prudente con `esAdmin()`, como en el resto del panel (CONTRATOS §2): mientras no se
+   * sabe se dibuja el menú chico —el de operación— y no el de administración. Al revés,
+   * a un supervisor le parpadeaban Troncales, Usuarios y Respaldos en cada recarga. */
   const roleOk = (it) => {
-    const rol = user && user.role;
-    if (!rol || rol === 'admin') return true;
-    if (rol === 'supervisor') return SUP_OK.includes(it.href);
-    return false;
+    if (esAdmin(user)) return true;
+    if (user && user.role === 'agente') return false;
+    return it.href === '/supervisor' || SUP_OK.includes(it.href);
   };
   const visibleItem = (it) => roleOk(it) && (!MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false);
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
@@ -197,6 +210,7 @@ export default function Shell({ children }) {
           <ScrollArea style={{ flex: 1, marginTop: 14 }} type="hover">
             {/* La portada, suelta y siempre arriba: no es un ítem de "Telefonía". */}
             {visibleItem(inicio) && <Box mb={10}>{navItem(inicio)}</Box>}
+            {!esAdmin(user) && user && user.role === 'supervisor' && <Box mb={10}>{navItem(inicioSup)}</Box>}
             {groups.filter(g => g.items.some(visibleItem)).map(g => {
               const opened = rail ? true : abiertos.includes(g.label);
               const GIcon = g.icon;
@@ -218,9 +232,13 @@ export default function Shell({ children }) {
           <Box pt="xs" mt="xs" style={{ borderTop: '1px solid rgba(120,130,150,.16)' }}>
             <Group justify={rail ? 'center' : 'space-between'} wrap="nowrap" gap={6}>
               {/* El modo noche se mira mucho más seguido de lo que se cambia: el chip lo
-                * muestra sin entrar a ninguna pantalla. Sólo para admin, que es el único
-                * rol al que la API le deja leer /nightmode (si no, sería un 403 por minuto). */}
-              {!rail && user?.role === 'admin' && <NightModeChip />}
+                * muestra sin entrar a ninguna pantalla. Se dibuja para admin Y supervisor
+                * porque `GET /nightmode` es SUP en rbac.js: es exactamente el «el supervisor
+                * ve si la central está abierta o cerrada» del contrato, y ahora que entra al
+                * shell hay dónde mostrárselo. Al agente no: no llega nunca a este shell. En el
+                * limbo de `user` no se dibuja —lado prudente— y ante un 403 `NightModeChip`
+                * no pinta nada, así que en el peor caso no se ve, no molesta. */}
+              {!rail && user && user.role !== 'agente' && <NightModeChip />}
               {!rail && <Tooltip label={connected ? 'Conexión en vivo activa' : 'Sin conexión en vivo'}><Badge size="sm" radius="sm" variant="light" color={connected ? 'teal' : 'gray'} leftSection={<span className="pbx-pip pbx-pulse" style={{ background: connected ? 'var(--mantine-color-teal-6)' : 'var(--mantine-color-gray-5)' }} />}>{connected ? 'En vivo' : 'Offline'}</Badge></Tooltip>}
               <Tooltip label={scheme === 'dark' ? 'Modo claro' : 'Modo oscuro'} position="top"><ActionIcon variant="subtle" color="gray" onClick={toggleScheme}>{scheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}</ActionIcon></Tooltip>
             </Group>
