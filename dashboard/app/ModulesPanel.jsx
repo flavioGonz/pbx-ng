@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Stack, Card, Group, Text, Switch, ThemeIcon, Badge, Alert } from '@mantine/core';
-import { IconShieldLock, IconArrowsLeftRight, IconWaveSine, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconInfoCircle, IconHeadset } from '@tabler/icons-react';
+import { IconShieldLock, IconArrowsLeftRight, IconWaveSine, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconInfoCircle, IconHeadset, IconDoorEnter } from '@tabler/icons-react';
 import { toast } from './notify';
 import { api, apiPost } from './api';
 
@@ -15,6 +15,12 @@ const MODS = [
   { id: 'clicktocall', label: 'Click-to-Call', desc: 'Llamadas web públicas por enlace o QR, sin registro.', icon: IconWorldShare },
   { id: 'push', label: 'Notificaciones Push', desc: 'Push RFC 8599 a la PWA y móviles.', icon: IconBell },
   { id: 'autoprov', label: 'Auto-aprovisionamiento', desc: 'Provisión automática de teléfonos físicos por MAC.', icon: IconDeviceLandlinePhone },
+  /* El id interno sigue siendo `intercom` aunque la etiqueta diga «Portería»: con ese nombre
+   * lo conocen el perfil `intercom` del compose, el reconciliador que prende y apaga go2rtc, y
+   * la fila `mod_intercom` que ya existe en las centrales instaladas. Renombrarlo dejaría el
+   * switch desconectado del contenedor. Ojo con la letra chica de la descripción: apagar esto
+   * apaga el VIDEO, no la ficha del cliente que ve el agente cuando entra una llamada. */
+  { id: 'intercom', label: 'Portería', desc: 'Porteros y cámaras RTSP de cada cliente, servidos como video en el panel (go2rtc). Enciende las pantallas «Portería» y «Clientes» del menú. Apagarlo saca el video: el agente sigue viendo la ficha de quien lo llama.', infra: true, icon: IconDoorEnter },
 ];
 
 export default function ModulesPanel() {

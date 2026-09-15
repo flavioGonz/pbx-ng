@@ -26,7 +26,6 @@ const THEMES = {
   digest:    { accent: '#0d9488', soft: '#f0fdfa', icon: '📊', kicker: 'Resumen diario' },
   access:    { accent: '#1d4ed8', soft: '#eff6ff', icon: '📱', kicker: 'Tu acceso al softphone' },
   meeting:   { accent: '#0891b2', soft: '#ecfeff', icon: '📅', kicker: 'Invitación a una reunión' },
-  fax:       { accent: '#0f766e', soft: '#f0fdfa', icon: '📠', kicker: 'Fax recibido' },
   info:      { accent: '#475569', soft: '#f8fafc', icon: 'ℹ️', kicker: 'Aviso' },
 };
 const THEME_BY_EVENT = {
@@ -193,30 +192,38 @@ function voicemailEmail({ brand, mailbox, fullname, from, when, duration, transc
   });
 }
 
-/** Fax recibido: de quién, cuántas páginas y el documento adjunto. */
-function faxEmail({ brand, caja, de, remoto, did, cuando, paginas, estado, detalle, adjuntos = [], panelUrl = '' }) {
-  const t = themeFor('fax');
-  const rows = [
-    ['De', de || 'desconocido'],
-    remoto ? ['Identificación del aparato', remoto] : null,
-    did ? ['Número llamado', did] : null,
-    ['Caja', caja || '—'],
-    ['Fecha', cuando],
-    ['Páginas', String(paginas || 0)],
-  ].filter(Boolean);
-  let body = rowsTable(rows, t.accent);
-  /* Un fax incompleto se avisa arriba y con todas las letras: el que lo recibe tiene que
-   * saber que le faltan páginas ANTES de archivarlo, no cuando el cliente reclama. */
-  if (estado !== 'ok') body += callout('⚠️ La transmisión <b>no terminó bien</b>' + (detalle ? ': ' + esc(detalle) : '') + '. Puede faltar parte del documento; conviene pedir que lo reenvíen.', 'security');
-  if (adjuntos.length) body += callout('📎 Va adjunto: <b>' + adjuntos.map(esc).join('</b>, <b>') + '</b>.', 'fax');
+/** PIN nuevo del buzón de voz.
+ *  Por qué se manda por correo: al rotar el PIN de un buzón que ya existía, el dueño se
+ *  queda afuera de sus propios mensajes sin enterarse. El correo es lo único que convierte
+ *  «le rotamos el PIN» en «el usuario lo sabe antes de necesitarlo». */
+/* Aviso al DUEÑO del buzón de que le rotaron el PIN.
+ *
+ * SIN BOTÓN AL PANEL, a propósito. Antes el CTA iba a `https://<dominio>/voz`, que es la
+ * pantalla de voz por IA, no la de buzones; y la de buzones (`/aplicaciones/vm`) es admin,
+ * mientras que el que recibe este correo es el dueño del interno —normalmente rol agente—,
+ * que ahí no entra y que además no tiene nada que hacer en el panel con su PIN. Lo único
+ * que necesita saber va en el cuerpo: cómo escuchar sus mensajes y cómo ponerse un PIN
+ * propio desde el teléfono, que es el camino que de verdad tiene.
+ *
+ * El PIN va en claro en el cuerpo porque ES el aviso: un PIN que se rota y no se comunica
+ * deja a la persona afuera de sus mensajes. El asunto y el preheader NO lo llevan (se ven
+ * en la lista del correo y en la notificación del celular, sin abrir nada). */
+function vmPinEmail({ brand, mailbox, fullname, pin }) {
+  const t = themeFor('access');
+  const body = rowsTable([
+    ['Buzón', 'Interno ' + mailbox + (fullname ? ' · ' + fullname : '')],   // rowsTable ya escapa
+    ['PIN nuevo', pin],
+  ], t.accent)
+    + callout('Para escuchar tus mensajes marcá <b>*97</b> desde tu interno. Si te lo pide, el PIN es el de arriba.', 'access')
+    + callout('¿Querés uno tuyo? Marcá <b>*97</b>, entrá con este PIN y elegí <b>0</b> (opciones del buzón) y después <b>5</b> (cambiar la clave). El nuevo queda al instante.', 'access');
   return shell({
-    brand, kind: 'fax',
-    title: 'Fax de ' + (de || 'desconocido') + ' · ' + (paginas || 0) + (paginas === 1 ? ' página' : ' páginas'),
-    subtitle: caja ? 'Recibido en «' + caja + '»' : '',
-    preheader: 'Fax de ' + (de || 'desconocido') + ' (' + (paginas || 0) + ' pág.)',
+    brand, kind: 'access',
+    title: 'Cambió el PIN de tu buzón de voz',
+    subtitle: 'Guardalo: es lo que te pide la central para escuchar tus mensajes.',
+    preheader: 'PIN nuevo del buzón ' + mailbox,
     body,
-    cta: panelUrl ? { url: panelUrl, label: 'Ver la bandeja de faxes' } : null,
-    foot: 'El documento también queda guardado en el panel, en Aplicaciones → Fax.',
+    cta: null,
+    foot: 'Si no pediste este cambio, avisale al administrador de la central.',
   });
 }
 
@@ -292,4 +299,4 @@ function testEmail({ brand }) {
   });
 }
 
-module.exports = { shell, rowsTable, callout, kpiGrid, alertEmail, digestEmail, voicemailEmail, faxEmail, enrollEmail, meetingEmail, testEmail, THEMES, THEME_BY_EVENT };
+module.exports = { shell, rowsTable, callout, kpiGrid, alertEmail, digestEmail, voicemailEmail, vmPinEmail, enrollEmail, meetingEmail, testEmail, THEMES, THEME_BY_EVENT };

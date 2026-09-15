@@ -13,19 +13,19 @@ let patched = false;
  * Vive acá, y no en `shell.jsx`, porque la misma lista tiene que contestar dos preguntas
  * que hasta ahora se contestaban por separado: qué ítems se le dibujan en el menú y a
  * dónde lo deja quedarse el redirect de abajo. Con las dos listas separadas pasó lo que
- * tenía que pasar: el menú le ofrecía «Fax» y «Salas de reunión» y el redirect lo
+ * tenía que pasar: el menú le ofrecía «Salas de reunión» y el redirect lo
  * rebotaba a /supervisor sin excepciones, así que todo el esconder-por-rol de adentro de
  * esas pantallas era código que con rol supervisor no se ejecutaba nunca.
  *
  * Para agregar una entrada acá la pantalla tiene que cumplir una de dos: o todos sus
- * pedidos son de familias SUP, o esconde sola lo que es de admin (la solapa
- * «Configuración» de /fax, el alta / editar / borrar / invitar / «Ver PIN» de /salas, los
- * «Envíos programados» de /reportes, la solapa «Almacenamiento» de /cdr). Una pantalla
+ * pedidos son de familias SUP, o esconde sola lo que es de admin (el alta / editar /
+ * borrar / invitar / «Ver PIN» de /salas, los «Envíos programados» de /reportes, la
+ * solapa «Almacenamiento» de /cdr). Una pantalla
  * que igual va a comer un 403 NO se agrega: un ítem de menú que sólo sabe decir «no
  * tenés permiso» es peor que no tenerlo. Por eso quedaron afuera `/mapa` (su único dato
  * es `GET /api/geo`, que es admin) y `/telefonos` (`GET|POST /api/settings` y el alta,
  * edición y baja de teléfonos son admin: la pantalla entera es configuración). */
-export const SUP_OK = ['/cdr', '/reportes', '/wallboard', '/monitor', '/fax', '/salas'];
+export const SUP_OK = ['/cdr', '/reportes', '/wallboard', '/monitor', '/salas'];
 
 /* ¿El supervisor se puede quedar en esta ruta, o lo devolvemos a su pantalla?
  * /supervisor sigue siendo su inicio —es a donde lo manda el login y a donde vuelve

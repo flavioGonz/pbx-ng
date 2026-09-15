@@ -64,9 +64,14 @@ table inet pbxng {
         type ipv4_addr
         flags timeout          # cada elemento puede vencer solo; sin timeout = permanente
     }
+    set banned6 {
+        type ipv6_addr         # nftables no mezcla familias en un set, ni en la familia inet
+        flags timeout
+    }
     chain input {
         type filter hook input priority -10; policy accept;
         ip saddr @banned drop
+        ip6 saddr @banned6 drop
     }
 }
 ```
@@ -82,8 +87,13 @@ Qué hay que saber para convivir con ella:
 - **Policy accept**: la tabla no cierra nada por sí sola. Sacarla (`nft delete table inet
   pbxng`) deja el host como estaba; el agente la vuelve a crear en el próximo `/fw/*` o
   reinicio del contenedor (`ensure_fw()` es idempotente y **nunca borra** el set).
-- **Sólo IPv4**, y el agente rechaza (`400`) IPs privadas, loopback, link-local, multicast,
-  reservadas y las del propio host: no podés dejarte afuera desde el panel.
+- **IPv4 e IPv6** (v6 desde 1.11.0: la tabla ya era `inet`, faltaban el set y la regla). El
+  agente rechaza (`400`) IPs privadas, loopback, link-local (`fe80::/10`), ULA (`fc00::/7`),
+  multicast, reservadas y las del propio host —v6 incluidas—: no podés dejarte afuera desde el
+  panel. Una `::ffff:1.2.3.4` (IPv4 vista por un socket v6) se guarda como IPv4 y va al set v4,
+  que es donde el paquete real se corta. En una central **sin IPv6 nada de esto molesta**: el
+  set v6 queda vacío y su regla no matchea nunca; si el kernel no lo soporta, el agente sigue
+  bloqueando v4 e informa `v6:false` con el motivo.
 - **Fuente de verdad = la base** (`pbxng_blocked`). La API manda el set completo con
   `POST /fw/sync` al arrancar y cada 5 min, así que un `nft flush set` a mano se revierte
   solo; para soltar una IP usá el panel (o `POST /api/security/unblock`).
@@ -100,8 +110,9 @@ Ver cómo está:
 
 ```bash
 nft list table inet pbxng                 # tabla completa
-nft list set inet pbxng banned            # IPs bloqueadas con el tiempo que les queda
-nft list chain inet pbxng input           # UNA sola línea "ip saddr @banned drop" + las 3 de gestión (§1.2)
+nft list set inet pbxng banned            # IPs v4 bloqueadas con el tiempo que les queda
+nft list set inet pbxng banned6           # lo mismo en IPv6 (vacío si la central no tiene v6)
+nft list chain inet pbxng input           # una línea "ip saddr @banned drop", una "ip6 saddr @banned6 drop" y las 3 de gestión (§1.2)
 ```
 
 ### 1.2 ARI/WS `8088` y AMI `5038`: sólo desde redes privadas (reglas `pbxng-mgmt`)

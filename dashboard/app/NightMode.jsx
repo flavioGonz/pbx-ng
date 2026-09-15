@@ -69,8 +69,11 @@ export default function NightModeCard({ compacto = false }) {
     const previo = modo;
     setModo(v); setGuardando(true);
     try {
-      await apiPut('/nightmode', { modo: v });
-      toast(v === 'auto' ? 'Modo noche automático: manda el horario' :
+      const r = await apiPut('/nightmode', { modo: v });
+      /* Con `aviso`, la base quedó al día y la central NO: el modo noche decide a dónde entra
+       * cada llamada de la calle, así que no se puede festejar un cambio que no se aplicó. */
+      if (r && r.aviso) toast(r.aviso, 'bad', { description: 'Mientras tanto la central sigue como estaba.' });
+      else toast(v === 'auto' ? 'Modo noche automático: manda el horario' :
         v === 'abierto' ? 'Forzado ABIERTO: entra por el destino normal' :
           'Forzado CERRADO: entra por el destino de fuera de hora', 'ok');
       recargar();

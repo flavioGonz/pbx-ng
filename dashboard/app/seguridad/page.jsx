@@ -212,15 +212,17 @@ function Listas({ soc, recargarSoc, admin }) {
     api('/security/unblock', { method: 'POST', body: { ip: v } }).then(recargarSoc),
     { loading: 'Soltando…', success: `${v} desbloqueada`, error: (e) => e.message });
 
+  /* La columna de IP corta por caracter y es más ancha que antes: una IPv6 entera no
+     entraba y empujaba el resto de la tabla fuera de la tarjeta. */
   const tabla = (fs, vacio, onSacar, campo) => (
     <Table highlightOnHover verticalSpacing="xs" fz="sm">
       <Table.Thead>
-        <Table.Tr><Table.Th w={170}>IP / red</Table.Th><Table.Th>{campo}</Table.Th>{admin && <Table.Th w={50} />}</Table.Tr>
+        <Table.Tr><Table.Th w={230}>IP / red</Table.Th><Table.Th>{campo}</Table.Th>{admin && <Table.Th w={50} />}</Table.Tr>
       </Table.Thead>
       <Table.Tbody>
         {fs.map((f) => (
           <Table.Tr key={f.ip}>
-            <Table.Td><Code fz="11px">{f.ip}</Code></Table.Td>
+            <Table.Td><Code fz="11px" style={{ wordBreak: 'break-all' }}>{f.ip}</Code></Table.Td>
             <Table.Td><Text fz="xs" c="dimmed" truncate maw={260}>{f.note || f.reason || '—'}{f.country ? ` · ${f.country}` : ''}</Text></Table.Td>
             {admin && (
               <Table.Td>
@@ -251,7 +253,7 @@ function Listas({ soc, recargarSoc, admin }) {
             <Text fw={700}>Agregar a una lista</Text>
           </Group>
           <SimpleGrid cols={{ base: 1, sm: 4 }} spacing="md" style={{ alignItems: 'end' }}>
-            <TextInput label="IP o red" description={lista === 'blanca' ? 'IP (1.2.3.4) o rango CIDR (1.2.3.0/24)' : 'Una IPv4 pública'} placeholder="203.0.113.5"
+            <TextInput label="IP o red" description={lista === 'blanca' ? 'IP o rango CIDR, v4 o v6 (1.2.3.0/24, 2001:db8::/32)' : 'Una IP pública, v4 o v6'} placeholder="203.0.113.5 · 2001:db8::1"
                        value={ip} onChange={(e) => setIp(e.currentTarget.value)} />
             <TextInput label="Nota" description="Para acordarse por qué" placeholder="opcional"
                        value={nota} onChange={(e) => setNota(e.currentTarget.value)} />
@@ -537,7 +539,7 @@ function SOC({ data, error, recargar, admin }) {
                   {(data.top_atacantes || []).map((b) => (
                     <Table.Tr key={b.ip}>
                       <Table.Td w={28}><Flag cc={b.cc} size={20} /></Table.Td>
-                      <Table.Td ff="monospace" fw={650}>{b.ip}</Table.Td>
+                      <Table.Td ff="monospace" fw={650} fz="xs" style={{ wordBreak: 'break-all' }}>{b.ip}</Table.Td>
                       <Table.Td><Badge size="sm" variant="light" color="orange">{b.hits}</Badge></Table.Td>
                       <Table.Td w={40}>
                         {admin && !b.permanent && (
@@ -581,7 +583,7 @@ function SOC({ data, error, recargar, admin }) {
             {bloqueosPag.map((b) => (
               <Table.Tr key={b.ip}>
                 <Table.Td><Flag cc={b.cc} size={20} /></Table.Td>
-                <Table.Td ff="monospace" fw={650}>{b.ip}</Table.Td>
+                <Table.Td ff="monospace" fw={650} style={{ wordBreak: 'break-all' }}>{b.ip}</Table.Td>
                 <Table.Td fz="xs">{b.country || '—'}</Table.Td>
                 <Table.Td><ISP name={b.isp} ip={b.ip} /></Table.Td>
                 <Table.Td><Motivo reason={b.reason} /></Table.Td>

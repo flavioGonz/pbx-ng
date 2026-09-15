@@ -1,7 +1,7 @@
 'use client';
 /* AplicacionesTab — renderiza UNA aplicación de llamada por su clave (para rutas /aplicaciones/<tab>). */
 import { Badge } from '@mantine/core';
-import { IconUsersGroup, IconBroadcast, IconUsers, IconMail, IconTag, IconHash, IconKey, IconUser } from '@tabler/icons-react';
+import { IconUsersGroup, IconBroadcast, IconUsers, IconTag, IconHash, IconUser } from '@tabler/icons-react';
 import QueuePanel from './QueuePanel';
 /* El catálogo de códigos ya no es una lista escrita a mano acá: lo manda la API y
  * los códigos son editables, así que esta solapa muestra el MISMO componente que
@@ -9,6 +9,7 @@ import QueuePanel from './QueuePanel';
 import FeatureCodes from './FeatureCodes';
 import CrudPanel from './CrudPanel';
 import SalasPanel from './SalasPanel';
+import BuzonesPanel from './BuzonesPanel';
 
 export default function AplicacionesTab({ tab }) {
   if (tab === 'rg') return (
@@ -35,16 +36,10 @@ export default function AplicacionesTab({ tab }) {
    * reunión son su propia pantalla (/salas): acá se muestra la MISMA, sin el encabezado,
    * para que el enlace de Aplicaciones que ya está en uso siga llevando a algún lado. */
   if (tab === 'conf') return <SalasPanel conEncabezado={false} />;
-  if (tab === 'vm') return (
-    <CrudPanel icon={<IconMail size={18} />} color="indigo" title="Buzones de voz" subtitle="Marcá *97 desde el interno para escuchar mensajes" idKey="mailbox" fetchUrl="/mailboxes" createUrl="/mailboxes" deleteUrl={(r) => '/mailboxes/' + r.mailbox}
-      columns={[{ key: 'mailbox', label: 'Buzón', mono: true }, { key: 'fullname', label: 'Nombre' }, { key: 'email', label: 'Email' }]}
-      fields={[
-        { name: 'mailbox', label: 'Buzón (interno)', required: true, icon: <IconHash size={15} />, placeholder: '1001', description: 'Número del interno dueño del buzón. Ej: 1001.' },
-        { name: 'password', label: 'PIN', type: 'password', required: true, icon: <IconKey size={15} />, description: 'Clave para escuchar los mensajes marcando *97. Ej: 1234.' },
-        { name: 'fullname', label: 'Nombre completo', icon: <IconUser size={15} />, description: 'Titular del buzón. Ej: Juan Pérez.' },
-        { name: 'email', label: 'Email', icon: <IconMail size={15} />, description: 'Para recibir los mensajes por correo (opcional). Ej: juan@empresa.com.' },
-      ]} emptyText="Sin buzones." />
-  );
+  /* Los buzones dejaron de ser un CRUD genérico: el PIN lo genera la API, no se muestra en
+   * el listado y se rota desde ahí (ver el encabezado de BuzonesPanel). El formulario viejo
+   * pedía el PIN a mano y sugería el número del interno, que era justamente el agujero. */
+  if (tab === 'vm') return <BuzonesPanel />;
   if (tab === 'codes') return <FeatureCodes />;
   if (tab === 'ai') return (
     <CrudPanel title="Agentes de IVR con IA" subtitle="Bots de voz · STT → LLM → TTS (integración de IA pendiente de conectar)" idKey="id" fetchUrl="/ai-agents" createUrl="/ai-agents" deleteUrl={(r) => '/ai-agents/' + r.id}

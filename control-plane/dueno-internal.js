@@ -3,7 +3,7 @@
  *  PBX-NG · ¿Quién ocupa esta extensión del contexto `internal`?
  *
  *  `internal` es un contexto COMPARTIDO: ahí conviven los códigos de función de
- *  telefonia.js (`*97` y compañía), las rutas salientes de trunks.js, el fax, las salas,
+ *  telefonia.js (`*97` y compañía), las rutas salientes de trunks.js, las salas,
  *  los abreviados globales y las cuatro aplicaciones de marcacion.js. Y todos publican
  *  igual: `setDialplan()` es DELETE + INSERT por (contexto, extensión), así que el que
  *  escribe último se lleva puesto al anterior EN SILENCIO —una DISA en `*97` borraba el
@@ -18,9 +18,9 @@
  *  puede ocupar una extensión de `internal`; el módulo que empiece a publicar ahí se
  *  agrega en `DUENOS` y los dos lados se enteran solos.
  *
- *  Lo usan los CUATRO módulos que publican en `internal`: `marcacion.js` (DISA, callback,
- *  directorio por nombre, abreviados globales), `telefonia.js` (códigos de función),
- *  `trunks.js` (rutas salientes y la salida directa de cada troncal) y `fax.js` (`fax-tx`).
+ *  Lo usan los TRES módulos que publican en `internal`: `marcacion.js` (DISA, callback,
+ *  directorio por nombre, abreviados globales), `telefonia.js` (códigos de función) y
+ *  `trunks.js` (rutas salientes y la salida directa de cada troncal).
  *  Hasta 1.10.0 los dos últimos escribían y borraban a ciegas y el candado NO era simétrico:
  *  se borraba una ruta saliente `_*21*.`, el admin publicaba un código de función en ese
  *  mismo número porque ya no había dialplan, y al recrear la ruta `setDialplan()` (DELETE +
@@ -71,12 +71,6 @@ const DUENOS = [
     col: "('_' || COALESCE(NULLIF(adv_config->>'outbound_prefix', ''), 'X') || '.')",
     filtro: " AND COALESCE(kind, 'asterisk')='asterisk'"
       + " AND COALESCE((adv_config->>'outbound_enabled')::boolean, true)" },
-  /* Fax de salida (`fax.js`): `internal/fax-tx` es una extensión FIJA, no configurable, así
-   * que la columna es la constante. Y sólo la reclama si esta central usa el fax (hay cajas
-   * o hay trabajos de salida): en una central sin fax, `fax-tx` no es de nadie y el número
-   * queda libre para quien lo quiera. */
-  { familia: 'fax', tabla: 'pbxng_fax_config', col: "'fax-tx'", clave: 'id', que: 'el fax de salida',
-    filtro: ' AND (EXISTS (SELECT 1 FROM pbxng_fax_boxes) OR EXISTS (SELECT 1 FROM pbxng_fax_out))' },
 ];
 
 /* La firma que deja cada familia de marcacion.js en la PRIMERA fila del dialplan que
@@ -96,7 +90,6 @@ const MARCA = {
    * dialplan lo publicaron las rutas salientes y no otra aplicación. */
   outbound: 'ruta ',
   troncal: 'Salida ',
-  fax: 'fax saliente',
 };
 
 /* ¿Esta fila del dialplan la publicó `familia`? */
@@ -165,7 +158,7 @@ async function duenoDeInternal(c, exten, familia, propio) {
   const { rows: ep } = await c.query('SELECT 1 FROM ps_endpoints WHERE id=$1 LIMIT 1', [ex]);
   if (ep.length) return { familia: 'extension', que: 'un interno', mensaje: 'ese número es el de un interno' };
   /* Y el resto de lo que vive en `internal` y no tiene tabla en esta lista (rutas
-   * salientes, fax, salas, lo que agregue mañana otro módulo): si hay dialplan publicado,
+   * salientes, salas, lo que agregue mañana otro módulo): si hay dialplan publicado,
    * no lo reclama mi tabla y no lleva mi firma, no se toca. Acá la extensión va en CRUDO:
    * en `extensions` el patrón se guarda con `_`. */
   const { rows: pub } = await c.query("SELECT app, appdata FROM extensions WHERE context='internal' AND exten=$1 AND priority=1", [exten]);

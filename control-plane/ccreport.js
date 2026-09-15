@@ -29,7 +29,7 @@
  *
  *  EL CONSUMIDOR ESTÁ ACOTADO A PROPÓSITO: es la única pieza del informe que escribe en
  *  la base al ritmo de las llamadas, y el pool de Postgres es el mismo que usan los
- *  `CURL()` del dialplan (el PIN de la DISA, el código de función, el fin de un fax). Los
+ *  `CURL()` del dialplan (el PIN de la DISA, el código de función). Los
  *  eventos se juntan en memoria y se vuelcan en un INSERT multi-fila cada `CC_LOTE_MS`,
  *  de a un volcado por vez: como máximo UNA conexión del pool ocupada y UNA adquisición
  *  cada dos segundos, con o sin pico de cola. El buffer tiene tope (`CC_LOTE_TOPE`) y
@@ -116,8 +116,8 @@ module.exports = function init(deps) {
   /* ── Cota del consumidor: buffer en memoria + INSERT por lotes ────────────
    * Esta es la ÚNICA pieza del informe que escribe en la base al ritmo de las llamadas,
    * y el pool de Postgres (`PG_POOL_MAX`, 10 por defecto) es el MISMO que usan los
-   * `CURL()` del dialplan: el PIN de la DISA (`internal/disa`), el aviso de código de
-   * función (`internal/feature`) y el fin de un fax (`internal/fax`). Un INSERT por
+   * `CURL()` del dialplan: el PIN de la DISA (`internal/disa`) y el aviso de código de
+   * función (`internal/feature`). Un INSERT por
    * evento y sin esperar a nadie hace que, cuando la base se pone lenta un rato (un
    * vacuum, el respaldo nocturno, la poda de `pbxng_sec_events`), las adquisiciones de
    * conexión se encolen sin límite adentro de `pg.Pool` — y las que quedan atrás son las

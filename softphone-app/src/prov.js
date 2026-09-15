@@ -53,8 +53,10 @@ export async function resolveEnroll(text) {
       if (d.prov_url) { const p = decodeProv(d.prov_url); if (p) return p; }
       if (d.ext) {                                                  // central vieja: armamos la config a mano
         const host = (d.server || e.base.replace(/^https?:\/\//, ''));
+        // Central vieja (sin prov_url): el STUN sale del propio host de la central, no de
+        // un servicio público — es el mismo criterio que usa hoy /api/ice.
         return { transport: 'webrtc', domain: host, ext: String(d.ext), pass: String(d.password || ''),
-                 wss: 'wss://' + host + '/ws', stun: 'stun:stun.l.google.com:19302' };
+                 wss: 'wss://' + host + '/ws', stun: 'stun:' + String(host).split(':')[0] + ':3478' };
       }
     } catch (err) { last = err; }
   }

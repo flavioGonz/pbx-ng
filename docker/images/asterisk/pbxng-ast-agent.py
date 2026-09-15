@@ -105,8 +105,11 @@ def core():
 #   GET  /fw/bans                  -> {enabled, bans:[{ip, expires_s|null}]}
 #   POST /fw/sync  {bans:[{ip,seconds}]}  deja el set EXACTAMENTE así
 # Todo vive en el kernel del host (network_mode host + NET_ADMIN): tabla inet pbxng,
-# set "banned" (ipv4_addr, flags timeout) y regla 'ip saddr @banned drop' en una chain
-# input de prioridad -10 (antes del filter normal, así ni siquiera llega a Asterisk).
+# sets "banned" (ipv4_addr) y "banned6" (ipv6_addr), los dos con flags timeout, y las
+# reglas 'ip saddr @banned drop' / 'ip6 saddr @banned6 drop' en una chain input de
+# prioridad -10 (antes del filter normal, así ni siquiera llega a Asterisk).
+# El set v6 se crea igual en una central sin IPv6: es inerte (ningún paquete lo matchea)
+# y estar ya creado es lo que evita tener que tocar el firewall el día que se habilita v6.
 # Se usa argv (nunca shell): las IPs se validan con ipaddress pero igual no se concatenan.
 #
 # En la misma chain viven las reglas de "gestión": ARI/HTTP+WS 8088 y AMI 5038 sólo se
@@ -118,6 +121,7 @@ def core():
 # alguien publique 8088 crudo a internet y deje el ARI (usuario/clave) al alcance de
 # cualquiera. Se desactiva con {"ari_public": true} en /etc/pbxng/fw.json.
 FW_FAMILY, FW_TABLE, FW_SET, FW_CHAIN = "inet", "pbxng", "banned", "input"
+FW_SET6 = "banned6"   # mismo rol que FW_SET pero para IPv6 (nftables no mezcla familias en un set)
 FW_MGMT4, FW_MGMT6, FW_MGMT_TAG = "mgmt_allow", "mgmt_allow6", "pbxng-mgmt"
 FW_MGMT_PORTS = (8088, 5038, 8092)   # ARI/WS, AMI y este agente: solo desde redes privadas
 # Privadas (RFC1918, incluye la subred de docker 172.17-31) + loopback; en v6 loopback,
@@ -155,7 +159,8 @@ def fw_ruleset_text(cfg=None):
     validar la sintaxis con `nft -c -f` (--print-fw)."""
     cfg = cfg or fw_config()
     L = ["table %s %s {" % (FW_FAMILY, FW_TABLE),
-         "    set %s {" % FW_SET, "        type ipv4_addr", "        flags timeout", "    }"]
+         "    set %s {" % FW_SET, "        type ipv4_addr", "        flags timeout", "    }",
+         "    set %s {" % FW_SET6, "        type ipv6_addr", "        flags timeout", "    }"]
     if not cfg["ari_public"]:
         L += ["    set %s {" % FW_MGMT4, "        type ipv4_addr", "        flags interval",
               "        elements = { %s }" % ", ".join(cfg["allow4"]), "    }",
@@ -163,7 +168,8 @@ def fw_ruleset_text(cfg=None):
               "        elements = { %s }" % ", ".join(cfg["allow6"]), "    }"]
     L += ["    chain %s {" % FW_CHAIN,
           "        type filter hook input priority -10; policy accept;",
-          "        ip saddr @%s drop" % FW_SET]
+          "        ip saddr @%s drop" % FW_SET,
+          "        ip6 saddr @%s drop" % FW_SET6]
     if not cfg["ari_public"]:
         L += fw_mgmt_rules()
     L += ["    }", "}"]
@@ -226,6 +232,14 @@ def ensure_fw():
         if rc2 != 0:
             return {"enabled": False, "motivo": "no se pudo crear el set: %s" % (err2 or "exit %d" % rc2)}
         creado.append("set")
+    # Set v6. Que falle (kernel sin IPv6, nft muy viejo) NO deshabilita el bloqueo: se sigue
+    # con v4 y se informa en `v6`, porque una central sin IPv6 tiene que funcionar igual.
+    v6 = True; motivo6 = ""
+    rc, _, err = fw_exists("set", FW_SET6)
+    if rc != 0:
+        rc2, _, err2 = nft(["add", "set", FW_FAMILY, FW_TABLE, FW_SET6, "{ type ipv6_addr; flags timeout; }"])
+        if rc2 != 0: v6, motivo6 = False, "no se pudo crear el set v6: %s" % (err2 or "exit %d" % rc2)
+        else: creado.append("set6")
     rc, out, err = fw_exists("chain", FW_CHAIN)
     if rc != 0:
         rc2, _, err2 = nft(["add", "chain", FW_FAMILY, FW_TABLE, FW_CHAIN, "{ type filter hook input priority -10; policy accept; }"])
@@ -235,18 +249,26 @@ def ensure_fw():
         out = ""
     # La regla se busca por texto en la chain listada: 'nft -f' con la sintaxis declarativa
     # la duplicaría en cada arranque, por eso se agrega a mano sólo cuando no está.
-    if ("@%s" % FW_SET) not in out or "drop" not in out:
+    # \b y no un "in" pelado: "@banned" es prefijo de "@banned6", así que con la regla v6
+    # presente y la v4 borrada a mano el chequeo daba positivo y la v4 no se recreaba nunca.
+    if not re.search(r"@%s\b" % FW_SET, out) or "drop" not in out:
         rc2, _, err2 = nft(["add", "rule", FW_FAMILY, FW_TABLE, FW_CHAIN, "ip", "saddr", "@" + FW_SET, "drop"])
         if rc2 != 0:
             return {"enabled": False, "motivo": "no se pudo agregar la regla: %s" % (err2 or "exit %d" % rc2)}
         creado.append("rule")
+    if v6 and not re.search(r"@%s\b" % FW_SET6, out):
+        rc2, _, err2 = nft(["add", "rule", FW_FAMILY, FW_TABLE, FW_CHAIN, "ip6", "saddr", "@" + FW_SET6, "drop"])
+        if rc2 != 0: v6, motivo6 = False, "no se pudo agregar la regla v6: %s" % (err2 or "exit %d" % rc2)
+        else: creado.append("rule6")
     st = fw_mgmt_sync(out)
     if st.get("error"):
         # La tabla de baneos ya quedó bien: que falle la parte de gestión no la deshabilita,
         # pero se informa para que el panel/log lo muestren.
-        return {"enabled": True, "creado": creado, "mgmt": False, "motivo": st["error"]}
+        return {"enabled": True, "creado": creado, "mgmt": False, "v6": v6, "motivo": st["error"] if v6 else st["error"] + " · " + motivo6}
     if st.get("creado"): creado.append("mgmt")
-    return {"enabled": True, "creado": creado, "mgmt": st.get("mgmt", False)}
+    res = {"enabled": True, "creado": creado, "mgmt": st.get("mgmt", False), "v6": v6}
+    if motivo6: res["motivo"] = motivo6
+    return res
 
 def fw_mgmt_sync(chain_listing):
     """Reconcilia las reglas de gestión (8088/5038 sólo desde redes privadas) con fw.json.
@@ -281,22 +303,29 @@ def fw_mgmt_sync(chain_listing):
     return {"mgmt": True, "creado": True}
 
 def host_ips():
-    """IPs propias del host (red del host): jamás se banea una, cortaría la gestión."""
+    """IPs propias del host (red del host): jamás se banea una, cortaría la gestión.
+    Se lee 'ip -br addr' directo y no ifaces(), que deja afuera las v6 a propósito (el panel
+    de red muestra sólo v4): banearse la propia v6 deja al administrador sin entrada."""
     res = set()
-    for i in ifaces():
-        for a in i.get("addrs", []):
+    for ln in sh("ip -br addr 2>/dev/null").splitlines():
+        for a in ln.split()[2:]:
             try: res.add(str(ipaddress.ip_interface(a).ip))
             except Exception: pass
     return res
 
 def fw_valid_ip(raw):
-    """Devuelve (ip_str, error). Sólo IPv4 pública y que no sea del propio host."""
+    """Devuelve (ip_str, error). IPv4 o IPv6 pública que no sea del propio host. La v6 vuelve
+    en forma canónica (ipaddress comprime y baja a minúsculas): el mismo texto que manda la
+    API, así el set no termina con dos elementos para la misma dirección."""
+    t = str(raw or "").strip()
+    if t.startswith("[") and t.endswith("]"): t = t[1:-1]     # "[2001:db8::1]" del formato host:puerto
+    t = t.split("%")[0]                                       # fe80::1%eth0: la zona es local, nft no la acepta
     try:
-        ip = ipaddress.ip_address(str(raw or "").strip())
+        ip = ipaddress.ip_address(t)
     except Exception:
         return None, "IP inválida"
-    if ip.version != 4:
-        return None, "sólo se bloquean direcciones IPv4"
+    # ::ffff:1.2.3.4 es una IPv4 vista por un socket v6: va al set v4 o el drop no la agarra.
+    if ip.version == 6 and ip.ipv4_mapped: ip = ip.ipv4_mapped
     if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
         return None, "no se bloquean direcciones privadas, de loopback ni reservadas"
     if str(ip) in host_ips():
@@ -308,6 +337,12 @@ def fw_seconds(v):
     except Exception: s = 0
     return max(0, min(s, 10 * 365 * 86400))  # tope 10 años: nft rechaza timeouts absurdos
 
+def fw_set_de(ip):
+    """A qué set va la IP. nftables no admite v4 y v6 en el mismo set, ni siquiera en la
+    familia inet: son dos sets y dos reglas, una por familia."""
+    try: return FW_SET6 if ipaddress.ip_address(ip).version == 6 else FW_SET
+    except Exception: return FW_SET
+
 def fw_elem(ip, seconds):
     return "%s timeout %ds" % (ip, seconds) if seconds > 0 else ip
 
@@ -317,12 +352,15 @@ def fw_ban(ip, seconds):
         if not st.get("enabled"): return 503, {"ok": False, **st}
         # Si ya estaba, 'add element' con otro timeout falla o no lo renueva según la
         # versión de nft: se saca primero y se vuelve a poner (misma transacción, nft -f).
+        st_set = fw_set_de(ip)
+        if st_set == FW_SET6 and not st.get("v6", True):
+            return 503, {"ok": False, "enabled": True, "v6": False, "error": st.get("motivo") or "nftables sin soporte IPv6 en este host"}
         script = "delete element %s %s %s { %s }\nadd element %s %s %s { %s }\n" % (
-            FW_FAMILY, FW_TABLE, FW_SET, ip, FW_FAMILY, FW_TABLE, FW_SET, fw_elem(ip, seconds))
+            FW_FAMILY, FW_TABLE, st_set, ip, FW_FAMILY, FW_TABLE, st_set, fw_elem(ip, seconds))
         rc, out, err = nft(["-f", "-"], stdin=script)
         if rc != 0:
             # El delete falla si no existía: reintento sólo con el add.
-            rc, out, err = nft(["add", "element", FW_FAMILY, FW_TABLE, FW_SET, "{ %s }" % fw_elem(ip, seconds)])
+            rc, out, err = nft(["add", "element", FW_FAMILY, FW_TABLE, st_set, "{ %s }" % fw_elem(ip, seconds)])
             if rc != 0: return 500, {"ok": False, "error": "nft: %s" % (err or "exit %d" % rc)}
         return 200, {"ok": True, "ip": ip, "seconds": seconds, "enabled": True}
 
@@ -330,7 +368,7 @@ def fw_unban(ip):
     with FW_LOCK:
         st = ensure_fw()
         if not st.get("enabled"): return 503, {"ok": False, **st}
-        rc, out, err = nft(["delete", "element", FW_FAMILY, FW_TABLE, FW_SET, "{ %s }" % ip])
+        rc, out, err = nft(["delete", "element", FW_FAMILY, FW_TABLE, fw_set_de(ip), "{ %s }" % ip])
         # No estaba en el set = ya está desbloqueada: idempotente, no es error.
         if rc != 0 and "No such file" not in err and "does not exist" not in err:
             return 500, {"ok": False, "error": "nft: %s" % (err or "exit %d" % rc)}
@@ -339,25 +377,29 @@ def fw_unban(ip):
 def fw_bans():
     st = ensure_fw()
     if not st.get("enabled"): return {"enabled": False, "bans": [], "motivo": st.get("motivo")}
-    rc, out, err = nft(["-j", "list", "set", FW_FAMILY, FW_TABLE, FW_SET])
-    if rc != 0: return {"enabled": False, "bans": [], "motivo": "nft: %s" % (err or "exit %d" % rc)}
     bans = []
+    # Los dos sets en una sola lista: para la API un ban es un ban, la familia la decide
+    # la IP. Que falte el set v6 (instalación vieja, kernel sin IPv6) no es un error.
+    rc4, out4, err4 = nft(["-j", "list", "set", FW_FAMILY, FW_TABLE, FW_SET])
+    if rc4 != 0: return {"enabled": False, "bans": [], "motivo": "nft: %s" % (err4 or "exit %d" % rc4)}
+    rc6, out6, _e6 = nft(["-j", "list", "set", FW_FAMILY, FW_TABLE, FW_SET6])
     try:
-        for it in json.loads(out).get("nftables", []):
-            s = it.get("set")
-            if not s: continue
-            for el in s.get("elem", []) or []:
-                # Sin timeout viene como string pelado; con timeout como {"elem":{"val","timeout","expires"}}.
-                if isinstance(el, str):
-                    bans.append({"ip": el, "expires_s": None})
-                elif isinstance(el, dict) and "elem" in el:
-                    e = el["elem"]; v = e.get("val")
-                    if isinstance(v, str):
-                        exp = e.get("expires", e.get("timeout"))
-                        bans.append({"ip": v, "expires_s": int(exp) if exp is not None else None})
+        for salida in ([out4] + ([out6] if rc6 == 0 else [])):
+            for it in json.loads(salida).get("nftables", []):
+                s = it.get("set")
+                if not s: continue
+                for el in s.get("elem", []) or []:
+                    # Sin timeout viene como string pelado; con timeout como {"elem":{"val","timeout","expires"}}.
+                    if isinstance(el, str):
+                        bans.append({"ip": el, "expires_s": None})
+                    elif isinstance(el, dict) and "elem" in el:
+                        e = el["elem"]; v = e.get("val")
+                        if isinstance(v, str):
+                            exp = e.get("expires", e.get("timeout"))
+                            bans.append({"ip": v, "expires_s": int(exp) if exp is not None else None})
     except Exception as e:
         return {"enabled": True, "bans": [], "motivo": "no se pudo leer el set: %s" % e}
-    return {"enabled": True, "bans": bans}
+    return {"enabled": True, "bans": bans, "v6": st.get("v6", True)}
 
 def fw_sync(items):
     """Deja el set exactamente con lo que manda la API (flush + add en una sola
@@ -365,18 +407,26 @@ def fw_sync(items):
     with FW_LOCK:
         st = ensure_fw()
         if not st.get("enabled"): return 503, {"ok": False, **st}
-        elems, rechazados = [], []
+        porSet, rechazados = {FW_SET: [], FW_SET6: []}, []
         for it in items or []:
             if not isinstance(it, dict): continue
             ip, e = fw_valid_ip(it.get("ip"))
             if e: rechazados.append({"ip": it.get("ip"), "error": e}); continue
-            elems.append(fw_elem(ip, fw_seconds(it.get("seconds"))))
-        script = "flush set %s %s %s\n" % (FW_FAMILY, FW_TABLE, FW_SET)
-        if elems:
-            script += "add element %s %s %s { %s }\n" % (FW_FAMILY, FW_TABLE, FW_SET, ", ".join(elems))
+            destino = fw_set_de(ip)
+            if destino == FW_SET6 and not st.get("v6", True):
+                rechazados.append({"ip": ip, "error": st.get("motivo") or "nftables sin soporte IPv6 en este host"}); continue
+            porSet[destino].append(fw_elem(ip, fw_seconds(it.get("seconds"))))
+        # Los dos sets se vacían y se llenan en la MISMA transacción: si el script falla, no
+        # queda medio firewall aplicado (v4 al día y v6 vacío, o al revés).
+        script = ""
+        for nombre, elems in porSet.items():
+            if nombre == FW_SET6 and not st.get("v6", True): continue
+            script += "flush set %s %s %s\n" % (FW_FAMILY, FW_TABLE, nombre)
+            if elems: script += "add element %s %s %s { %s }\n" % (FW_FAMILY, FW_TABLE, nombre, ", ".join(elems))
+        total = len(porSet[FW_SET]) + len(porSet[FW_SET6])
         rc, out, err = nft(["-f", "-"], t=20, stdin=script)
         if rc != 0: return 500, {"ok": False, "error": "nft: %s" % (err or "exit %d" % rc), "rechazados": rechazados}
-        return 200, {"ok": True, "enabled": True, "total": len(elems), "rechazados": rechazados}
+        return 200, {"ok": True, "enabled": True, "total": total, "v6": st.get("v6", True), "rechazados": rechazados}
 
 def agent_token():
     try: return open(TOKEN_FILE).read().strip()

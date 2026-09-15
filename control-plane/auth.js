@@ -42,9 +42,12 @@ const emails = require('./emails');
  *   broadcastSoon       refresca el snapshot del socket tras crear un interno
  *   createWebrtcEndpoint(c, ext, password, context, tenant, video)  alta de interno WebRTC (app.js)
  *   smtpHint            traduce errores SMTP a un mensaje útil (app.js, lo comparte /api/email/test)
+ *   iceMedio            () => { iceServers } de turn.js (dueño `medios`): el MISMO ICE que
+ *                       entrega /api/ice, para que la provisión por QR no sea una copia
+ *                       con otros valores (docs/CONTRATOS.md §3, familia `turn`/`ice`)
  */
 module.exports = function init(deps) {
-  const { app, pool, SECRET, NODES, alerts, sbcLink, broadcastSoon, createWebrtcEndpoint, smtpHint } = deps;
+  const { app, pool, SECRET, NODES, alerts, sbcLink, broadcastSoon, createWebrtcEndpoint, smtpHint, iceMedio } = deps;
 
   // ---------------- Autenticación ----------------
   function auth(req, res, next) {
@@ -144,10 +147,6 @@ module.exports = function init(deps) {
      * a propósito —ahí lo vería cualquiera con `dialplan show` o con la base—, así que
      * esta ruta es la que compara el bcrypt, cuenta los intentos y bloquea. */
     ['POST', /^\/api\/internal\/(disa|callback)$/],
-    /* Mismo caso otra vez (fax.js): al terminar un ReceiveFAX / SendFAX el dialplan avisa
-     * cómo salió (`FAXOPT(status|pages|error…)` sólo existe en el canal). Sin este aviso no
-     * hay forma de saber si el fax entró, ni de mandar por correo el que se recibió. */
-    ['POST', /^\/api\/internal\/fax$/],
     ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
     ['GET',  /^\/api\/softphone\/latest$/],       // el login muestra la version descargable sin sesion
     ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
@@ -241,17 +240,23 @@ module.exports = function init(deps) {
       const { rows: us } = await pool.query('SELECT id, username, name, role FROM pbxng_users WHERE ext=$1 LIMIT 1', [ext]);
       const u = us[0] || null;
       const name = (u && u.name) || ext;
-      const pub = process.env.PUBLIC_IP || process.env.DOMAIN || domain || '';
-      const tuser = process.env.TURN_USER || 'pbxng';
-      const tpass = process.env.TURN_PASS || '';
-      const stun = process.env.STUN_URL || 'stun:stun.l.google.com:19302';
       const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
       const host = req.headers['x-forwarded-host'] || req.get('host') || '';
       const apiBase = (await getS('public_base')) || (host ? (proto + '://' + host) : '');
-      const useTurn = !!(pub && tpass);
+      /* El ICE del teléfono sale de la MISMA función que /api/ice (turn.js, dueño
+       * `medios`): el origen elegido en el panel —coturn propio, el del SBC-NG o uno
+       * externo— y el STUN del propio appliance. Antes esto era una copia con
+       * `stun.l.google.com` y `turn:<PUBLIC_IP>:3478` fijos, así que un teléfono
+       * aprovisionado por QR se llevaba una configuración distinta de la que la central
+       * le entregaba por /api/ice, y encima apuntando a un TURN que podía no existir. */
+      const ice = iceMedio ? await iceMedio() : { iceServers: [] };
+      const srv = (ice && ice.iceServers) || [];
+      const stun = srv.filter((x) => /^stuns?:/i.test(String(x.urls || ''))).map((x) => x.urls).join(',');
+      const rel = srv.find((x) => x.username && x.credential);
+      const turnUrl = rel ? (Array.isArray(rel.urls) ? rel.urls[0] : String(rel.urls)).replace(/\?transport=.*$/i, '') : '';
       const cfg = {
         transport: 'webrtc', name, domain, ext, pass: au[0].password, wss,
-        stun, turn: useTurn ? ('turn:' + pub + ':3478') : '', turnUser: useTurn ? tuser : '', turnPass: useTurn ? tpass : '',
+        stun, turn: turnUrl, turnUser: rel ? rel.username : '', turnPass: rel ? rel.credential : '',
         apiBase,
         /* Token de softphone (scope 'phone'), no una sesión de panel: si no, un supervisor
          * pidiendo la config del interno de un admin se llevaba una sesión de admin por 30 días. */
@@ -369,9 +374,13 @@ module.exports = function init(deps) {
       const sipHost = (await gS('sip_host')) || (_lk.active ? _lk.host : '') || NODES.asterisk || dom;
       const { rows: un } = await pool.query('SELECT id, username, name, role FROM pbxng_users WHERE ext=$1 LIMIT 1', [String(e.ext)]);
       const u = un[0] || null;
-      const pubIp = process.env.PUBLIC_IP || process.env.DOMAIN || dom || '';
-      const tU = process.env.TURN_USER || 'pbxng', tP = process.env.TURN_PASS || '';
-      const withTurn = !!(pubIp && tP);
+      /* Mismo ICE que /api/ice y que /api/provision: lo arma turn.js (dueño `medios`)
+       * según el origen elegido en el panel. Ver la nota de /api/provision. */
+      const iceE = iceMedio ? await iceMedio() : { iceServers: [] };
+      const srvE = (iceE && iceE.iceServers) || [];
+      const stunE = srvE.filter((x) => /^stuns?:/i.test(String(x.urls || ''))).map((x) => x.urls).join(',');
+      const relE = srvE.find((x) => x.username && x.credential);
+      const turnE = relE ? (Array.isArray(relE.urls) ? relE.urls[0] : String(relE.urls)).replace(/\?transport=.*$/i, '') : '';
       const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
       const host = req.headers['x-forwarded-host'] || req.get('host') || '';
       const apiBase = (await gS('public_base')) || (dom ? 'https://' + dom : (host ? proto + '://' + host : ''));
@@ -381,9 +390,9 @@ module.exports = function init(deps) {
         domain: dom, ext: String(e.ext), pass: e.password,
         // WebRTC
         wss: isWeb ? wssU : '',
-        stun: process.env.STUN_URL || 'stun:stun.l.google.com:19302',
-        turn: (isWeb && withTurn) ? ('turn:' + pubIp + ':3478') : '',
-        turnUser: (isWeb && withTurn) ? tU : '', turnPass: (isWeb && withTurn) ? tP : '',
+        stun: isWeb ? stunE : '',
+        turn: (isWeb && relE) ? turnE : '',
+        turnUser: (isWeb && relE) ? relE.username : '', turnPass: (isWeb && relE) ? relE.credential : '',
         // SIP nativo
         sipServer: isWeb ? '' : sipHost, sipPort: isWeb ? '' : sipPort,
         sipTransport: isWeb ? '' : sipTransport,

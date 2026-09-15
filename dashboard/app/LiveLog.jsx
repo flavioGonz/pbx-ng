@@ -129,7 +129,9 @@ export default function LiveLog() {
                    style={{ flexShrink: 0, width: 66, justifyContent: 'center' }}>
               {TIPO[e.tipo] || e.tipo}
             </Badge>
-            {e.ip && <span style={{ color: COLOR[e.sev] || '#98a2b3', fontWeight: 700, flexShrink: 0 }}>{e.ip}</span>}
+            {/* Sin el corte, una IPv6 (hasta 39 caracteres) se comía el ancho de la fila en
+                el celular y el texto del evento quedaba fuera de la pantalla. */}
+            {e.ip && <span style={{ color: COLOR[e.sev] || '#98a2b3', fontWeight: 700, wordBreak: 'break-all' }}>{e.ip}</span>}
             {e.cuenta && <span style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0 }}>{e.cuenta}</span>}
             <span style={{ color: 'var(--mantine-color-text)', wordBreak: 'break-word', opacity: .92 }}>{e.texto}</span>
           </div>

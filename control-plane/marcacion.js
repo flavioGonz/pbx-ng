@@ -84,7 +84,7 @@ const dueno = require('./dueno-internal');
  */
 module.exports = function init(deps) {
   const { app, pool, amiAction, setDialplan, exigirExt, clientIp, errorHttp, broadcastSoon, logger } = deps;
-  const log = logger ? logger('marcacion') : { info() {}, error() {} };
+  const log = logger ? logger('marcacion') : { info() {}, warn() {}, error() {} };
 
   /* URL con la que ASTERISK ve a esta API (mismo criterio y misma variable que telefonia.js). */
   const API_URL = String(process.env.AST_API_URL || process.env.API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -140,14 +140,19 @@ module.exports = function init(deps) {
   /* Único armador del CURL del dialplan: así el token no se olvida en ninguno. */
   const curlA = (ruta, qs) => '${CURL(' + API_BASE + ruta + ',' + qs + TOK_Q + ')}';
 
-  // ── AstDB por AMI (mismo criterio que telefonia.js: los errores se tragan a
-  //    propósito, la fuente de verdad es Postgres y syncAbreviados() la vuelve a volcar).
+  /* ── AstDB por AMI (mismo criterio que telefonia.js: el guardado no se cae por un AMI
+   * caído, la fuente de verdad es Postgres y syncAbreviados() la vuelve a volcar). Lo que
+   * SÍ cambió: el error se registra y se devuelve. Un DBPut perdido acá deja el abreviado
+   * en la libreta del panel y mudo en el teléfono, y el usuario se entera marcándolo. */
   async function astPut(family, key, val) {
-    try { await amiAction({ Action: 'DBPut', Family: family, Key: String(key), Val: String(val) }); } catch (_) {}
+    try { await amiAction({ Action: 'DBPut', Family: family, Key: String(key), Val: String(val) }); return true; }
+    catch (e) { log.error('AstDB: no se pudo escribir ' + family + '/' + key, e); return false; }
   }
   async function astDel(family, key) {
-    try { await amiAction({ Action: 'DBDel', Family: family, Key: String(key) }); } catch (_) {}
+    try { await amiAction({ Action: 'DBDel', Family: family, Key: String(key) }); return true; }
+    catch (e) { log.error('AstDB: no se pudo borrar ' + family + '/' + key, e); return false; }
   }
+  const AVISO_ASTDB = 'Guardado en la base, pero Asterisk no tomó el cambio (AMI caído): se aplica solo cuando la central vuelva.';
 
   const setGet = async (k, def) => { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return rows[0] && rows[0].value != null ? rows[0].value : def; } catch (_) { return def; } };
   const setPut = (k, v) => pool.query('INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [k, String(v)]);
@@ -163,7 +168,7 @@ module.exports = function init(deps) {
   // ═══════════════ Quién es dueño de una extensión de `internal` ═══════════
 
   /* `internal` es un contexto COMPARTIDO: ahí conviven los códigos de función de
-   * telefonia.js (`*97` y compañía), las rutas salientes de trunks.js, el fax, los
+   * telefonia.js (`*97` y compañía), las rutas salientes de trunks.js, los
    * abreviados globales y estas cuatro aplicaciones. Publicar una extensión sin
    * preguntar quién la tiene era pisar al otro EN SILENCIO: dar de alta una DISA en
    * `*97` borraba el dialplan del buzón de voz y nadie se enteraba hasta que un usuario
@@ -973,20 +978,27 @@ module.exports = function init(deps) {
         const quedan = new Set(limpias.map((e) => e.code));
         for (const r of antes) if (!quedan.has(r.code)) await astDel('abrev', ext + '-' + r.code);
       });
-      for (const e of limpias) await astPut('abrev', ext + '-' + e.code, e.destino);
+      let ok = true;
+      for (const e of limpias) if (!await astPut('abrev', ext + '-' + e.code, e.destino)) ok = false;
       broadcastSoon();
-      res.json({ prefijo, entradas: limpias });
+      const out = { prefijo, entradas: limpias };
+      if (!ok) { out.aviso = AVISO_ASTDB; log.warn('abreviados guardados sin llegar a la AstDB', { ext }); }
+      res.json(out);
     } catch (e) { errorHttp(res, e); }
   });
 
   /* Postgres → AstDB al arrancar y en cada reconexión del AMI, igual que syncFeatures():
-   * la astdb vive en la capa de escritura del contenedor de Asterisk, así que nace vacía
-   * cada vez que se recrea y sin esto los abreviados personales quedarían mudos. */
+   * la astdb ya tiene volumen propio, pero si quedó desincronizada de Postgres (o viene de
+   * una instalación anterior al volumen) los abreviados personales quedarían mudos. */
   async function syncAbreviados() {
     try {
       const { rows } = await pool.query('SELECT ext,code,destino FROM pbxng_abreviados WHERE ext IS NOT NULL');
-      for (const r of rows) await astPut('abrev', r.ext + '-' + r.code, r.destino);
-      log.info('abreviados personales volcados a la AstDB', { entradas: rows.length });
+      let fallados = 0;
+      for (const r of rows) if (!await astPut('abrev', r.ext + '-' + r.code, r.destino)) fallados++;
+      // Este vuelco es la red de seguridad del resto: si queda incompleto, el teléfono
+      // marca abreviados que ya no existen (o no marca los que sí) hasta la próxima vuelta.
+      if (fallados) log.warn('el volcado de abreviados a la AstDB quedó incompleto', { entradas: rows.length, fallados });
+      else log.info('abreviados personales volcados a la AstDB', { entradas: rows.length });
     } catch (e) { log.error('syncAbreviados: ' + (e && e.message)); }
   }
 

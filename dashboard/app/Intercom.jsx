@@ -7,14 +7,24 @@ import { IconVideo, IconVideoOff, IconDeviceCctv, IconBell, IconReload, IconVolu
 function MseTile({ stream }) {
   const videoRef = useRef(null);
   const [status, setStatus] = useState('connecting'); // connecting | live | error
+  const [motivo, setMotivo] = useState('');             // por qué no hay imagen, en una línea
   const [muted, setMuted] = useState(true);
   const [gen, setGen] = useState(0);
+  /* Una cámara que no responde NO puede colgar el recuadro. Sin este reloj, un RTSP que no
+   * contesta dejaba el tile en el shimmer de «CARGANDO» para siempre: el WebSocket queda
+   * abierto esperando el primer segmento y no hay evento que avise. A los 12 s se degrada a
+   * «Sin señal» con el motivo y el botón de reintentar, que es lo que el operador necesita. */
+  const ESPERA_MS = 12000;
   useEffect(() => {
     const base = stream && stream.base, src = stream && stream.src;
     const video = videoRef.current;
-    if (!base || !src || !video || typeof MediaSource === 'undefined') { setStatus('error'); return; }
+    if (!video || typeof MediaSource === 'undefined') { setStatus('error'); setMotivo('el navegador no puede reproducir este video'); return; }
+    if (!base) { setStatus('error'); setMotivo('falta configurar la dirección de go2rtc'); return; }
+    if (!src) { setStatus('error'); setMotivo('el dispositivo no tiene canal asignado'); return; }
     let stopped = false, ws = null, sb = null, queue = [];
-    setStatus('connecting');
+    setStatus('connecting'); setMotivo('');
+    const fallar = (m) => { if (stopped) return; setStatus((st) => (st === 'live' ? 'error' : 'error')); setMotivo((prev) => prev || m); };
+    const reloj = setTimeout(() => fallar('la cámara no respondió en ' + (ESPERA_MS / 1000) + ' segundos'), ESPERA_MS);
     const ms = new MediaSource();
     video.src = URL.createObjectURL(ms);
     video.muted = true;
@@ -32,16 +42,18 @@ function MseTile({ stream }) {
       ws.onmessage = (ev) => {
         if (typeof ev.data === 'string') {
           let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-          if (msg.type === 'mse' && msg.value) { try { sb = ms.addSourceBuffer(msg.value); sb.mode = 'segments'; sb.addEventListener('updateend', () => { trim(); flush(); }); setStatus('live'); video.play().catch(() => {}); } catch (e) { setStatus('error'); } }
-          else if (msg.type === 'error') { setStatus('error'); }
+          if (msg.type === 'mse' && msg.value) { try { sb = ms.addSourceBuffer(msg.value); sb.mode = 'segments'; sb.addEventListener('updateend', () => { trim(); flush(); }); clearTimeout(reloj); setStatus('live'); setMotivo(''); video.play().catch(() => {}); } catch (e) { fallar('el navegador no soporta el códec de esta cámara'); } }
+          else if (msg.type === 'error') { fallar(typeof msg.value === 'string' && msg.value ? msg.value : 'go2rtc no pudo abrir el stream'); }
         } else {
           queue.push(new Uint8Array(ev.data)); if (queue.length > 80) queue = queue.slice(-40); flush();
         }
       };
-      ws.onerror = () => { if (!stopped) setStatus('error'); };
-      ws.onclose = () => { if (!stopped) setStatus(s => s === 'live' ? 'error' : s === 'connecting' ? 'error' : s); };
+      ws.onerror = () => fallar('no se pudo conectar con go2rtc');
+      ws.onclose = () => fallar('go2rtc cortó el stream');
     });
-    return () => { stopped = true; try { ws && ws.close(); } catch (e) {} try { if (ms.readyState === 'open') ms.endOfStream(); } catch (e) {} try { video.src = ''; } catch (e) {} };
+    // Salir de la pantalla cierra el WebSocket: el video es pesado y una pared abierta en tres
+    // pestañas es tráfico y CPU del appliance para nadie.
+    return () => { stopped = true; clearTimeout(reloj); try { ws && ws.close(); } catch (e) {} try { if (ms.readyState === 'open') ms.endOfStream(); } catch (e) {} try { video.src = ''; } catch (e) {} };
   }, [stream && stream.base, stream && stream.src, gen]);
 
   const Icon = stream && stream.type === 'intercom' ? IconBell : IconDeviceCctv;
@@ -53,6 +65,7 @@ function MseTile({ stream }) {
       {status === 'error' &&
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#8b95a3' }}>
           <IconVideoOff size={28} /><span style={{ fontSize: 12 }}>Sin señal</span>
+          {motivo && <span style={{ fontSize: 11, maxWidth: 240, textAlign: 'center', opacity: .85 }}>{motivo}</span>}
           <button onClick={() => setGen(g => g + 1)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,.08)', color: '#cdd3db', border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}><IconReload size={13} /> Reintentar</button>
         </div>}
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px', background: 'linear-gradient(180deg,rgba(0,0,0,.62),transparent)', color: '#fff' }}>

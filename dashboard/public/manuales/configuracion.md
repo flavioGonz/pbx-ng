@@ -594,7 +594,7 @@ un destino.
 |---|---|
 | **DID** | El número que te asignó el operador |
 | **Nombre** | Para identificarla en la lista |
-| **Destino** | Extensión, cola, IVR, buzón, sala de reunión o **caja de fax** |
+| **Destino** | Extensión, cola, IVR, buzón o sala de reunión |
 
 **Ejemplo:** el `24001234` (línea principal) va al **IVR** de bienvenida; el `24001299` (ventas
 directo) va a la **cola de Ventas**.
@@ -688,7 +688,9 @@ destino normal no es un interno, escucha un saludo y se corta).
 ### 10.1 Crear una extensión
 
 En **Extensiones → Nuevo**. Lo mínimo es el número y el nombre. Cada extensión nace con su contraseña
-SIP generada y su **buzón de voz activado** (PIN inicial = su número).
+SIP generada y su **buzón de voz activado**, con un **PIN al azar** que genera la central (antes
+era el propio número del interno, o sea que no era un PIN: cualquiera que supiera la extensión
+escuchaba sus mensajes). El PIN se ve y se cambia en **Aplicaciones → Buzones** (§13.3).
 
 ![Alta de una extensión](img/cfg-02-nuevo-interno.png)
 
@@ -980,6 +982,17 @@ Cada extensión ya tiene el suyo (`*97` para escucharlo). En **Aplicaciones → 
 *"Mensaje de voz al correo"*: cargás la dirección y cada mensaje nuevo llega por mail con **el audio
 adjunto y la transcripción automática**.
 
+**El PIN del buzón.** Con `*97`, desde el propio teléfono, no se pide nada: la central reconoce la
+extensión que se autenticó. El PIN hace falta para `*98`, que es entrar al buzón de **otro**
+interno. Los buzones nuevos nacen con un PIN al azar; en la lista, el botón del ojo lo muestra y el
+de las flechas genera uno nuevo (si el buzón tiene correo configurado, al dueño le llega un aviso).
+
+> **Buzones marcados «Es el número».** En una central que venía funcionando de antes, el PIN de
+> cada buzón era el número del buzón: eso no es un PIN, y con `*98` los escucha cualquier interno.
+> La actualización **no se los cambia sola a propósito** —hacerlo dejaría a cada persona afuera de
+> sus propios mensajes de un día para el otro, sin que nadie le avise—: los marca en naranja para
+> que los vayas rotando **de a uno, avisándole al dueño**.
+
 ![Buzón de voz al correo](img/cfg-09-buzon-email.png)
 
 ### 13.4 Grupos de timbrado, paging y códigos
@@ -1132,53 +1145,6 @@ computadora mientras habla por teléfono.
 > **Las salas viejas cambiaron.** Al actualizar a 1.10.0, toda conferencia que no tenía PIN
 > recibió uno generado al azar. Si tu cliente entraba a una sala «sin nada», ahora necesita el
 > PIN: abrí la sala en el panel y pasáselo.
-
-### 13.9 Fax
-
-» Menú lateral → Aplicaciones → **Fax**
-
-Recibir faxes **en el correo** y mandarlos **desde el panel**, sin aparato de fax ni línea
-analógica. Tiene cuatro solapas: **Recibidos**, **Enviados**, **Enviar** y **Configuración**
-(esta última, sólo administrador).
-
-**Antes que nada, mirá que esté en verde.** La pantalla consulta al servidor si están las piezas
-que hacen falta (los módulos de fax de Asterisk y los conversores de documento de la API) y, si
-falta algo, lo dice en rojo **con el nombre exacto de lo que falta**. Es mejor enterarse ahí que
-en medio de una llamada.
-
-> **En esta versión el fax puede no estar operativo todavía.** Las imágenes que se publicaron con
-> 1.10.0 no incluyen esas piezas: el módulo de fax de Asterisk y los conversores de la API se
-> agregan en un release de empaquetado. Todo lo demás del panel funciona igual; el fax queda en
-> rojo hasta entonces. Preguntá antes de prometerlo en una demo.
-
-**Recibir.** Se crea una **caja de fax** (nombre, a qué correo van los faxes, la identificación
-que se anuncia y la cabecera) y después, en **Rutas → Entrantes**, se apunta un DID con tipo de
-destino **Fax** a esa caja. Lo que llega se convierte a PDF y sale por correo; el original se
-guarda y se puede bajar desde **Recibidos**. La caja admite **varias direcciones** separadas por
-coma.
-
-- **Detectar tono de fax en llamadas de voz**: para el caso clásico de un número que recibe voz y
-  a veces un fax. La central escucha el tono y desvía esa llamada a la caja.
-- Borrar un fax recibido es de **administrador**: es un documento, y borrarlo es la misma
-  decisión que borrar una grabación.
-
-**Enviar.** En la solapa **Enviar**: el número, un asunto y un PDF. El envío es una **cola con
-reintentos** (un fax que no entra a la primera es lo normal, no un error) y sale por la **ruta
-saliente de siempre**, con su prefijo, su CallerID y su failover. En **Enviados** se ve el estado
-y los intentos de cada uno, se baja el PDF que se mandó y se puede **reintentar sin volver a
-subir el archivo**.
-
-> **El número se rechaza, no se limpia.** Se aceptan espacios, puntos, guiones y paréntesis como
-> separadores; cualquier otra cosa da error. Un número «arreglado» a la fuerza sería marcar un
-> número que nadie pidió.
-
-**Configuración** (administrador): identificación y cabecera por defecto, **a qué troncales se
-les activa T.38**, corrección de errores, cantidad de reintentos y minutos entre ellos, y los
-topes de páginas y de tamaño del PDF.
-
-> **T.38 con red de seguridad.** La central pide T.38 —el fax «digital», que es el que funciona
-> de verdad sobre internet— pero **deja siempre el respaldo en audio**. Con eso el fax sale igual
-> si el operador no lo soporta.
 
 ---
 
@@ -1499,7 +1465,7 @@ teléfono, qué historial y qué buzón son "los suyos".
 | Rol | Qué puede hacer |
 |---|---|
 | **Administrador** | Todo |
-| **Supervisor** | Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, **reportes de call center** (verlos y exportarlos), grabaciones, clientes (CRM completo), intercom, aprovisionar y enrolar internos. Desde 1.10.0 también: **moderar una sala de reunión** (ver quién está, silenciar, expulsar), **las dos bandejas de fax y mandar un fax**, **ver por qué troncal está saliendo cada ruta** y **el registro de uso de DISA y callback**. **Nada** de configuración del sistema (troncales, rutas, usuarios, respaldos…), ni programar los envíos de informes, ni crear salas o invitar (la invitación lleva el PIN), ni configurar cajas de fax, ni borrar un fax recibido |
+| **Supervisor** | Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, **reportes de call center** (verlos y exportarlos), grabaciones, clientes (CRM completo), intercom, aprovisionar y enrolar internos. Desde 1.10.0 también: **moderar una sala de reunión** (ver quién está, silenciar, expulsar), **ver por qué troncal está saliendo cada ruta** y **el registro de uso de DISA y callback**. **Nada** de configuración del sistema (troncales, rutas, usuarios, respaldos…), ni programar los envíos de informes, ni crear salas o invitar (la invitación lleva el PIN) |
 | **Agente** | Su softphone, su historial, su buzón, sus grabaciones (sólo las llamadas en las que participó), la ficha del cliente y la encuesta de la llamada — todo sobre **su** extensión |
 
 Reglas que aplica la central (no sólo el panel: la API rechaza con *"no tenés permiso para esta

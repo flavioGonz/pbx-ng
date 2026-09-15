@@ -76,3 +76,41 @@ test('la imagen all-in-one sigue declarando que no es equivalente a produccion',
   assert.ok(/NO es equivalente a la de\s*\n?#\s*produccion/.test(aio) || aio.includes('NO es equivalente a la de'),
     'se borro del encabezado de Dockerfile.allinone la advertencia de que no es equivalente a produccion.');
 });
+
+/* El guard de bucle del contexto `internal` tiene que escribir SALTOS con el prefijo
+ * heredable. Vive acá porque es un invariante del archivo del repo, como los `require`:
+ * `Set(SALTOS=...)` a secas compila y funciona igual para los desvios (mismo canal), asi
+ * que nada lo delata hasta que alguien arma un sigueme cruzado —el canal Local nace con el
+ * contador en cero y la llamada gira sola hasta que cuelgan—. Es exactamente el tipo de
+ * linea que una edicion distraida "simplifica" sacando los dos guiones bajos. */
+test('el guard de bucle de internal escribe __SALTOS (heredable por el canal Local del sigueme)', () => {
+  const ext = leer('config/asterisk/extensions.conf');
+  assert.ok(/Set\(__SALTOS=\$\[\$\{SALTOS\} \+ 1\]\)/.test(ext),
+    'extensions.conf tiene que incrementar __SALTOS (con doble guion bajo): sin herencia el sigueme cruzado no se corta nunca');
+  assert.ok(/ExecIf\(\$\["\$\{SALTOS\}"=""\]\?Set\(__SALTOS=0\)\)/.test(ext),
+    'la inicializacion del contador tambien va con __SALTOS, o el primer salto pierde la herencia');
+  assert.ok(!/[^_]\bSet\(SALTOS=/.test(ext), 'quedo un Set(SALTOS=...) sin prefijo heredable');
+});
+
+/* La astdb (astdb.sqlite3) es la que lee el dialplan en cada llamada: desvios, no-molestar,
+ * modo noche y PIN de las salas. Vivia en la capa de escritura del contenedor, asi que
+ * recrear Asterisk la vaciaba y quedaba una ventana —hasta el resync del AMI— en la que la
+ * central atendia como si nada de eso estuviera configurado. Este invariante ata las tres
+ * piezas que tienen que moverse juntas (astdbdir, el montaje y la declaracion del volumen en
+ * los DOS compose): con una sola que se caiga, la astdb vuelve a ser efimera en silencio. */
+test('la astdb vive en un volumen propio en los dos compose', () => {
+  const conf = leer('config/asterisk/asterisk.conf');
+  assert.ok(!/^\[directories\]\(!\)/m.test(conf),
+    'la stanza [directories] volvio a ser plantilla ((!)): Asterisk la ignora y astdbdir no aplica');
+  const m = /^astdbdir\s*=>\s*(\S+)\s*$/m.exec(conf);
+  assert.ok(m, 'asterisk.conf perdio el astdbdir');
+  const dir = m[1];
+  assert.ok(dir !== '/var/lib/asterisk',
+    'astdbdir volvio a /var/lib/asterisk: ahi no se puede montar un volumen sin tapar sonidos, agi-bin y claves');
+  for (const f of ['docker-compose.yml', 'docker-compose.release.yml']) {
+    const c = leer(f);
+    assert.ok(c.includes('asterisk_db:' + dir),
+      `${f} no monta el volumen asterisk_db en ${dir}: la astdb se vacia al recrear el contenedor`);
+    assert.ok(/^\s{2}asterisk_db:\s*$/m.test(c), `${f} no declara el volumen asterisk_db`);
+  }
+});

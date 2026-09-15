@@ -7,13 +7,14 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Card, Text, Group, Badge, Button, TextInput, Textarea, Select, Stack, ThemeIcon, Tabs,
-  ActionIcon, Tooltip, Avatar, Loader, Anchor, SimpleGrid, Table, Divider, Transition, Timeline, Rating,
+  ActionIcon, Tooltip, Avatar, Loader, Anchor, SimpleGrid, Table, Divider, Transition, Timeline, Rating, Switch,
 } from '@mantine/core';
 import {
   IconArrowLeft, IconUserCheck, IconBuilding, IconDeviceCctv, IconTrash, IconDeviceFloppy,
   IconId, IconMapPin, IconPhone, IconBell, IconAddressBook, IconVideo, IconHistory,
   IconClipboardList, IconMap2, IconPhoneCheck, IconPhoneX, IconClock, IconPlayerPlay,
   IconPlayerPause, IconMoodSmile, IconRefresh, IconInfoCircle, IconCircleFilled,
+  IconPencil, IconX, IconPlugConnected, IconLock,
 } from '@tabler/icons-react';
 import { toast } from '../../notify';
 import Slot from '../../Slot';
@@ -113,6 +114,9 @@ export default function ClienteFicha() {
   const [np, setNp] = useState({ name: '', doc: '', relation: '', valid_until: '' });
   const [nsp, setNsp] = useState({ name: '', kind: '' });
   const [nd, setNd] = useState({ label: '', type: 'intercom', rtsp_url: '' });
+  const [ed, setEd] = useState(null);       // portero que se está editando en la misma pantalla
+  const [probando, setProbando] = useState(null);
+  const [prueba, setPrueba] = useState({}); // resultado de «Probar» por dispositivo
   const [streams, setStreams] = useState([]);
   const [calls, setCalls] = useState([]);
   const [recs, setRecs] = useState([]);
@@ -159,8 +163,32 @@ export default function ClienteFicha() {
   async function delPerson(pid) { await j(API + '/persons/' + pid, { method: 'DELETE' }); reload(); }
   async function addSpace() { if (!nsp.name) return; await j(API + '/clients/' + id + '/spaces', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nsp) }); setNsp({ name: '', kind: '' }); toast('Espacio agregado', 'ok'); reload(); }
   async function delSpace(sid) { await j(API + '/spaces/' + sid, { method: 'DELETE' }); reload(); }
-  async function addDevice() { if (!nd.label) return; await j(API + '/clients/' + id + '/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nd) }); setNd({ label: '', type: 'intercom', rtsp_url: '' }); toast('Dispositivo agregado', 'ok', { description: 'Tarda unos segundos en aparecer el video.' }); reload(); }
-  async function delDevice(did) { await j(API + '/devices/' + did, { method: 'DELETE' }); reload(); }
+  async function addDevice() { if (!nd.label) return; await j(API + '/clients/' + id + '/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nd) }); setNd({ label: '', type: 'intercom', rtsp_url: '' }); toast('Dispositivo agregado', 'ok', { description: 'Tarda unos segundos en aparecer el video.' }); recargarVideo(); reload(); }
+  async function delDevice(did) { if (!confirm('¿Sacar este portero? Deja de verse y go2rtc corta el RTSP.')) return; await j(API + '/devices/' + did, { method: 'DELETE' }); toast('Dispositivo eliminado', 'info'); recargarVideo(); reload(); }
+  /* Guardar la edición de un portero. `rtsp_url` vacío significa «no la toques»: la URL viaja
+   * enmascarada desde la API (adentro van usuario y clave de la cámara), así que mandar lo que
+   * se lee en el campo borraría la credencial con tres puntitos. */
+  async function saveDevice() {
+    if (!ed || !ed.label) return;
+    const r = await j(API + '/devices/' + ed.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: ed.label, type: ed.type, enabled: ed.enabled, rtsp_url: ed.rtsp_nueva || '' }) });
+    if (!r) { toast('No se pudo guardar el dispositivo', 'bad'); return; }
+    setEd(null); toast('Dispositivo guardado', 'ok'); recargarVideo(); reload();
+  }
+  /* «Probar» pregunta del lado del servidor: go2rtc se conecta a la cámara de verdad y contesta
+   * si hubo video o por qué no. Así el que carga un portero no tiene que adivinar si el problema
+   * es la IP, la clave o el camino del stream. */
+  async function testDevice(did) {
+    setProbando(did);
+    const r = await j(API + '/devices/' + did + '/test', { method: 'POST' });
+    setProbando(null);
+    const res = r || { ok: false, motivo: 'no se pudo consultar a la central' };
+    setPrueba((m) => ({ ...m, [did]: res }));
+    if (res.ok) toast('La cámara responde', 'ok', { description: (res.codecs || []).join(' · ') || undefined });
+    else toast('La cámara no responde', 'bad', { description: res.motivo });
+  }
+  // Refrescar la pared después de tocar un portero, sin recargar la pantalla entera.
+  function recargarVideo() { setTimeout(() => j(API + '/intercom/streams?client=' + id).then(d => setStreams(Array.isArray(d) ? d : [])), 1500); }
 
   if (loading && !sel) return <Group justify="center" py={80}><Loader /></Group>;
   if (!sel) return <Card withBorder radius="lg" p="xl"><Text c="dimmed" ta="center">Cliente no encontrado. <Anchor onClick={() => router.push('/clientes')}>Volver</Anchor></Text></Card>;
@@ -288,22 +316,57 @@ export default function ClienteFicha() {
               <Intercom streams={streams} columns={streams.length > 1 ? 2 : 1} emptyHint="Agregá un portero o cámara con URL RTSP para ver el video acá." />
             </Card>
 
+            {/* Moderación de porteros: agregar, editar, probar y sacar sin salir de esta pantalla. */}
             <Card withBorder radius="lg" p="md" shadow="sm">
-              <Text fw={700} fz="sm" mb="sm">Dispositivos asociados</Text>
+              <Group justify="space-between" mb="sm">
+                <Text fw={700} fz="sm">Dispositivos asociados</Text>
+                <Tooltip label="La URL RTSP lleva usuario y clave adentro: se muestra tapada y sólo se puede reemplazar entera" multiline w={260}>
+                  <Badge size="xs" variant="light" color="gray" leftSection={<IconLock size={10} />}>credenciales ocultas</Badge>
+                </Tooltip>
+              </Group>
               <Stack gap={6}>
-                {(sel.devices || []).map(d => (
-                  <Group key={d.id} justify="space-between" wrap="nowrap" className="pbx-row">
-                    <div style={{ minWidth: 0 }}>
-                      <Text fz="sm"><b>{d.label}</b>{' '}
-                        <Badge size="xs" variant="light" color={d.type === 'intercom' ? 'orange' : 'grape'} leftSection={d.type === 'intercom' ? <IconBell size={10} /> : <IconDeviceCctv size={10} />}>
-                          {d.type === 'intercom' ? 'Portero' : 'Cámara'}
-                        </Badge>
-                      </Text>
-                      <Text fz={11} c="dimmed" truncate>{d.rtsp_url || 'sin URL'}</Text>
-                    </div>
-                    <ActionIcon size="sm" variant="subtle" color="red" onClick={() => delDevice(d.id)}><IconTrash size={14} /></ActionIcon>
-                  </Group>
-                ))}
+                {(sel.devices || []).length === 0 && <Text c="dimmed" size="sm" ta="center" py="sm">Sin porteros ni cámaras. Agregá uno abajo.</Text>}
+                {(sel.devices || []).map(d => {
+                  const editando = ed && ed.id === d.id;
+                  const p = prueba[d.id];
+                  if (editando) return (
+                    <Card key={d.id} withBorder radius="md" p="sm">
+                      <Group gap={6} align="flex-end" wrap="wrap">
+                        <TextInput size="xs" w={140} label="Etiqueta" value={ed.label} onChange={e => setEd(v => ({ ...v, label: e.currentTarget.value }))} />
+                        <Select size="xs" w={110} label="Tipo" data={[{ value: 'intercom', label: 'Portero' }, { value: 'camera', label: 'Cámara' }]} value={ed.type} onChange={v => setEd(s => ({ ...s, type: v }))} />
+                        <Switch size="sm" mb={6} label="Habilitado" checked={!!ed.enabled} onChange={e => setEd(v => ({ ...v, enabled: e.currentTarget.checked }))} />
+                      </Group>
+                      <TextInput mt={6} size="xs" label="Nueva URL RTSP"
+                        description={d.rtsp_set ? 'Dejalo vacío para conservar la que ya está cargada' : 'Todavía no tiene URL cargada'}
+                        placeholder={d.rtsp_url || 'rtsp://usuario:clave@ip:554/stream'}
+                        value={ed.rtsp_nueva} onChange={e => setEd(v => ({ ...v, rtsp_nueva: e.currentTarget.value }))} />
+                      <Group justify="flex-end" gap={6} mt={8}>
+                        <Button size="xs" variant="default" leftSection={<IconX size={13} />} onClick={() => setEd(null)}>Cancelar</Button>
+                        <Button size="xs" color="teal" leftSection={<IconDeviceFloppy size={13} />} onClick={saveDevice}>Guardar</Button>
+                      </Group>
+                    </Card>
+                  );
+                  return (
+                    <Group key={d.id} justify="space-between" wrap="nowrap" className="pbx-row">
+                      <div style={{ minWidth: 0 }}>
+                        <Text fz="sm"><b>{d.label}</b>{' '}
+                          <Badge size="xs" variant="light" color={d.type === 'intercom' ? 'orange' : 'grape'} leftSection={d.type === 'intercom' ? <IconBell size={10} /> : <IconDeviceCctv size={10} />}>
+                            {d.type === 'intercom' ? 'Portero' : 'Cámara'}
+                          </Badge>
+                          {d.enabled === false && <> <Badge size="xs" variant="light" color="gray">deshabilitado</Badge></>}
+                          {p && <> <Badge size="xs" variant="light" color={p.ok ? 'teal' : 'red'}>{p.ok ? 'responde' : 'no responde'}</Badge></>}
+                        </Text>
+                        <Text fz={11} c="dimmed" truncate>{d.rtsp_url || 'sin URL RTSP'}</Text>
+                        {p && !p.ok && p.motivo && <Text fz={11} c="red.6">{p.motivo}</Text>}
+                      </div>
+                      <Group gap={4} wrap="nowrap">
+                        <Tooltip label="Probar contra la cámara"><ActionIcon size="sm" variant="subtle" color="blue" loading={probando === d.id} onClick={() => testDevice(d.id)}><IconPlugConnected size={14} /></ActionIcon></Tooltip>
+                        <Tooltip label="Editar"><ActionIcon size="sm" variant="subtle" onClick={() => setEd({ id: d.id, label: d.label || '', type: d.type || 'camera', enabled: d.enabled !== false, rtsp_nueva: '' })}><IconPencil size={14} /></ActionIcon></Tooltip>
+                        <Tooltip label="Sacar"><ActionIcon size="sm" variant="subtle" color="red" onClick={() => delDevice(d.id)}><IconTrash size={14} /></ActionIcon></Tooltip>
+                      </Group>
+                    </Group>
+                  );
+                })}
                 <Divider my={4} />
                 <Group gap={6} align="flex-end">
                   <TextInput size="xs" w={130} placeholder="Etiqueta" value={nd.label} onChange={e => setNd(v => ({ ...v, label: e.currentTarget.value }))} />

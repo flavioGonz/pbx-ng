@@ -25,6 +25,13 @@ const LOCK = 7264790;   // id arbitrario del candado (pg_advisory_lock), fijo pa
   try { await pool.query('SELECT 1'); }
   catch (e) { log.error('no se puede conectar a PostgreSQL (' + (process.env.DB_HOST || 'postgres') + ':' + (process.env.DB_PORT || 5432) + '): ' + e.message); process.exit(1); }
   const c = await pool.connect();
+  /* Los RAISE NOTICE de las migraciones SON el único rastro de lo que una migración decidió
+   * por su cuenta (la 0018, por ejemplo, avisa qué ruta entrante repuntó o borró). Postgres
+   * los manda al cliente —`client_min_messages` es NOTICE por defecto; `log_min_messages` es
+   * WARNING, así que en el log del servidor no aparecen—, pero node-pg los descarta en
+   * silencio si nadie escucha el evento. Sin este listener el aviso se perdía y el
+   * administrador se enteraba cuando un cliente llamaba al DID. */
+  c.on('notice', (m) => log.info('[sql] ' + (m && m.message ? m.message : String(m))));
   try {
     await c.query('SELECT pg_advisory_lock($1)', [LOCK]);
     await c.query(`CREATE TABLE IF NOT EXISTS pbxng_schema_migrations (

@@ -2,6 +2,212 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.11.0] - 2026-09-15
+### Added
+- **El coturn propio es parte de PBX-NG y viene ENCENDIDO DE FÁBRICA, con selector de origen del
+  TURN.** Diagnóstico medido en una central en producción, no supuesto: no había contenedor
+  coturn (`COMPOSE_PROFILES` vacío, el perfil `turn` nunca se levantó, el 3478 cerrado), `/api/ice`
+  les repartía a **siete softphones WebRTC** la dirección `turn:<dominio>:3478` —un relay que
+  nadie corría—, el `.env` tenía `TURN_HOST` apuntando al SBC (que sí tenía un coturn,
+  escuchando sólo en `172.17.0.1`, el bridge de Docker: inalcanzable desde afuera) y el panel
+  mostraba el módulo «TURN/STUN» **encendido**. Sin TURN un softphone detrás de un NAT simétrico
+  se queda sin audio: eso es *roto*, no *mejorable*, y PBX-NG se vende solo.
+  - **Nuevo `control-plane/turn.js`** (dueño `medios`), que se queda con `GET /api/ice` y con
+    `/api/turn/**`. El ORIGEN del TURN es **uno solo a la vez** y se elige desde el panel, ya no
+    por SSH: `propio` (el coturn del appliance, **default**), `sbc` (host tomado del enlace a
+    SBC-NG —no se copia la IP a ningún lado— + credenciales propias) o `externo` (URL y
+    credenciales a mano). Elegir `sbc` o `externo` **apaga el coturn local**.
+    `GET|PUT /api/turn/origen`, y las contraseñas **nunca** vuelven por la API.
+  - **`/api/ice` dice la verdad**: entrega el origen elegido y, si ese origen no está utilizable,
+    lo dice en `motivo` en vez de caer en silencio a otro. **Sin credenciales no publica ninguna
+    entrada `turn:`.** El **STUN por defecto pasa a ser el propio appliance**: el
+    `stun:stun.l.google.com:19302` que estaba hardcodeado hacía que una central sin salida a
+    internet —lo normal en un organismo público— arrancara el WebRTC pidiéndole permiso a Google.
+    El mismo criterio en el cliente (`useSoftphone.js` y `softphone-app/`).
+  - **La provisión por QR y el enrolado usan la MISMA función** (`auth.js` recibe `iceMedio`).
+    Antes eran dos copias con `stun.l.google.com` y `turn:<PUBLIC_IP>:3478` fijos: un teléfono
+    aprovisionado se llevaba una configuración distinta de la que la central le entregaba.
+  - **`GET /api/turn/estado`** separa lo **deseado** (el interruptor) de lo que de verdad está
+    **corriendo** (medido). Un switch de infraestructura tiene que dibujar `corriendo`: si el
+    panel y la central no coinciden, el bug es del panel.
+  - **Probar el TURN de verdad**: `POST /api/turn/probe` (y `POST /api/turn/test`, que el panel ya
+    llamaba) hacen STUN Binding → Allocate sin credenciales (`401`+realm) → Allocate firmado
+    (`200` + candidato relay), UDP y TCP. **Un relay en una dirección que ningún cliente puede
+    usar sale FALLA**, no OK: loopback, `0.0.0.0`, link-local, o una IP privada con el TURN
+    publicado en una pública — que es exactamente el coturn del SBC de la central real.
+    `scripts/check-turn.py` incorpora el mismo veredicto.
+  - **Migración `0019_turn_origen.sql`** (nueva; las `0012`–`0018` no se tocan): siembra
+    `mod_turn='1'` y `turn_origen='propio'` **sólo si no hay fila** y borra un `stun_url` que
+    apunte a un STUN público. **`install.sh` deja `COMPOSE_PROFILES=core,turn`** en los dos roles
+    (en `core` sólo se saltea si el TURN vive en otro host, `--turn-ip=`) y ya no pregunta por el
+    perfil `turn`; `.env.example` también. El self-check real del TURN ahora corre en los dos roles.
+
+### Fixed
+- **El reconciliador de módulos salteaba el caso «no hay fila», que era justo el default.**
+  `moduleEnabled()` de la API devuelve `true` cuando no hay fila en `pbxng_settings`, pero
+  `docker/pbxng-reconciler.sh` hacía `[ -z "$v" ] && continue`: el default existía en la API y no
+  llegaba nunca al contenedor. Por eso el panel mostraba «TURN/STUN» en ON con el coturn
+  inexistente, y **nadie lo prendía nunca porque para todos ya estaba prendido**. Ahora, sin fila,
+  se aplica el default declarado y **se escribe la fila**, así la decisión queda visible en el
+  panel. `turn=1` de fábrica. `ai` e `intercom` quedan deliberadamente fuera de esa tabla: sin
+  fila, levantar `ai` arranca faster-whisper (4 GB) en un appliance que pudo instalarse con
+  `--profiles=core` justamente para no tenerlo (queda anotado como decisión de `empaquetado`/`api`).
+- **El agente del contenedor coturn (`:8091`) decía «Operativo» siempre.** Resolvía `active` con
+  `turnserver --version` —o sea con poder ejecutar el binario— porque la rama de `systemctl`
+  devolvía vacío: en el contenedor no hay systemd (coturn es PID 1). Ahora mira si hay alguien
+  escuchando `listening-port`. Y su `POST /test` se retiró (`410`): corría `turnutils_uclient`
+  contra `127.0.0.1` **desde adentro del propio coturn**, o sea que no podía fallar ni con el
+  relay atado al bridge de Docker. Una prueba que no puede fallar no es una prueba.
+
+### Removed
+- **Se retira el fax (T.38, fax a correo y envío desde el panel), que había entrado entero en
+  1.10.0.** Es una **decisión de producto**, no técnica: el fax no va más en PBX-NG. El mercado
+  se achica todos los años y ninguna instalación llegó a usarlo —en la central de referencia no
+  había una sola caja de fax, ni un trabajo de envío, ni una línea de dialplan de fax—, así que
+  se retira antes de que empiece a costar mantenimiento: eran ~1.000 líneas de API con su cola
+  de reintentos, una pantalla, cuatro tablas, dos dependencias de imagen y una función más
+  publicando en el contexto compartido `internal`. Sale de todos lados en el mismo cambio:
+  `control-plane/fax.js` y sus dos pruebas, su montaje en `app.js`, sus reglas de `rbac.js`, la
+  ruta pública `POST /api/internal/fax`, la familia `fax` de `dueno-internal.js` (`internal/fax-tx`
+  vuelve a ser un número libre), el correo de fax recibido de `emails.js`, la pantalla `/fax` con
+  su ítem de menú y su atajo del panel de supervisor, y `/fax` de la lista `SUP_OK`.
+- **El destino «Fax» de las rutas entrantes.** Un DID ya no puede entrar a una caja de fax. Las
+  rutas que lo tuvieran **no quedan colgadas**: la migración `0018_sin_fax.sql` las repunta —el
+  destino de fuera de hora se limpia (la ruta sigue válida y cae al saludo o al buzón, como
+  cualquier ruta con horario y sin destino cerrado) y el destino principal pasa al IVR de menor
+  id— y **reescribe el dialplan de ese DID en la misma transacción**, porque nada regenera las
+  rutas entrantes al arrancar: sacar el destino sin tocar `extensions` dejaba el DID saltando a
+  un `fax-rx-<n>` inexistente, o sea mudo, y en el panel se veía perfecto. Si la central no tiene
+  ningún IVR al que mandar la llamada, la ruta se borra con su dialplan y la migración lo avisa
+  con un `NOTICE`: ahí hay que darle un destino nuevo al DID desde el panel.
+- **Migración `0018_sin_fax.sql`** (nueva; las `0012`–`0017` ya están aplicadas y no se tocan).
+  Borra `pbxng_fax_config`, `pbxng_fax_boxes`, `pbxng_fax_in` y `pbxng_fax_out`, el dialplan que
+  hubiera quedado (`from-trunk/fax`, `from-trunk/fax-rx-%`, `internal/fax-tx`) y apaga el T.38 y
+  la detección de tono de los endpoints de troncal (el fax era el único que escribía esas
+  columnas: negociar T.38 en una central que ya no sabe recibir un fax es pedir un reinvite que
+  después no se contesta). Es idempotente y **no falla si las tablas no existen**. Lo que **no**
+  borra son los documentos del spool (`/recordings/fax`): un fax recibido es un documento del
+  cliente y una migración no puede deshacer eso; si quedó alguno, hay que llevárselo a mano.
+- **Paquetes de fax de las imágenes.** La de la API pierde `ghostscript` y `libtiff-tools`
+  (**~72 MiB** menos, casi todo `libgs10` con sus fuentes `urw-base35` y `poppler-data`, que eran
+  dependencias duras) y el aviso de `gs` / `tiff2pdf` del entrypoint; la de Asterisk pierde
+  `libspandsp-dev` / `libtiff-dev` del build, `libspandsp2` / `libtiff6` del runtime, el
+  `--enable res_fax` / `res_fax_spandsp` del menuselect y las dos listas de verificación (la del
+  Dockerfile y la del entrypoint). Lo mismo en la imagen todo-en-uno. Y salen las variables
+  `FAX_DIR`, `FAX_DIR_AST`, `FAX_MAX_MB`, `FAX_TICK_MS` y `FAX_CONVERT_MS` de los **dos** compose
+  (dev y release, que siguen siendo espejo). No había volumen propio de fax que sacar: el spool
+  colgaba del volumen `recordings`.
+
+**Al actualizar** no hay nada que hacer a mano: la API corre la `0018` sola al arrancar. Conviene
+sí `docker compose build` (o bajar las imágenes nuevas), que es donde se nota la imagen más chica.
+
+### Fixed
+- **Una cámara que no responde ya no cuelga el recuadro de video** (`dashboard/app/Intercom.jsx`).
+  Un RTSP mudo dejaba el tile en el shimmer de «CARGANDO» para siempre: el WebSocket con go2rtc
+  queda abierto esperando el primer segmento y no hay ningún evento que avise. Ahora cada
+  recuadro degrada por su cuenta a los 12 s —«Sin señal», el nombre del portero, **el motivo en
+  una línea** y el botón de reintentar—, y también cuando falta la dirección de go2rtc, cuando el
+  dispositivo no tiene canal o cuando el navegador no soporta el códec. La pared con ocho
+  porteros muestra los siete que andan.
+- **Las credenciales RTSP no se muestran más enteras en una lista.** Usuario y clave de la cámara
+  viajan dentro de la URL (`rtsp://usuario:clave@ip/...`) y se veían tal cual en la ficha del
+  cliente, en la pared de `/intercom` y en la libreta del supervisor. La API las tapa antes de
+  contestar (`rtspMask()`; agrega `rtsp_set` para que el formulario sepa si ya hay algo cargado)
+  y la edición trata el campo vacío como «dejala como está», así guardar una etiqueta no borra la
+  clave con tres puntitos. **Deuda anotada** en `docs/CONTRATOS.md` §3: separarlas en columnas
+  propias es una migración nueva y toca `syncGo2rtc()`, así que no entró acá; lo que queda
+  expuesto es un volcado de la base o un respaldo, no la pantalla.
+- **La AstDB dejó de ser efímera: ahora tiene volumen propio (`asterisk_db`).** `astdbdir` pasa de
+  `/var/lib/asterisk` a `/var/lib/asterisk/db` y ese directorio se monta como volumen en los dos
+  compose (dev y release, verificado con `docker/check-compose-parity.sh`). Recrear el contenedor
+  de Asterisk vaciaba la base que el **dialplan lee en cada llamada** —desvíos, no-molestar, modo
+  noche, feriados, PIN de las salas, abreviados, marca de grabación— y quedaba una ventana de
+  ~30–40 s, hasta que la API volcaba Postgres → AstDB en el resync del AMI, en la que la central
+  atendía como si nada de eso estuviera configurado: llamadas sin desviar, salas sin PIN y horario
+  de oficina a las tres de la mañana. De paso se descubre que la stanza `[directories]` de
+  `asterisk.conf` venía **con el `(!)` del sample**, o sea que era una plantilla y Asterisk la
+  ignoraba entera: cambiar una ruta ahí no hacía nada. Va un subdirectorio y no `/var/lib/asterisk`
+  a secas porque un volumen sobre el padre taparía los sonidos, `agi-bin` y las claves que trae la
+  imagen. **El resync se queda igual**: pasa a ser la red para cuando Postgres y la AstDB se
+  desincronizan, no la única fuente. Invariante nuevo en `control-plane/test/imagen-asterisk.test.js`
+  (astdbdir + montaje + declaración del volumen en los dos compose se mueven juntos).
+- **El centro de seguridad ya banea IPv6.** La tabla de nftables era `inet` desde el principio,
+  pero faltaba todo lo demás: el agente rechazaba con `400` cualquier v6 y `guard.js` descartaba
+  el evento de seguridad si no empezaba con `IPV4/`, así que una fuerza bruta contra el 5060 por
+  IPv6 **no se contaba ni se bloqueaba**. Ahora: set `banned6 {type ipv6_addr; flags timeout;}` y
+  regla `ip6 saddr @banned6 drop` en la misma chain (`docker/images/asterisk/pbxng-ast-agent.py`,
+  `--print-fw` valida con `nft -c -f -`); `/fw/ban|unban|sync|bans` eligen el set por la familia
+  de la IP y el sync deja los dos exactos en una sola transacción; el parseo de `remoteaddress`
+  acepta las dos formas que manda Asterisk (`IPV6/UDP/2001:db8::1/5060` y la de corchetes con el
+  puerto pegado, `IPV6/WSS/[2001:db8::1]:5060`); la lista blanca y el geo-bloqueo aceptan prefijos
+  v6; y el panel muestra las direcciones largas sin romper la tabla ni la línea en vivo. Dos
+  trampas que costaron su línea de código: toda IP se guarda **normalizada** (v6 comprimida, en
+  minúsculas y sin el `%eth0`) porque `::1` y `0:0:0:0:0:0:0:1` son la misma dirección y sin
+  unificar quedaban dos filas en `pbxng_blocked` y un `unblock` que no soltaba nada; y
+  `::ffff:1.2.3.4` se guarda como IPv4, porque el paquete que llega sigue siendo v4 y el drop que
+  lo corta está en el set v4. La LAN v6 (`fe80::/10`, `fc00::/7`, `::1`) nunca se banea, igual que
+  la v4. **En una central sin IPv6 nada de esto molesta**: el set v6 queda vacío, su regla no
+  matchea nunca y, si el kernel no lo soporta, el agente sigue bloqueando v4 e informa `v6:false`
+  con el motivo. El **geo-bloqueo también vale para v6**: se verificó contra el endpoint `batch`
+  de ip-api —el mismo que usa `geoLookup`— que resuelve país e ISP de una v6 igual que de una v4.
+- **El buzón de voz ya tiene PIN de verdad.** El PIN de un buzón nuevo era **el número del
+  buzón**: con un teléfono registrado se marcaba `*98`, se ponía el interno ajeno dos veces y se
+  escuchaban sus mensajes. Es el mismo agujero que las salas de reunión tenían hasta 1.10.0.
+  Ahora el PIN se genera **al azar** (seis dígitos con `crypto`) y el alta de buzón pasó a estar
+  en un solo lugar (`control-plane/vmpin.js`), porque el `INSERT` estaba copiado en los cuatro
+  sitios donde se crea un interno y arreglar tres de cuatro era cuestión de tiempo. El listado
+  `GET /api/mailboxes` **no devuelve el PIN** (sólo `pin_debil`); el PIN en claro sale del
+  detalle `GET /api/mailboxes/:mailbox` y se rota con `POST /api/mailboxes/:mailbox/pin`, las dos
+  **admin** con regla explícita en `rbac.js`. Al rotarlo se le avisa al dueño por correo si el
+  buzón tiene dirección. `*97` (buzón propio desde el propio teléfono) no cambia: sigue sin pedir
+  PIN y la identidad sigue saliendo de `CHANNEL(endpoint)`, no del CallerID.
+- **A los buzones que ya existen NO se les toca el PIN, y eso es a propósito.** Rotarlos con una
+  migración deja a cada persona afuera de sus propios mensajes de un día para el otro, sin aviso
+  y sin saber a quién preguntarle; en una central con decenas de internos eso es el soporte de
+  una semana. **No hay migración de esquema en este arreglo**: el PIN viejo se detecta solo
+  (`password` = número del buzón), la API lo nombra una vez en el log al arrancar y el panel los
+  lista en un aviso para que el administrador los rote **de a uno, avisándole al dueño**. Misma
+  decisión que con las salas heredadas sin PIN en 1.10.0. La pantalla de buzones
+  (`/aplicaciones/vm`) dejó de ser el CRUD genérico: es `BuzonesPanel.jsx`, con «Ver PIN», «PIN
+  nuevo» y el cartel del PIN recién generado (un cartel y no un toast: si se pierde, hay que
+  volver a rotar).
+- **Los errores de AMI al escribir la AstDB ya no se tragan en silencio.** El estado caliente
+  (desvíos, no-molestar, sígueme, PIN de sala, abreviados, marca de grabación) vive en la AstDB y
+  la fuente de verdad es Postgres; los `astPut`/`astDel` atrapaban el error con un `catch (_) {}`
+  mudo, así que un `DBPut` perdido dejaba al panel diciendo «desvío puesto» mientras la central
+  seguía timbrando el interno, o el no-molestar prendido para siempre, **sin una sola línea de
+  log**. Ahora el fallo se registra con familia y clave, y donde el cambio lo apretó una persona
+  la respuesta trae `aviso` y el panel lo muestra como error: `PUT extensions/:ext/features`,
+  `PUT nightmode`, `POST|PUT salas`, `PUT extensions/:ext/abreviados` y `POST
+  extensions/record-all`. Los volcados de arranque (`syncFeatures`, `syncRecFlags`,
+  `syncAbreviados`) cuentan lo que no pudieron escribir y avisan con `warn`. El guardado **sigue
+  sin fallar** por un AMI caído: sin Asterisk el panel tiene que poder guardar. Además, el reloj
+  de agenda de las salas ya no marca como publicada una sala cuyo `DBPut` falló (se anotaba
+  igual, y una sala agendada podía quedar abierta o cerrada para siempre).
+- **El sígueme cruzado ya no gira sin fin.** Con A → sígueme a B y B → sígueme a A, la llamada se
+  pasaba de uno al otro hasta que alguien cortaba: el guard de bucle de `extensions.conf` contaba
+  saltos en la variable `SALTOS`, pero el sígueme sale por un canal `Local` y un canal nuevo nace
+  con las variables en cero, así que cada salto era el «primero». Se arregla en los dos lados:
+  el dialplan pasa a `__SALTOS` (heredable, el `Local` se lleva el contador puesto y el tope de 5
+  vale para la cadena entera) **y** la API rechaza el ciclo al guardar, caminando el grafo de
+  desvíos —así agarra también el de tres pasos A→B, B→C, C→A— con el mensaje del recorrido. Hacen
+  falta los dos: validar al guardar es frágil (el ciclo se puede armar en el medio, o desde el
+  teléfono con un código de función) y el tope del dialplan corta la llamada por el buzón, que
+  funciona pero es feo. Cuando el rechazo llega por el código de función —el dialplan ya escribió
+  la AstDB antes de avisarle a la API—, la API reescribe la AstDB desde Postgres para no dejarlas
+  desparejas.
+- **El menú del panel ya no parpadea mientras no se sabe quién entró.** Entre que carga el shell
+  y contesta `GET auth/me`, `user` es `undefined`; el menú resolvía ese limbo como «no es admin»
+  y el administrador veía primero el menú chico de operación y después le aparecía el resto
+  (antes, con el criterio contrario, el que parpadeaba era el supervisor, que además podía
+  apretar un botón que sólo sabe dar 403). Ahora `dashboard/app/shell.jsx` no dibuja ningún ítem
+  hasta saber el rol: muestra un esqueleto del mismo alto, así el menú tampoco salta.
+- **Salas de reunión: el arranque ya no deja una ventana en la que una sala con PIN rechaza a
+  todo el mundo.** A los 9 s del arranque, `control-plane/salas.js` disparaba el volcado de PIN a
+  la AstDB y la republicación del dialplan a la vez; el dialplan compara `${SALAPIN}` contra
+  `${DB(salapin/<sala>)}` y con la AstDB todavía vacía falla cerrado. Ahora se republica el
+  dialplan **después** de que los PIN estén escritos.
+
 ## [1.10.0] - 2026-09-14
 Sprint 7: cierra el **bloque B** de `docs/BRECHA-UCM-XORCOM.md` —lo que se pide en una
 licitación y lo que firma un supervisor— salvo la alta disponibilidad, que sigue pendiente.
@@ -26,6 +232,32 @@ API al arrancar.
 3. Si venís usando **callback en modo PIN**, la migración `0017` lo **apaga**: leé por qué en
    *Changed*.
 ### Added
+- **Módulo «Portería» en `Configuración → Módulos`, con sus dos entradas de menú.** La función
+  estaba **entera y con datos vivos** en la central de referencia —un cliente, un espacio, una
+  persona, el portero «Frente» con su RTSP y `go2rtc` sirviendo el stream hacía cinco semanas—
+  pero **ninguna de sus pantallas estuvo nunca en el menú** (no es una regresión: no aparecen en
+  todo el historial del repo) y el módulo tampoco tenía switch. Ahora aparece en Módulos con la
+  etiqueta **«Portería»** y, encendido, muestra el grupo «Portería» del menú con **«Portería»**
+  (la pared de video, `/intercom`) y **«Clientes»** (`/clientes`, donde se dan de alta los
+  porteros RTSP, los espacios y las personas autorizadas). Apagado, el grupo entero desaparece.
+  El **id interno sigue siendo `intercom`**: con ese nombre lo conocen `MODULE_IDS`, el perfil
+  del compose y `docker/pbxng-reconciler.sh`, y así se llama la fila `mod_intercom` que ya existe
+  en las centrales instaladas — renombrarlo habría dejado el switch desconectado del contenedor.
+  Lo que cambió es sólo la etiqueta y la descripción. **No hay migración**: el módulo viene
+  encendido por defecto, que es lo que las centrales instaladas ya hacen.
+- **Apagar Portería no apaga el screen-pop del CRM.** `GET /api/clients/lookup` contesta igual
+  con el módulo apagado —nombre, documento, personas autorizadas, espacios y notas de quien
+  llama—; lo único que viene vacío es `devices`, los canales de go2rtc, porque con el módulo
+  apagado no hay go2rtc que los sirva. Queda dicho en el código (comentario en la ruta y en el
+  `MOD_MAP` de `shell.jsx`) y en `docs/CONTRATOS.md` §3: apagar el video no puede dejar ciego al
+  agente que atiende la llamada.
+- **Moderar un portero sin salir de `/clientes/<id>`**: además del alta y la baja que ya estaban,
+  ahora se puede **editar** (`PUT /api/devices/:did` — etiqueta, tipo, habilitado y URL RTSP) y
+  **probar** (`POST /api/devices/:did/test`, que le pide a go2rtc conectarse a la cámara de
+  verdad y devuelve `{ok, motivo}`), así el que carga un portero no tiene que adivinar si el
+  problema es la IP, la clave o el camino del stream. El alta, la edición y la baja ahora tocan
+  go2rtc **en el acto** en vez de esperar al barrido de 60 s; y la baja además **borra el stream
+  en go2rtc**, que antes quedaba tirándole RTSP a una cámara que ya no era de nadie.
 - **Reportes de call center** (`control-plane/ccreport.js`, migración `0012_ccreport.sql`,
   pantalla **Operación → Reportes de call center**). Nivel de servicio, abandono, espera media
   y máxima, conversación media y total, por **cola** y por **agente**, con CSV e informe A4 para
@@ -348,7 +580,8 @@ estático (`extensions.conf`), `modules.conf` y el Dockerfile (`tzdata`).
   zone` (`docker/config/initdb/01-schema.sql`) y se escriben con el reloj del contenedor, que
   ahora es local. Es deuda preexistente (el CDR ya se mostraba mal), pero este release la vuelve
   visible. Queda por decidir si se migran los históricos o si la columna pasa a `timestamptz`.
-- **La AstDB sigue sin volumen propio.** `astdbdir` apunta a `/var/lib/asterisk`, que no está
+- **La AstDB sigue sin volumen propio.** *(resuelto en 1.11.0: `astdbdir => /var/lib/asterisk/db`
+  y volumen `asterisk_db` en los dos compose.)* `astdbdir` apunta a `/var/lib/asterisk`, que no está
   montado, así que recrear el contenedor la borra. Con el re-volcado por AMI el daño ya no es
   permanente ni silencioso, pero **hay una ventana de ~30–40 s** tras recrear Asterisk en la que
   los desvíos, el DND, el sígueme, los feriados y el modo noche no aplican. El arreglo de fondo

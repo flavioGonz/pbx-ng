@@ -45,7 +45,7 @@ const _dgram = require('dgram');
  *             `filasSalida()` se exporta sólo para poder probar la escalera sin base ni Asterisk. `regenerarEntrantes` lo usa telefonia.js
  *             cuando cambia un horario o un feriado (los tramos viven en el dialplan del DID).
  */
-/* `internal` es un contexto COMPARTIDO (códigos de función, DISA, abreviados, fax) y
+/* `internal` es un contexto COMPARTIDO (códigos de función, DISA, abreviados) y
  * `setDialplan()` es DELETE + INSERT: quién puede ocupar cada extensión lo contesta un solo
  * lugar, el mismo que usan telefonia.js y marcacion.js (ver el encabezado de
  * `dueno-internal.js`). Este módulo publica dos cosas ahí: las rutas salientes y la salida
@@ -478,7 +478,7 @@ module.exports = function init(deps) {
     /* Último paso, y ACÁ y no en `escribirSaliente()`: la pregunta se hace con el patrón ya
      * normalizado y ANTES de que la fila entre (o se mueva) en `pbxng_outbound_routes`, así
      * que el único que puede reclamar ese número es OTRO —un código de función, una DISA, un
-     * abreviado global, el fax, la salida directa de una troncal, otra ruta saliente—. Sin
+     * abreviado global, la salida directa de una troncal, otra ruta saliente—. Sin
      * esto, `escribirSaliente()` (DELETE + INSERT) le borraba el dialplan al otro en
      * silencio: se borraba una ruta `_*21*.`, el admin publicaba ahí el código de desvío
      * porque el número figuraba libre, y al recrear la ruta el código desaparecía. */
@@ -657,15 +657,14 @@ module.exports = function init(deps) {
    * sprint 6 la llamó `DB(nightmode)` a secas, pero la función DB() de Asterisk exige
    * familia/clave (func_db.c), así que acá y allá se usa `DB(nightmode/modo)`. */
   const NIGHTMODE = 'DB(nightmode/modo)';
-  /* `fax` (sprint 10, fax.js): el DID entra directo a una caja de fax. El destino es el id
-   * de la caja y el dialplan de `fax-rx-<id>` (ReceiveFAX + aviso a la API) lo escribe
-   * fax.js, que es el dueño de esa extensión: acá sólo se salta a ella. */
-  const DEST_OK = ['interno', 'ivr', 'cola', 'app', 'fax'];
+  /* El fax salió del producto en 1.11.0 y con él el destino `fax`. Las rutas que lo
+   * tenían las repunta la migración 0018 (no alcanza con sacarlo de esta lista: el
+   * dialplan de una ruta entrante sólo se reescribe cuando alguien toca la ruta, así que
+   * el DID seguiría saltando a un `fax-rx-<n>` que ya no existe). */
+  const DEST_OK = ['interno', 'ivr', 'cola', 'app'];
 
   function inboundRows(dest_type, v) {
     if (dest_type === 'ivr') return [[1, 'Goto', 'ivr,' + v + ',1']];
-    // Sólo dígitos: el id de la caja va crudo al Goto (mismo criterio que el resto del módulo).
-    if (dest_type === 'fax') return [[1, 'Goto', 'from-trunk,fax-rx-' + String(v).replace(/[^0-9]/g, '') + ',1']];
     if (dest_type === 'cola') return [[1, 'Answer', ''], [2, 'Queue', v], [3, 'Hangup', '']];
     if (dest_type === 'app') return [[1, 'Goto', 'internal,' + v + ',1']];
     return [[1, 'Dial', 'PJSIP/' + v + ',30'], [2, 'Voicemail', v + '@default,u'], [3, 'Hangup', '']];
@@ -735,9 +734,38 @@ module.exports = function init(deps) {
   function validarEntrante(b) {
     if (b.dest_type && !DEST_OK.includes(b.dest_type)) throw Object.assign(new Error('destino inválido: ' + b.dest_type), { status: 400 });
     if (b.dest_cerrado_type && !DEST_OK.includes(b.dest_cerrado_type)) throw Object.assign(new Error('destino fuera de hora inválido: ' + b.dest_cerrado_type), { status: 400 });
-    // El destino de fax es el id de una caja: sin dígitos el Goto quedaría apuntando a `fax-rx-`.
-    if (b.dest_type === 'fax' && !/^[0-9]+$/.test(String(b.dest_value || ''))) throw Object.assign(new Error('elegí a qué caja de fax entra el DID'), { status: 400 });
-    if (b.dest_cerrado_type === 'fax' && !/^[0-9]+$/.test(String(b.dest_cerrado_value || ''))) throw Object.assign(new Error('elegí a qué caja de fax va fuera de hora'), { status: 400 });
+  }
+
+  /* Lista blanca del VALOR del destino, por tipo. Hasta 1.10.0 las dos únicas validaciones de
+   * contenido que tenía una ruta entrante eran las del fax, así que al retirarlo el `dest_value`
+   * quedó entrando crudo al dialplan del DID. Y ese valor no es un dato que se muestre: es
+   * `appdata` de la tabla realtime que lee Asterisk —`Dial(PJSIP/<v>,30)`, `Queue(<v>)`,
+   * `Goto(ivr,<v>,1)`, `Goto(internal,<v>,1)`—, donde una coma de más agrega argumentos a la
+   * aplicación y un `,1` de más cambia a qué extensión salta la llamada de un desconocido.
+   * Por eso se valida por tipo y no genéricamente: cada tipo termina en un sitio distinto. */
+  const VALOR_OK = {
+    interno: /^[0-9]{1,32}$/,        // número de interno: va a `PJSIP/<v>` y a `<v>@default`
+    ivr: /^[*#0-9]{1,16}$/,          // `pbxng_ivr.exten`, la extensión del IVR en el contexto `ivr`
+    cola: /^[A-Za-z0-9_-]{1,64}$/,   // nombre de cola; mismo juego de caracteres que usa apps.js
+    app: /^[*#0-9]{1,16}$/,          // número de acceso publicado en el contexto compartido `internal`
+  };
+  /* Se valida contra la fila EFECTIVA (la que quedó en `pbxng_inbound_routes`), no contra el
+   * body: el PUT hace COALESCE, así que puede venir el tipo sin el valor o el valor sin el
+   * tipo, y lo que importa es la combinación que `escribirEntrante()` va a publicar. */
+  function validarDestinos(r) {
+    const mal = (msg) => { throw Object.assign(new Error(msg), { status: 400 }); };
+    const tipo = r.dest_type || 'interno';
+    const v = r.dest_value == null ? '' : String(r.dest_value);
+    if (!v) mal('falta el destino de la ruta entrante');
+    // El tipo puede venir de la fila vieja (ej. una ruta de fax que quedó sin migrar): no se publica.
+    if (!VALOR_OK[tipo]) mal('destino inválido: ' + tipo);
+    if (!VALOR_OK[tipo].test(v)) mal('destino inválido para el tipo «' + tipo + '»: ' + v);
+    // Fuera de hora sólo llega al dialplan cuando tiene tipo Y valor (ver `filasCerrado()`).
+    if (r.dest_cerrado_type && r.dest_cerrado_value) {
+      const vc = String(r.dest_cerrado_value);
+      if (!VALOR_OK[r.dest_cerrado_type]) mal('destino fuera de hora inválido: ' + r.dest_cerrado_type);
+      if (!VALOR_OK[r.dest_cerrado_type].test(vc)) mal('destino fuera de hora inválido para el tipo «' + r.dest_cerrado_type + '»: ' + vc);
+    }
   }
 
   app.get('/api/routes/inbound', async (req, res) => {
@@ -755,6 +783,7 @@ module.exports = function init(deps) {
       const { rows } = await c.query(
         'INSERT INTO pbxng_inbound_routes (did,name,dest_type,dest_value,horario_id,dest_cerrado_type,dest_cerrado_value) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING ' + COLS_IN,
         [did, name || did, dest_type, dest_value, parseInt(b.horario_id, 10) || null, b.dest_cerrado_type || null, b.dest_cerrado_value || null]);
+      validarDestinos(rows[0]);
       await escribirEntrante(c, rows[0]);
       await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: did, id: rows[0].id });
     } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
@@ -774,6 +803,7 @@ module.exports = function init(deps) {
           b.horario_id === undefined ? viejo[0].horario_id : (parseInt(b.horario_id, 10) || null),
           b.dest_cerrado_type === undefined ? viejo[0].dest_cerrado_type : (b.dest_cerrado_type || null),
           b.dest_cerrado_value === undefined ? viejo[0].dest_cerrado_value : (b.dest_cerrado_value || null)]);
+      validarDestinos(rows[0]);
       await escribirEntrante(c, rows[0]);
       await c.query('COMMIT'); broadcastSoon(); res.json(rows[0]);
     } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }

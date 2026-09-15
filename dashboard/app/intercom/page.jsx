@@ -1,7 +1,8 @@
 'use client';
-// Sección admin · Intercom. Tabla de clientes; por cliente se asocian dispositivos
-// de video (porteros / cámaras) que sirven de apoyo a la videollamada. El preview
+// Sección admin · Portería (módulo `intercom`). Tabla de clientes; por cliente se asocian
+// dispositivos de video (porteros / cámaras) que sirven de apoyo a la videollamada. El preview
 // usa go2rtc por detrás (MSE), pero NO se expone su panel ni su URL acá.
+// La URL RTSP llega enmascarada desde la API: adentro van usuario y clave de la cámara.
 import { useEffect, useState, useCallback } from 'react';
 import Intercom from '../Intercom';
 import {
@@ -63,7 +64,7 @@ export default function IntercomAdmin() {
     <div>
       <Group justify="space-between" mb="md" wrap="nowrap">
         <Group gap="sm"><ThemeIcon size={44} radius="md" variant="gradient" gradient={{ from: 'grape.6', to: 'violet.8' }}><IconDeviceCctv size={24} /></ThemeIcon>
-          <div><Text fw={800} fz="xl" lh={1.05}>Intercom · Video de clientes</Text><Text fz="xs" c="dimmed">Porteros y cámaras asociados a cada cliente, como apoyo a la videollamada</Text></div>
+          <div><Text fw={800} fz="xl" lh={1.05}>Portería · Video de clientes</Text><Text fz="xs" c="dimmed">Porteros y cámaras asociados a cada cliente, como apoyo a la videollamada</Text></div>
         </Group>
         <Group gap="sm">
           <Paper withBorder radius="md" px="md" py={6}><Group gap={6}><IconBell size={15} color="var(--mantine-color-orange-6)" /><div><Text fz={11} c="dimmed">Porteros</Text><Text fw={800} fz="lg" lh={1}>{tot.i}</Text></div></Group></Paper>

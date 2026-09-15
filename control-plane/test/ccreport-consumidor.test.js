@@ -3,7 +3,7 @@
  *
  * Lo que se verifica es el TECHO, que es el motivo por el que el consumidor existe así:
  * es la única pieza del informe que escribe al ritmo de las llamadas y comparte el pool
- * con los `CURL()` del dialplan (el PIN de la DISA, el código de función, el fin de fax).
+ * con los `CURL()` del dialplan (el PIN de la DISA, el código de función).
  *   1) un pico de eventos NO se traduce en un INSERT por evento: se juntan en lotes;
  *   2) con la base lenta no se acumulan consultas en vuelo (una sola por vez);
  *   3) pasado el tope del buffer se descartan eventos en vez de crecer sin límite;

@@ -36,6 +36,8 @@ const crypto = require('crypto');
 /* Quién ocupa cada extensión del contexto compartido `internal`: la lista es única y la
  * comparten marcacion.js y este módulo (ver el encabezado de dueno-internal.js). */
 const dueno = require('./dueno-internal');
+/* Sólo por `VM_CTX`: el contexto de los buzones lo decide un lugar solo (ver vmpin.js). */
+const vmpin = require('./vmpin');
 
 /**
  * deps:
@@ -57,7 +59,7 @@ const dueno = require('./dueno-internal');
  */
 module.exports = function init(deps) {
   const { app, pool, amiAction, setDialplan, exigirExt, clientIp, errorHttp, broadcastSoon, regenerarEntrantes, logger } = deps;
-  const log = logger ? logger('telefonia') : { info() {}, error() {} };
+  const log = logger ? logger('telefonia') : { info() {}, warn() {}, error() {} };
 
   /* URL con la que ASTERISK ve a esta API. Asterisk corre en la red del host y la API
    * publica :3000 sólo en loopback, así que 127.0.0.1:3000 es el caso normal; se puede
@@ -111,15 +113,22 @@ module.exports = function init(deps) {
   /* Único armador del CURL al que avisan los códigos: así el token no se olvida en ninguno. */
   const curlFeat = (qs) => 'FEATRES=${CURL(' + API_BASE + '/api/internal/feature,' + qs + TOK_Q + ')}';
 
-  /* AstDB por AMI. Se traga los errores a propósito (mismo criterio que setRecFlag de
-   * recordings.js): si Asterisk está caído la verdad sigue en Postgres y syncFeatures()
-   * la vuelve a volcar al reconectar; fallar el PUT dejaría al panel sin poder guardar. */
+  /* AstDB por AMI. El guardado NO se cae si el AMI falla —la fuente de verdad es Postgres y
+   * syncFeatures() vuelve a volcar todo al reconectar—, pero el error SÍ se registra y el
+   * resultado vuelve al que llamó: antes el `catch (_) {}` era mudo y un DBPut perdido dejaba
+   * al panel diciendo «desvío puesto» mientras la central seguía timbrando el interno (o, al
+   * revés, un DBDel perdido dejaba el no-molestar prendido para siempre). Devuelve true/false
+   * para que quien apretó el botón se entere de que el cambio todavía no está en la central. */
   async function astPut(family, key, val) {
-    try { await amiAction({ Action: 'DBPut', Family: family, Key: String(key), Val: String(val) }); } catch (_) {}
+    try { await amiAction({ Action: 'DBPut', Family: family, Key: String(key), Val: String(val) }); return true; }
+    catch (e) { log.error('AstDB: no se pudo escribir ' + family + '/' + key, { valor: String(val) }, e); return false; }
   }
   async function astDel(family, key) {
-    try { await amiAction({ Action: 'DBDel', Family: family, Key: String(key) }); } catch (_) {}
+    try { await amiAction({ Action: 'DBDel', Family: family, Key: String(key) }); return true; }
+    catch (e) { log.error('AstDB: no se pudo borrar ' + family + '/' + key, e); return false; }
   }
+  /* Texto único del aviso: lo muestran el panel y el softphone tal cual viene. */
+  const AVISO_ASTDB = 'Guardado en la base, pero Asterisk no tomó el cambio (AMI caído): se aplica solo cuando la central vuelva.';
 
   /* Modo noche en la AstDB. El contrato del sprint lo llamó `DB(nightmode)` a secas, pero
    * la función DB() de Asterisk EXIGE familia/clave (func_db.c: "DB requires an argument,
@@ -140,13 +149,19 @@ module.exports = function init(deps) {
     : Object.assign({}, FEAT_DEF));
 
   /* Estado del interno → AstDB. Vacío = borrar la clave: el dialplan pregunta por el
-   * contenido, y una clave con '' no es lo mismo que una clave ausente en DB_EXISTS. */
+   * contenido, y una clave con '' no es lo mismo que una clave ausente en DB_EXISTS.
+   * Devuelve false si ALGUNA de las claves quedó sin escribir: el estado del interno son
+   * seis claves y que se escriban cinco es tan inconsistente como que no se escriba ninguna
+   * (un DND puesto con el desvío viejo sin borrar manda las llamadas a otro lado). */
   async function aplicarFeat(ext, f) {
-    if (f.dnd) await astPut('dnd', ext, '1'); else await astDel('dnd', ext);
+    let ok = true;
+    const anotar = (r) => { if (!r) ok = false; };
+    anotar(f.dnd ? await astPut('dnd', ext, '1') : await astDel('dnd', ext));
     for (const k of ['cfu', 'cfb', 'cfnr', 'fm']) {
-      if (f[k]) await astPut(k, ext, f[k]); else await astDel(k, ext);
+      anotar(f[k] ? await astPut(k, ext, f[k]) : await astDel(k, ext));
     }
-    if (f.fm) await astPut('fmt', ext, f.fm_seg || 15); else await astDel('fmt', ext);
+    anotar(f.fm ? await astPut('fmt', ext, f.fm_seg || 15) : await astDel('fmt', ext));
+    return ok;
   }
 
   async function leerFeat(ext) {
@@ -154,8 +169,53 @@ module.exports = function init(deps) {
     return salidaFeat(rows[0]);
   }
 
+  /* ── Bucle de desvío / sígueme ───────────────────────────────────────────
+   * Las cuatro banderas de destino (cfu, cfb, cfnr, fm) terminan mandando la llamada de
+   * vuelta al contexto `internal`, así que forman un grafo entre internos y un ciclo ahí es
+   * una llamada que gira sola: A con sígueme a B y B a A se pasaban la llamada hasta que
+   * alguien cortaba, porque el canal Local del sígueme ARRANCA de cero el contador SALTOS
+   * del dialplan. El tope de SALTOS se arregló en extensions.conf (pasa a `__SALTOS`, que
+   * el Local hereda), pero eso corta la llamada por el buzón: feo igual. Acá se impide el
+   * ciclo al GUARDAR, que es donde se puede explicar qué pasó.
+   *
+   * Por qué se camina el grafo entero y no se compara sólo «A↔B»: el ciclo se arma en tres
+   * pasos (A→B, B→C, C→A) y cada paso, mirado solo, es inocente. Se recorre desde el destino
+   * propuesto siguiendo los destinos YA guardados de los demás; si se vuelve a `ext`, hay
+   * ciclo. Un destino que no es un interno de esta central (un celular) no tiene fila en
+   * `pbxng_ext_features` y corta la caminata sola. TOPE de nodos por si alguien dejó un
+   * grafo raro de antes: esto corre adentro de un PUT, no puede quedarse pensando.
+   *
+   * `claves` son las banderas que ESTE guardado cambia, y no todas las del interno a
+   * proposito: se prohibe el ciclo que uno arma, no el que uno heredó. Si no fuera así, un
+   * ciclo ya guardado en la base (armado antes de que existiera esta comprobación, o desde
+   * el teléfono) dejaría al usuario sin poder ni apagar su propio DND: el guardado es
+   * parcial pero `f` es el merge con lo actual, así que los cfu/cfb/cfnr/fm viejos entrarían
+   * en la detección aunque nadie los esté tocando. Del ciclo viejo se sale como se entró:
+   * borrando el desvío (borrar nunca siembra, porque el destino queda vacío). */
+  const TOPE_CAMINO = 64;
+  async function cicloDesvio(ext, f, claves) {
+    const semillas = claves.map((k) => f[k]).filter(Boolean);
+    if (!semillas.length) return null;
+    const vistos = new Set([String(ext)]);
+    let frente = semillas.map((d) => ({ dest: String(d), camino: [String(ext), String(d)] }));
+    for (let n = 0; frente.length && n < TOPE_CAMINO; n++) {
+      const { dest, camino } = frente.shift();
+      if (dest === String(ext)) return camino;
+      if (vistos.has(dest)) continue;
+      vistos.add(dest);
+      const { rows } = await pool.query('SELECT cfu, cfb, cfnr, fm FROM pbxng_ext_features WHERE ext=$1', [dest]);
+      if (!rows[0]) continue;
+      for (const k of ['cfu', 'cfb', 'cfnr', 'fm']) {
+        const sig = String(rows[0][k] || '').trim();
+        if (sig) frente.push({ dest: sig, camino: camino.concat(sig) });
+      }
+    }
+    return null;
+  }
+
   /* Guarda el estado del interno en Postgres (fuente de verdad) y en la AstDB (lo que
-   * lee el dialplan). `parcial` sólo pisa los campos presentes. */
+   * lee el dialplan). `parcial` sólo pisa los campos presentes. Devuelve el estado y, si la
+   * AstDB no tomó el cambio, un `aviso` para que el panel no diga que quedó aplicado. */
   async function guardarFeat(ext, parcial) {
     const actual = await leerFeat(ext);
     const f = Object.assign({}, actual, parcial);
@@ -163,14 +223,21 @@ module.exports = function init(deps) {
     for (const k of ['cfu', 'cfb', 'cfnr', 'fm']) {
       f[k] = String(f[k] || '').trim();
       if (f[k] && !DESTINO.test(f[k])) throw err(400, 'destino inválido en ' + k + ' (sólo dígitos, hasta 32)');
+      if (f[k] === String(ext)) throw err(400, 'el destino de ' + k + ' no puede ser el mismo interno');
     }
     f.fm_seg = Math.min(120, Math.max(5, parseInt(f.fm_seg, 10) || 15));
+    /* Se compara contra lo que ya estaba, no contra qué campos vinieron en el cuerpo: el
+     * panel manda el formulario entero (también los destinos que el usuario no tocó) y
+     * cualquiera de esos reenvíos idénticos haría de semilla sin que nadie cambie nada. */
+    const cambiadas = ['cfu', 'cfb', 'cfnr', 'fm'].filter((k) => f[k] !== actual[k]);
+    const ciclo = await cicloDesvio(ext, f, cambiadas);
+    if (ciclo) throw err(400, 'eso arma un bucle de desvíos: ' + ciclo.join(' → ') + '. Sacá primero el desvío del otro interno.');
     await pool.query(
       `INSERT INTO pbxng_ext_features (ext,dnd,cfu,cfb,cfnr,fm,fm_seg,updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,now())
        ON CONFLICT (ext) DO UPDATE SET dnd=$2, cfu=$3, cfb=$4, cfnr=$5, fm=$6, fm_seg=$7, updated_at=now()`,
       [ext, f.dnd, f.cfu || null, f.cfb || null, f.cfnr || null, f.fm || null, f.fm_seg]);
-    await aplicarFeat(ext, f);
+    if (!await aplicarFeat(ext, f)) { f.aviso = AVISO_ASTDB; log.warn('desvíos/DND guardados sin llegar a la AstDB', { ext }); }
     return f;
   }
 
@@ -179,11 +246,16 @@ module.exports = function init(deps) {
   async function syncFeatures() {
     try {
       const { rows } = await pool.query('SELECT * FROM pbxng_ext_features');
-      for (const r of rows) await aplicarFeat(r.ext, salidaFeat(r));
+      let fallados = 0;
+      for (const r of rows) if (!await aplicarFeat(r.ext, salidaFeat(r))) fallados++;
       const { rows: fer } = await pool.query('SELECT md, fecha, anual FROM pbxng_feriados');
-      for (const f of fer) { const k = claveFeriado(f); if (k) await astPut('hol', k, '1'); }
-      await astPut(NM_FAM, NM_KEY, await setGet('nightmode', 'auto'));
-      log.info('estado de telefonía volcado a la AstDB', { internos: rows.length, feriados: fer.length });
+      for (const f of fer) { const k = claveFeriado(f); if (k && !await astPut('hol', k, '1')) fallados++; }
+      if (!await astPut(NM_FAM, NM_KEY, await setGet('nightmode', 'auto'))) fallados++;
+      /* Este vuelco es la red de seguridad de todo lo demás: si acá quedan claves sin
+       * escribir, el dialplan está leyendo un estado viejo y NADIE se va a enterar por el
+       * panel (que muestra Postgres). Por eso sube a warn con la cuenta, no a info. */
+      if (fallados) log.warn('el volcado a la AstDB quedó incompleto: el dialplan lee un estado viejo hasta la próxima reconexión del AMI', { internos: rows.length, feriados: fer.length, fallados });
+      else log.info('estado de telefonía volcado a la AstDB', { internos: rows.length, feriados: fer.length });
     } catch (e) { log.error('syncFeatures: ' + (e && e.message)); }
   }
 
@@ -398,9 +470,13 @@ module.exports = function init(deps) {
     const modo = String(b.modo || '').trim();
     try {
       if (modo && !['auto', 'abierto', 'cerrado'].includes(modo)) return res.status(400).json({ error: "modo tiene que ser auto, abierto o cerrado" });
-      if (modo) { await setPut('nightmode', modo); await astPut(NM_FAM, NM_KEY, modo); }
+      let aplicado = true;
+      if (modo) { await setPut('nightmode', modo); aplicado = await astPut(NM_FAM, NM_KEY, modo); }
       if (b.horario_id !== undefined) await setPut('nightmode_horario_id', b.horario_id == null ? '' : String(parseInt(b.horario_id, 10) || ''));
       const e = await estadoNightmode();
+      /* Forzar el modo noche decide a dónde entra CADA llamada de la calle: si el DBPut no
+       * llegó, el que lo forzó tiene que saber que la central sigue como estaba. */
+      if (!aplicado) { e.aviso = AVISO_ASTDB; log.warn('modo noche guardado sin llegar a la AstDB', { modo }); }
       broadcastSoon();
       res.json(e);
     } catch (e) { errorHttp(res, e); }
@@ -526,8 +602,28 @@ module.exports = function init(deps) {
       // Los cuatro de siempre: mismas filas que tenía el FEATURE_CODES fijo de apps.js.
       case 'eco':       return [[1, 'Answer', ''], [2, 'Echo', ''], [3, 'Hangup', '']];
       case 'midigito':  return [[1, 'Answer', ''], [2, 'SayDigits', '${CALLERID(num)}'], [3, 'Hangup', '']];
-      case 'vm_propio': return [[1, 'Answer', ''], [2, 'VoiceMailMain', '${CALLERID(num)}@default'], [3, 'Hangup', '']];
-      case 'vm_otro':   return [[1, 'Answer', ''], [2, 'VoiceMailMain', ''], [3, 'Hangup', '']];
+      /* *97 (buzón propio). ESTE dialplan tiene que ser el MISMO que el `*97` estático de
+       * docker/config/asterisk/extensions.conf, porque el realtime le GANA al estático en
+       * cuanto el administrador mueve el código a otro número: si acá pusiéramos
+       * `VoiceMailMain(${CALLERID(num)}@ctx)` a secas, el buzón pediría PIN pero se lo
+       * pediría al buzón que dice el CallerID, y el CallerID es lo que el teléfono manda
+       * en el From: un interno registrado pone el número de otro y entra a su buzón.
+       * La identidad sale de `CHANNEL(endpoint)` —el endpoint que se autenticó, cuyo id
+       * ES el número del buzón— y la 's' (saltear el PIN) se usa SÓLO si el canal es
+       * PJSIP; un `Local/...` (Originate, click-to-call) cae al camino que pide PIN.
+       * Las prioridades de los GotoIf son absolutas porque `numerar()` renumera 1..N en
+       * orden y la tabla realtime `extensions` no tiene columna de etiqueta. */
+      case 'vm_propio': return [
+        [1, 'Answer', ''],
+        [2, 'Wait', '1'],
+        [3, 'GotoIf', '$["${CHANNEL(channeltype)}"="PJSIP"]?4:6'],
+        [4, 'VoiceMailMain', '${CHANNEL(endpoint)}@' + vmpin.VM_CTX + ',s'],
+        [5, 'Hangup', ''],
+        [6, 'VoiceMailMain', '${CALLERID(num)}@' + vmpin.VM_CTX],
+        [7, 'Hangup', ''],
+      ];
+      // *98 (buzón de otro): NUNCA lleva la 's'; pide número de buzón y PIN.
+      case 'vm_otro':   return [[1, 'Answer', ''], [2, 'VoiceMailMain', '@' + vmpin.VM_CTX], [3, 'Hangup', '']];
       default: return null;
     }
   }
@@ -710,7 +806,21 @@ module.exports = function init(deps) {
         else if (valor === 'dnd') parcial = { dnd: false };
         else parcial = { dnd: false, cfu: '', cfb: '', cfnr: '', fm: '' };
       } else return res.status(400).json({ error: 'acción desconocida' });
-      const f = await guardarFeat(ext, parcial);
+      let f;
+      try { f = await guardarFeat(ext, parcial); }
+      catch (e) {
+        /* Este camino llega DESPUÉS de que el dialplan ya escribió la AstDB con su propio
+         * `Set(DB(...))`: el teléfono marcó el código y la central le creyó. Si acá se
+         * rechaza (un destino inválido, o el bucle de desvíos que ahora se corta), quedarse
+         * con el 400 dejaría la AstDB con un valor que Postgres no tiene —exactamente la
+         * divergencia que se está tratando de evitar—. Se reescribe la AstDB desde Postgres,
+         * que es la fuente de verdad, y recién ahí se responde el error. */
+        if (e && e.status === 400) {
+          try { await aplicarFeat(ext, await leerFeat(ext)); }
+          catch (e2) { log.error('no se pudo revertir en la AstDB lo que el código de función ya había escrito', { ext, accion }, e2); }
+        }
+        throw e;
+      }
       broadcastSoon();
       res.json({ ok: true, ext, features: f });
     } catch (e) { errorHttp(res, e); }

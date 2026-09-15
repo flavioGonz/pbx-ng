@@ -56,6 +56,27 @@ def xor_addr(v):
     ip = bytes(a ^ b for a, b in zip(v[4:8], struct.pack(">I", MAGIC)))
     return f"{socket.inet_ntoa(ip)}:{port}"
 
+def es_privada(ip):
+    try: o = [int(x) for x in ip.split(".")]
+    except Exception: return False
+    if len(o) != 4: return False
+    return (o[0] in (0, 10, 127) or (o[0] == 172 and 16 <= o[1] <= 31)
+            or (o[0] == 192 and o[1] == 168) or (o[0] == 169 and o[1] == 254))
+
+def relay_inservible(ip):
+    """Un relay que ningun cliente puede usar. Que el TURN conteste y autentique NO
+    alcanza: lo que se le entrega al navegador es esta direccion. Caso real medido en
+    produccion: un coturn escuchando solo en 172.17.0.1 (el bridge de Docker de esa
+    maquina) autenticaba perfecto y no le servia a nadie. Eso tiene que salir FALLA."""
+    o = ip.split(".")
+    if len(o) != 4: return "la direccion del relay no es IPv4"
+    try: o = [int(x) for x in o]
+    except Exception: return "la direccion del relay no es IPv4"
+    if o[0] == 0:   return "el relay anuncia 0.0.0.0: falta external-ip en turnserver.conf"
+    if o[0] == 127: return "el relay anuncia loopback (127.x): solo sirve dentro del propio contenedor"
+    if o[0] == 169 and o[1] == 254: return "el relay anuncia link-local (169.254.x)"
+    return None
+
 def err_code(a):
     if A_ERROR not in a:
         return None
@@ -145,7 +166,19 @@ def main():
         except Exception as e:
             bad(f"[{proto}] Allocate firmado sin respuesta ({e})"); ch.close(); rc = 1; continue
         if m == 0x0103 and A_XOR_RELAYED in at2:
-            ok(f"[{proto}] ALLOCATE 200 · relay = {xor_addr(at2[A_XOR_RELAYED])}  ->  TURN OK (alcanzable + autenticado)")
+            rel = xor_addr(at2[A_XOR_RELAYED]); rel_ip = rel.split(":")[0]
+            motivo = relay_inservible(rel_ip)
+            # Relay privado con un TURN publicado en una IP publica: desde la LAN "anda",
+            # desde afuera --que es para lo que existe el TURN-- no llega nadie.
+            if not motivo and es_privada(rel_ip) and not es_privada(ip):
+                motivo = (f"el relay anuncia una direccion privada ({rel_ip}) y el TURN esta publicado "
+                          f"en {ip}: los clientes de afuera no la alcanzan")
+            if motivo:
+                bad(f"[{proto}] ALLOCATE 200 pero el relay NO SIRVE: {rel} — {motivo}")
+                warn("      -> revisa external-ip= en turnserver.conf y el port-forward del rango relay")
+                rc = 1
+            else:
+                ok(f"[{proto}] ALLOCATE 200 · relay = {rel}  ->  TURN OK (alcanzable + autenticado)")
         else:
             code = err_code(at2)
             if code in (401, 403):

@@ -125,7 +125,11 @@ export default function DesviosPanel({ ext, propio = false, codigos, onGuardado 
       const v = { ...VACIO, ...body, ...(r || {}) };
       v.fm_seg = Number(v.fm_seg) > 0 ? Number(v.fm_seg) : 15;
       setDatos(v); setForm(v);
-      toast(propio ? 'Tus desvíos quedaron guardados' : 'Desvíos del interno ' + ext + ' guardados', 'ok');
+      /* `aviso` llega cuando la API guardó en la base pero Asterisk no tomó el cambio (AMI
+       * caído). Decirle «guardado» a secas era la mentira que más caro salía acá: la persona
+       * apaga el no-molestar, se va tranquila y el teléfono sigue sin sonar. */
+      if (r && r.aviso) toast(r.aviso, 'bad', { description: 'El panel ya lo tiene guardado; la central lo va a tomar cuando vuelva.' });
+      else toast(propio ? 'Tus desvíos quedaron guardados' : 'Desvíos del interno ' + ext + ' guardados', 'ok');
       if (onGuardado) onGuardado(v);
     } catch (e) { toast(e.message, 'bad'); }
     setGuardando(false);

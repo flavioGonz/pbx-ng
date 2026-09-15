@@ -21,6 +21,9 @@
 
 const nodemailer = require('nodemailer');
 const emails = require('./emails');
+/* Generación y validación del PIN del buzón: está en su propio archivo porque el alta de
+ * buzón la hacen también los tres `create*Endpoint` de app.js (ver su encabezado). */
+const vmpin = require('./vmpin');
 
 /**
  * deps:
@@ -54,7 +57,11 @@ module.exports = function init(deps) {
   //  sin token, sin red de por medio.
   // ---------------------------------------------------------------------------
   const VM_DIR = process.env.VM_DIR || '/voicemail';
-  const VM_CTX = process.env.VM_CONTEXT || 'default';
+  /* El contexto de los buzones sale de vmpin.js y no de `process.env` leído acá: es el
+   * mismo valor que usan el alta de internos (`vmpin.seed`) y el `*97` del dialplan, y
+   * cuando estaba escrito en dos lugares con `VM_CONTEXT` distinto de 'default' quedaban
+   * buzones en un contexto y listado/rotación en otro. */
+  const VM_CTX = vmpin.VM_CTX;
   const _fsp = require('fs').promises;
   const _path = require('path');
   const vmSafe = (x) => String(x || '').replace(/[^A-Za-z0-9_-]/g, '');
@@ -229,6 +236,20 @@ module.exports = function init(deps) {
   }
   setInterval(() => { vmMailTick().catch(() => {}); }, 45000);
   setTimeout(() => { vmMailTick().catch(() => {}); }, 20000);
+
+  /* Buzones cuyo PIN es el número del buzón, o sea sin PIN. NO se rotan solos: rotarle el
+   * PIN a alguien de un día para el otro lo deja afuera de sus propios mensajes sin que
+   * nadie le avise, y una central desplegada puede tener decenas. Se nombran una vez en el
+   * arranque —mismo criterio que las salas sin PIN de salas.js— para que el que mira el log
+   * de la actualización los vea; el panel además los marca uno por uno y el administrador
+   * los rota cuando pueda avisarle al dueño. */
+  setTimeout(async () => {
+    try {
+      const { rows } = await pool.query('SELECT mailbox, password FROM voicemail WHERE context=$1', [VM_CTX]);
+      const debiles = rows.filter((r) => vmpin.pinDebil(r.mailbox, r.password)).map((r) => r.mailbox);
+      if (debiles.length) logger('vm').warn('buzones sin PIN de verdad (el PIN es el número del buzón): con *98 los escucha cualquier interno. Rotalos desde el panel avisándole al dueño', { buzones: debiles.slice(0, 50), total: debiles.length });
+    } catch (e) { logger('vm').error('no se pudo auditar el PIN de los buzones', e); }
+  }, 25000);
 
   // Config de "buzon -> email" por buzon
   app.get('/api/vm/email', async (req, res) => {
@@ -569,13 +590,201 @@ module.exports = function init(deps) {
   });
   app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 
-  app.get('/api/mailboxes', async (req, res) => { try { const { rows } = await pool.query("SELECT mailbox,fullname,email FROM pbxng_mailboxes ORDER BY mailbox"); res.json(rows); } catch (e) { errorHttp(res, e); } });
+  /* Lo que hace falta para avisar, buscado UNA vez. En la rotación en lote esto se
+   * calcula al principio y se comparte: armar un transporte SMTP por buzón eran catorce
+   * conexiones al servidor de correo para mandar catorce mensajes, y varios proveedores
+   * cortan por eso. Devuelve null si la central no tiene SMTP configurado. */
+  async function avisoSmtp() {
+    const smtp = await smtpFor(1);
+    if (!smtp) return null;
+    const { rows: br } = await pool.query("SELECT value FROM pbxng_settings WHERE key='brand'");
+    return {
+      tx: nodemailer.createTransport({ host: smtp.host, port: smtp.port || 587, secure: !!smtp.secure, auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined }),
+      from: smtp.from_addr || smtp.username,
+      brand: (br[0] && br[0].value) || 'PBX-NG',
+    };
+  }
+
+  /* Aviso del PIN nuevo al dueño del buzón. Devuelve false —sin tirar— si la central no
+   * tiene SMTP configurado o el buzón no tiene correo: no poder avisar no es motivo para
+   * dejar el buzón con el PIN viejo, pero el panel sí tiene que decir que no se avisó.
+   *
+   * El correo NO lleva enlace al panel: el destinatario es el dueño del interno (rol
+   * agente), la pantalla de buzones es admin y con su PIN no tiene nada que hacer ahí.
+   * Ver el comentario de `emails.vmPinEmail`. */
+  async function avisarPinNuevo(mailbox, pin, smtpCtx) {
+    const { rows } = await pool.query(
+      `SELECT v.fullname, COALESCE(NULLIF(v.email,''), m.email, '') AS email
+         FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox = v.mailbox
+        WHERE v.mailbox=$1 AND v.context=$2`, [mailbox, VM_CTX]);
+    const box = rows[0];
+    if (!box || !box.email) return false;
+    const ctx = smtpCtx === undefined ? await avisoSmtp() : smtpCtx;
+    if (!ctx) return false;
+    await ctx.tx.sendMail({
+      from: ctx.from,
+      to: box.email,
+      // El asunto NO lleva el PIN: se lee en la lista del correo y en la notificación del
+      // celular sin abrir nada, y ahí no hace falta.
+      subject: 'Cambió el PIN de tu buzón de voz · interno ' + mailbox,
+      html: emails.vmPinEmail({ brand: ctx.brand, mailbox, fullname: box.fullname, pin }),
+      text: 'El PIN de tu buzón de voz (interno ' + mailbox + ') ahora es ' + pin + '.\n'
+        + 'Para escuchar tus mensajes marcá *97 desde tu interno.\n'
+        + 'Si querés poner uno tuyo: *97, entrá con este PIN y elegí 0 y después 5.\n',
+    });
+    return true;
+  }
+
+  /* ── Buzones de voz: el PIN ───────────────────────────────────────────────
+   * El PIN del buzón era el número del buzón (ver el encabezado de vmpin.js), así que no
+   * había PIN: con `*98` cualquiera escuchaba los mensajes de cualquiera. Ahora:
+   *   · se crea al azar (vmpin.pinNuevo) y se devuelve UNA vez, al crearlo;
+   *   · el LISTADO no lo trae, sólo `pin_debil` (mismo criterio que `tiene_pin` de las
+   *     salas: un PIN en una lista que se mira de a diez es un PIN regalado);
+   *   · sale por el DETALLE `GET /api/mailboxes/:mailbox`, que es admin (rbac.js);
+   *   · se rota con `POST /api/mailboxes/:mailbox/pin`, también admin.
+   * A los buzones que YA existen no se les toca el PIN desde ninguna migración: rotarlos
+   * a ciegas deja a cada usuario afuera de sus propios mensajes sin que nadie le avise.
+   * Se los marca `pin_debil` y el panel los muestra en rojo para que el administrador los
+   * rote uno por uno, avisando. El listado se arma contra `voicemail`, que es la tabla que
+   * de verdad LEE Asterisk: `pbxng_mailboxes` es sólo la configuración del envío por
+   * correo y un buzón puede estar en una y no en la otra. */
+  const MB_OK = /^[0-9]{1,20}$/;
+  app.get('/api/mailboxes', async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT v.mailbox, COALESCE(NULLIF(m.fullname,''), v.fullname) AS fullname,
+                COALESCE(NULLIF(v.email,''), m.email) AS email,
+                v.password AS _pw
+           FROM voicemail v LEFT JOIN pbxng_mailboxes m ON m.mailbox = v.mailbox
+          WHERE v.context = $1 ORDER BY v.mailbox`, [VM_CTX]);
+      res.json(rows.map((r) => ({ mailbox: r.mailbox, fullname: r.fullname, email: r.email, pin_debil: vmpin.pinDebil(r.mailbox, r._pw) })));
+    } catch (e) { errorHttp(res, e); }
+  });
+  /* El PIN en claro sale SÓLO de acá (admin): el operador lo dicta por teléfono o lo copia.
+   * Se guarda en claro porque Asterisk lo compara en claro contra lo que se marca — no es
+   * una decisión de este módulo, es cómo funciona `app_voicemail` con realtime. */
+  app.get('/api/mailboxes/:mailbox', async (req, res) => {
+    const mailbox = String(req.params.mailbox || '');
+    try {
+      const { rows } = await pool.query('SELECT mailbox, fullname, email, password FROM voicemail WHERE mailbox=$1 AND context=$2', [mailbox, VM_CTX]);
+      if (!rows[0]) return res.status(404).json({ error: 'no existe ese buzón' });
+      res.json({ mailbox: rows[0].mailbox, fullname: rows[0].fullname, email: rows[0].email, pin: rows[0].password || '', pin_debil: vmpin.pinDebil(rows[0].mailbox, rows[0].password) });
+    } catch (e) { errorHttp(res, e); }
+  });
   app.post('/api/mailboxes', async (req, res) => {
-    const { mailbox, password, fullname, email, context = 'default' } = req.body || {};
-    if (!mailbox || !password) return res.status(400).json({ error: 'mailbox y password son obligatorios' });
+    const { mailbox, password, fullname, email, context = VM_CTX } = req.body || {};
+    if (!mailbox) return res.status(400).json({ error: 'mailbox es obligatorio' });
+    if (!MB_OK.test(String(mailbox))) return res.status(400).json({ error: 'buzón inválido (sólo dígitos)' });
+    /* El PIN dejó de ser obligatorio: sin PIN escrito se genera uno y se devuelve. Antes
+     * era obligatorio y el panel sugería el número del interno, que es peor que no pedirlo. */
+    const pin = password === undefined || password === null || String(password).trim() === '' ? vmpin.pinNuevo() : String(password).trim();
+    if (!vmpin.PIN_OK.test(pin)) return res.status(400).json({ error: 'el PIN tiene que ser de 4 a 10 dígitos' });
+    if (vmpin.pinDebil(mailbox, pin)) return res.status(400).json({ error: 'el PIN no puede ser el número del buzón' });
     const c = await pool.connect();
-    try { await c.query('BEGIN'); await c.query("INSERT INTO voicemail (mailbox,context,password,fullname,email) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [mailbox, context, String(password), fullname || mailbox, email || null]); await c.query("INSERT INTO pbxng_mailboxes (mailbox,fullname,email) VALUES ($1,$2,$3) ON CONFLICT (mailbox) DO UPDATE SET fullname=EXCLUDED.fullname,email=EXCLUDED.email", [mailbox, fullname || mailbox, email || null]); await c.query('COMMIT'); res.status(201).json({ created: mailbox }); }
+    try {
+      await c.query('BEGIN');
+      await c.query("INSERT INTO voicemail (mailbox,context,password,fullname,email) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [mailbox, context, pin, fullname || mailbox, email || null]);
+      await c.query("INSERT INTO pbxng_mailboxes (mailbox,fullname,email) VALUES ($1,$2,$3) ON CONFLICT (mailbox) DO UPDATE SET fullname=EXCLUDED.fullname,email=EXCLUDED.email", [mailbox, fullname || mailbox, email || null]);
+      /* El `ON CONFLICT DO NOTHING` de arriba es el caso normal, no el raro: cada interno ya
+       * nace con su buzón, así que «crear» el del 1001 casi siempre encuentra uno hecho. Se
+       * relee el PIN que QUEDÓ en vez de devolver el que se generó acá; si no, el panel le
+       * mostraría al operador un PIN que la central no conoce y que nadie va a poder usar. */
+      const { rows } = await c.query('SELECT password FROM voicemail WHERE mailbox=$1 AND context=$2', [mailbox, context]);
+      await c.query('COMMIT');
+      const quedo = (rows[0] && rows[0].password) || pin;
+      res.status(201).json({ created: mailbox, pin: quedo, ya_existia: quedo !== pin });
+    }
     catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+  });
+  /* Rota UN buzón y avisa. Lo comparten la rotación de a uno y la de lote para que las dos
+   * se comporten igual: mismo UPDATE, mismo registro en el log y mismo correo. Devuelve
+   * `null` si el buzón no existe (el que llama decide si eso es 404 o una fila con error). */
+  async function rotarUno(mailbox, pin, quien, smtpCtx) {
+    const { rowCount } = await pool.query('UPDATE voicemail SET password=$2 WHERE mailbox=$1 AND context=$3', [mailbox, pin, VM_CTX]);
+    if (!rowCount) return null;
+    logger('vm').info('PIN del buzón rotado', { mailbox, por: quien });
+    let avisado = false;
+    try { avisado = await avisarPinNuevo(mailbox, pin, smtpCtx); }
+    catch (e) { logger('vm').warn('no se pudo avisar el PIN nuevo por correo', { mailbox }, e); }
+    return { mailbox, pin, avisado };
+  }
+
+  /* Rotar el PIN. No se recarga nada: `app_voicemail` con realtime lee la fila en cada
+   * `VoiceMailMain`, así que el PIN nuevo vale para la llamada siguiente. Se avisa por
+   * correo si el buzón tiene dirección configurada, porque un PIN que cambia y nadie
+   * comunica es un usuario que llama a soporte. */
+  app.post('/api/mailboxes/:mailbox/pin', async (req, res) => {
+    const mailbox = String(req.params.mailbox || '');
+    const dado = (req.body || {}).pin;
+    const pin = dado === undefined || dado === null || String(dado).trim() === '' ? vmpin.pinNuevo() : String(dado).trim();
+    if (!vmpin.PIN_OK.test(pin)) return res.status(400).json({ error: 'el PIN tiene que ser de 4 a 10 dígitos' });
+    if (vmpin.pinDebil(mailbox, pin)) return res.status(400).json({ error: 'el PIN no puede ser el número del buzón' });
+    try {
+      const r = await rotarUno(mailbox, pin, (req.user && req.user.username) || '?');
+      if (!r) return res.status(404).json({ error: 'no existe ese buzón' });
+      res.json(r);
+    } catch (e) { errorHttp(res, e); }
+  });
+
+  /* ── Rotación EN LOTE ─────────────────────────────────────────────────────
+   * Para qué existe: en una central que ya venía andando, TODOS los buzones tienen el PIN
+   * igual al número del interno (así los creaba PBX-NG hasta 1.10.0). Ninguna migración los
+   * toca —rotarle el PIN a catorce personas de un día para el otro las deja afuera de sus
+   * propios mensajes sin que sepan a quién preguntarle—, así que el camino es este: el panel
+   * los marca `pin_debil`, y el administrador decide CUÁNDO rotarlos y lo hace de a uno o
+   * todos juntos, con el aviso por correo saliendo solo.
+   *
+   * Tres decisiones que no son obvias:
+   *  · NO existe «rotar todos» implícito. O viene la lista de buzones, o viene
+   *    `solo_debiles:true` (que es una lista igual, calculada acá). Un POST sin cuerpo que
+   *    rote la central entera es exactamente el accidente que esto viene a evitar.
+   *  · Cada buzón lleva SU PIN al azar, no uno común: un PIN compartido es no tener PIN.
+   *  · El PIN sólo vuelve en la respuesta de los buzones a los que NO se les pudo avisar
+   *    (sin correo configurado o sin SMTP). Al resto ya les llegó, y devolver catorce PIN en
+   *    claro en una sola respuesta —que queda en el historial del navegador y en cualquier
+   *    log intermedio— es regalar todos los buzones juntos. Los que sí hace falta dictar
+   *    salen en la respuesta y el panel los muestra para que el operador los pase.
+   *
+   * Se rota de a uno y en serie, no en una transacción: si el correo del buzón 7 falla, los
+   * seis anteriores YA fueron avisados y volver atrás sus PIN dejaría a esa gente con un PIN
+   * que no es el que recibió. La respuesta dice fila por fila qué pasó. */
+  const LOTE_MAX = 200;
+  app.post('/api/mailboxes/rotar-pin', async (req, res) => {
+    const b = req.body || {};
+    try {
+      let lista;
+      if (b.solo_debiles) {
+        const { rows } = await pool.query('SELECT mailbox, password FROM voicemail WHERE context=$1 ORDER BY mailbox', [VM_CTX]);
+        lista = rows.filter((r) => vmpin.pinDebil(r.mailbox, r.password)).map((r) => r.mailbox);
+      } else if (Array.isArray(b.mailboxes)) {
+        lista = b.mailboxes.map((m) => String(m || '').trim()).filter(Boolean);
+      } else {
+        return res.status(400).json({ error: 'decí qué buzones rotar: `mailboxes` (lista) o `solo_debiles: true`' });
+      }
+      lista = [...new Set(lista)];
+      if (!lista.length) return res.json({ rotados: 0, avisados: 0, resultados: [] });
+      if (lista.length > LOTE_MAX) return res.status(400).json({ error: 'son demasiados buzones de una vez (máximo ' + LOTE_MAX + ')' });
+      const quien = (req.user && req.user.username) || '?';
+      // El transporte SMTP se arma UNA vez para todo el lote (ver `avisoSmtp`). `null`
+      // —sin SMTP configurado— también se comparte: así no se reintenta por cada buzón.
+      const smtpCtx = await avisoSmtp();
+      const resultados = [];
+      for (const mailbox of lista) {
+        if (!MB_OK.test(mailbox)) { resultados.push({ mailbox, ok: false, avisado: false, pin: null, error: 'buzón inválido (sólo dígitos)' }); continue; }
+        try {
+          const r = await rotarUno(mailbox, vmpin.pinNuevo(), quien, smtpCtx);
+          if (!r) { resultados.push({ mailbox, ok: false, avisado: false, pin: null, error: 'no existe ese buzón' }); continue; }
+          resultados.push({ mailbox, ok: true, avisado: r.avisado, pin: r.avisado ? null : r.pin, error: null });
+        } catch (e) {
+          logger('vm').warn('no se pudo rotar el PIN del buzón', { mailbox }, e);
+          resultados.push({ mailbox, ok: false, avisado: false, pin: null, error: 'no se pudo rotar' });
+        }
+      }
+      const rotados = resultados.filter((r) => r.ok).length;
+      logger('vm').info('rotación en lote de PIN de buzones', { pedidos: lista.length, rotados, por: quien });
+      res.json({ rotados, avisados: resultados.filter((r) => r.avisado).length, resultados });
+    } catch (e) { errorHttp(res, e); }
   });
   app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
 

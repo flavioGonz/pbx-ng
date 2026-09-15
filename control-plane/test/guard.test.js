@@ -105,3 +105,61 @@ test('las privadas nunca se banean', async () => {
   assert.equal(cont.fwBan.length, 0);
   await assert.rejects(guard.banear('192.168.1.50', { manual: true }), /privadas/);
 });
+
+/* ---------------------------------------------------------------------------
+ *  IPv6. La tabla de nftables ya era `inet`, pero el SOC descartaba todo lo que no
+ *  fuera IPV4: un atacante por v6 contra el 5060 golpeaba sin que nadie lo contara.
+ *  Lo que se prueba acá es lo que no se ve en una central sin v6: que el evento se
+ *  entienda en las dos formas que manda Asterisk, que la dirección se guarde en UNA
+ *  sola forma (si no, el desbloqueo no encuentra lo que baneó) y que la LAN v6
+ *  (link-local y ULA) siga tan protegida como la v4.
+ * ------------------------------------------------------------------------ */
+const { parseRemote, ipEn, normalizarIp, esPrivada } = require('../guard');
+
+test('parseRemote entiende las dos formas v6 de Asterisk (y la v4 de siempre)', () => {
+  assert.deepEqual(parseRemote('IPV4/UDP/203.0.113.9/5060'), { ip: '203.0.113.9', proto: 'UDP', puerto: '5060' });
+  assert.deepEqual(parseRemote('IPV6/UDP/2001:db8::1/5060'), { ip: '2001:db8::1', proto: 'UDP', puerto: '5060' });
+  // Con corchetes el puerto viaja pegado a la dirección y todo cae en el tercer campo.
+  assert.deepEqual(parseRemote('IPV6/WSS/[2001:db8::1]:5060'), { ip: '2001:db8::1', proto: 'WSS', puerto: '5060' });
+  assert.equal(parseRemote('[::1]:5060').ip, '::1');
+  assert.equal(parseRemote('IPV6/UDP/no-es-una-ip/5060'), null);
+});
+
+test('la misma IPv6 escrita de varias formas es una sola', () => {
+  assert.equal(normalizarIp('2001:0DB8:0000:0000:0000:0000:0000:0001'), '2001:db8::1');
+  assert.equal(normalizarIp('[2001:db8::1]'), '2001:db8::1');
+  assert.equal(normalizarIp('fe80::1%eth0'), 'fe80::1');
+  // Una v4 vista por un socket v6 se guarda como v4: el paquete que llega es v4 y el
+  // drop que lo corta está en el set v4.
+  assert.equal(normalizarIp('::ffff:203.0.113.9'), '203.0.113.9');
+  assert.equal(normalizarIp('1.2.3.4.5'), null);
+});
+
+test('la lista blanca acepta prefijos v6 y no mezcla familias', () => {
+  assert.ok(ipEn('2001:db8:0:1::20', '2001:db8::/32'));
+  assert.ok(!ipEn('2001:dba::20', '2001:db8::/32'));
+  assert.ok(ipEn('2001:db8::1', '2001:0db8:0:0:0:0:0:1'));
+  // Una regla v4 no puede eximir a una v6 (ni al revés): son espacios distintos.
+  assert.ok(!ipEn('2001:db8::1', '0.0.0.0/0'));
+  assert.ok(!ipEn('203.0.113.9', '::/0'));
+  assert.ok(ipEn('203.0.113.9', '203.0.113.0/24'), 'la v4 de siempre tiene que seguir andando');
+});
+
+test('la LAN v6 (link-local, ULA, loopback) nunca se banea', async () => {
+  assert.ok(esPrivada('fe80::1') && esPrivada('fd00::5') && esPrivada('::1'));
+  assert.ok(!esPrivada('2a02:1234::5'));
+  const { guard, ami, cont } = armar();
+  guard._engancharAmi();
+  for (let i = 0; i < 10; i++) ami.emit('managerevent', { ...amiEvent('ChallengeResponseFailed', 'x'), remoteaddress: 'IPV6/UDP/[fe80::1]:5060' });
+  await esperar(40);
+  assert.equal(cont.fwBan.length, 0, 'un teléfono de la LAN con la clave vieja no puede dejar a la oficina sin central');
+});
+
+test('un ataque por IPv6 se banea igual que uno por v4', async () => {
+  const { guard, ami, cont } = armar();
+  guard._engancharAmi();
+  for (let i = 0; i < 6; i++) { ami.emit('managerevent', { ...amiEvent('ChallengeResponseFailed', 'x'), remoteaddress: 'IPV6/UDP/[2a02:1234::5]:5060' }); await esperar(20); }
+  await esperar(50);
+  assert.equal(cont.fwBan.length, 1, 'exactamente un POST /fw/ban');
+  assert.equal(cont.fwBan[0].ip, '2a02:1234::5', 'al agente le tiene que llegar la forma canónica');
+});

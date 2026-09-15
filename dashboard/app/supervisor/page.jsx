@@ -6,7 +6,7 @@ import { useAuth, logout } from '../auth';
 import Softphone from '../Softphone';
 import ClientesLibreta from '../ClientesLibreta';
 import { Card, Text, Group, Badge, Button, ThemeIcon, Stack, ActionIcon, Tooltip, ScrollArea, Table, useComputedColorScheme } from '@mantine/core';
-import { IconLogout, IconEar, IconMicrophone, IconUrgent, IconRefresh, IconUsersGroup, IconPhoneOff, IconAddressBook, IconUsers, IconPrinter, IconReportAnalytics, IconDeviceAnalytics, IconHistory } from '@tabler/icons-react';
+import { IconLogout, IconEar, IconMicrophone, IconUrgent, IconRefresh, IconUsersGroup, IconPhoneOff, IconAddressBook, IconUsers, IconReportAnalytics, IconDeviceAnalytics, IconHistory } from '@tabler/icons-react';
 import { toast } from '../notify';
 import Link from 'next/link';
 
@@ -14,7 +14,6 @@ import Link from 'next/link';
  * hace —escuchar, susurrar, irrumpir— y mandarlo ahí sería sacarlo de donde está. */
 const ATAJOS = [
   { href: '/salas', label: 'Salas', icon: IconUsers },
-  { href: '/fax', label: 'Fax', icon: IconPrinter },
   { href: '/reportes', label: 'Reportes', icon: IconReportAnalytics },
   { href: '/wallboard', label: 'Wallboard', icon: IconDeviceAnalytics },
   { href: '/cdr', label: 'CDR', icon: IconHistory },
@@ -93,7 +92,7 @@ export default function SupervisorPanel() {
         <Group gap="xs">
           {/* Las pantallas que rbac.js le da al supervisor. Sin estos links no había NINGÚN
               camino hacia ellas: la lista SUP_OK, las reglas del backend y todo el
-              esconder-por-rol de /fax y /salas eran código que con rol supervisor no se
+              esconder-por-rol de /salas eran código que con rol supervisor no se
               ejecutaba nunca, porque para llegar había que escribir la URL a mano. */}
           {ATAJOS.map((a) => (
             <Button key={a.href} size="sm" variant="subtle" color="gray" component={Link} href={a.href}

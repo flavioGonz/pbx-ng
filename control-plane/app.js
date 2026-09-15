@@ -23,6 +23,10 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const alerts = require('./alerts');
 const emails = require('./emails');
+/* El buzón del interno nace con PIN AL AZAR y no con el número del interno: ver el
+ * encabezado de vmpin.js (el mismo INSERT estaba copiado en los cuatro lugares donde se
+ * crea un endpoint, y los cuatro dejaban el buzón sin PIN de verdad). */
+const vmpin = require('./vmpin');
 const sysmon = require('./sysmon');
 const astconf = require('./astconf');   // aparcado, captura y música en espera (config generada)
 
@@ -109,9 +113,9 @@ async function createWebrtcEndpoint(c, id, password, context = 'internal', tenan
   await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,$2,'no','yes','yes',60,$3) ON CONFLICT (id) DO UPDATE SET max_contacts=EXCLUDED.max_contacts,remove_existing='no',remove_unavailable='yes',support_path='yes'", [id, max_contacts, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
   await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-ws',$1,$1,$2,'all',$3,$4,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-ws',allow=EXCLUDED.allow,webrtc='yes'", [id, context, allow, tenant_id]);
-  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@' || $2::text WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id, vmpin.VM_CTX]);
   await sipConf.afterCreate(c, id);
-  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
+  await vmpin.seed(c, id);
 }
 
 // geo (ip-api.com) con cache en memoria
@@ -310,12 +314,14 @@ const ami = new AsteriskManager(CFG.ami.port, CFG.ami.host, CFG.ami.user, CFG.am
 ami.keepConnected();
 /* Volcados Postgres → AstDB (los módulos se anotan acá al registrarse: recordings.js con
  * syncRecFlags y telefonia.js con syncFeatures). Se corren en CADA conexión del AMI, que
- * es exactamente el evento «Asterisk es nuevo o volvió»: la astdb (astdb.sqlite3) no está
- * en un volumen, así que un `docker compose up -d --force-recreate asterisk` la deja
- * vacía y, sin esto, las marcas de grabación y TODOS los desvíos, DND, sígueme, feriados
- * y el modo noche dejaban de aplicarse en silencio mientras el panel los seguía mostrando
- * prendidos (la verdad está en Postgres, que no cambió). Los 2 s le dan tiempo a Asterisk
- * a terminar de cargar func_db antes del primer DBPut.
+ * es exactamente el evento «Asterisk es nuevo o volvió». Desde 1.11.0 la astdb
+ * (astdb.sqlite3) vive en el volumen `asterisk_db`, así que recrear el contenedor ya no la
+ * vacía; esto se queda igual porque sigue siendo la red para el otro caso: que Postgres y
+ * la astdb se desincronicen (una instalación anterior al volumen, un volumen recreado a
+ * mano, una escritura por AMI que se perdió). Sin esto, las marcas de grabación y TODOS los
+ * desvíos, DND, sígueme, feriados y el modo noche dejan de aplicarse en silencio mientras el
+ * panel los sigue mostrando prendidos (la verdad está en Postgres, que no cambió). Los 2 s le
+ * dan tiempo a Asterisk a terminar de cargar func_db antes del primer DBPut.
  *
  * El freno es de 5 s y NO de un minuto a propósito: `deploy.sh` levanta la API primero y
  * recrea Asterisk unos segundos después, así que con una ventana larga el volcado del
@@ -359,6 +365,13 @@ async function moduleEnabled(id) {
   try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', ['mod_' + id]); return rows[0] ? rows[0].value !== '0' : !MODULE_DEFAULT_OFF.has(id); }
   catch (_) { return !MODULE_DEFAULT_OFF.has(id); }
 }
+/* Escribe el estado DESEADO de un módulo. Existe como función (y no inline en
+ * /api/modules) porque el selector de origen del TURN también lo usa: elegir el TURN
+ * del SBC-NG o uno externo apaga el coturn local, y eso es exactamente mover este
+ * interruptor. Un solo lugar que escriba `mod_<id>` = una sola verdad. */
+async function setModule(id, on) {
+  await pool.query('INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2', ['mod_' + id, on ? '1' : '0']);
+}
 /* Autenticación y usuarios (auth.js): auth() y la allowlist pública que usa el gate de
  * arriba (en tiempo de request), el alcance por extensión (mismaExt/exigirExt/extPropia),
  * el freno a la fuerza bruta y las rutas de sesión, usuarios, enrolado y provisión.
@@ -367,6 +380,8 @@ const { auth, isPublicApi, mismaExt, exigirExt, extPropia, clientIp } = require(
   app, pool, SECRET, NODES, alerts,
   sbcLink: (...a) => sbcLink(...a), broadcastSoon: (...a) => broadcastSoon(...a),
   createWebrtcEndpoint: (...a) => createWebrtcEndpoint(...a), smtpHint: (...a) => smtpHint(...a),
+  // turn.js se inicializa más abajo; la lambda se resuelve recién en tiempo de request.
+  iceMedio: (...a) => turnMedios.iceServers(...a),
 });
 /* Motor de llamadas sobre ARI (callengine.js): cache por eventos, click-to-dial,
  * colgar/retener/transferir/aparcar, supervision con snoop. */
@@ -472,19 +487,10 @@ function softphoneLatest() {
   } catch (_) { return { available: false }; }
 }
 app.get('/api/softphone/latest', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(softphoneLatest()); });
-// ICE/TURN para el softphone WebRTC: se arma con el dominio y las credenciales de coturn (no hardcodear)
-app.get('/api/ice', (req, res) => {
-  const domain = process.env.PUBLIC_IP || process.env.DOMAIN || '';
-  const tuser = process.env.TURN_USER || 'pbxng';
-  const tpass = process.env.TURN_PASS || '';
-  const stun = process.env.STUN_URL || 'stun:stun.l.google.com:19302';
-  const ice = [{ urls: stun }];
-  if (domain && tpass) {
-    ice.push({ urls: 'turn:' + domain + ':3478?transport=udp', username: tuser, credential: tpass });
-    ice.push({ urls: 'turn:' + domain + ':3478?transport=tcp', username: tuser, credential: tpass });
-  }
-  res.json({ iceServers: ice });
-});
+/* ICE/TURN: lo registra control-plane/turn.js (dueño `medios`), más abajo, junto al
+ * resto de /api/turn/**. Acá sólo queda la nota para el que lo venga a buscar: la
+ * lista de servidores ICE la arma UNA función (turn.iceServers()), y de ahí salen
+ * /api/ice, la provisión por QR y el enrolado. */
 
 // ==================== Agente: disponibilidad / pausa en cola ====================
 async function _agentQueues(ext){ const { rows } = await pool.query('SELECT queue_name, COALESCE(paused,0) AS paused FROM queue_members WHERE interface=$1',['PJSIP/'+ext]); return rows; }
@@ -691,9 +697,9 @@ async function createSipEndpoint(c, id, password, context = 'internal', tenant_i
   await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,1,'no','yes','yes',60,$2) ON CONFLICT (id) DO NOTHING", [id, tenant_id]);
   await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password", [id, password, tenant_id]);
   await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact) VALUES ($1,'transport-udp',$1,$1,$2,'all',$4,$3,'extension','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET transport='transport-udp'", [id, context, tenant_id, await sipConf.defaultCodecs(false)]);
-  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@' || $2::text WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id, vmpin.VM_CTX]);
   await sipConf.afterCreate(c, id);
-  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
+  await vmpin.seed(c, id);
 }
 const normMac = (m) => String(m || '').toLowerCase().replace(/[^0-9a-f]/g, '');
 async function getProvSetting(k, def) { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return (rows[0] && rows[0].value) || def; } catch (_) { return def; } }
@@ -947,15 +953,18 @@ app.get('/api/voz/config', async (req, res) => { try { const r = await vozFwd('G
 app.post('/api/voz/config', async (req, res) => { try { const r = await vozFwd('POST', '/admin/config', req.body || {}); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
 app.post('/api/voz/test', async (req, res) => { try { const u = await vozBase(); const r = await fetch(u + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: (req.body && req.body.text) || 'Hola, esta es una prueba de la voz seleccionada.', voice: req.body && req.body.voice, rate: 22050, format: 'wav' }), signal: AbortSignal.timeout(20000) }); const buf = Buffer.from(await r.arrayBuffer()); res.set('Content-Type', 'audio/wav').send(buf); } catch (e) { errorHttp(res, e); } });
 
-// --- TURN / Coturn (agente CT106) ---
+// --- TURN / Coturn: agente HTTP del contenedor (:8091); la dirección sale de TURN_AGENT o de TURN_HOST ---
 const TURN_BASE = process.env.TURN_AGENT || (NODES.turn ? 'http://' + NODES.turn + ':8091' : 'http://127.0.0.1:8091');
 async function turnFwd(method, path, body, ms) { const opt = { method, signal: AbortSignal.timeout(ms || 8000) }; if (body !== undefined) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify(body); } opt.headers = Object.assign({ 'X-PBXNG-Token': AGENT_TOKEN }, opt.headers); return fetch(TURN_BASE + path, opt); }
-app.get('/api/turn', async (req, res) => { try { const r = await turnFwd('GET', '/health'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
-app.get('/api/turn/config', async (req, res) => { try { const r = await turnFwd('GET', '/config'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
-app.post('/api/turn/config', async (req, res) => { try { const r = await turnFwd('POST', '/config', req.body || {}, 15000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
-app.post('/api/turn/restart', async (req, res) => { try { const r = await turnFwd('POST', '/restart', {}, 15000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
-app.get('/api/turn/logs', async (req, res) => { try { const r = await turnFwd('GET', '/logs'); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
-app.post('/api/turn/test', async (req, res) => { try { const r = await turnFwd('POST', '/test', {}, 15000); res.json(await r.json()); } catch (e) { errorHttp(res, e); } });
+/* Medio (turn.js, dueño `medios`): GET /api/ice, el selector de origen del TURN
+ * (propio / SBC-NG / externo), el estado REAL del servicio y la sonda STUN+Allocate.
+ * También reenvía la consola del contenedor coturn (/api/turn, config, restart, logs).
+ * `sbcLink` va como lambda porque trunks.js se inicializa más abajo: acá sólo se
+ * referencia, se llama recién en tiempo de request (mismo patrón que auth.js). */
+const turnMedios = require('./turn')({
+  app, pool, NODES, moduleEnabled, setModule, turnFwd,
+  sbcLink: (...a) => sbcLink(...a),
+});
 
 // --- NPM: proxy inverso + certificado TLS (gestion desde el panel) ---
 let _npmCertCache = null;
@@ -1211,9 +1220,8 @@ const { syncFeatures } = require('./telefonia')({
   errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), regenerarEntrantes, logger,
 });
 /* Desde acá el volcado Postgres → AstDB corre también en cada (re)conexión del AMI: ver
- * `resincronizar` más arriba. Es lo que salva a los desvíos, el DND, el sígueme, los
- * feriados y el modo noche cuando se recrea el contenedor de Asterisk (la astdb vive en
- * la capa de escritura del contenedor, no en un volumen, así que nace vacía). */
+ * `resincronizar` más arriba. Es lo que devuelve a la astdb los desvíos, el DND, el sígueme,
+ * los feriados y el modo noche si quedó desincronizada de Postgres (la fuente de verdad). */
 resincronizar.push(syncFeatures, syncRecFlags);
 
 /* Marcación (marcacion.js): DISA, callback, dial-by-name y marcación abreviada. Va
@@ -1237,18 +1245,6 @@ const { syncSalas } = require('./salas')({
   broadcastSoon: (...a) => broadcastSoon(...a), logger,
 });
 resincronizar.push(syncSalas);
-
-/* Fax (fax.js): T.38 entrante y saliente, fax a correo y envío desde el panel. Va DESPUÉS
- * de trunks.js porque el envío sale por las rutas salientes que aquél publica en `internal`
- * (`Local/<numero>@internal`), y comparte con telefonia.js / marcacion.js la forma de
- * hablarle al dialplan: dialplan realtime + un CURL de vuelta contra 127.0.0.1 con el token
- * del agente. Su `syncFax` entra en `resincronizar` porque además de reescribir el dialplan
- * reconcilia las columnas de T.38 del endpoint de cada troncal. */
-const { syncFax } = require('./fax')({
-  app, pool, amiAction, amiCommand, setDialplan, clientIp, agentToken: AGENT_TOKEN,
-  smtpHint, errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), logger,
-});
-resincronizar.push(syncFax);
 
 /* Reportes de call center (ccreport.js): métricas por cola y por agente sobre un rango de
  * fechas, export CSV, informe A4 y envío programado por correo. Lee el MISMO horario de
@@ -1292,10 +1288,12 @@ app.post('/api/modules', async (req, res) => {
   const { id, enabled } = req.body || {};
   if (!MODULE_IDS.includes(id)) return res.status(400).json({ error: 'modulo invalido' });
   try {
-    await pool.query("INSERT INTO pbxng_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2", ['mod_' + id, enabled ? '1' : '0']);
+    await setModule(id, enabled);
     let svc = null;
     try {
-      if (id === 'turn') { const r = await turnFwd('POST', '/service', { action: enabled ? 'start' : 'stop' }, 12000); svc = await r.json(); }
+      // El estado REAL del TURN queda viejo apenas se mueve el interruptor: se invalida
+      // para que la próxima lectura vuelva a medir en vez de repetir lo cacheado.
+      if (id === 'turn') { turnMedios.invalidar(); const r = await turnFwd('POST', '/service', { action: enabled ? 'start' : 'stop' }, 12000); svc = await r.json(); }
     } catch (e) { svc = { error: e.message }; }
     if (id === 'sbc') { invalidarSbcLink(); broadcastSoon(); }
     res.json({ ok: true, id, enabled: !!enabled, svc });
@@ -1580,23 +1578,30 @@ app.post('/api/endpoints', async (req, res) => {
     return res.status(409).json({ error: vn.mensaje, motivo: vn.motivo, conflicto: vn.conflicto || null });
   }
   const c = await pool.connect();
+  /* El PIN del buzón que nace junto con el interno. Se devuelve UNA vez, en esta respuesta,
+   * y no queda en ningún otro lado: el buzón recién creado todavía NO tiene dirección de
+   * correo configurada, así que el aviso de `POST /api/mailboxes/:mailbox/pin` no tendría a
+   * dónde ir; si no sale por acá, el PIN al azar se pierde y el dueño no puede entrar a su
+   * propio buzón. Queda `null` si el buzón ya existía (un teléfono que se reaprovisiona):
+   * ese PIN no lo generamos nosotros y sale sólo por `GET /api/mailboxes/:mailbox`. */
+  let vmSeed;
   try {
     await c.query('BEGIN');
     await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,remove_unavailable,support_path,qualify_frequency,tenant_id) VALUES ($1,$2,'no','yes','yes',60,$3)", [id, max_contacts, tenant_id]);
     await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$1,$2,$3)", [id, password, tenant_id]);
     if (webrtc) {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact,dtmf_mode) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes',$6)", [id, transport, context, allow, tenant_id, dtmf]);
-  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@' || $2::text WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id, vmpin.VM_CTX]);
   await sipConf.afterCreate(c, id);
-  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
+  vmSeed = await vmpin.seed(c, id);
     } else {
       await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,direct_media,rtp_symmetric,force_rport,rewrite_contact,dtmf_mode) VALUES ($1,$2,$1,$1,$3,'all',$4,$5,'extension','no','yes','yes','yes',$6)", [id, transport, context, allow, tenant_id, dtmf]);
-  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@default' WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id]);
+  await c.query("UPDATE ps_endpoints SET mailboxes = id || '@' || $2::text WHERE id=$1 AND (mailboxes IS NULL OR mailboxes='')", [id, vmpin.VM_CTX]);
   await sipConf.afterCreate(c, id);
-  await c.query("INSERT INTO voicemail (context, mailbox, password, fullname) SELECT 'default', $1::text, $1::text, 'Interno ' || $1::text WHERE NOT EXISTS (SELECT 1 FROM voicemail v WHERE v.mailbox = $1::text AND v.context='default')", [id]);
+  vmSeed = await vmpin.seed(c, id);
     }
     if (req.body && req.body.name) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
-    await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.status(201).json({ created: id, webrtc, video });
+    await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.status(201).json({ created: id, webrtc, video, vm_mailbox: id, vm_pin: (vmSeed && vmSeed.pin) || null });
   } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/endpoints/:id', async (req, res) => {
@@ -2090,10 +2095,56 @@ async function _g2refresh(){ try{ const q=await pool.query("SELECT value FROM pb
 _g2refresh(); setInterval(_g2refresh, 30000);
 async function syncGo2rtc(){ try{ const q=await pool.query("SELECT go2rtc_src, rtsp_url FROM pbxng_client_devices WHERE enabled AND rtsp_url IS NOT NULL AND rtsp_url<>''"); for(const d of q.rows){ try{ await fetch(GO2RTC_MGMT+'/api/streams?name='+encodeURIComponent(d.go2rtc_src)+'&src='+encodeURIComponent(d.rtsp_url),{method:'PUT'}); }catch(e){} } }catch(e){} }
 setTimeout(syncGo2rtc, 10000); setInterval(syncGo2rtc, 60000);
+/* Alta/baja de UN stream en go2rtc. El barrido de arriba corre cada 60 s; estas dos existen
+ * para que agregar, editar o sacar un portero se vea en el acto y —sobre todo— para que al
+ * borrarlo go2rtc deje de tirarle RTSP a una camara que ya no es de nadie. */
+async function g2alta(src, rtsp){
+  if(!src || !rtsp) return;
+  try{ await fetch(GO2RTC_MGMT+'/api/streams?name='+encodeURIComponent(src)+'&src='+encodeURIComponent(rtsp),{method:'PUT'}); }catch(e){}
+}
+async function g2baja(src){
+  if(!src) return;
+  try{ await fetch(GO2RTC_MGMT+'/api/streams?src='+encodeURIComponent(src),{method:'DELETE'}); }catch(e){}
+}
+/* «Probar» un portero: go2rtc intenta conectarse de verdad y contesta que encontro. Lo unico
+ * que sale de aca es si anduvo y, si no, POR QUE en una linea — nunca el cuerpo de go2rtc,
+ * que repite la URL RTSP con usuario y clave adentro. */
+async function g2probar(src){
+  if(!src) return { ok:false, motivo:'el dispositivo no tiene canal asignado' };
+  let r;
+  try{ r = await fetch(GO2RTC_MGMT+'/api/probe?src='+encodeURIComponent(src), { signal: AbortSignal.timeout(12000) }); }
+  catch(e){ return { ok:false, motivo: /timeout|abort/i.test(e.name+' '+e.message) ? 'la camara no contesto en 12 segundos' : 'no se pudo hablar con go2rtc' }; }
+  if(!r.ok) return { ok:false, motivo:'go2rtc respondio '+r.status+' (revisa la URL RTSP, el usuario y la clave)' };
+  let d = null; try{ d = await r.json(); }catch(e){}
+  const pistas = (d && Array.isArray(d.producers) ? d.producers : []).flatMap(p => Array.isArray(p.medias) ? p.medias : []);
+  if(!pistas.length) return { ok:false, motivo:'go2rtc conecto pero la camara no ofrecio video' };
+  const codecs = [...new Set(pistas.map(m => String(m).split(/[,\s]+/).find(x => /^[A-Za-z0-9]+$/.test(x)) || '').filter(Boolean))];
+  return { ok:true, motivo:'', pistas: pistas.length, codecs };
+}
 app.get('/api/intercom/config', async (req,res)=>{ try{ const q=await pool.query("SELECT value FROM pbxng_settings WHERE key='go2rtc_url'"); res.json({ go2rtc_url: (q.rows[0]&&q.rows[0].value)||'', mgmt: GO2RTC_MGMT }); }catch(e){ errorHttp(res, e); } });
 app.post('/api/intercom/config', async (req,res)=>{ const u=(req.body&&req.body.go2rtc_url)||''; try{ const up=await pool.query("UPDATE pbxng_settings SET value=$1 WHERE key='go2rtc_url'",[u]); if(up.rowCount===0) await pool.query("INSERT INTO pbxng_settings(key,value) VALUES('go2rtc_url',$1)",[u]); CRMGO2RTC=u; syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
 app.post('/api/intercom/sync', async (req,res)=>{ try{ await syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
 function crmNormNum(s){ return String(s||'').replace(/[^0-9]/g,''); }
+
+/* Las credenciales del portero viajan DENTRO de la URL RTSP (`rtsp://usuario:clave@ip/...`) y
+ * se guardan en claro: es lo que hablan las camaras. Mientras sigan asi, la API nunca devuelve
+ * la URL entera a una pantalla ni la escribe en un log — la enmascara y avisa si hay algo
+ * cargado. El que quiera cambiarla la vuelve a escribir; el panel manda `rtsp_url` vacio para
+ * decir «dejala como esta». Deuda anotada en docs/CONTRATOS.md: separar usuario y clave en
+ * columnas propias es una migracion y toca el reconciliador de go2rtc. */
+function rtspMask(url){
+  const u = String(url||'');
+  if(!u) return '';
+  // Se conserva lo que sirve para reconocer el aparato (esquema, host, puerto y camino) y se
+  // tapa el par usuario:clave, que es lo unico secreto de la cadena.
+  return u.replace(/^(\w+:\/\/)([^/@]*)@/, (_m, esquema) => esquema + '\u2022\u2022\u2022:\u2022\u2022\u2022@');
+}
+/* Un dispositivo tal como puede salir a la vista: sin la URL cruda, con la enmascarada y con
+ * el booleano que necesita el formulario para saber si ya hay algo guardado. */
+function deviceSafe(d){
+  const { rtsp_url, ...resto } = d;
+  return { ...resto, rtsp_url: rtspMask(rtsp_url), rtsp_set: !!(rtsp_url && String(rtsp_url).trim()) };
+}
 
 // Escribir en el CRM (clientes, personas autorizadas, espacios, dispositivos) queda reservado a
 // admin y supervisor. Los agentes LEEN la ficha del cliente que los llama —para eso existe el
@@ -2114,6 +2165,12 @@ app.get('/api/clients', async (req,res)=>{ try{
     FROM pbxng_clients c ORDER BY c.name`); res.json(rows);
 }catch(e){errorHttp(res, e);} });
 
+/* Screen-pop del panel de agente. ESTA RUTA NO SE APAGA CON PORTERIA, a proposito: es lo que
+ * le muestra al agente quien esta llamando (nombre, documento, personas autorizadas, espacios,
+ * notas) y de eso vive el call center. Apagar el modulo Porteria apaga los PORTEROS —el video—,
+ * no la ficha del cliente: lo unico que se cae de esta respuesta cuando el modulo esta apagado
+ * es `devices`, que son los canales de go2rtc. Si alguien vuelve a envolver esta ruta en un
+ * `moduleEnabled('intercom')`, deja ciego al agente para apagar un video. Ver CONTRATOS §3, «Porteria». */
 app.get('/api/clients/lookup', async (req,res)=>{ try{
   const num = crmNormNum(req.query.number);
   if(!num) return res.json({});
@@ -2124,8 +2181,12 @@ app.get('/api/clients/lookup', async (req,res)=>{ try{
   const c = rows[0];
   c.persons = (await pool.query('SELECT * FROM pbxng_client_persons WHERE client_id=$1 ORDER BY name',[c.id])).rows;
   c.spaces = (await pool.query('SELECT * FROM pbxng_client_spaces WHERE client_id=$1 ORDER BY name',[c.id])).rows;
-  c.devices = (await pool.query('SELECT id,label,type,go2rtc_src FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[c.id])).rows
-    .map(d=>({ id:d.id, label:d.label, type:d.type, base:CRMGO2RTC, src:d.go2rtc_src }));
+  // Con Porteria apagada no hay go2rtc corriendo: devolver canales seria ofrecerle al agente
+  // ocho recuadros que nunca van a cargar. La ficha, en cambio, viaja igual.
+  c.devices = (await moduleEnabled('intercom'))
+    ? (await pool.query('SELECT id,label,type,go2rtc_src FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[c.id])).rows
+        .map(d=>({ id:d.id, label:d.label, type:d.type, base:CRMGO2RTC, src:d.go2rtc_src }))
+    : [];
   res.json(c);
 }catch(e){errorHttp(res, e);} });
 
@@ -2135,7 +2196,9 @@ app.get('/api/clients/:id', async (req,res)=>{ try{
   const c = rows[0];
   c.persons = (await pool.query('SELECT * FROM pbxng_client_persons WHERE client_id=$1 ORDER BY name',[c.id])).rows;
   c.spaces = (await pool.query('SELECT * FROM pbxng_client_spaces WHERE client_id=$1 ORDER BY name',[c.id])).rows;
-  c.devices = (await pool.query('SELECT * FROM pbxng_client_devices WHERE client_id=$1 ORDER BY label',[c.id])).rows;
+  // `deviceSafe` saca la URL RTSP cruda: la ficha del cliente es una lista en pantalla y ahi
+  // viajan usuario y clave del portero (ver rtspMask).
+  c.devices = (await pool.query('SELECT * FROM pbxng_client_devices WHERE client_id=$1 ORDER BY label',[c.id])).rows.map(deviceSafe);
   res.json(c);
 }catch(e){errorHttp(res, e);} });
 
@@ -2212,9 +2275,42 @@ app.delete('/api/spaces/:sid', crmWrite, async (req,res)=>{ try{ await pool.quer
 app.post('/api/clients/:id/devices', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const src = b.go2rtc_src || ('cli'+req.params.id+'_'+Date.now().toString(36));
   const { rows } = await pool.query('INSERT INTO pbxng_client_devices (client_id,label,type,rtsp_url,go2rtc_src,enabled) VALUES ($1,$2,$3,$4,$5,COALESCE($6,true)) RETURNING *',
-    [req.params.id,b.label,b.type||'camera',b.rtsp_url||null,src,b.enabled]); res.status(201).json(rows[0]);
+    [req.params.id,b.label,b.type||'camera',b.rtsp_url||null,src,b.enabled]);
+  g2alta(rows[0].go2rtc_src, rows[0].rtsp_url);   // que el video aparezca ya, sin esperar el barrido
+  res.status(201).json(deviceSafe(rows[0]));
 }catch(e){errorHttp(res, e);} });
-app.delete('/api/devices/:did', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_devices WHERE id=$1',[req.params.did]); res.json({ok:true}); }catch(e){errorHttp(res, e);} });
+
+/* Editar un portero sin salir de la ficha: etiqueta, tipo, si esta habilitado y —si hace falta—
+ * la URL RTSP. `rtsp_url` ausente o vacio significa «no la toques»: como la pantalla nunca ve la
+ * URL entera (viaja enmascarada), mandar lo que se lee en el formulario borraria la clave. */
+app.put('/api/devices/:did', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
+  const nueva = (b.rtsp_url===undefined || b.rtsp_url===null || String(b.rtsp_url).trim()==='') ? null : String(b.rtsp_url).trim();
+  const { rows } = await pool.query(`UPDATE pbxng_client_devices SET
+      label=COALESCE($2,label), type=COALESCE($3,type), rtsp_url=COALESCE($4,rtsp_url),
+      enabled=COALESCE($5,enabled) WHERE id=$1 RETURNING *`,
+    [req.params.did, b.label||null, b.type||null, nueva, (b.enabled===undefined?null:!!b.enabled)]);
+  if(!rows[0]) return res.status(404).json({error:'no existe'});
+  // Deshabilitar un portero tiene que cortar el RTSP, no solo esconderlo del panel.
+  if(rows[0].enabled) g2alta(rows[0].go2rtc_src, rows[0].rtsp_url); else g2baja(rows[0].go2rtc_src);
+  res.json(deviceSafe(rows[0]));
+}catch(e){errorHttp(res, e);} });
+
+/* Probar el portero contra la camara real. Se re-da de alta el stream antes de probar porque el
+ * aparato puede haberse editado hace un segundo y el barrido de 60 s todavia no paso. */
+app.post('/api/devices/:did/test', crmWrite, async (req,res)=>{ try{
+  const { rows } = await pool.query('SELECT go2rtc_src, rtsp_url, enabled FROM pbxng_client_devices WHERE id=$1',[req.params.did]);
+  if(!rows[0]) return res.status(404).json({error:'no existe'});
+  if(!rows[0].rtsp_url) return res.json({ ok:false, motivo:'el dispositivo no tiene URL RTSP cargada' });
+  if(!rows[0].enabled) return res.json({ ok:false, motivo:'el dispositivo esta deshabilitado' });
+  await g2alta(rows[0].go2rtc_src, rows[0].rtsp_url);
+  res.json(await g2probar(rows[0].go2rtc_src));
+}catch(e){errorHttp(res, e);} });
+
+app.delete('/api/devices/:did', crmWrite, async (req,res)=>{ try{
+  const { rows } = await pool.query('DELETE FROM pbxng_client_devices WHERE id=$1 RETURNING go2rtc_src',[req.params.did]);
+  if(rows[0]) g2baja(rows[0].go2rtc_src);  // sin esto go2rtc sigue tirandole RTSP a una camara huerfana
+  res.json({ok:true});
+}catch(e){errorHttp(res, e);} });
 
 app.get('/api/intercom/clients', async (req,res)=>{ try{
   const { rows } = await pool.query(`SELECT DISTINCT c.id, c.name FROM pbxng_clients c JOIN pbxng_client_devices d ON d.client_id=c.id WHERE d.enabled ORDER BY c.name`); res.json(rows);

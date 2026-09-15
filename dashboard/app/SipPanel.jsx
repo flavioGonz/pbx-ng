@@ -65,11 +65,16 @@ export default function SipPanel() {
   }
   async function toggleRecAll(on) {
     setBusy('rec');
-    try { await apiPost('/extensions/record-all', { enabled: on }); }
+    let r;
+    try { r = await apiPost('/extensions/record-all', { enabled: on }); }
     catch (e) { toast(e.message, 'bad'); return; }
     finally { setBusy(''); }
     setCfg((c) => ({ ...c, record_all: on }));
-    toast(on ? 'Grabación global activada: se graban todas las llamadas' : 'Grabación global desactivada', on ? 'warn' : 'ok');
+    /* `aviso`: quedó en la base y Asterisk no lo tomó. Acá la mentira es cara en los dos
+     * sentidos: creer que se está grabando cuando no, o dejar de grabar a alguien que lo
+     * pidió y que en realidad se sigue grabando. */
+    if (r && r.aviso) toast(r.aviso, 'bad', { description: 'Hasta entonces la central sigue como estaba.' });
+    else toast(on ? 'Grabación global activada: se graban todas las llamadas' : 'Grabación global desactivada', on ? 'warn' : 'ok');
   }
 
   if (!cfg) return <Group justify="center" py={48}><Loader size="sm" color="pbx" /></Group>;

@@ -73,7 +73,9 @@ function preferCodec(nombre, forzar) {
 
 function iceServersFrom(cfg) {
   const list = [];
-  (cfg.stun || 'stun:stun.l.google.com:19302').split(',').map(s => s.trim()).filter(Boolean)
+  // Sin STUN configurado NO se inventa uno público: el aprovisionamiento (QR / enrolado)
+  // trae el del propio appliance, y una central sin internet no puede depender de Google.
+  String(cfg.stun || '').split(',').map(s => s.trim()).filter(Boolean)
     .forEach(u => list.push({ urls: u.startsWith('stun:') ? u : 'stun:' + u }));
   // TURN solo si trae usuario y clave; un credential vacío puede romper el RTCPeerConnection/ICE
   if (cfg.turn && cfg.turnUser && cfg.turnPass) {

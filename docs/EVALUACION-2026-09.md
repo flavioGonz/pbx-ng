@@ -147,7 +147,10 @@ efímero), CI en GitHub Actions como puerta del release, y `app.js` partido en `
 panel, los `catch` vacíos. Lo que sigue describe el estado previo. Cero tests en todo el repositorio (control-plane,
 dashboard, softphone). Cero ESLint/Prettier. `app.js` tiene 3.668 líneas (54 % del backend) con
 líneas de hasta 1.322 caracteres y 262 endpoints; `app.js.orig` está commiteado. 97 `catch` vacíos
-en el backend y 237 en el panel: los errores se tragan sin avisar. El panel no tiene ningún
+en el backend y 237 en el panel: los errores se tragan sin avisar (los de la AstDB —`astPut`/
+`astDel` de `telefonia.js`, `salas.js` y `marcacion.js`, `setRecFlag`/`setRecAll` de
+`recordings.js`— resueltos en 1.11.0: registran el error y devuelven `aviso` al panel; el resto
+sigue). El panel no tiene ningún
 `error.jsx`/`loading.jsx`: un throw en render deja la pantalla en blanco, y con la API caída
 muestra datos viejos sin ninguna señal (resuelto en 1.5.0: `ErrorBoundary.jsx` dentro del shell,
 `error.jsx`, `loading.jsx` y banner «Base de datos sin respuesta»; el resto de 3.7 sigue).
@@ -220,7 +223,7 @@ Como producto, hay pocas funciones de central que no tenga. Lo que falta está e
 - **Softphone**: firma de código (hoy el instalador Windows no está firmado: SmartScreen lo
   frena), y una versión macOS/Linux si el mercado la pide.
 - **Manuales**: faltan capturas en varios capítulos; y documentación de API (OpenAPI) para
-  integradores. (Los capítulos de las pantallas nuevas de 1.10.0 —salas de reunión, fax,
+  integradores. (Los capítulos de las pantallas nuevas de 1.10.0 —salas de reunión,
   reportes de call center y failover— están escritos, pero también sin capturas.)
 
 ## 5. Qué le falta para ser robusta
@@ -266,9 +269,14 @@ Seguridad → Ajustes de la central). `*97` con `CHANNEL(endpoint)` y
 `func_curl`/`func_uriencode` en `modules.conf`); ARI/AMI (`8088`/`5038`) sólo desde
 redes privadas por nftables (`pbxng-mgmt`, `fw.json`) ✅ 1.7.0, ya que loopback no sirve con la API en
 bridge y TLS no tiene certificado; token en todo POST y en los GET de configuración del agente
-(`/net`, `/route`, `/fw/bans`) + validación de `/route` sin shell ✅ 1.7.0. Pendiente: STUN configurable
-(no Google); la clave del buzón nace igual al interno (`voicemail.password = mailbox`) y nadie
-obliga a cambiarla — corresponde a `api`; sumar `8092` (agente) a `pbxng-mgmt` (`GET /core`
+(`/net`, `/route`, `/fw/bans`) + validación de `/route` sin shell ✅ 1.7.0. La clave del buzón que nacía igual al interno
+(`voicemail.password = mailbox`, o sea sin PIN: cualquiera la adivinaba y entraba por `*98`)
+✅ (resuelto en 1.11.0): el PIN se genera al azar con `crypto` desde el único alta de buzón
+(`control-plane/vmpin.js`), no viaja en el listado y se ve y se rota sólo desde rutas `admin`.
+Los buzones YA creados **no** se rotan a ciegas —eso deja a cada usuario afuera de sus mensajes
+sin avisarle—: se detectan solos, la API los nombra en el log al arrancar y el panel los lista
+para rotarlos de a uno. Pendiente: STUN configurable
+(no Google); sumar `8092` (agente) a `pbxng-mgmt` (`GET /core`
 queda abierto a cualquiera que llegue al host).
 
 **Bloque 5 — red de seguridad de desarrollo.** Casi completo en 1.7.0. Primer paso en 1.6.0: `control-plane/test/guard.test.js`
@@ -289,7 +297,7 @@ Quedan en `app.js` internos/endpoints, push/click-to-call, teléfonos físicos (
 red/TURN/NPM/captura, `backup`, CRM/encuesta, wallboard y pickup-groups (las conferencias se
 fueron a `salas.js` en 1.10.0, ya como salas de reunión). En 1.10.0 se sumaron cuatro módulos
 más con el mismo patrón —`marcacion.js`, `salas.js`, `fax.js` y `ccreport.js`— y ninguna ruta
-nueva quedó en `app.js`. Sigue
+nueva quedó en `app.js` (`fax.js` se retiró entero en 1.11.0, con el fax). Sigue
 pendiente: Prettier y la prueba e2e de humo del panel (login → topología → troncales) con
 Playwright.
 

@@ -72,7 +72,11 @@ function SalaForm({ sala, onListo, onCancelar }) {
     setGuardando(true);
     try {
       const r = editando ? await apiPut('/salas/' + sala.name, cuerpo) : await apiPost('/salas', cuerpo);
-      toast('Sala «' + (r.label || r.name) + '» guardada', 'ok', {
+      /* `aviso`: la sala quedó guardada en la base pero Asterisk no tomó los PIN (AMI caído).
+       * Sin esto, cambiar un PIN filtrado se veía como un guardado perfecto y la reunión
+       * seguía abriéndose con el PIN viejo. */
+      if (r.aviso) toast(r.aviso, 'bad', { description: 'La sala sigue pidiendo el PIN anterior hasta que la central vuelva.' });
+      else toast('Sala «' + (r.label || r.name) + '» guardada', 'ok', {
         description: 'PIN participante ' + r.pin + ' · PIN moderador ' + r.pin_mod,
       });
       onListo();

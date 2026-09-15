@@ -19,6 +19,11 @@ for f in parking.conf moh.conf features.conf pjsip.conf rtp.conf pjsip-security.
 done
 # Carpeta de audios de música en espera administrada desde el panel.
 mkdir -p /var/lib/asterisk/sounds/custom/moh 2>/dev/null || true
+# Directorio de la astdb (asterisk.conf, astdbdir): acá monta el volumen asterisk_db. Si no
+# existe, Asterisk no puede abrir astdb.sqlite3 y arranca sin base interna: el dialplan
+# quedaría sin desvíos, sin modo noche y sin los PIN de las salas.
+mkdir -p /var/lib/asterisk/db 2>/dev/null || true
+chown asterisk:asterisk /var/lib/asterisk/db 2>/dev/null || true
 
 # --- res_pgsql.conf (realtime ARA) ---
 cat > /etc/asterisk/res_pgsql.conf <<EOF
@@ -114,12 +119,12 @@ for m in func_curl.so func_uri.so func_db.so func_strings.so \
          app_directory.so app_read.so func_hangupcause.so; do
   [ -f "/usr/lib/asterisk/modules/$m" ] || echo "AVISO GRAVE: falta el modulo $m y modules.conf lo pide con 'require =': Asterisk va a salir con codigo 2 y el contenedor queda en crash-loop (central sin telefonos). Hay que reconstruir la imagen de Asterisk."
 done
-# ESPERADOS: se avisa y se sigue. Que falte el fax no puede dejar sin telefonos a toda la
-# central, asi que NO van como "require" en modules.conf. El build ya corta si el modulo no
-# se compilo (ver images/asterisk/Dockerfile); esto es la red de seguridad para una imagen
-# vieja o armada a mano: el aviso queda en el log del arranque en vez de aparecer como
-# "no such application ReceiveFAX" en medio de una llamada de fax.
-for m in res_fax.so res_fax_spandsp.so app_disa.so app_confbridge.so; do
+# ESPERADOS: se avisa y se sigue. Que falte una DISA o una conferencia no puede dejar sin
+# telefonos a toda la central, asi que NO van como "require" en modules.conf. El build ya
+# corta si el modulo no se compilo (ver images/asterisk/Dockerfile); esto es la red de
+# seguridad para una imagen vieja o armada a mano: el aviso queda en el log del arranque en
+# vez de aparecer como "no such application" en medio de una llamada.
+for m in app_disa.so app_confbridge.so; do
   [ -f "/usr/lib/asterisk/modules/$m" ] || echo "aviso: falta el modulo $m en esta imagen; las funciones que lo usan van a fallar en tiempo de llamada"
 done
 

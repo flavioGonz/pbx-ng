@@ -9,7 +9,7 @@ import PageHeader from '../PageHeader';
 import DidOverview from '../DidOverview';
 import FailoverSalida from '../FailoverSalida';
 
-const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación', fax: 'Fax' };
+const destLabel = { interno: 'Interno', ivr: 'IVR', cola: 'Cola', app: 'Aplicación' };
 
 export default function Rutas({ embedded } = {}) {
   const { data: sbcLink } = useApi('/sbc-link');
@@ -85,10 +85,10 @@ export default function Rutas({ embedded } = {}) {
             fields={[
               { name: 'did', label: 'DID / Número entrante', required: true, icon: <IconPhoneIncoming size={15} />, placeholder: '59824000000', description: 'El número que te entrega el operador. Ej: 59824000000 (o el formato que envía tu proveedor).' },
               { name: 'name', label: 'Nombre', icon: <IconTag size={15} />, placeholder: 'Línea principal', description: 'Etiqueta para identificar la ruta. Ej: Línea principal, Ventas.' },
-              { name: 'dest_type', label: 'Tipo de destino', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'A dónde se manda la llamada entrante.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }, { value: 'fax', label: 'Fax (caja de fax)' }] },
-              { name: 'dest_value', label: 'Destino', required: true, icon: <IconTarget size={15} />, placeholder: '1001', description: 'Según el tipo: Interno → 1001 · IVR → 9000 · Cola → soporte · Aplicación → su número de acceso · Fax → el número de la caja (Aplicaciones → Fax).' },
+              { name: 'dest_type', label: 'Tipo de destino', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'A dónde se manda la llamada entrante.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }] },
+              { name: 'dest_value', label: 'Destino', required: true, icon: <IconTarget size={15} />, placeholder: '1001', description: 'Según el tipo: Interno → 1001 · IVR → 9000 · Cola → soporte · Aplicación → su número de acceso.' },
               { name: 'horario_id', label: 'Horario de atención', type: 'select', icon: <IconClockHour4 size={15} />, data: horarioOpts, description: 'Dentro del horario la llamada va al destino de arriba; fuera de él, al de abajo. Los horarios y los feriados se cargan en Telefonía → Horarios.' },
-              { name: 'dest_cerrado_type', label: 'Tipo de destino fuera de hora', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'Sólo se usa si elegiste un horario.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }, { value: 'fax', label: 'Fax (caja de fax)' }] },
+              { name: 'dest_cerrado_type', label: 'Tipo de destino fuera de hora', type: 'select', icon: <IconArrowsSplit size={15} />, description: 'Sólo se usa si elegiste un horario.', data: [{ value: 'interno', label: 'Interno' }, { value: 'ivr', label: 'IVR' }, { value: 'cola', label: 'Cola' }, { value: 'app', label: 'Aplicación (nº de acceso)' }] },
               { name: 'dest_cerrado_value', label: 'Destino fuera de hora', icon: <IconMoonStars size={15} />, placeholder: '9001', description: 'A dónde entra la llamada con la central cerrada (feriado, fuera de horario o modo noche). Vacío = al buzón.' },
             ]} emptyText="Sin rutas de entrada. Creá una para recibir llamadas de la troncal." />
         </Tabs.Panel>

@@ -52,6 +52,11 @@ volumes:
   npm_data:
   npm_letsencrypt:
   asterisk_sounds:
+  # Base interna de Asterisk (astdb.sqlite3, astdbdir=/var/lib/asterisk/db). La lee el
+  # dialplan en cada llamada (desvios, no-molestar, modo noche, PIN de salas) y sin volumen
+  # se vaciaba al recrear el contenedor: habia una ventana de ~30-40 s, hasta el resync del
+  # AMI, en la que la central atendia como si nada de eso estuviera configurado.
+  asterisk_db:
   # Config que genera el panel (aparcado, captura, MoH): sobrevive a recrear
   # contenedores y la comparten Asterisk (lee) y la API (escribe).
   asterisk_conf:
@@ -129,6 +134,9 @@ services:
       TZ: ${TZ:-America/Montevideo}
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
+      # La astdb sobrevive a recrear el contenedor: el volcado Postgres -> AstDB de la API
+      # sigue como red por si las dos se desincronizan, no como unica fuente.
+      - asterisk_db:/var/lib/asterisk/db
       - recordings:/var/spool/asterisk/monitor
       - voicemail:/var/spool/asterisk/voicemail
       # Certificado ACME que renueva la API: Asterisk solo lo lee (TLS/WSS de PJSIP).
@@ -210,21 +218,6 @@ services:
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
       PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-30000}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-      # --- fax (docs/CONTRATOS.md §6) ---
-      # FAX_DIR y FAX_DIR_AST son LOS DOS NOMBRES DEL MISMO DIRECTORIO: la API lo ve en
-      # /recordings/fax y Asterisk en /var/spool/asterisk/monitor/fax, porque los dos montan
-      # el volumen `recordings`. Por eso el spool sobrevive a un `up -d` sin volumen propio.
-      # Van vacías a propósito: vacío = el default de fax.js, que ya es ese par. Se declaran
-      # igual para que se puedan cambiar desde el .env sin tocar el compose — y si se cambia
-      # una HAY QUE CAMBIAR LA OTRA, o Asterisk escribe el TIFF donde la API no lo encuentra.
-      FAX_DIR: ${FAX_DIR:-}
-      FAX_DIR_AST: ${FAX_DIR_AST:-}
-      # Tope DURO del PDF que se sube (lo aplica express.raw al registrar la ruta, así que
-      # no se puede subir desde el panel), cada cuánto corre la cola/barrido, y cuánto puede
-      # tardar ghostscript antes de que lo maten.
-      FAX_MAX_MB: ${FAX_MAX_MB:-}
-      FAX_TICK_MS: ${FAX_TICK_MS:-}
-      FAX_CONVERT_MS: ${FAX_CONVERT_MS:-}
     volumes:
       - recordings:/recordings        # rw: la API indexa Y borra grabaciones
       - voicemail:/voicemail

@@ -43,10 +43,29 @@ module.exports = function init(deps) {
 
   /* Marca de grabación en la AstDB (familia `rec`): el dialplan la consulta al armar
    * la llamada; se re-sincroniza desde la base al arrancar porque la AstDB no sobrevive
-   * a un contenedor nuevo de Asterisk. */
-  async function setRecFlag(ext, on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: String(ext), Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: String(ext) }); } catch (_) {} }
-  async function setRecAll(on) { try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: '_ALL_', Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: '_ALL_' }); } catch (_) {} }
-  async function syncRecFlags() { try { const { rows } = await pool.query("SELECT id FROM ps_endpoints WHERE pbxng_record=true"); for (const r of rows) await setRecFlag(r.id, true); const { rows: s } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); await setRecAll(!!(s[0] && s[0].value === '1')); } catch (_) {} }
+   * a un contenedor nuevo de Asterisk. El fallo del AMI no tumba el guardado (Postgres es la
+   * fuente de verdad y syncRecFlags lo vuelve a volcar), pero se REGISTRA y se devuelve: acá
+   * el error mudo era además un problema legal —el panel decía «grabando» y la central no
+   * grababa, o al revés, se seguía grabando a alguien que pidió que se dejara de grabar—. */
+  const logRec = logger('REC');
+  async function setRecFlag(ext, on) {
+    try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: String(ext), Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: String(ext) }); return true; }
+    catch (e) { logRec.error('AstDB: no se pudo ' + (on ? 'marcar' : 'desmarcar') + ' la grabación de rec/' + ext, e); return false; }
+  }
+  async function setRecAll(on) {
+    try { await amiAction(on ? { Action: 'DBPut', Family: 'rec', Key: '_ALL_', Val: '1' } : { Action: 'DBDel', Family: 'rec', Key: '_ALL_' }); return true; }
+    catch (e) { logRec.error('AstDB: no se pudo ' + (on ? 'prender' : 'apagar') + ' la grabación de todos (rec/_ALL_)', e); return false; }
+  }
+  async function syncRecFlags() {
+    try {
+      const { rows } = await pool.query("SELECT id FROM ps_endpoints WHERE pbxng_record=true");
+      let fallados = 0;
+      for (const r of rows) if (!await setRecFlag(r.id, true)) fallados++;
+      const { rows: s } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'");
+      if (!await setRecAll(!!(s[0] && s[0].value === '1'))) fallados++;
+      if (fallados) logRec.warn('el volcado de marcas de grabación a la AstDB quedó incompleto', { internos: rows.length, fallados });
+    } catch (e) { logRec.error('syncRecFlags', e); }
+  }
   setTimeout(() => { syncRecFlags().catch(() => {}); }, 9000);
 
   pool.query("INSERT INTO pbxng_rec_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING").catch(e => logger('REC').error('cfg', e));
@@ -248,7 +267,9 @@ module.exports = function init(deps) {
 
 
   app.get('/api/extensions/record-all', async (req, res) => { try { const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='record_all'"); res.json({ enabled: !!(rows[0] && rows[0].value === '1') }); } catch (e) { errorHttp(res, e); } });
-  app.post('/api/extensions/record-all', async (req, res) => { try { const on = !!(req.body && req.body.enabled); await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('record_all',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [on ? '1' : '0']); await setRecAll(on); res.json({ ok: true, enabled: on }); } catch (e) { errorHttp(res, e); } });
+  /* «Grabar todo» prendido en el panel y apagado en la central (o al revés) es lo peor que
+   * puede pasar acá, así que si el DBPut no salió el que apretó el interruptor se entera. */
+  app.post('/api/extensions/record-all', async (req, res) => { try { const on = !!(req.body && req.body.enabled); await pool.query("INSERT INTO pbxng_settings (key,value) VALUES ('record_all',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [on ? '1' : '0']); const aplicado = await setRecAll(on); const out = { ok: true, enabled: on }; if (!aplicado) out.aviso = 'Guardado en la base, pero Asterisk no tomó el cambio (AMI caído): se aplica solo cuando la central vuelva.'; res.json(out); } catch (e) { errorHttp(res, e); } });
 
   /* Historial: admin y supervisor ven todo (con ?ext= filtran); agente y token de softphone
    * SIEMPRE ven sólo su interno, se ignore lo que manden en ?ext=. */

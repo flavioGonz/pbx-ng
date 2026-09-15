@@ -6,15 +6,45 @@ acá no se puede asumir.
 
 ## 1. Piezas y quién es dueño
 
-| Pieza | Directorio | Agente |
-|---|---|---|
-| API / control-plane | `control-plane/` | `api` |
-| Panel web | `dashboard/` | `panel` |
-| Asterisk y dialplan | `docker/config/asterisk/`, `docker/images/asterisk/`, `control-plane/astconf.js` | `telefonia` |
-| Empaquetado / operación | `docker/`, `deploy/`, `.github/workflows/`, `VERSION` | `empaquetado` |
-| Softphone de escritorio | `softphone-app/` | `softphone` |
-| Documentación | `README.md`, `CHANGELOG.md`, `docs/`, manuales | `docs` |
-| Revisión | (no escribe producto) | `revisor` |
+La regla es una sola: **cada archivo, tabla y endpoint tiene UN dueño**. El que no es dueño
+lo consume y, si necesita un cambio, lo pide. No alcanza con decir «tocá sólo tu área»: hay
+que decir dónde está el borde y quién manda cuando dos áreas se tocan.
+
+| Pieza | Directorio | Agente | Consume de |
+|---|---|---|---|
+| API / control-plane | `control-plane/` | `api` | — |
+| Panel web | `dashboard/` | `panel` | el contrato de cada endpoint (su dueño) |
+| Asterisk y dialplan | `docker/config/asterisk/`, `docker/images/asterisk/`, `control-plane/astconf.js` | `telefonia` | `api` (que lo genera desde el panel) |
+| Medio: WebRTC/ICE/TURN/STUN, `coturn`, `/api/ice`, NAT y RTP | `docker/images/coturn/`, el servicio `coturn`, `app.js:/api/ice`, `useSoftphone.js` | `medios` | endpoints PJSIP (`telefonia`), enlace SBC (`api`) |
+| SOC: baneos, listas, geobloqueo | `control-plane/guard.js`, `docker/images/asterisk/pbxng-ast-agent.py`, `dashboard/app/seguridad/` | `seguridad` | `rbac.js`/`auth.js` y `alerts.js` (`api`) |
+| Portería y CRM: clientes, porteros RTSP, go2rtc | `clients`/`spaces`/`devices`/`intercom`/`survey`, `dashboard/app/clientes/`, `intercom/` | `porteria` | `rbac.js` (`api`), pared de video (`panel`) |
+| Empaquetado / operación | `docker/`, `deploy/`, `.github/workflows/`, `VERSION` | `empaquetado` | los servicios que empaqueta |
+| Softphone de escritorio | `softphone-app/` | `softphone` | `/api/ice` (`medios`), `me/sipcreds` (`api`) |
+| Documentación | `README.md`, `CHANGELOG.md`, `docs/`, manuales | `docs` | todos |
+| Revisión | (no escribe producto) | `revisor` | mira el diff real, no los informes |
+
+### 1.0 Cómo se sincronizan
+
+1. **Todos leen este archivo antes de escribir una línea.** Es el único lugar donde vive lo
+   compartido: endpoints, roles, eventos de socket, variables, volúmenes, migraciones y quién
+   publica en el contexto `internal`.
+2. **El que cambia el contrato lo actualiza en el mismo cambio.** Un contrato que se actualiza
+   «después» miente justo durante el sprint, que es cuando hay cinco agentes leyéndolo a la vez.
+3. **«Pedido a `<agente>`» en el informe final, nunca el arreglo por mano propia.** Dos
+   versiones de la misma corrección, verdes por separado, son el peor conflicto posible.
+4. **Lo que falta se pide, no se instala a mano.** Si tu cambio necesita un módulo de Asterisk,
+   una librería o un paquete que no está en la imagen, se lo pedís a `empaquetado` con el nombre
+   exacto y escribís el código para que funcione cuando llegue.
+
+Dos cosas aprendidas a golpes, que valen para todos:
+
+- **Una pieza sin dueño es una pieza rota.** El TURN estaba repartido entre tres agentes y el
+  resultado fue una central anunciando un relay que nadie corría, con siete softphones WebRTC
+  configurados. Si algo no aparece en la tabla de arriba, la respuesta no es «lo hace
+  cualquiera»: es agregar la fila.
+- **No se edita el árbol mientras corre un workflow.** Ya pasó: un módulo a medio cablear, el
+  revisor lo leyó como bloqueante y otro agente lo borró. Lo que haya que tocar mientras el
+  equipo trabaja se escribe aparte y se integra cuando el árbol queda libre.
 
 ### 1.1 Archivos de la API por dominio (`control-plane/`)
 
@@ -25,11 +55,10 @@ wallboard, pickup-groups). El resto vive en módulos con el patrón
 TODO por `deps` (nada global) y **se registran en `app.js` después del gate de auth y de
 `rbac.middleware`** (Express resuelve en orden: un módulo registrado antes queda sin token ni
 rol). Orden efectivo hoy: gate → `auth.js` → `sipconf.js` → `callengine.js` → `recordings.js`
-→ `apps.js` → `trunks.js` → `telefonia.js` → `marcacion.js` → `salas.js` → `fax.js` →
-`ccreport.js` → `guard.js` → 404 JSON + `errores.js` (`telefonia.js` va después de `trunks.js`
+→ `apps.js` → `trunks.js` → `telefonia.js` → `marcacion.js` → `salas.js` →
+`ccreport.js` → `turn.js` → `guard.js` → 404 JSON + `errores.js` (`telefonia.js` va después de `trunks.js`
 porque usa su `regenerarEntrantes`; `marcacion.js` después de `telefonia.js` porque sus números
-cortos no pueden pisar los códigos de función de aquel; `fax.js` después de `trunks.js` porque
-el envío sale por las rutas salientes que aquél publica en `internal`).
+cortos no pueden pisar los códigos de función de aquel).
 
 | Archivo | Dominio (rutas `/api/…`) | Devuelve a `app.js` |
 |---|---|---|
@@ -42,15 +71,16 @@ el envío sale por las rutas salientes que aquél publica en `internal`).
 | `trunks.js` | `trunks/*`, `routes/inbound|outbound`, `sbc-link`, `registrations`; sondeo OPTIONS, semillas `to-sbc` / `mod_sbc`, failover de troncal. Publica DOS cosas en el contexto compartido `internal` —la ruta saliente (`_<patrón>`) y la salida directa de cada troncal (`_<prefijo>.`, «crear ruta de salida automática»)— y las dos pasan por `dueno-internal.js`: 409 antes de escribir, y borrar sólo lo propio | `sbcLink`, `upsertSbcLink`, `invalidarSbcLink`, `trunkStatuses`, `defaultOutTrunk`, `regenerarEntrantes`, `failoverStates`, `filasSalida`, `SBC_TRUNK` |
 | `telefonia.js` | telefonía clásica de oficina (1.9.0): `extensions/:ext/features` (desvíos, DND, sígueme), `horarios/*`, `feriados/*`, `nightmode`, `featurecodes/*` (catálogo editable, reemplaza al `FEATURE_CODES` fijo de `apps.js`) y `internal/feature` (lo que el usuario marca en el teléfono → Postgres). Escribe Postgres **y** la AstDB por AMI; le pide a `trunks.js` que regenere las rutas entrantes cuando cambia un horario o un feriado. Antes de publicar un código de función en `internal` pregunta quién ocupa esa extensión con `dueno-internal.js` (409 si es de otro) y sólo borra del dialplan lo que publicó él: el contexto es compartido y `setDialplan()` es DELETE + INSERT | `syncFeatures`, `estadoNightmode`, `filasCodigo`, `tramoAhora`, `leerFeat`, `guardarFeat` |
 | `marcacion.js` | marcación (1.10.0, ítem 12 de `BRECHA-UCM-XORCOM.md`): `disa/*`, `callback/*`, `dialbyname`, `abreviados/*`, `extensions/:ext/abreviados` y las dos rutas que llama el dialplan (`internal/disa`, `internal/callback`). DISA y callback **nacen apagados**; el PIN vive en bcrypt en Postgres y **nunca** en el dialplan: el dialplan lo pregunta por CURL y esta API compara, cuenta intentos, bloquea y registra cada uso con el CallerID de origen en `pbxng_marcacion_log`. Sus extensiones de entrada pasan por el mismo `dueno-internal.js` que los códigos de función: el candado del contexto compartido `internal` es simétrico y la lista de quién puede ocupar una extensión está en un solo lugar | `syncAbreviados`, `matchPatron`, `rutaGanadora`, `filasDisa`, `filasCallback`, `filasDbn`, `filasAbrevPropio` |
-| `fax.js` | fax (1.10.0, ítem 7 de `BRECHA-UCM-XORCOM.md`): `fax/estado`, `fax/config`, `fax/boxes*`, `fax/in*`, `fax/out*` y `internal/fax` (el dialplan avisa cómo terminó un ReceiveFAX/SendFAX). Escribe el dialplan realtime de recepción (`from-trunk`, `fax-rx-<caja>` y `fax` para el CNG) y de envío (`internal`, `fax-tx`, que pasa por `dueno-internal.js` como el resto de lo que se publica en ese contexto compartido). **En una central sin fax no escribe dialplan**: `syncFax` en el arranque y `escribirDialplan()` sólo publican `fax-tx` si hay al menos una caja o un trabajo de salida, y el primer envío lo crea si falta. Reconcilia las columnas T.38 del endpoint de cada troncal, convierte PDF ⇄ TIFF (ghostscript / tiff2pdf, siempre por `execFile`), manda el fax recibido por correo y maneja la cola de salida con reintentos | `syncFax`, `filasRx`, `filasTx`, `paginasTiff`, `aplicarT38` |
 | `ccreport.js` | reportes de call center (1.10.0, ítem 8 de `BRECHA-UCM-XORCOM.md`): `ccreport`, `ccreport/csv`, `ccreport/report`, `ccreport/schedules*`. Lee el mismo horario de atención que el modo noche (`pbxng_horarios` + `nightmode_horario_id`) pero lo evalúa **dentro del SQL**, no con el `tramoAhora` de `telefonia.js`. Consume por AMI los eventos de cola (`QueueCallerJoin`, `AgentConnect`, `AgentComplete`, `QueueCallerAbandon`, `AgentRingNoAnswer`) → `pbxng_queue_events`, que es la fuente del informe (el `cdr` no sabe nada de lo que pasa dentro de una cola); reusa `report.js` para el A4 y `alerts.js`/`emails.js` para el envío programado | `metricas`, `filasCsv`, `tick` (hoy `app.js` no usa ninguno) |
 | `guard.js` | centro de seguridad: `security/*`, `ipgeo`, eventos AMI `security`, nftables vía el agente | (ver §3, familia `security`) |
+| `turn.js` | medio: `ice` y `turn/*` (origen del TURN —propio / SBC-NG / externo—, estado REAL del servicio, sonda STUN+Allocate y consola del contenedor coturn). Dueño `medios`; lee `sbcLink()` de `trunks.js` y NO lo escribe | `iceServers`, `origenEfectivo`, `estado`, `invalidar`, `sondear` |
 | `rbac.js` | tabla deny-by-default método+ruta → rol | `middleware` |
 
 Auxiliares sin rutas propias: `astconf.js`, `salud.js`, `sysmon.js`, `alerts.js`, `backup.js`,
 `acme.js`, `recstore.js`, `report.js`, `diagtrunk.js`, `emails.js`, `log.js`, `errores.js`,
 `numbering.js`, `netmode.js`, `push-providers.js`, `ai-pipeline.js`, `dueno-internal.js`,
-`migrate.js` + `migrations/`. El detalle de qué recibe cada módulo por `deps` está en el JSDoc de cabecera
+`vmpin.js` (PIN del buzón de voz: generación, validación y el ÚNICO alta de buzón; lo comparten
+`app.js` y `apps.js` — ver §3), `migrate.js` + `migrations/`. El detalle de qué recibe cada módulo por `deps` está en el JSDoc de cabecera
 de cada archivo y en `.claude/agents/api.md`.
 
 ## 2. Autenticación y roles
@@ -103,7 +133,7 @@ de cada archivo y en `.claude/agents/api.md`.
   | `recordings/match`, `recordings/:id/audio` | GET | TODOS | agente: sólo llamadas en las que participó su interno |
   | `extensions/:ext/features` | GET\|PUT | TODOS | desvíos, DND y sígueme del **propio** interno: la ruta exige la ext con `exigirExt`, así que el agente sólo alcanza el suyo y admin/supervisor cualquiera. Va ANTES de la regla general de `extensions` |
   | `extensions/:ext/abreviados` | GET\|PUT | TODOS | libreta de marcación abreviada **personal** del interno: misma idea y mismo `exigirExt` que `features`, y también va ANTES de la regla general de `extensions`. Los números cortos GLOBALES (`abreviados`) son configuración de la central: `admin` |
-  | `clients/lookup` | GET | TODOS | screen-pop |
+  | `clients/lookup` | GET | TODOS | screen-pop. **No se apaga con el módulo Portería**: sólo `devices` viene vacío cuando está apagado (ver §3, «Portería») |
   | `survey/fields` · `survey` | GET · POST | TODOS | encuesta post-llamada |
   | `calls/*` (live, `:id/hangup|hold|unhold`, spy…) | * | SUP | |
   | `channels`, `wallboard` | GET | SUP | |
@@ -112,7 +142,7 @@ de cada archivo y en `.claude/agents/api.md`.
   | `cdr/report` | GET | SUP | |
   | `ccreport` · `ccreport/csv` · `ccreport/report` | GET | SUP | reportes de call center: ver y exportar es operación (el informe lo firma el supervisor). `ccreport/schedules*` —programar el envío por correo— es configuración y cae al default `admin` |
   | `recordings` · `recordings/:id/transcript|peaks` · `recordings/:id/transcribe` | GET · GET · POST | SUP | |
-  | `clients`, `persons`, `spaces`, `devices` (y subrutas) | * | SUP | CRM completo (`crmWrite` ya limitaba la escritura) |
+  | `clients`, `persons`, `spaces`, `devices` (y subrutas) | * | SUP | CRM completo y moderación de porteros —`PUT /devices/:id` y `POST /devices/:id/test` caen acá por el comodín— (`crmWrite` ya limitaba la escritura) |
   | `intercom/clients`, `intercom/streams` | GET | SUP | |
   | `survey/*` | * | SUP | |
   | `extensions`, `tenants`, `metrics` | GET | SUP | |
@@ -122,26 +152,25 @@ de cada archivo y en `.claude/agents/api.md`.
   | `nightmode` | GET | SUP | el supervisor VE si la central está abierta o cerrada; forzarlo (PUT), los horarios, los feriados y los códigos de función son `admin` |
   | `disa/registro` · `callback/registro` | GET | SUP | registro de uso de DISA y callback (quién entró, desde qué CallerID, a qué número): es operación —es lo que explica una factura rara o un barrido de PINes— y es sólo lectura. Configurar la DISA (PIN, rutas habilitadas, encenderla) cae al default `admin` |
   | `security` · `security/live` | GET | SUP | centro de seguridad: resumen y registro en vivo (sólo lectura); bloquear/desbloquear, listas, geo-bloqueo, ajustes y `apply` son `admin` |
-  | `salas` · `salas/:name/live` · `salas/:name/mute`\|`kick` | GET · GET · POST | SUP | salas de reunión: el supervisor ve la lista, entra a la vista en vivo y **modera** (silenciar, expulsar) — es lo mismo que ya puede hacer con una llamada. El **detalle** `GET salas/:name` es `admin` porque es el único lugar que devuelve los dos PIN, y con el PIN de moderador se entra, se silencia y se expulsa: verlo es ser moderador de todas las salas. Alta, baja, edición e `invitar` (el correo puede llevar el PIN de moderador) caen al default `admin`. El panel esconde esos botones cuando el rol no es admin (`/salas` está en `SUP_OK`), igual que el borrar de `/fax` |
-  | `fax/estado`, `fax/config`, `fax/boxes`, `fax/in`, `fax/out`, `fax/(in\|out)/:id/pdf` | GET | SUP | ver las dos bandejas y bajar el documento |
-  | `fax/out` · `fax/out/:id/retry` · `fax/out/:id` | POST · POST · DELETE | SUP | mandar un fax, reintentarlo y cancelarlo es operación del día a día (el supervisor ya puede originar llamadas). Configurar cajas y T.38, y **borrar un fax recibido**, caen al default `admin`: un fax recibido es un documento. El panel **esconde** el botón de borrar de Recibidos cuando el rol no es admin (`/fax` está en SUP): un botón que sólo sabe dar 403 es peor que no tenerlo |
-  | Todo lo demás | * | admin | users, settings, trunks, routes, sbc-link, modules (escritura), backup, asterisk, net, system, turn, acme, npm, integrations, branding (escritura), extensions/endpoints (escritura), ivr, queues/ringgroups (escritura), recordings (borrado y almacenamiento), vm/email, security (escritura, whitelist, geoblock, settings, apply), ipgeo, email, voz, prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, geo, push/devices, salas (detalle con PIN, alta/baja/edición e invitación), disa, callback, dialbyname, abreviados (globales y prefijo)… |
+  | `salas` · `salas/:name/live` · `salas/:name/mute`\|`kick` | GET · GET · POST | SUP | salas de reunión: el supervisor ve la lista, entra a la vista en vivo y **modera** (silenciar, expulsar) — es lo mismo que ya puede hacer con una llamada. El **detalle** `GET salas/:name` es `admin` porque es el único lugar que devuelve los dos PIN, y con el PIN de moderador se entra, se silencia y se expulsa: verlo es ser moderador de todas las salas. Alta, baja, edición e `invitar` (el correo puede llevar el PIN de moderador) caen al default `admin`. El panel esconde esos botones cuando el rol no es admin (`/salas` está en `SUP_OK`) |
+  | `mailboxes/:mailbox` · `mailboxes/:mailbox/pin` · `mailboxes/rotar-pin` | GET · POST · POST | admin | buzones de voz: el **PIN en claro** y su rotación. Van con regla **explícita** aunque el default ya sea `admin`, porque «buzones ajenos» es trabajo de supervisor y el día que se le abra `mailboxes` con un comodín, estas dos se irían con él sin que nadie lo note — y con el PIN de un buzón se escuchan los mensajes de otro marcando `*98`, sin dejar rastro |
+  | Todo lo demás | * | admin | users, settings, trunks, routes, sbc-link, modules (escritura), backup, asterisk, net, system, turn, acme, npm, integrations, branding (escritura), extensions/endpoints (escritura), ivr, queues/ringgroups (escritura), recordings (borrado y almacenamiento), vm/email, security (escritura, whitelist, geoblock, settings, apply), ipgeo, email, voz, prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, geo, push/devices, salas (detalle con PIN, alta/baja/edición e invitación), mailboxes (listado sin PIN, alta y baja), disa, callback, dialbyname, abreviados (globales y prefijo)… |
 
   El RBAC no aplica a rutas públicas (sin `req.user`) ni a tokens `scope:'phone'` (van por
   `FONO_PERMITIDO`).
 - **`SUP_OK`: qué pantallas del shell abre un supervisor.** La lista vive en
   `dashboard/app/auth.jsx` (exportada) y es **una sola** para dos cosas: qué ítems se le
   dibujan en el menú (`app/shell.jsx`) y en qué rutas lo deja quedarse el redirect de
-  `AuthProvider`. Estuvieron separadas y pasó lo previsible: el menú ofrecía `/fax` y
-  `/salas` y el redirect lo mandaba a `/supervisor` sin excepciones, así que todo el
+  `AuthProvider`. Estuvieron separadas y pasó lo previsible: el menú ofrecía `/salas`
+  y el redirect lo mandaba a `/supervisor` sin excepciones, así que todo el
   esconder-por-rol de adentro de esas pantallas era código que nunca corría con rol
-  supervisor. Hoy: `['/cdr', '/reportes', '/wallboard', '/monitor', '/fax', '/salas']`.
+  supervisor. Hoy: `['/cdr', '/reportes', '/wallboard', '/monitor', '/salas']`.
   `/supervisor` sigue siendo su pantalla de **inicio** (a donde lo manda el login y a donde
   vuelve desde cualquier ruta que no le corresponde); el rol `agente` no cambia: sigue
   yendo siempre a `/agente`.
   Para entrar a la lista, la pantalla tiene que cumplir una de dos: **todos** sus pedidos
-  son de familias SUP, o **esconde sola** lo que es de admin (la solapa «Configuración» de
-  `/fax`, el alta/edición/baja/invitar/«Ver PIN» de `/salas`, los «Envíos programados» de
+  son de familias SUP, o **esconde sola** lo que es de admin (el
+  alta/edición/baja/invitar/«Ver PIN» de `/salas`, los «Envíos programados» de
   `/reportes`, la solapa «Almacenamiento» y el botón de borrar de `/cdr`), siempre con
   `useEsAdmin()`. Una pantalla que igual va a comer un `403` **no se agrega**. Por eso
   quedaron **afuera** `/mapa` (su único dato es `GET /api/geo`, que es `admin`) y
@@ -202,9 +231,12 @@ de cada archivo y en `.claude/agents/api.md`.
   expresión en cada pantalla. Resolverlo al revés (`!user || user.role === 'admin'`) le hace
   parpadear los controles de administración a un supervisor y lo deja apretar un botón que sólo
   sabe dar 403. Esto es cosmética: el permiso de verdad lo decide `rbac.js`. El **menú** del
-  shell entra en la misma regla: en el limbo dibuja el menú chico (el de operación), no el de
-  administración. Al día de hoy usan el helper `/fax` (solapa «Configuración» y borrar de
-  Recibidos), `/salas` (`SalasPanel`: nueva, editar, borrar, invitar y «Ver PIN»), `/reportes`
+  shell es la excepción y no elige un rol en el limbo: mientras `user` es `undefined` dibuja un
+  **esqueleto** y ningún ítem (`menuListo` en `app/shell.jsx`). Es la única salida sin parpadeo,
+  porque acá cualquier respuesta que se elija le parpadea a alguien: con el criterio prudente el
+  administrador ve el menú chico de operación y después le aparece el resto; con el imprudente
+  el supervisor ve Troncales, Usuarios y Respaldos y puede apretar un botón que sólo sabe dar
+  403 —eso último no se vuelve a hacer—. Al día de hoy usan el helper `/salas` (`SalasPanel`: nueva, editar, borrar, invitar y «Ver PIN»), `/reportes`
   («Envíos programados»), `/cdr` (solapa «Almacenamiento») y `/grabaciones` (ocupación del
   disco, configuración y borrado), más `app/shell.jsx` (menú y chip de modo noche) y
   `/seguridad`.
@@ -239,12 +271,12 @@ de cada archivo y en `.claude/agents/api.md`.
 - Rutas públicas (sin token) = exactamente `PUBLIC_API` en `control-plane/auth.js`. Hoy: `auth/login`,
   `phone/token`, `auth/setup`, `ice`, `branding`, `enroll/:token`, `prompts/:id/audio`,
   `push/vapid`, `push/(subscribe|register|unsubscribe)`, `internal/wake`, `internal/feature`,
-  `internal/disa`, `internal/callback`, `internal/fax`, `c2c/public/*`, `softphone/latest`,
+  `internal/disa`, `internal/callback`, `c2c/public/*`, `softphone/latest`,
   `geo/report`, `manuales/img/*`.
-  **`POST /api/internal/{feature,disa,callback,fax}` las llama el dialplan por CURL** (lo que el
-  usuario marca en el teléfono —DND, desvíos, sígueme, modo noche—, el PIN de la DISA y cómo
-  terminó un ReceiveFAX/SendFAX) y por eso no tienen sesión, pero `telefonia.js` / `marcacion.js`
-  / `fax.js` las cierran con los mismos tres candados: la IP tiene que ser **loopback**, el pedido **no puede traer
+  **`POST /api/internal/{feature,disa,callback}` las llama el dialplan por CURL** (lo que el
+  usuario marca en el teléfono —DND, desvíos, sígueme, modo noche— y el PIN de la DISA) y por
+  eso no tienen sesión, pero `telefonia.js` / `marcacion.js`
+  las cierran con los mismos tres candados: la IP tiene que ser **loopback**, el pedido **no puede traer
   `X-Forwarded-For` ni `X-Real-IP`**, y tiene que venir con el secreto compartido de
   `/etc/pbxng/agent.token` en el campo `tok` (comparado con `timingSafeEqual`). Cualquiera de
   los tres que falle → `403 {error:'sólo desde la central'}`. **Un filtro de "red privada" no
@@ -269,23 +301,21 @@ de cada archivo y en `.claude/agents/api.md`.
 | Familia | Para qué | Pantalla |
 |---|---|---|
 | `auth`, `users`, `me` | sesión, usuarios, cambio de clave | `/login`, `/usuarios` |
-| `extensions`, `endpoints`, `directory`, `presence` | internos y presencia | `/internos` |
+| `extensions`, `endpoints`, `directory`, `presence` | internos y presencia. **`POST /api/endpoints` devuelve `{created, webrtc, video, vm_mailbox, vm_pin}`** (1.11.0): el buzón del interno nace con PIN al azar (`vmpin.seed`) y `vm_pin` es la ÚNICA vez que ese PIN se ve —el buzón recién creado todavía no tiene dirección de correo, así que no hay a quién avisarle—. Es `null` cuando el buzón ya existía (reaprovisionar un teléfono no le rota el PIN al dueño): ese sale por `GET /api/mailboxes/:mailbox` | `/internos` |
 | `trunks`, `routes`, `sbc-link`, `registrations` | troncales, rutas entrantes/salientes, conexión a SBC-NG, diagnóstico de troncal (`control-plane/trunks.js`, mismo patrón `init(deps)` que `auth.js`; `sbcLink()` es lo único que el resto de la API mira para saber si hay SBC adelante) | `/troncales`, `/rutas`, `/sbc` |
 | `queues`, `ringgroups`, `paging`, `ivr`, `ai-agents`, `featurecodes`, `parking`, `moh`, `mailboxes`, `vm` | aplicaciones: colas (tabla realtime `queues` + `pbxng_queues`), grupos de timbrado, paging, IVR clásico y con IA (`Stasis pbxng,ai,<id>` → `ai-pipeline.js`), códigos de función, aparcado y música en espera (archivos vía `astconf.js`), buzones y buzón → correo (`control-plane/apps.js`, mismo patrón `init(deps)` que `auth.js`/`trunks.js`/`recordings.js`; devuelve `aiAgentDialplan`, `buildIvrDialplan`, `vmList`; `wallboard` y `pickup-groups` siguen en `app.js`) | `/aplicaciones/*`, `/funciones`, `/ivr`, `/voz` |
-| `salas` | salas de reunión: alta/baja/edición, vista en vivo (quién está adentro, silenciar, expulsar) e invitación por correo (`control-plane/salas.js`, 1.10.0; reemplaza a `conferences` de `app.js`). Detalle abajo | `/salas` (y `/aplicaciones/conf`, que muestra la misma pantalla). `SUP_OK` de `dashboard/app/shell.jsx` incluye `/salas`: el supervisor ve el ítem y modera desde el panel; alta, baja, edición e invitación se esconden si no es admin |
+| `salas` | salas de reunión: alta/baja/edición, vista en vivo (quién está adentro, silenciar, expulsar) e invitación por correo (`control-plane/salas.js`, 1.10.0; reemplaza a `conferences` de `app.js`). Detalle abajo | `/salas` (y `/aplicaciones/conf`, que muestra la misma pantalla). `SUP_OK` de `dashboard/app/auth.jsx` incluye `/salas`: el supervisor ve el ítem y modera desde el panel; alta, baja, edición e invitación se esconden si no es admin |
 | `extensions/:ext/features`, `horarios`, `feriados`, `nightmode`, `featurecodes` | telefonía clásica de oficina (`control-plane/telefonia.js`, 1.9.0): desvíos / DND / sígueme por interno, horarios de atención, feriados, modo noche y el catálogo editable de códigos de función. Detalle abajo | `/internos` (solapa «Desvíos y no molestar»), `/agente` («Mis desvíos»), `/horarios`, `/funciones` |
 | `disa`, `callback`, `dialbyname`, `abreviados`, `extensions/:ext/abreviados` | marcación (`control-plane/marcacion.js`, 1.10.0): DISA con PIN y rutas restringidas, callback, directorio por nombre (`Directory()`, prompts `dir-*` que ya vienen en el paquete de audios) y números cortos globales y por interno. DISA y callback **nacen apagados**. Detalle abajo | pendiente (pedido a `panel`) |
 | `internal/feature` | el dialplan avisa por CURL qué marcó el usuario en el teléfono (§2: loopback + sin cabecera de proxy + `agent.token`) | — |
 | `internal/disa`, `internal/callback` | el dialplan de la DISA pregunta por CURL si el PIN es correcto y si puede marcar ese número; el del callback avisa a quién devolverle la llamada (mismo candado que `internal/feature`) | — |
-| `fax/estado`, `fax/config`, `fax/boxes`, `fax/in`, `fax/out` | fax (`control-plane/fax.js`, 1.10.0): cajas de fax (a qué correo va cada número), bandeja de recibidos y de enviados con descarga del PDF, envío (PDF crudo en el cuerpo) con cola y reintentos, T.38 por troncal y detección de tono. `GET fax/estado` dice qué falta en el servidor (ghostscript, tiff2pdf, `res_fax_spandsp`, permiso de escritura del spool). Detalle abajo | `/fax` |
-| `internal/fax` | el dialplan avisa cómo terminó un `ReceiveFAX`/`SendFAX` (`FAXOPT(status\|statusstr\|pages\|error\|remotestationid)` sólo existe en el canal); mismo candado que `internal/feature` | — |
 | `calls` | control de llamadas (dial, hangup, hold, transfer, park, spy, live) | agente, supervisor, monitor |
 | `recordings`, `cdr`, `calls/record`, `extensions/record-all` | grabaciones e historial: marca de grabación (AstDB `rec`), grabar en vivo, indexador de `/recordings`, audio/transcripción/picos, almacenamiento remoto (`recstore.js`) e informe (`report.js`) (`control-plane/recordings.js`, mismo patrón `init(deps)` que `auth.js`/`trunks.js`; devuelve `setRecFlag`, `setRecAll`, `syncRecFlags`, `wavToPcm`, `analyzeText`, `indexRecordings`) | `/grabaciones`, `/cdr` |
 | `ccreport`, `ccreport/csv`, `ccreport/report`, `ccreport/schedules` | reportes de call center (`control-plane/ccreport.js`, 1.10.0). Detalle abajo | `/reportes` |
-| `clients`, `survey` | CRM propio | `/clientes` |
+| `clients`, `persons`, `spaces`, `devices`, `intercom`, `survey` | Portería y CRM propio (`porteria`). Detalle abajo | `/intercom`, `/clientes`, `/clientes/<id>` |
 | `asterisk`, `net`, `sip`, `capture`, `system`, `topology`, `metrics` | núcleo, red, diagnóstico | `/asterisk`, `/red`, `/topologia`, `/` |
 | `sipconf` | ajustes SIP de la central (NAT, RTP, timers, TLS, códecs por defecto; sólo admin) | Configuración → SIP |
-| `turn`, `ice`, `acme`, `npm` | WebRTC/TURN, certificados, proxy | Configuración |
+| `turn`, `ice`, `acme`, `npm` | WebRTC/TURN (`control-plane/turn.js`, dueño `medios`), certificados, proxy. Detalle del ORIGEN del TURN abajo | Configuración |
 | `modules`, `settings`, `branding`, `integrations`, `alerts`, `email` | configuración | `/configuracion` |
 | `backup` | respaldo y restauración; `backup/schedule` (GET → `{enabled, hour, keep, last_run, last_ok, last_error, last_nombre, running, tz}`, POST `{enabled, hour, keep}` con `hour` entero 0–23, `keep` entero ≥ 1, `enabled` booleano, cada campo opcional, `400 {error}` si no valida; devuelve el estado nuevo. Se guarda en `pbxng_settings` (`backup_enabled` default `1`, `backup_hour` default 3, `backup_keep` default `BACKUP_KEEP`/14, `backup_last_run|ok|error|nombre`). Un planificador interno de la API revisa cada minuto: si está activo, es esa hora (reloj local del contenedor, `tz`) y hoy no hay marca `backup_last_run`, corre `backup.programado()` (crear sin grabaciones + retención). El cron del host (`backup-cli.js`) escribe las mismas claves, así que ninguno repite el del otro. El panel tolera 404 en versiones sin el endpoint) | `/respaldos` |
 | `push`, `c2c`, `enroll`, `phones`, `provision` | PWA, click-to-call, aprovisionamiento. `GET /api/push/vapid` → `{key}` con la pública VAPID vigente (`''` mientras la API no tenga un par que firme: el panel muestra «Servidor sin clave VAPID»). El par sale, en este orden, de `VAPID_PUBLIC`/`VAPID_PRIVATE` del `.env` si web-push lo acepta, de `pbxng_settings` (`vapid_public`/`vapid_private`) o, si ninguno sirve, la API genera uno al arrancar, lo guarda en `pbxng_settings` y lo avisa con un `warn` (las suscripciones hechas con otra pública fallan al enviar y se limpian solas con 404/410) | varios |
@@ -294,18 +324,82 @@ de cada archivo y en `.claude/agents/api.md`.
 | `manuales` | manuales in-panel | `/manuales` |
 | `security`, `ipgeo` | centro de seguridad (`control-plane/guard.js`): bloqueos por IP en nftables, registro en vivo, lista blanca, filtro por país, ajustes anti fuerza bruta | `/seguridad` |
 
+Medio: **origen del TURN, `/api/ice` y el estado real del relay** (`control-plane/turn.js`,
+1.11.0, dueño `medios`; migración `0019_turn_origen.sql`).
+
+**La regla:** la central no corre TURN, la central **dice** qué TURN usar. Sin TURN un softphone
+detrás de un NAT simétrico se queda sin audio —eso es *roto*, no *mejorable*—, así que el coturn
+propio es parte de PBX-NG y **viene encendido de fábrica** (`COMPOSE_PROFILES=core,turn` en
+`install.sh` y en `.env.example`, `mod_turn='1'` sembrado por la migración, y el default del
+reconciliador). El anclaje de medio con rtpengine del borde sigue siendo de SBC-NG: no son la
+misma pieza en dos lugares.
+
+- **UN SOLO ORIGEN A LA VEZ**, en `pbxng_settings.turn_origen`:
+  - `propio` (**default**) · el coturn del appliance. Host = `turn_host` del panel, y si está
+    vacío `PUBLIC_IP` → `DOMAIN`; credenciales = `TURN_USER`/`TURN_PASS` del `.env`.
+  - `sbc` · el coturn del SBC-NG. **El host NO se copia**: sale de `sbcLink()` (`trunks.js`,
+    dueño `api`), que es el único lugar donde vive la dirección del borde; las credenciales van
+    en `turn_sbc_user`/`turn_sbc_pass`. Exige el enlace **activo** (`400` si no) y **apaga el
+    coturn local** (`mod_turn='0'`).
+  - `externo` · `turn_ext_urls` (csv, cada una tiene que empezar con `turn:`/`turns:`) +
+    `turn_ext_user`/`turn_ext_pass`. También apaga el coturn local.
+  Si el origen elegido no está utilizable, `/api/ice` **no cae en silencio a otro** y devuelve
+  `motivo`: repartir un TURN que no es el configurado es el mismo error que repartir uno que no
+  existe.
+- **`GET /api/ice`** (público, `Cache-Control: no-store`) → `{iceServers, origen, motivo?}`. Es la
+  ÚNICA función que arma esa lista: `GET /api/provision` y `GET /api/enroll/:token` (auth.js) la
+  reciben por `deps.iceMedio`, así que el QR no puede traer una configuración distinta de la que
+  la central entrega. **Sin credenciales no se publica ninguna entrada `turn:`.**
+- **El STUN por defecto es el propio appliance** (`stun:<host del origen>:<puerto>`).
+  `stun_url` (o `STUN_URL`) lo pisa. **Nada de servicios públicos**: el
+  `stun:stun.l.google.com:19302` que estaba hardcodeado hacía que una central sin salida a
+  internet —lo normal en un organismo público— arrancara el WebRTC pidiéndole permiso a Google.
+  El mismo criterio vale en el cliente: `dashboard/app/useSoftphone.js` arranca con la lista
+  vacía y `softphone-app/src/config.js` con `stun: ''`.
+- `GET|PUT /api/turn/origen` (admin) · lee y cambia el origen. **Nunca devuelve contraseñas**,
+  sólo `tiene_clave`. Una clave vacía en el PUT significa «no cambiar».
+- `GET /api/turn/estado` (admin) → `{origen, host, puerto, deseado, corriendo, relay, mapped,
+  motivo, local}`. **`deseado` es el interruptor; `corriendo` es lo que contestó el servidor.**
+  Un switch de infraestructura tiene que dibujar `corriendo`: si el panel y la central no
+  coinciden, el bug es del panel. Cacheado 20 s; `?fresco=1` remide.
+- `POST /api/turn/probe` y `POST /api/turn/test` (admin) · la **sonda de verdad**, UDP y TCP:
+  STUN Binding → Allocate sin credenciales (tiene que dar `401`+realm) → Allocate firmado
+  (`200` + `XOR-RELAYED-ADDRESS`). **Que el puerto conteste no alcanza**, y por eso un relay en
+  una dirección que ningún cliente puede usar sale **FALLA**: loopback, `0.0.0.0`, link-local, o
+  una IP privada cuando el TURN está publicado en una pública (el caso real: un coturn
+  escuchando sólo en `172.17.0.1`, el bridge de Docker, autenticaba perfecto y no le servía a
+  nadie). `scripts/check-turn.py` —que corre `install.sh` al terminar— hace exactamente los
+  mismos pasos y da el mismo veredicto.
+- El agente del contenedor (`docker/images/coturn/pbxng-turn-agent.py`, :8091) **ya no miente**:
+  `active` se decide por si hay alguien escuchando `listening-port`, no por poder ejecutar
+  `turnserver --version` (que daba «Operativo» siempre). Su `POST /test` local se retiró (`410`):
+  corría `turnutils_uclient` contra `127.0.0.1` desde adentro del propio coturn, o sea que no
+  podía fallar. Arrancar y parar el servicio bajo Docker lo hace el reconciliador, no el agente.
+
 Telefonía clásica de oficina (`control-plane/telefonia.js`, 1.9.0; migración
 `0011_telefonia_clasica.sql`). **La fuente de verdad es PostgreSQL y el dialplan lee la AstDB**:
 cada escritura de estas rutas toca las dos cosas (la AstDB por AMI `DBPut`/`DBDel`), y
 `syncFeatures()` vuelca Postgres → AstDB al arrancar la API y en **cada (re)conexión del AMI**
-(§5). Los errores de AMI se tragan a propósito: sin Asterisk el panel tiene que poder guardar.
+(§5). Un fallo del AMI **no** tumba el guardado —sin Asterisk el panel tiene que poder
+guardar— pero se registra y vuelve como `aviso` en la respuesta (§5, AstDB).
 
 - `GET|PUT /api/extensions/:ext/features` (**TODOS**, la ruta acota con `exigirExt`: agente y
-  token de softphone sólo su propio interno) → `{dnd:bool, cfu, cfb, cfnr, fm, fm_seg}`. Los
-  cuatro destinos son **sólo dígitos, hasta 32** (`400 {error}` si no; ni `*` ni `#` ni `+`) y
-  **vacío = apagado**. `fm` va **con el prefijo de la ruta saliente** (el dialplan marca
-  `Local/<fm>@internal` y no adivina prefijos); `fm_seg` se acota a 5–120, default 15. El PUT es
-  parcial (sólo pisa los campos presentes), pero el panel manda siempre los seis.
+  token de softphone sólo su propio interno) → `{dnd:bool, cfu, cfb, cfnr, fm, fm_seg}` (más
+  `aviso` en el PUT si la AstDB no tomó el cambio). Los cuatro destinos son **sólo dígitos,
+  hasta 32** (`400 {error}` si no; ni `*` ni `#` ni `+`) y **vacío = apagado**. `fm` va **con el
+  prefijo de la ruta saliente** (el dialplan marca `Local/<fm>@internal` y no adivina prefijos);
+  `fm_seg` se acota a 5–120, default 15. El PUT es parcial (sólo pisa los campos presentes),
+  pero el panel manda siempre los seis.
+  **No se puede armar un bucle**: las cuatro banderas mandan la llamada de vuelta a `internal`,
+  así que forman un grafo entre internos; antes de guardar se camina ese grafo desde el destino
+  propuesto siguiendo los destinos ya guardados de los demás y, si se vuelve al interno que se
+  está editando, es `400` con la cadena en el mensaje (`1101 → 1102 → 1101`). Agarra el ciclo de
+  tres pasos (A→B, B→C, C→A), no sólo el de dos. El destino igual al propio interno también es
+  `400`. Esto es la mitad del arreglo: la otra es el tope `__SALTOS` del dialplan (§5), que
+  cubre lo que se arme en el medio y lo que escriba la AstDB sin pasar por acá — validar sólo al
+  guardar sería frágil. Cuando el rechazo llega por `POST /api/internal/feature` (el usuario
+  marcó el código en el teléfono, y **el dialplan ya escribió la AstDB** antes de avisar), la API
+  reescribe la AstDB desde Postgres antes de devolver el `400`, para no dejarlas desparejas.
 - `GET|POST|PUT|DELETE /api/horarios` (admin) → `[{id, nombre, tramos, activo}]`; `tramos` es
   `[{dias, desde, hasta}]` en el formato de `GotoIfTime`: `dias` = `*` o `mon-fri` (rangos con
   vuelta de semana incluidos), `desde`/`hasta` = `HH:MM` 24 h, máximo 20 tramos. Cruzar
@@ -334,12 +428,26 @@ cada escritura de estas rutas toca las dos cosas (la AstDB por AMI `DBPut`/`DBDe
   puede» porque la pantalla de códigos no muestra cuáles están publicados: una instalación parcial
   sería invisible para quien la está mirando. Acciones:
   `dnd_on dnd_off cfu_set cfu_off cfb_set cfb_off cfnr_set cfnr_off fm_set fm_off night eco
-  midigito vm_propio vm_otro`. **Ojo con las dos formas del código**: lo que se ve y se edita va
+  midigito vm_propio vm_otro`. **`vm_propio` publica el MISMO dialplan que el `*97` estático de
+  `docker/config/asterisk/extensions.conf`** (1.11.0), no una versión corta: `GotoIf` sobre
+  `CHANNEL(channeltype)`, `VoiceMailMain(${CHANNEL(endpoint)}@<VM_CONTEXT>,s)` para el canal PJSIP
+  y `VoiceMailMain(${CALLERID(num)}@<VM_CONTEXT>)` —con PIN— para cualquier otro. El estático hoy
+  gana porque `*97` está ahí escrito, pero **en cuanto el administrador mueve el código a otro
+  número manda el realtime**, y lo que había antes era `VoiceMailMain(${CALLERID(num)}@default)` a
+  secas: pedía PIN, pero identificaba al que llama por el CallerID, que es lo que el teléfono manda
+  en el `From` y cualquier interno registrado puede falsear. `vm_otro` (`*98`) **nunca** lleva la
+  `s`. **Ojo con las dos formas del código**: lo que se ve y se edita va
   sin `_` (`*21*.`), pero a la tabla realtime `extensions` se escribe **con** `_` cuando es un
   patrón, porque `pbx_realtime` sólo corre `ast_extension_match` sobre las filas cuyo `exten`
   empieza con `_` (misma convención que `outExten()` de `trunks.js`).
 - `POST /api/routes/inbound/:id` → ver `PUT /api/routes/inbound/:id` y las columnas nuevas
   `horario_id`, `dest_cerrado_type`, `dest_cerrado_value` de `pbxng_inbound_routes` (§5).
+- `POST|PUT /api/routes/inbound`: `dest_type` ∈ `interno | ivr | cola | app` (el `fax` salió en
+  1.11.0) y **el valor también se valida, por tipo**, porque termina crudo en el `appdata` de la
+  tabla realtime: `interno` → `[0-9]{1,32}`, `ivr` y `app` → `[*#0-9]{1,16}`, `cola` →
+  `[A-Za-z0-9_-]{1,64}`. Lo mismo para `dest_cerrado_type`/`dest_cerrado_value`. Se comprueba
+  contra la fila **efectiva** (después del `COALESCE` del PUT), dentro de la transacción y antes
+  de escribir el dialplan: un valor inválido da `400` y no deja ni fila ni extensión.
 - `POST /api/internal/feature` (pública, §2): `{tok, ext, accion, valor}` como **formulario**
   (`func_curl` no manda JSON). `accion` ∈ `dnd_on | dnd_off | cfu | cfb | cfnr | fm | off |
   night`; con `off`, `valor` dice qué apagar (`cfu|cfb|cfnr|fm|dnd`, o vacío = todo).
@@ -351,62 +459,6 @@ cada escritura de estas rutas toca las dos cosas (la AstDB por AMI `DBPut`/`DBDe
 - `GET|PUT /api/extensions/:ext/abreviados`: libreta de abreviados personales del interno
   (códigos de dos dígitos). El PUT manda la lista **completa**: lo que no está, se borra.
   La ruta exige la ext propia con `exigirExt`, igual que `…/features`.
-
-Fax (`control-plane/fax.js`, 1.10.0; migración `0016_fax.sql`). **Asterisk habla con el otro
-módem y esta API convierte, guarda, avisa por correo y encola.** Archivos en disco (volumen
-compartido con Asterisk, `FAX_DIR` / `FAX_DIR_AST`, §6), índice en Postgres: un TIFF de veinte
-páginas en un `bytea` hace que el respaldo lógico pase de megabytes a gigabytes.
-
-Las imágenes traen lo necesario: `control-plane/Dockerfile` instala **ghostscript** y
-**libtiff-tools** (`gs` / `tiff2pdf`, ~72 MiB) y `docker/images/asterisk/Dockerfile` compila
-**`res_fax` + `res_fax_spandsp`** (`libspandsp-dev` en el build, `libspandsp2` + `libtiff6` en
-runtime) y **corta el build** si el módulo no quedó. Los dos entrypoints avisan en el arranque
-si algo falta, en vez de dejar que el fax falle en medio de una llamada.
-
-- `GET /api/fax/estado` (SUP) → `{herramientas:{ghostscript, ghostscript_version, tiff2pdf},
-  asterisk:{res_fax, spandsp}, spool:{dir, dir_asterisk, escribible}, limites:{max_mb,
-  max_mb_duro, max_paginas}, en_cola, listo}`. `asterisk.*` en `null` = no se pudo preguntar
-  (AMI caído). Es lo primero que pide el panel: si falta algo lo dice con nombre y apellido en
-  vez de dejar que el fax falle en medio de una llamada.
-- `GET|PUT /api/fax/config` (GET SUP, PUT admin) → `{station_id, header, ecm, t38, t38_ec,
-  trunks, detect, detect_box, detect_seg, max_mb, max_paginas, reintentos, reintento_min,
-  dial_seg}`. `t38_ec` ∈ `none|fec|redundancy`. `trunks` = troncales a las que se les aplica
-  T.38 (y la detección de tono); el PUT reescribe el dialplan de fax y reconcilia
-  `ps_endpoints` (§5). Cada nombre de `trunks` tiene que ser una troncal **existente**
-  (`pbxng_trunks`, las mismas que ofrece el selector del panel): un nombre desconocido o con
-  caracteres fuera de `[A-Za-z0-9_-]{1,64}` da `400` diciendo cuál, ya no se descarta en
-  silencio; los repetidos se colapsan. `max_mb` **no puede superar** el tope duro `FAX_MAX_MB` del entorno.
-- `GET|POST|PUT|DELETE /api/fax/boxes` (GET SUP, resto admin) → cajas de fax
-  `{id, nombre, email, station_id, header, adjuntar_tiff, enabled, recibidos, rutas}`. `email`
-  admite varios separados por coma. Borrar una caja con rutas entrantes apuntándole da `409`.
-- `GET /api/fax/in` (SUP) → recibidos; `GET /api/fax/in/:id/pdf` (SUP, `?tiff=1` para el TIFF)
-  baja el documento **con el token** (el panel lo pide con `raw: true`); `DELETE /api/fax/in/:id`
-  (admin) borra la fila **y los archivos**.
-- `GET /api/fax/out` (SUP) → la cola de salida con `{estado, intentos, max_intentos, detalle}`;
-  `estado` ∈ `pendiente | enviando | cancelando | ok | error | cancelado`.
-- `POST /api/fax/out?numero=&nombre=&asunto=` (SUP) con el **PDF como cuerpo crudo**
-  (`Content-Type: application/pdf`, sin multipart, igual que `backup/subir`). Validación antes
-  de tocar nada: tope de tamaño en el parser, firma `%PDF-` y `%%EOF`, y tope de páginas después
-  de convertir. `numero` sólo dígitos (se aceptan espacios, puntos, guiones y paréntesis como
-  separadores y se sacan; **cualquier otra cosa se rechaza**, no se limpia: un `*21*099…`
-  limpiado a dígitos sería marcar un número que nadie pidió). Errores: `400` número,
-  `413` tamaño/páginas, `415` no es un PDF, `503` falta ghostscript.
-- `POST /api/fax/out/:id/retry` (SUP) revive un trabajo `error`/`cancelado` **sin volver a subir
-  el PDF**; `DELETE /api/fax/out/:id` (SUP) borra, o **cancela** si está `enviando` (no se le
-  saca el archivo a un `SendFAX` en curso). Cancelar deja el trabajo en el estado intermedio
-  **`cancelando`**, no en `cancelado`: el canal sigue vivo unos segundos y el chequeo de **un
-  fax a la vez** de la cola cuenta `cancelando` como ocupado (si no, arrancaría el siguiente con
-  el anterior todavía modulando por la misma troncal). Lo pasa a `cancelado` el aviso del
-  dialplan, o el barrido de colgados del reloj si ese aviso nunca llega; un `cancelando` no se
-  puede reintentar ni borrar hasta que cierre.
-- `POST /api/internal/fax` (pública, §2): `{tok, dir:'in'|'out', …}` como **formulario**.
-  Responde `ok` en texto plano **antes** de convertir y mandar el correo (del otro lado hay un
-  canal de Asterisk esperando). El `uniqueid` es UNIQUE y hay además un barrido del spool que
-  importa el TIFF que quedó sin aviso: un fax recibido no se pierde porque el que llamaba colgó
-  dos segundos antes de tiempo. Ese barrido saca la caja del **nombre del archivo**
-  (`<caja>-<uniqueid>.tif`) y nunca de la configuración: si no la puede deducir (nombre viejo,
-  caja borrada) el fax entra con `box_id = NULL`, **sin correo** y con el motivo en `email_err`
-  para que se vea en la bandeja. Adivinar el destinatario filtraba el documento a otra área.
 
 Reportes de call center (`control-plane/ccreport.js`, 1.10.0; migración `0012_ccreport.sql`).
 **La fuente es `pbxng_queue_events`, NO el `cdr`**: el CDR no distingue «esperó 40 s en cola y
@@ -422,7 +474,7 @@ instalación de esta versión**, y el tiempo de pausa/sesión del agente no se m
 **El consumidor está ACOTADO y ese techo es parte del contrato.** Es la única pieza del sprint
 que escribe en la base **al ritmo de las llamadas**, y el pool de Postgres (`PG_POOL_MAX`, 10)
 es el MISMO que usan los `CURL()` del dialplan: el PIN de la DISA (`internal/disa`), el aviso de
-código de función (`internal/feature`) y el fin de un fax (`internal/fax`). Un INSERT por evento
+código de función (`internal/feature`). Un INSERT por evento
 y sin esperar a nadie hace que, con la base momentáneamente lenta (un vacuum, el respaldo
 nocturno, la poda de `pbxng_sec_events`), las adquisiciones de conexión se encolen sin límite
 dentro de `pg.Pool` y las que quedan atrás sean las del camino de llamada: el `CURL()` vuelve
@@ -550,6 +602,77 @@ ventana fuera de la cual la sala no abre.
   `GET /api/salas/:name`. Con rol supervisor la pantalla queda en modo moderación: sólo la
   vista en vivo con silenciar y expulsar.
 
+Buzones de voz y su PIN (`control-plane/apps.js` + `control-plane/vmpin.js`, 1.11.0). El PIN
+vive en la columna `password` de la tabla realtime `voicemail`, que es la que lee
+`app_voicemail`; **no hay migración de esquema** y **ninguna migración toca un PIN existente**
+(el porqué, abajo).
+
+- **El contexto del buzón lo decide un solo lugar: `vmpin.VM_CTX`** (`VM_CONTEXT`, default
+  `default`). Lo usan `vmpin.seed`, todas las rutas `/api/mailboxes` de `apps.js`, el
+  `ps_endpoints.mailboxes` que escribe `app.js` al crear un interno y el `*97`/`*98` que publica
+  `telefonia.js`. Antes `apps.js` lo leía del entorno y los otros tres tenían `'default'` escrito
+  a mano: con `VM_CONTEXT` distinto, el alta de internos dejaba los buzones en un contexto, el
+  panel listaba y rotaba los de otro y `VoiceMailMain` buscaba en un tercero.
+
+- **El PIN se genera al azar, siempre** (`vmpin.pinNuevo()`, seis dígitos con `crypto`). Hasta
+  1.10.0 el buzón nacía con `password = mailbox`, o sea sin PIN: cualquiera con un teléfono
+  registrado marcaba `*98`, ponía el interno ajeno dos veces y escuchaba sus mensajes. El alta
+  del buzón está en **un solo lugar** (`vmpin.seed`, que usan los tres `create*Endpoint` de
+  `app.js` y el `POST /api/mailboxes`): eran cuatro copias del mismo `INSERT` y arreglar tres
+  era cuestión de tiempo. `*97` (buzón propio desde el propio teléfono) no pide PIN y **no
+  cambia**: la identidad sale de `CHANNEL(endpoint)`, no del CallerID (§5).
+- `GET /api/mailboxes` (admin) → `[{mailbox, fullname, email, pin_debil}]` desde `voicemail`
+  (izquierda) `LEFT JOIN pbxng_mailboxes`. **No trae el PIN**, igual que el listado de salas.
+  `pin_debil` es `true` cuando el PIN es el número del buzón o está vacío; **se calcula, no se
+  guarda**: una columna se desincronizaría el día que alguien cambie el PIN por SQL o desde
+  `VoiceMailMain`, que escribe la tabla él solo.
+- `GET /api/mailboxes/:mailbox` (**admin**, regla explícita en `rbac.js`) → `{mailbox, fullname,
+  email, pin, pin_debil}` (`404` si no existe). Único lugar de lectura con el PIN en claro.
+- `POST /api/mailboxes {mailbox, password?, fullname?, email?}` (admin) → `201 {created, pin,
+  ya_existia}`. `password` **ya no es obligatorio**: sin él se genera. Con él, 4–10 dígitos y
+  distinto del número del buzón (`400` si no). El `pin` de la respuesta es el que **quedó en la
+  base**, no el que se generó: el alta es `ON CONFLICT DO NOTHING` y cada interno ya nace con su
+  buzón, así que «crear» uno existente no lo pisa (`ya_existia: true`) — devolver el PIN generado
+  sería mostrarle al operador uno que la central no conoce.
+- `POST /api/mailboxes/:mailbox/pin {pin?}` (**admin**, regla explícita) → `{mailbox, pin,
+  avisado}` (`404` si no existe). Rota el PIN; sin cuerpo genera uno. No recarga nada
+  (`app_voicemail` con realtime lee la fila en cada `VoiceMailMain`). `avisado` dice si se le
+  mandó el correo al dueño (`emails.vmPinEmail`); es `false` sin SMTP o sin dirección en el
+  buzón, y ahí el panel le dice al operador que lo pase él.
+- `POST /api/mailboxes/rotar-pin {mailboxes?: [], solo_debiles?: bool}` (**admin**, regla
+  explícita) → `{rotados, avisados, resultados:[{mailbox, ok, avisado, pin, error}]}`. Rotación
+  **en lote**: es el camino para una central que ya venía andando con todos los buzones en
+  `password = mailbox`. Tres cosas del contrato, cada una por un motivo:
+  - **No existe «rotar todos» implícito**: o viene `mailboxes` (lista), o viene
+    `solo_debiles: true` (que es la misma lista, calculada en la API con `vmpin.pinDebil`). Un
+    POST sin cuerpo devuelve `400`, no rota la central entera. Máximo 200 por llamada.
+  - **Cada buzón lleva su propio PIN al azar** (un PIN común es no tener PIN), y el `pin` de la
+    respuesta **sólo viene para los que NO se pudieron avisar** (`avisado:false`): a los demás ya
+    les llegó por correo, y devolver catorce PIN en claro en una sola respuesta —que queda en el
+    historial del navegador y en cualquier log intermedio— es regalar todos los buzones juntos.
+  - **No es una transacción**: se rota de a uno y en serie, y la respuesta dice fila por fila qué
+    pasó (un buzón inexistente o un correo que falla no aborta el lote). Volver atrás los PIN ya
+    rotados dejaría a esa gente con un PIN distinto del que recibió por correo. El transporte SMTP
+    se arma **una vez** para todo el lote.
+- **El correo del PIN (`emails.vmPinEmail`) no lleva botón al panel.** El destinatario es el dueño
+  del interno —normalmente rol `agente`—, y el CTA apuntaba a `https://<dominio>/voz`, que es la
+  pantalla de voz por IA; la de buzones (`/aplicaciones/vm`) es admin y él ahí no entra. En su
+  lugar el cuerpo le dice lo que sí puede hacer: `*97` para escuchar, y `*97` → `0` → `5` para
+  ponerse un PIN propio desde el teléfono. El PIN va en claro en el cuerpo (HTML y texto) porque
+  **ese es el aviso**; el **asunto y el preheader no lo llevan**, que son lo que se ve en la lista
+  del correo y en la notificación del celular sin abrir nada.
+- **Los buzones que ya existen NO se rotan.** Una migración que los rota a ciegas deja a cada
+  persona afuera de sus propios mensajes de un día para el otro, sin aviso y sin que sepa a
+  quién preguntarle; en una central con decenas de internos eso es el soporte de una semana.
+  Se los marca `pin_debil`, la API los nombra una vez en el log al arrancar (`warn`) y el panel
+  los lista en un aviso naranja para que el administrador los rote **cuando él decida**: de a uno
+  (`POST /api/mailboxes/:mailbox/pin`) o todos juntos (`POST /api/mailboxes/rotar-pin`), y en los
+  dos casos el dueño se entera por correo. Es la misma decisión que se tomó con las salas heredadas
+  sin PIN en 1.10.0: la API no rota nada sola, pero deja el camino hecho.
+- Panel: **`/aplicaciones/vm`** ya no es un `CrudPanel` genérico sino `BuzonesPanel.jsx` (alta
+  sin campo de PIN, «Ver PIN», «PIN nuevo», el aviso de los buzones débiles y el cartel con el
+  PIN recién generado, que no es un toast porque si se pierde hay que volver a rotar).
+
 Marcación: DISA, callback, dial-by-name y abreviados (`control-plane/marcacion.js`; migración
 `0015_marcacion.sql`). **DISA y callback nacen apagados** (`enabled=false`): son la puerta
 clásica del fraude de tarifación y una actualización no puede encender sola algo que gasta plata.
@@ -625,22 +748,22 @@ clásica del fraude de tarifación y una actualización no puede encender sola a
   imagen, así que el `require` no deja la central sin arrancar. Todo `require =` va además en
   las **dos listas de verificación** de la imagen (§5, «regla de los tres lugares»).
 - **La extensión de entrada no puede pisar a otro**: `internal` es un contexto compartido (códigos
-  de función, rutas salientes, fax, abreviados globales), así que el alta y la edición de DISA,
+  de función, rutas salientes, abreviados globales), así que el alta y la edición de DISA,
   callback, directorio y número corto rechazan con **409** —diciendo quién la ocupa— una extensión
   que ya tenga dueño, **también cuando la aplicación se crea apagada**. Y el borrado del dialplan
   se limita a las filas que publicó `marcacion.js` (se reconocen por el `NoOp` de la prioridad 1):
   antes, dar de alta una DISA en `*97` borraba en silencio el dialplan del buzón de voz.
-- **El candado es simétrico y lo cierran los CUATRO módulos que publican en `internal`** (1.10.0):
-  `marcacion.js`, `telefonia.js`, `trunks.js` (rutas salientes y salida directa de troncal) y
-  `fax.js` (`fax-tx`). La lista de quién puede ocupar una extensión (`DUENOS` de
+- **El candado es simétrico y lo cierran los TRES módulos que publican en `internal`** (1.10.0):
+  `marcacion.js`, `telefonia.js` y `trunks.js` (rutas salientes y salida directa de troncal).
+  La lista de quién puede ocupar una extensión (`DUENOS` de
   `dueno-internal.js`) es **única**: el módulo que empiece a publicar ahí se agrega en esa lista
-  y los dos lados se enteran solos. Con dos de los cuatro escribiendo a ciegas el candado no
+  y los dos lados se enteran solos. Con dos de los tres escribiendo a ciegas el candado no
   servía: se borraba una ruta saliente `_*21*.`, el administrador publicaba ahí un código de
   función porque el número figuraba libre, y al recrear la ruta `setDialplan()` (DELETE + INSERT)
   se llevaba puesto el código sin avisar. Firmas de la prioridad 1 que permiten reconocer lo
   propio: `DISA `, `Callback `, `Directorio por nombre`, `Abreviado `, `ruta ` (rutas salientes,
-  **también las de una sola troncal**, que antes no llevaban `NoOp`), `Salida ` (salida directa de
-  troncal) y `fax saliente` (`fax-tx`); los códigos de función no tienen firma y se reconocen por
+  **también las de una sola troncal**, que antes no llevaban `NoOp`) y `Salida ` (salida directa
+  de troncal); los códigos de función no tienen firma y se reconocen por
   el catálogo.
 - Panel: **pendiente** (pedido a `panel`).
 
@@ -737,7 +860,9 @@ reemplaza a `/api/security` de fail2ban, `security/ban` y `security/unban`, que 
   {ok:true, output:''}`). La API crea ese archivo con los defaults en el arranque si no existe;
   como el entrypoint de Asterisk lo crea vacío antes, en una instalación nueva queda vacío
   hasta el primer `apply` (Asterisk corre mientras tanto con los `unidentified_*` de fábrica).
-- Lista blanca (`pbxng_f2b_whitelist`, IP o CIDR; exime del contador y del geo-bloqueo):
+- Lista blanca (`pbxng_f2b_whitelist`, IP o CIDR, **v4 o v6**; exime del contador y del
+  geo-bloqueo). Una regla v4 nunca tapa una v6 ni al revés, y el prefijo se acota a la familia
+  (≤32 en v4, ≤128 en v6):
   `GET /api/security/whitelist` → `[{ip, note, created}]`; `POST {ip, note?}` (si esa IP estaba
   bloqueada, la desbloquea); `DELETE /api/security/whitelist?ip=` / `DELETE …/whitelist/:ip` /
   `POST …/whitelist/remove {ip}` (compatibilidad).
@@ -752,10 +877,14 @@ reemplaza a `/api/security` de fail2ban, `security/ban` y `security/unban`, que 
   (aunque sea `SuccessfulAuth`) desde un país vetado es ban permanente. Sin país resuelto
   (ip-api caído) no se decide nada.
 - `GET /api/ipgeo?ips=a,b` (admin) → `{ip:{country, cc, city, isp}}` (cache en memoria, ip-api).
+  ip-api resuelve IPv6 igual que IPv4 (verificado contra el endpoint `batch` que usa
+  `geoLookup`), así que el **geo-bloqueo vale para las dos familias**; las IPs se consultan
+  normalizadas, que es también la clave del cache.
 - Reglas del motor: fallos por IP en ventana deslizante (`max_fallos` en `ventana_s`) → ban
   de `ban_s`; el ban número `ban_permanente_tras` en 24 h es permanente; `InvalidAccountID`
   con ≥3 cuentas distintas en la ventana = escáner (ban inmediato si `escaneres`);
-  `SuccessfulAuth` resetea el contador de esa IP; IPs privadas nunca se banean. Un
+  `SuccessfulAuth` resetea el contador de esa IP; IPs privadas nunca se banean (en v6: `::1`,
+  `fc00::/7`, `fe80::/10`, multicast y los rangos de ejemplo). Un
   `unblock` manual borra también el historial de bans de esa IP (la escalada a permanente
   arranca de cero: es un "perdón"; la escalada sólo se acumula cuando el ban vence solo).
   Agregar un CIDR a la lista blanca no suelta las IPs ya bloqueadas dentro del rango (sólo
@@ -823,6 +952,54 @@ en compose (20 s, §7) cubre ese tope.
 Logs: cada línea es JSON `{ts, level, mod, msg, …campos}` (`control-plane/log.js`); el prefijo
 viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, formato legible con
 `LOG_FORMAT=text` (§6).
+
+### Portería (módulo «Portería», id interno `intercom`) — dueño `porteria`
+
+La etiqueta que ve el usuario en `Configuración → Módulos` es **«Portería»**; el id interno
+es y sigue siendo **`intercom`**. No se renombra: con ese nombre lo conocen el perfil
+`intercom` del compose (§7), `docker/pbxng-reconciler.sh` (que prende y apaga el contenedor
+`go2rtc` según `pbxng_settings.mod_intercom`) y la fila `mod_intercom` que ya existe en las
+centrales instaladas. Cambiar el id dejaría el switch del panel desconectado del contenedor.
+
+Qué enciende y qué apaga el switch:
+
+- **Enciende** las dos entradas de menú del grupo «Portería» en `dashboard/app/shell.jsx`
+  (`MOD_MAP`): `/intercom` (la pared de video) y `/clientes` (donde se dan de alta los porteros
+  RTSP, los espacios y las personas autorizadas). Apagado, el grupo entero desaparece del menú.
+  Antes de 1.11.0 ninguna de las dos pantallas estuvo **nunca** en el menú: existían, tenían
+  datos vivos y la única forma de llegar era escribir la URL.
+- **Apaga el video, NO el CRM.** `GET /api/clients/lookup` —el screen-pop del panel de agente—
+  contesta igual con el módulo apagado: nombre, documento, personas autorizadas, espacios y
+  notas del que llama. Lo único que cambia es que `devices` (los canales de go2rtc) viene
+  vacío, porque con el módulo apagado no hay go2rtc que los sirva. **Envolver esa ruta en un
+  `moduleEnabled('intercom')` deja ciego al agente para apagar un video: no se hace.**
+- Por defecto el módulo viene **encendido** (no está en `MODULE_DEFAULT_OFF` de `app.js`), que
+  es el comportamiento que ya tienen las centrales instaladas. No hace falta migración.
+
+Moderación de porteros, toda en `/clientes/<id>` (solapa «Dispositivos en vivo»):
+
+| Ruta | Qué hace |
+|---|---|
+| `POST /api/clients/:id/devices` | alta; genera el `go2rtc_src` y da de alta el stream en go2rtc en el acto |
+| `PUT /api/devices/:did` | edición: `label`, `type`, `enabled` y `rtsp_url`. **`rtsp_url` ausente o vacío = «no la toques»** (ver credenciales, abajo). Deshabilitar da de baja el stream en go2rtc |
+| `POST /api/devices/:did/test` | «Probar»: go2rtc se conecta a la cámara de verdad (`/api/probe`) y contesta `{ok, motivo, pistas, codecs}`. El cuerpo de go2rtc **no** se reenvía: repite la URL RTSP con la clave adentro |
+| `DELETE /api/devices/:did` | baja; también borra el stream en go2rtc, si no queda tirándole RTSP a una cámara huérfana |
+
+Todas pasan por `crmWrite` (admin o supervisor) además del `rbac.js` de §2.
+
+**Credenciales RTSP.** Hoy viajan dentro de la URL (`rtsp://usuario:clave@ip/...`) y se guardan
+en claro en `pbxng_client_devices.rtsp_url`, porque es lo que hablan las cámaras. Mientras eso
+siga así: la API **nunca** devuelve la URL entera a una pantalla (`rtspMask()` tapa el par
+usuario:clave y agrega `rtsp_set`, en `GET /api/clients/:id` y en el alta y la edición), y
+**nunca** se escribe en un log. *Deuda pendiente*: separar usuario y clave en columnas propias
+es una migración nueva y toca `syncGo2rtc()`, así que no entró en 1.11.0; el riesgo que queda
+es un volcado de la base o un respaldo, no la pantalla.
+
+**Una cámara que no responde no cuelga la pantalla.** `dashboard/app/Intercom.jsx` degrada cada
+recuadro por separado: a los 12 s sin primer segmento (o ante un error del WebSocket) pasa a
+«Sin señal» con el nombre del portero, el motivo en una línea y un botón de reintentar. Antes
+un RTSP mudo dejaba el recuadro en «CARGANDO» para siempre, porque el WebSocket queda abierto
+esperando y no hay evento que avise. Al desmontar se cierra el WebSocket: el video es pesado.
 
 ## 4. Tiempo real (socket.io en `/socket.io`, mismo origen vía el proxy)
 
@@ -897,8 +1074,13 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   es el endpoint que autenticó, no el `CALLERID(num)` que manda el teléfono); otros canales y
   `*98` (buzón ajeno) piden clave, nunca llevan `s`. Mailbox = id del endpoint = interno.
   **Telefonía clásica (1.9.0)**, en el patrón `_[1-9]XXX` del contexto `internal` y por lo tanto
-  **dentro de la imagen** (cambiarlo obliga a reconstruirla): guardia de bucle (`SALTOS`, tope 5 →
-  buzón, porque un desvío A→B y otro B→A giraban sin fin) → `DB(dnd/<ext>)=1` va a la extensión
+  **dentro de la imagen** (cambiarlo obliga a reconstruirla): guardia de bucle (**`__SALTOS`**, tope 5 →
+  buzón, porque un desvío A→B y otro B→A giraban sin fin; va con el prefijo heredable
+  porque el sígueme sale por un canal `Local` y un canal nuevo nace con las variables en
+  cero: con `SALTOS` a secas el tope no veía nunca la cadena entera y el sígueme cruzado
+  giraba igual. La API además **rechaza el ciclo al guardar** —§3, `features`—, pero eso
+  sólo agarra los ciclos ya escritos: el tope del dialplan es el que cubre los que se arman
+  en el medio) → `DB(dnd/<ext>)=1` va a la extensión
   nueva `vm-DND` (`VoiceMail(…,b)`, el teléfono **no suena** y el motivo queda en el log y en el
   CDR) → `DB(cfu/<ext>)` con contenido salta a `Goto(internal,<destino>,1)` **antes** del wake y
   del `Dial` → el timeout del `Dial` es 25 s salvo que haya sígueme, y ahí sale de
@@ -911,6 +1093,20 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
 - **AstDB (base interna de Asterisk): quién escribe y quién lee.** La escribe **sólo la API**
   (por AMI `DBPut`/`DBDel`) y el **dialplan de los códigos de función** (que después avisa a la
   API por `POST /api/internal/feature`, §3). La lee el dialplan, estático y generado.
+
+  **Un `DBPut`/`DBDel` que falla NO tumba el guardado, pero tampoco se calla.** La fuente de
+  verdad es Postgres y el volcado de reconexión lo vuelve a aplicar, así que el panel tiene
+  que poder guardar con el AMI caído; lo que antes faltaba era el aviso. Hoy los `astPut`/
+  `astDel` de `telefonia.js`, `salas.js` y `marcacion.js` y los `setRecFlag`/`setRecAll` de
+  `recordings.js` **registran el error** (`log.error`, con familia y clave) y **devuelven
+  `true`/`false`**; cuando el cambio es algo que alguien apretó en el panel, la respuesta
+  lleva `aviso: "<texto>"` junto al resultado normal y el panel lo muestra como error en vez
+  de decir «guardado». Lo llevan hoy: `PUT /api/extensions/:ext/features`,
+  `PUT /api/nightmode`, `POST|PUT /api/salas[/:name]`, `PUT /api/extensions/:ext/abreviados`
+  y `POST /api/extensions/record-all`. Los volcados de arranque (`syncFeatures`,
+  `syncRecFlags`, `syncAbreviados`) cuentan los fallos y suben a `warn`: si ese volcado queda
+  incompleto, el dialplan lee un estado viejo y **nadie** se entera por el panel, que muestra
+  Postgres.
 
   | Clave | Valor | La escribe | La lee |
   |---|---|---|---|
@@ -932,14 +1128,17 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   siempre vacía y con un WARNING por llamada. El contrato del sprint 6 decía `DB(nightmode)`; la
   desviación es deliberada y está aplicada igual en `telefonia.js` y en `trunks.js`.
 
-  **La AstDB no está en un volumen** (`astdbdir` apunta a `/var/lib/asterisk`, y los compose sólo
-  montan `…/sounds/custom`): recrear el contenedor de Asterisk la deja vacía. Por eso el volcado
-  Postgres → AstDB (`syncFeatures` de `telefonia.js`, `syncRecFlags` de `recordings.js`,
-`syncSalas` de `salas.js` y `syncAbreviados` de `marcacion.js`) corre en
-  **cada conexión del AMI** y no sólo a los 9 s del arranque de la API (`app.js`, array
-  `resincronizar`; 2 s de gracia para que Asterisk cargue `func_db`, freno de 60 s si el AMI
-  flapea). Aun así queda una ventana de ~30–40 s tras recrear Asterisk en la que nada de esto
-  aplica; el arreglo de fondo es darle volumen propio.
+  **La AstDB vive en un volumen propio** (desde 1.11.0): `astdbdir => /var/lib/asterisk/db` en
+  `asterisk.conf` —con la stanza `[directories]` SIN el `(!)` del sample, que la volvía una
+  plantilla inerte— y el volumen `asterisk_db` montado ahí en los dos compose. Subdirectorio y no
+  `/var/lib/asterisk` a secas: un volumen sobre el padre taparía sonidos, `agi-bin` y claves de la
+  imagen. Antes la base nacía vacía al recrear el contenedor y quedaba una ventana de ~30–40 s en
+  la que el dialplan leía vacío: sin desvíos, sin DND, sin modo noche y sin los PIN de las salas.
+  El volcado Postgres → AstDB (`syncFeatures` de `telefonia.js`, `syncRecFlags` de
+  `recordings.js`, `syncSalas` de `salas.js` y `syncAbreviados` de `marcacion.js`) **se queda
+  igual**, en **cada conexión del AMI** y no sólo a los 9 s del arranque de la API (`app.js`,
+  array `resincronizar`; 2 s de gracia para que Asterisk cargue `func_db`, freno de 60 s si el AMI
+  flapea): ahora es la red para cuando Postgres y la AstDB se desincronizan, no la única fuente.
 - **Dialplan que genera la API para una ruta entrante CON horario** (contexto realtime
   `from-trunk`, `trunks.js`): el DID ocupa **tres extensiones**, `<did>` (decide),
   `abierto-<did>` (destino normal) y `cerrado-<did>` (destino fuera de hora, o el buzón del
@@ -953,35 +1152,6 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   a `regenerarEntrantes({horario_id})`. **Sin horario asignado la ruta se genera como siempre**,
   con una sola extensión. Borrar la ruta, o sacarle el horario, borra las tres. La zona horaria
   que usan `GotoIfTime` y `STRFTIME` es la del contenedor de Asterisk (§6, `TZ`).
-- **Fax (`fax.js`, 1.10.0).** Dialplan realtime, no estático: recepción en `from-trunk`
-  (`fax-rx-<caja>`: `ReceiveFAX(<spool>/in/<caja>-${UNIQUEID}.tif,fz)` + aviso por CURL; la caja
-  va en el nombre para que el barrido del spool sepa de quién es el fax, ver §3) y envío en
-  `internal` (`fax-tx`: `SendFAX(${FAXFILE},fz)`), los dos contextos con `switch => Realtime` en
-  `extensions.conf` — **un contexto nuevo no existiría sin reconstruir la imagen**. Las opciones
-  son siempre `f` (respaldo en audio) **y** `z` (pedir T.38): así el mismo dialplan sirve con
-  T.38, sin T.38 y con un SBC-NG en el medio que no pase el reinvite. El envío se origina con
-  `Local/<numero>@internal/n` + `Variable: FAXJOB/FAXFILE/FAXSID/FAXHDR` (una cabecera
-  `Variable:` por clave), o sea que sale por la **ruta saliente de siempre**, con su prefijo, su
-  CallerID y su cadena de failover. La detección de tono (CNG) usa `fax_detect` del endpoint de
-  la troncal: chan_pjsip manda la llamada a la extensión **`fax`** del contexto del endpoint
-  (`from-trunk`), que deriva a la caja elegida. `fax.js` es el único que escribe las columnas
-  T.38 de `ps_endpoints` (`t38_udptl`, `t38_udptl_ec`, `t38_udptl_nat`, `t38_udptl_maxdatagram`,
-  `fax_detect`, `fax_detect_timeout`) y las **reconcilia cada vuelta de su reloj**, porque
-  `writeAsteriskTrunk()` de `trunks.js` borra y reinserta esa fila en cada edición de troncal
-  (pendiente: que `trunks.js` llame a `aplicarT38()` después de escribir). Esa reconciliación
-  **sólo enciende las troncales de la lista `trunks` de la configuración y sólo apaga las que
-  SALIERON de esa lista** (el diff se calcula en el `PUT /api/fax/config`, que es donde se sabe
-  cuál era la lista vieja): el fax no apaga el T.38 de una troncal que él nunca encendió. Y con
-  la lista vacía —el default de `0016_fax.sql`, o sea toda central que no usa fax—
-  `aplicarT38()` **sale sin tocar `ps_endpoints`**, que es una tabla realtime que Asterisk
-  consulta en cada llamada. Los dos UPDATE (el que enciende y el que apaga) filtran por
-  `pbxng_kind='trunk'`: en esa tabla conviven troncales e internos y el fax no puede tocar
-  el endpoint de un teléfono. Las rutas entrantes
-  aceptan `dest_type='fax'` con el **id de la caja** como `dest_value`.
-  **Ojo con `extensions.appdata`: es `varchar(256)`.** Por eso el aviso final va partido en
-  `FQ1`/`FQ2`/`FQ3` y no en un solo CURL; pasarse no da un error entendible (Postgres contesta
-  22001 y el panel muestra «alguno de los datos no es válido»), así que `fax.js` lo frena al
-  generar con un mensaje que dice qué línea no entra.
 - Config generada por el panel: `pbxng.d/{parking,features,moh,pjsip,rtp,pjsip-security}.conf`
   (volumen `asterisk_conf`) incluida por `#include` desde los `.conf` base. Dialplan de
   aplicaciones: tabla realtime `extensions`. Contextos: `from-trunk` (entrantes), `internal`
@@ -1008,7 +1178,13 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   `RequestNotSupported` / `RequestBadFormat` / `UnexpectedAddress` / `InvalidTransport` →
   `escaner`; `SessionLimit` / `MemoryLimit` / `LoadAverageLimit` → `flood` (crit);
   `SuccessfulAuth` → `ok` (no cuenta como fallo y resetea el contador de la IP);
-  `ChallengeSent` se ignora. Sólo `IPV4/...` se procesa (nftables del módulo es IPv4).
+  `ChallengeSent` se ignora. Se procesan **IPV4 e IPV6** (desde 1.11.0): de `remoteaddress` se
+  aceptan `IPV4/UDP/1.2.3.4/5060`, `IPV6/UDP/2001:db8::1/5060` y la forma con corchetes y puerto
+  pegado (`IPV6/WSS/[2001:db8::1]:5060`, que partida por `/` deja todo en el tercer campo), más la
+  IP pelada. Toda IP se guarda **normalizada** (v6 comprimida y en minúsculas, sin el
+  identificador de zona `%eth0`, y `::ffff:1.2.3.4` guardada como IPv4): dos formas de la misma
+  dirección eran dos filas en `pbxng_blocked` y un `unblock` que no encontraba lo que había
+  baneado.
 - Agente de Asterisk `:8092` (`docker/images/asterisk/pbxng-ast-agent.py`; la API le habla
   con `astFwd()` y `sysmon.js` con `get()`, ambos mandan `X-PBXNG-Token`). **Autenticación**:
   todo `POST` (`/fw/*`, `/route`, `/iface`, `/netmode`, `/diag`, `/sound`, `/reload`) y los
@@ -1025,17 +1201,23 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
   - `POST /fw/ban {ip, seconds}` (`seconds` 0 = permanente, tope 10 años) →
     `200 {ok, ip, seconds, enabled:true}`.
   - `POST /fw/unban {ip}` → `200 {ok, ip, enabled:true}` (idempotente: no estar en el set no es error).
-  - `GET /fw/bans` → `{enabled:bool, bans:[{ip, expires_s|null}], motivo?}` (`expires_s` = segundos
-    que le quedan; `null` = permanente).
-  - `POST /fw/sync {bans:[{ip,seconds}]}` → `200 {ok, enabled, total, rechazados:[{ip,error}]}`:
-    deja el set EXACTAMENTE así (flush + add en una sola transacción `nft -f`).
-  - Errores: `400 {error}` (IP inválida, IPv6, privada/loopback/reservada, IP del propio host,
-    `bans` no es lista), `401 {error:'token inválido'}`, `503 {ok:false, enabled:false, motivo}`
-    si no hay `nft` o el kernel no soporta nf_tables, `500 {ok:false, error}` si `nft` falló.
-  - Implementación: tabla `inet pbxng`, set `banned {type ipv4_addr; flags timeout;}`, chain
-    `input` (`type filter hook input priority -10; policy accept`) con la regla
-    `ip saddr @banned drop`. `ensure_fw()` es idempotente (crea sólo lo que falta, nunca borra el
-    set): la corre el entrypoint (`pbxng-ast-agent.py --ensure-fw`, tolera un host sin nftables
+  - `GET /fw/bans` → `{enabled:bool, v6:bool, bans:[{ip, expires_s|null}], motivo?}` (`expires_s`
+    = segundos que le quedan; `null` = permanente). Los dos sets vienen en una sola lista: para
+    la API un ban es un ban y la familia la decide la IP.
+  - `POST /fw/sync {bans:[{ip,seconds}]}` → `200 {ok, enabled, v6, total, rechazados:[{ip,error}]}`:
+    deja los sets EXACTAMENTE así (flush + add de los dos en una sola transacción `nft -f`).
+  - Errores: `400 {error}` (IP inválida, privada/loopback/link-local/ULA/reservada, IP del propio
+    host, `bans` no es lista), `401 {error:'token inválido'}`, `503 {ok:false, enabled:false,
+    motivo}` si no hay `nft` o el kernel no soporta nf_tables, `500 {ok:false, error}` si `nft`
+    falló. **IPv6 ya no es un error** (desde 1.11.0): se banea igual.
+  - Implementación: tabla `inet pbxng`, sets `banned {type ipv4_addr; flags timeout;}` y
+    `banned6 {type ipv6_addr; flags timeout;}` (nftables no mezcla familias en un set), chain
+    `input` (`type filter hook input priority -10; policy accept`) con las reglas
+    `ip saddr @banned drop` y `ip6 saddr @banned6 drop`. La IP entra al set que le toca por su
+    familia y `/fw/sync` deja los **dos** sets exactos en una sola transacción. Si el host no
+    soporta v6, el agente sigue con v4 y devuelve `v6:false` con el motivo (los bans v6 van a
+    `rechazados`): en una central sin IPv6 todo esto es inerte. `ensure_fw()` es idempotente
+    (crea sólo lo que falta, nunca borra los sets): la corre el entrypoint (`pbxng-ast-agent.py --ensure-fw`, tolera un host sin nftables
     y sigue), el agente al arrancar y cada `/fw/*`. Los bloqueos viven en el kernel del host:
     sobreviven a reinicios del contenedor; la API debe llamar a `/fw/sync` al arrancar para
     reconciliar con `pbxng_blocked`.
@@ -1058,23 +1240,16 @@ viejo (`[ARI]`, `[PUSH]`…) es ahora el campo `mod`. Nivel por `LOG_LEVEL`, for
 `DOMAIN PUBLIC_IP TENANT_MODE DEFAULT_COMPANY` · `DB_HOST DB_PORT DB_NAME DB_USER DB_PASS` ·
 `ARI_USER ARI_PASS AMI_USER AMI_PASS JWT_SECRET ADMIN_DEFAULT_PASS` · `ASTERISK_HOST MEDIA_HOST
 TURN_HOST VOZ_HOST NPM_HOST AST_AGENT TURN_AGENT` · `TURN_USER TURN_PASS TURN_CLI_PASS
-TURN_REALM` · `API_URL` (el dashboard lo lee al arrancar, `server.js`; ya no se fija en el build) · `SOFTPHONE_DIR` (opcional) ·
+TURN_REALM` (**`TURN_HOST` NO alimenta `/api/ice`**: sólo apunta al agente `:8091` y al nodo
+«TURN» de la topología. El host que se les declara a los softphones sale del ORIGEN elegido en
+el panel —§3, `control-plane/turn.js`—, y eso es a propósito: en una central real `TURN_HOST`
+quedó apuntando a un SBC desconectado y nadie pudo corregirlo sin entrar por SSH. `STUN_URL`
+es un override opcional del STUN; sin él el STUN es el propio appliance, nunca un servicio
+público) · `API_URL` (el dashboard lo lee al arrancar, `server.js`; ya no se fija en el build) · `SOFTPHONE_DIR` (opcional) ·
 `COMPOSE_PROFILES` (módulos activos) · `VAPID_PUBLIC VAPID_PRIVATE VAPID_SUBJECT` (Web Push;
 opcionales: si el par falta o no firma —placeholder, largo incorrecto— la API genera uno y lo
 guarda en `pbxng_settings.vapid_*`, §3 familia `push`; `VAPID_SUBJECT` default
 `mailto:soporte@example.com`) · `GO2RTC_MGMT` (intercom, default `http://go2rtc:1984`)
-· **`FAX_DIR`** (dónde ve la API el spool de fax, default `<REC_DIR>/fax`, o sea `/recordings/fax`) y **`FAX_DIR_AST`**
-(el MISMO directorio como lo ve Asterisk, default `/var/spool/asterisk/monitor/fax`): son los
-dos nombres del mismo lugar, y por defecto cuelgan del volumen `recordings`, que ya está montado
-en los dos contenedores — el fax funciona sin tocar el compose, y el spool sobrevive a un `up -d`
-porque `recordings` es un volumen con nombre. Si cambia uno hay que cambiar el
-otro, o Asterisk escribe el TIFF donde la API no lo encuentra. Desde 1.10.0 los dos compose
-reenvían `FAX_DIR FAX_DIR_AST FAX_MAX_MB FAX_TICK_MS FAX_CONVERT_MS` en el `environment:` del
-servicio `api`, vacíos por defecto (vacío = el default de `fax.js`) · `FAX_MAX_MB` (tope DURO del PDF
-que se sube, default 20, máximo 64; la configuración del panel puede bajarlo pero no subirlo,
-porque el límite lo aplica `express.raw` al registrar la ruta) · `FAX_TICK_MS` (cada cuánto corre
-la cola de envío, el barrido del spool y la reconciliación de T.38; default 20000, mínimo 5000) ·
-`FAX_CONVERT_MS` (tiempo máximo de ghostscript / tiff2pdf, default 120000)
 · `ENROLL_REUSE_SECONDS` (opcional, default 120) · `SALAS_AGENDA_MS` (opcional, default
 30000, mínimo 10000: cada cuánto la API revisa si una sala agendada tiene que abrir o cerrar)
 · **`CC_LOTE_MS CC_LOTE_TOPE CC_LOTE_FILAS`** (opcionales, la cota del consumidor AMI de
@@ -1132,19 +1307,15 @@ API). No existe `REDIS_HOST`: Redis se retiró del stack (nada lo usaba).
 
 ## 7. Volúmenes (iguales en `docker-compose.yml` y `docker-compose.release.yml`)
 
-`pg_data npm_data npm_letsencrypt asterisk_sounds asterisk_conf voz_models go2rtc_config
-recordings voicemail certs respaldos`. Montajes: asterisk → `recordings`, `voicemail`, `certs`
-(`/etc/pbxng`, ro), `asterisk_conf` (`/etc/asterisk/pbxng.d`), `asterisk_sounds`, `respaldos`;
+`pg_data npm_data npm_letsencrypt asterisk_sounds asterisk_db asterisk_conf voz_models
+go2rtc_config recordings voicemail certs respaldos`. Montajes: asterisk → `recordings`,
+`voicemail`, `certs` (`/etc/pbxng`, ro), `asterisk_conf` (`/etc/asterisk/pbxng.d`),
+`asterisk_sounds`, `asterisk_db` (`/var/lib/asterisk/db`, la AstDB), `respaldos`;
 api → `recordings` (rw), `voicemail`, `certs` (`/etc/pbxng`), `respaldos`, `asterisk_conf`,
 `asterisk_sounds`. Asterisk con `cap_add: NET_ADMIN` y `network_mode: host`. Servicios: `core`
 = postgres, asterisk, api, dashboard · `turn` = coturn · `ai` = voz · `intercom` = go2rtc ·
 `proxy` = npm (sin Redis). `docker/check-compose-parity.sh` (lo corre `release.sh` y la CI)
 falla si los dos compose difieren en algo que no sea `build:`/`image:`.
-El **fax** (§3) todavía no tiene volumen propio: usa un subdirectorio del volumen `recordings`
-(`FAX_DIR=/recordings/fax` en la API, `FAX_DIR_AST=/var/spool/asterisk/monitor/fax` en Asterisk),
-que es el único ya montado en los dos contenedores, así que funciona sin tocar el compose.
-Pedido a `empaquetado`: un volumen `fax` propio, `ghostscript` + `libtiff-tools` en la imagen de
-la API y `libspandsp2`/`libspandsp-dev` (res_fax_spandsp) en la de Asterisk.
 Todos los servicios llevan `healthcheck`, `mem_limit`/`memswap_limit` (variables `MEM_*`, §6)
 y `logging` json-file 10 MB × 5 (`x-logging`). `stop_grace_period`: asterisk 60 s, api 20 s.
 El healthcheck de la API pega a `GET /health/ready` (tiene que devolver 503 si la base no
@@ -1205,6 +1376,12 @@ réplicas no migren a la vez); `deploy.sh` lo corre además antes del `up -d` (c
 `run --rm --no-deps --entrypoint node api migrate.js`: el entrypoint de la imagen ignora los
 argumentos y terminaría levantando la API, hay que pisarlo) para que un esquema roto frene el
 deploy en vez de dejar la API en crash-loop; al arrancar no hace nada la segunda vez.
+**Los `RAISE NOTICE` de una migración salen por el log de la API** con el prefijo `[sql]`:
+`migrate.js` engancha el evento `notice` de node-pg, que si no se escucha los descarta en
+silencio (Postgres sí los manda al cliente —`client_min_messages` es `NOTICE`—, pero
+`log_min_messages` es `WARNING`, así que tampoco quedan en el log del servidor). Es el único
+rastro de lo que una migración decide sola: si una migración repunta o borra datos de una
+central en producción, tiene que avisarlo con `RAISE NOTICE`.
 `0012_ccreport.sql` (1.10.0) crea `pbxng_queue_events` (la vida de cada llamada dentro de una
 cola, que llena el consumidor AMI de `ccreport.js`) y `pbxng_cc_reports` (los envíos
 programados del informe), siembra la regla de alerta `ccreport.scheduled` **prendida** y el
@@ -1219,8 +1396,31 @@ sin PIN que además ahora se puede moderar es una sala abierta a cualquiera que 
 `0015_marcacion.sql` (1.10.0) crea `pbxng_disa`, `pbxng_callback`, `pbxng_dialbyname`,
 `pbxng_abreviados` y `pbxng_marcacion_log`. **DISA y callback nacen con `enabled=false`**: una
 actualización no enciende sola algo que gasta plata.
-`0016_fax.sql` (1.10.0) crea `pbxng_fax_config` (singleton), `pbxng_fax_boxes`, `pbxng_fax_in` y
-`pbxng_fax_out`. Los documentos van al disco (§7), no a un `bytea`.
+`0016_fax.sql` (1.10.0) creó las cuatro tablas del fax, que **`0018_sin_fax.sql` (1.11.0) borra**
+(ver abajo): la `0016` se deja como está porque ya corrió en centrales instaladas y una migración
+aplicada no se edita nunca.
+`0018_sin_fax.sql` (1.11.0) **retira el fax** (decisión de producto, ver el CHANGELOG y el ítem 7
+de `docs/BRECHA-UCM-XORCOM.md`): borra `pbxng_fax_in`, `pbxng_fax_out`, `pbxng_fax_boxes` y
+`pbxng_fax_config`, el dialplan que hubiera quedado (`from-trunk/fax`, `from-trunk/fax-rx-%`,
+`internal/fax-tx` —que vuelve a ser un número libre del contexto compartido—) y apaga `t38_udptl`
+y `fax_detect` en los endpoints con `pbxng_kind='trunk'`. **Las rutas entrantes que tenían destino
+`fax` se repuntan en la misma transacción, dialplan incluido**: el destino de fuera de hora se
+limpia (la ruta sigue siendo válida y cae al buzón o al saludo, como cualquier ruta con horario y
+sin destino cerrado) y el destino principal pasa al IVR de menor id; si la central no tiene
+ningún IVR, la ruta se borra con su dialplan y queda un `NOTICE` en el log de la migración. Tocar
+sólo la tabla no alcanzaba: **nada regenera las rutas entrantes al arrancar**, así que el DID
+habría seguido saltando a un `fax-rx-<n>` inexistente —silencio para el que llama, y en el panel
+la ruta se ve perfecta—. Es idempotente y no falla si las tablas no existen (el fax se agregó en
+1.10.0 y no se activó en ninguna instalación). **No borra los documentos del spool**
+(`/recordings/fax`): un fax recibido es un documento del cliente.
+`0019_turn_origen.sql` (1.11.0) **deja explícito que el coturn propio viene encendido de
+fábrica**: siembra `mod_turn='1'` y `turn_origen='propio'` **sólo si no hay fila** (una central
+que ya decidió apagarlo no se toca) y borra un `stun_url` que apunte a Google/Cloudflare/Twilio.
+Existe por un bug de tres piezas medido en producción: `moduleEnabled()` devuelve `true` cuando
+NO hay fila, así que el panel mostraba «TURN/STUN» encendido; el reconciliador salteaba justo ese
+caso (`[ -z "$v" ] && continue`), así que el contenedor nunca se levantaba; y `/api/ice` repartía
+igual la dirección del relay inexistente a siete softphones WebRTC. El default existía en la API
+y no llegaba nunca al contenedor, y nadie lo encendía porque para todos ya estaba encendido.
 `0017_callback_rutas.sql` (1.10.0) le agrega a `pbxng_callback` la columna `rutas` (jsonb, las
 mismas ids de `pbxng_outbound_routes` que usa la DISA) **y apaga los callbacks en modo `pin` que
 estuvieran encendidos**: ahí el destino lo ponía el CallerID de quien llamaba —que se falsea en
@@ -1249,8 +1449,8 @@ no rompe porque las tablas ya existen, pero la próxima migración no se aplicar
   Hay dos clases de prueba en `test/`:
   - **unitarias con mocks** (`guard.test.js`): sin base ni Asterisk, corren siempre.
   - **de integración** (`auth`, `rbac`, `users`, `trunks`, `sbc-link`, `calls`, `telefonia`,
-    `marcacion`, `salas`, `ccreport`, `fax`, `fax-barrido` `.test.js`; 102 pruebas en total con
-    `guard.test.js`, ~51 s):
+    `marcacion`, `salas`, `ccreport` `.test.js`; 98 pruebas en total con
+    `guard.test.js`, ~38 s):
     levantan la API REAL (`app.js` como proceso hijo en un puerto libre, `JWT_SECRET` de
     prueba, `ADMIN_DEFAULT_PASS=admin`, ARI/AMI/agente apuntando a puertos cerrados de
     loopback, `CONF_DIR`/`REC_DIR`/`VM_DIR`/`BACKUP_DIR` en un temporal) contra un

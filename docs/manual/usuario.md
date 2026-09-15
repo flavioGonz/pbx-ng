@@ -182,8 +182,8 @@ Si no atendés, la persona puede dejarte un mensaje.
 
 - **Desde el teléfono**: marcá `*97`. Desde tu teléfono o softphone registrado entra directo a **tu**
   buzón, sin PIN (la central lo reconoce por la extensión que se autenticó, no por el número que
-  muestra el teléfono). El PIN sólo hace falta para `*98` (buzón de otra extensión): al principio es
-  el número de esa extensión; cambialo desde el menú del buzón.
+  muestra el teléfono). El PIN sólo hace falta para `*98` (buzón de otra extensión): lo genera la
+  central al azar y te lo pasa el administrador. También lo podés cambiar desde el menú del buzón.
 - **Desde la app**: en la sección **Voz** los escuchás, los leés transcritos y los borrás.
 - **Por correo**: si el administrador lo activó, cada mensaje te llega al mail con el audio adjunto
   y **la transcripción escrita**. Te enterás de qué se trata sin escuchar nada.

@@ -129,24 +129,25 @@ const PERMISOS = [
   // encenderla) es otra cosa y cae al default: admin.
   ['GET',      /^\/api\/(disa|callback)\/registro$/,        SUP],
 
-  // Fax: ver las dos bandejas, bajar el documento y MANDAR un fax es operación —es lo que
-  // hace todos los días la secretaría de un estudio contable, y el supervisor ya puede
-  // originar llamadas (`calls/dial`)—. Configurar las cajas, el T.38 de las troncales y
-  // BORRAR un fax recibido es otra cosa y cae al default (admin): un fax recibido es un
-  // documento, y borrarlo es la misma decisión que borrar una grabación.
-  ['GET',      /^\/api\/fax\/(estado|config)$/,             SUP],
-  ['GET',      /^\/api\/fax\/boxes$/,                       SUP],
-  ['GET',      /^\/api\/fax\/(in|out)$/,                    SUP],
-  ['GET',      /^\/api\/fax\/(in|out)\/\d+\/pdf$/,          SUP],
-  ['POST',     /^\/api\/fax\/out$/,                         SUP],
-  ['POST',     /^\/api\/fax\/out\/\d+\/retry$/,             SUP],
-  ['DELETE',   /^\/api\/fax\/out\/\d+$/,                    SUP],
+  // Buzones de voz: el LISTADO no trae el PIN (sólo `pin_debil`), pero el DETALLE
+  // `GET /api/mailboxes/:mailbox` y la rotación `POST /api/mailboxes/:mailbox/pin` sí lo
+  // manejan en claro, y con el PIN del buzón se escuchan los mensajes de otro marcando
+  // `*98`. Misma decisión que los PIN de las salas: quedan en ADMIN. Van con regla
+  // EXPLÍCITA aunque el default ya sea admin, porque el día que a `mailboxes` se le abra
+  // una regla para supervisor (buzones ajenos ES trabajo de supervisor) un comodín
+  // `/api/mailboxes(/|$)` se llevaría puestas estas dos sin que nadie lo note.
+  ['GET',      /^\/api\/mailboxes\/[^/]+$/,                 ADMIN],
+  ['POST',     /^\/api\/mailboxes\/[^/]+\/pin$/,            ADMIN],
+  // Rotación EN LOTE (`solo_debiles` o una lista): es la misma acción repetida, así que
+  // el mismo rol. Va antes que cualquier comodín futuro de `mailboxes` por lo mismo que
+  // las dos de arriba, y con más razón: de un saque le cambia el PIN a toda la central.
+  ['POST',     /^\/api\/mailboxes\/rotar-pin$/,             ADMIN],
 
   /* ── Todo lo demás (configuración del sistema) queda en ADMIN por defecto:
    *    users, settings, trunks, routes, sbc-link, modules (escritura), backup,
    *    asterisk, net, system, turn, acme, npm, integrations, branding (escritura),
    *    extensions/endpoints (escritura), ivr, queues/ringgroups (escritura),
-   *    recordings (borrado y almacenamiento), fax (cajas, config y borrado de recibidos), vm/email, security (escritura, whitelist, geoblock, settings), email, voz,
+   *    recordings (borrado y almacenamiento), vm/email, security (escritura, whitelist, geoblock, settings), email, voz,
    *    prompts, sysprompts, capture, sip, db, manuales, c2c, alerts, etc. */
 ];
 

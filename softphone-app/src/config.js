@@ -2,7 +2,10 @@ const KEY = 'sp_config';
 const DEFAULTS = {
   transport: 'webrtc',
   wss: '', wssBackup: '', domain: '', ext: '', pass: '', name: '',
-  stun: 'stun:stun.l.google.com:19302', turn: '', turnUser: '', turnPass: '',
+  // Vacíos: los llena el aprovisionamiento (QR / link de enrolado) con el STUN y el TURN
+  // de la propia central. Un default público hacía que un softphone recién instalado
+  // buscara candidatos contra Google aun en redes sin salida a internet.
+  stun: '', turn: '', turnUser: '', turnPass: '',
   sipServer: '', sipPort: '5060', sipTransport: 'udp', sipSrtp: 'none', sipDtmf: 'rfc4733', tlsVerify: false, sipSrv: false, sipMwi: false, soundsUi: true,
   codec: 'auto', codecForce: false,   // preferencia de códec de audio (para probar transcoding del SBC)
 };

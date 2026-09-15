@@ -197,15 +197,20 @@ case "$ROLE" in
 # ==========================================================================
 all)
   TENANT_MODE="${TENANT_F:-single}"
-  c "Modulos (perfiles). core siempre; el resto opcional."
-  PROFS=(core)
-  if [[ -n "$PROFILES" ]]; then IFS=',' read -ra PROFS <<< "core,$PROFILES"; PROFS=($(printf '%s\n' "${PROFS[@]}" | awk '!s[$0]++'));
+  # El perfil `turn` NO se pregunta: el coturn propio es parte de PBX-NG y viene
+  # ENCENDIDO DE FABRICA. Sin TURN, un softphone detras de un NAT simetrico se queda
+  # sin audio; eso es ROTO, no "mejorable". Ya paso: una central se instalo con
+  # COMPOSE_PROFILES vacio y estuvo repartiendo por /api/ice la direccion de un relay
+  # que nadie corria, con siete softphones WebRTC configurados contra eso.
+  c "Modulos (perfiles). core y turn siempre; el resto opcional."
+  PROFS=(core turn)
+  if [[ -n "$PROFILES" ]]; then IFS=',' read -ra PROFS <<< "core,turn,$PROFILES"; PROFS=($(printf '%s\n' "${PROFS[@]}" | awk '!s[$0]++'));
   elif [[ "$YES" == 1 ]]; then PROFS=(core turn ai intercom); else
-    echo "   1) Todo (core+turn+ai+intercom)   2) Elegir   3) Solo core"
+    echo "   1) Todo (core+turn+ai+intercom)   2) Elegir   3) Solo el nucleo (core+turn)"
     case "$(ask 'Elegi' '1')" in
       1) PROFS=(core turn ai intercom);;
-      3) PROFS=(core);;
-      2) yn "turn (Coturn, WebRTC detras de NAT)" && PROFS+=(turn); yn "ai (Voz IA)" && PROFS+=(ai); yn "intercom (go2rtc)" && PROFS+=(intercom);;
+      3) PROFS=(core turn);;
+      2) yn "ai (Voz IA)" && PROFS+=(ai); yn "intercom (go2rtc)" && PROFS+=(intercom);;
       *) r "Opcion invalida"; exit 1;;
     esac
   fi
@@ -239,8 +244,11 @@ core)
   DOMAIN="${DOMAIN_F:-$( [[ "$YES" == 1 ]] && echo pbx.local || ask 'Dominio publico' 'pbx.tu-dominio.com')}"
   PUBLIC_IP="${PUBLIC_IP_F:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP publica (WAN)' '')}"
   TURN_IP="${TURN_IP:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP del host TURN (coturn) si esta separado (vacio = esta VM)' '')}"
-  PROFS=(core)
-  if [[ -n "$PROFILES" ]]; then IFS=',' read -ra PROFS <<< "core,$PROFILES"; PROFS=($(printf '%s\n' "${PROFS[@]}" | awk '!s[$0]++'));
+  # Igual que en el rol `all`: el coturn viene encendido de fabrica. La UNICA razon
+  # para no levantarlo aca es que el TURN viva en OTRO host (--turn-ip=), porque
+  # entonces ya hay uno y un solo origen se declara a la vez.
+  if [[ -n "$TURN_IP" ]]; then PROFS=(core); else PROFS=(core turn); fi
+  if [[ -n "$PROFILES" ]]; then IFS=',' read -ra PROFS <<< "$(IFS=,; echo "${PROFS[*]}"),$PROFILES"; PROFS=($(printf '%s\n' "${PROFS[@]}" | awk '!s[$0]++'));
   elif [[ "$YES" != 1 ]]; then yn "Incluir 'ai' (Voz IA/IVR)?" n && PROFS+=(ai); yn "Incluir 'intercom' (video go2rtc)?" n && PROFS+=(intercom); fi
   CPROFILES="$(IFS=,; echo "${PROFS[*]}")"
   ensure_env; gen_shared_secrets
@@ -264,6 +272,9 @@ core)
   y "  Si hay un SBC-NG adelante, conectalo desde el panel: Configuracion -> SBC-NG."
   g "================================================================"
   fw_note "$CPROFILES"
+  # Mismo chequeo REAL que el rol `all`: que el puerto conteste no alcanza, lo que
+  # importa es que llegue un candidato relay.
+  [[ "$CPROFILES" == *turn* ]] && turn_selfcheck
 ;;
 # ==========================================================================
 *) r "Rol invalido: $ROLE (usa all | core)"; exit 1;;

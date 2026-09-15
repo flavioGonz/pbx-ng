@@ -2,11 +2,11 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { usePoll, useApi } from './api';
 import { fmtBytes, fmtUptime, fmtFechaHora, fmtReloj } from './fmt';
-import { SimpleGrid, Card, Group, Text, Title, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider, Alert, Grid, Tooltip } from '@mantine/core';
+import { SimpleGrid, Card, Group, Text, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider, Alert, Grid, Anchor } from '@mantine/core';
+import Link from 'next/link';
 import Slot from './Slot';
 import { IconServer2, IconCpu, IconDatabase, IconDeviceLandlinePhone, IconUsers, IconPhone, IconHeadset, IconUsersGroup, IconClock, IconActivity, IconWorld, IconShieldLock, IconRouteAltLeft, IconCircleFilled, IconDeviceSdCard, IconLayoutDashboard, IconBolt, IconPlugConnected, IconAlertTriangle, IconArrowRight, IconBan, IconPhoneOff } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
-import SystemOverview from './SystemOverview';
 import AttackGlobe from './AttackGlobe';
 import { useLive } from './useLive';
 
@@ -150,6 +150,10 @@ export default function Resumen() {
    * el que hace que esta pantalla sirva de verdad: un ataque en curso se ve al entrar,
    * sin tener que acordarse de abrir la otra pestaña. */
   const { data: soc } = usePoll('/security', 60000);
+  /* El relay de medios. Va aparte de `/topology` porque la topología sólo mide puertos y
+   * un TURN que contesta el puerto puede estar repartiendo una dirección privada —que es
+   * exactamente lo que pasaba acá—. Esta sonda hace un Allocate y mira el candidato. */
+  const { data: turn } = usePoll('/turn/estado', 60000);
   /* `[]` literal como dependencia de un hook es el bug de React #185 que ya nos comió
    * /troncales dos veces: cada render arma un arreglo nuevo y el efecto se llama solo
    * para siempre. Memoizado, y `npm run check:deps` lo vigila. */
@@ -244,7 +248,15 @@ export default function Resumen() {
   const svcList = [
     { n: 'Asterisk (AMI/ARI)', est: combinar(vivo(h.ari), vivo(h.ami), estMed('asterisk')), ip: topo?.nodes?.asterisk || '-' },
     { n: 'Base de datos', est: combinar(vivo(h.db), estMed('db')), ip: topo?.nodes?.db || '-' },
-    { n: 'Turn-NG Server', est: combinar(estMed('turn') ?? estComp(/TURN/i)), ip: topo?.nodes?.turn || '-' },
+    /* El relay de medios es de ESTA central (el coturn propio), no del borde. La fila
+     * mostraba `TURN_HOST`, que en pbx01 apuntaba al SBC desde que se desconectó: un
+     * servicio de otra máquina, dado por «Operativo» porque un puerto contestaba. Ahora
+     * el estado sale de la sonda real (`/api/turn/estado`), que hace un Allocate y mira
+     * el candidato relay: un TURN que contesta pero reparte una dirección privada es una
+     * FALLA, no un OK. */
+    { n: 'Relay de medios (TURN)', est: !turn ? ESPERANDO : (turn.corriendo ? OK : CAIDO),
+      ip: (turn && turn.host) ? turn.host + ' · ' + turn.origen : '—',
+      detalle: (turn && !turn.corriendo && turn.motivo) || '' },
     { n: 'Proxy NPM (TLS/WSS)', est: combinar(estMed('proxy') ?? estComp(/Proxy/i)), ip: topo?.nodes?.npm || '-' },
     // Bordes EXTERNOS: otro producto, con su propio panel. Se listan aparte para que
     // se vea que su caida no es una falla de esta central, pero si le corta la salida.
@@ -318,8 +330,9 @@ export default function Resumen() {
       </Grid>
 
 
-      {/* Fila 1: espacio · recursos · servicios */}
-      <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
+      {/* Hardware: espacio y recursos del equipo, que es lo único de la máquina que se mira
+          todos los días. El inventario por nodo vive en /sistema. */}
+      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
         <Card withBorder radius="lg" padding="lg" shadow="sm">
           <Text fw={600} mb="md">Uso de espacio</Text>
           <SimpleGrid cols={2}>
@@ -343,45 +356,12 @@ export default function Resumen() {
           <Group gap="lg" mt="xs"><Group gap={5}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#4f7fd9' }} /><Text size="xs" c="dimmed">CPU ({m?.cores || '?'} cores)</Text></Group><Group gap={5}><span style={{ width: 10, height: 10, borderRadius: 3, background: '#b06ad6' }} /><Text size="xs" c="dimmed">Memoria</Text></Group><Text size="xs" c="dimmed" ml="auto">load {m?.load ? m.load[0].toFixed(2) : '—'}</Text></Group>
         </Card>
 
-        <Card withBorder radius="lg" padding="lg" shadow="sm">
-          <Text fw={600} mb="md">Servicios principales</Text>
-          <Stack gap={2}>
-            {svcList.map(s => (
-              <Group key={s.n} justify="space-between" py={7} style={{ borderBottom: '1px solid var(--mantine-color-gray-1)' }}>
-                <Group gap={8}><ThemeIcon size={28} radius="md" variant="light" color={s.est === CAIDO ? 'red' : s.est === OK ? 'teal' : 'gray'}><IconServer2 size={15} /></ThemeIcon><div><Text size="sm" fw={500} lh={1.1}>{s.n}</Text><Text size="xs" c="dimmed" ff="monospace">{s.ip}</Text></div></Group>
-                <Badge variant="light" color={s.est === CAIDO ? 'red' : s.est === OK ? 'teal' : 'gray'}>{s.est === CAIDO ? 'Caído' : s.est === OK ? 'Operativo' : 'Midiendo…'}</Badge>
-              </Group>
-            ))}
-          </Stack>
-        </Card>
       </SimpleGrid>
 
-      {/* Fila 2: PBX · interfaces · troncales */}
-      <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
-        <Card withBorder radius="lg" padding="lg" shadow="sm">
-          <Text fw={600} mb="md">Estado del PBX</Text>
-          <StatRow icon={<IconClock size={15} />} label="Hora del sistema" value={fmtFechaHora(snap?.ts)} />
-          <StatRow icon={<IconPhone size={15} />} label="Llamadas activas" value={ch.length} color="teal" />
-          <StatRow icon={<IconUsers size={15} />} label="Usuarios WebRTC" value={webrtc} color="grape" />
-          <StatRow icon={<IconActivity size={15} />} label="Uptime servidor" value={fmtUptime(m?.uptime)} color="orange" />
-          <Box mt="md">
-            <Bar label="Extensiones registrados" value={online} total={eps.length} color="teal" />
-            <Bar label="Colas / ACD" value={qs.length} total={qs.length || 1} color="violet" />
-          </Box>
-        </Card>
-
-        <Card withBorder radius="lg" padding="lg" shadow="sm">
-          <Text fw={600} mb="md">Estado de interfaces</Text>
-          <Stack gap={2}>
-            {(comps.length ? comps : svcList.map(s => ({ name: s.n, status: s.est === CAIDO ? 'down' : s.est === OK ? 'ok' : 'wait', detail: s.ip }))).slice(0, 8).map((c, i) => (
-              <Group key={i} justify="space-between" py={7} style={{ borderBottom: '1px solid var(--mantine-color-gray-1)' }}>
-                <Group gap={8}><IconCircleFilled size={9} color={c.status === 'ok' ? 'var(--mantine-color-teal-6)' : c.status === 'pending' ? 'var(--mantine-color-yellow-6)' : c.status === 'down' ? 'var(--mantine-color-red-6)' : 'var(--mantine-color-gray-5)'} /><Text size="sm">{c.name}</Text></Group>
-                <Text size="xs" c="dimmed" ff="monospace" truncate maw={150}>{c.detail || ''}</Text>
-              </Group>
-            ))}
-          </Stack>
-        </Card>
-
+      {/* Troncales. «Estado del PBX» y «Estado de interfaces» se fueron: repetían los
+          números grandes de arriba y la lista de servicios de al lado. Una pantalla que
+          dice tres veces lo mismo no informa más, informa peor. */}
+      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
         <Card withBorder radius="lg" padding="lg" shadow="sm">
           <Group justify="space-between" mb="md"><Text fw={600}>Troncales</Text><Badge variant="light" color="gray">{trunks.length} total</Badge></Group>
           <Group wrap="nowrap" gap="lg" align="center">
@@ -403,33 +383,22 @@ export default function Resumen() {
             {trunks.length === 0 && <Text size="sm" c="dimmed" ta="center" py="sm">Sin troncales configuradas.</Text>}
           </Stack>
         </Card>
+        <Card withBorder radius="lg" padding="lg" shadow="sm">
+          <Group justify="space-between" mb="md">
+            <Text fw={600}>Servicios principales</Text>
+            <Anchor component={Link} href="/sistema" size="xs">Ver el sistema en detalle →</Anchor>
+          </Group>
+          <Stack gap={2}>
+            {svcList.map(s => (
+              <Group key={s.n} justify="space-between" py={7} style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+                <Group gap={8}><ThemeIcon size={28} radius="md" variant="light" color={s.est === CAIDO ? 'red' : s.est === OK ? 'teal' : 'gray'}><IconServer2 size={15} /></ThemeIcon><div><Text size="sm" fw={500} lh={1.1}>{s.n}</Text><Text size="xs" c="dimmed" ff="monospace">{s.ip}</Text></div></Group>
+                <Badge variant="light" color={s.est === CAIDO ? 'red' : s.est === OK ? 'teal' : 'gray'}>{s.est === CAIDO ? 'Caído' : s.est === OK ? 'Operativo' : 'Midiendo…'}</Badge>
+              </Group>
+            ))}
+          </Stack>
+        </Card>
       </SimpleGrid>
 
-      {/* Núcleo de Asterisk: el estado vivo del motor (versión, canales, endpoints,
-          transportes y módulos) — antes vivía en la pestaña "PBX" del menú. */}
-      <Card withBorder radius="lg" padding="lg" shadow="sm">
-        <Group justify="space-between" mb="md">
-          <Group gap="sm">
-            <ThemeIcon size={42} radius="md" variant="light" color="pbx"><IconServer2 size={22} /></ThemeIcon>
-            <div><Text fw={800} lh={1.1}>Núcleo de Asterisk</Text><Text size="xs" c="dimmed">{core?.version || 'Consultando el motor…'}</Text></div>
-          </Group>
-          <Group gap={6}>
-            <Badge variant={h.ami ? 'filled' : 'light'} color={h.ami ? 'teal' : 'red'} leftSection={<IconBolt size={12} />}>{h.ami ? 'AMI' : 'Sin AMI'}</Badge>
-            <Badge variant="light" color={h.ari ? 'teal' : 'gray'}>{h.ari ? 'ARI' : 'Sin ARI'}</Badge>
-          </Group>
-        </Group>
-        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Versión</Text><Text fw={700} size="sm">{core?.version || '—'}</Text></Card>
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Canales activos</Text><Text fw={800} size="xl">{core?.channels ?? ch.length}</Text></Card>
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Endpoints</Text><Text fw={800} size="xl">{core?.endpoints ?? eps.length}</Text></Card>
-          <Card withBorder radius="md" padding="sm"><Text size="xs" c="dimmed">Uptime del motor</Text><Text fw={700} size="sm">{(core?.uptime || '—').replace(/^System uptime:\s*/i, '')}</Text></Card>
-        </SimpleGrid>
-        {core?.transports?.length > 0 && <><Text fw={600} size="sm" mt="md" mb={6}>Transportes PJSIP</Text><Group gap="xs">{core.transports.map(t => <Badge key={t.id} variant="light" color="pbx" leftSection={<IconPlugConnected size={12} />}>{t.id} · {(t.proto || '').toUpperCase()}</Badge>)}</Group></>}
-        {core?.modules && <><Text fw={600} size="sm" mt="md" mb={6}>Módulos clave</Text><Group gap="xs">{Object.entries(core.modules).map(([k, v]) => <Badge key={k} variant="light" color={v ? 'teal' : 'red'}>{k}: {v ? 'cargado' : 'no'}</Badge>)}</Group></>}
-      </Card>
-
-      {/* Infraestructura completa: cada nodo con sus recursos, interfaces y servicios */}
-      <SystemOverview data={ov} />
     </Stack>
   );
 }

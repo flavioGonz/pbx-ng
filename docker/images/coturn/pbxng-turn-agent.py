@@ -80,11 +80,34 @@ def sessions():
     if cur: sess.append(cur)
     return sess
 
+def turn_escucha():
+    """¿El proceso turnserver está de verdad escuchando el puerto de señalización?
+
+    POR QUE ASI Y NO `turnserver --version`: eso es el BINARIO, no el servicio. El agente
+    decia "active" con sólo poder ejecutar el ejecutable, asi que el panel mostraba
+    «Operativo» aunque el turnserver estuviera caido o ni siquiera hubiera arrancado.
+    Y `systemctl` no existe en el contenedor (coturn es PID 1 via exec), o sea que la
+    rama de systemd devolvia vacio SIEMPRE. Aca se mide lo unico que importa: que haya
+    alguien aceptando conexiones en listening-port.
+
+    OJO: esto sigue siendo "el puerto contesta", que NO alcanza para decir que el TURN
+    sirve. El veredicto de verdad (Allocate + candidato relay + cordura de la direccion
+    del relay) lo da la API: POST /api/turn/probe y scripts/check-turn.py.
+    """
+    d, _ = parse_conf()
+    try: port = int(d.get("listening-port", 3478))
+    except Exception: port = 3478
+    for host in ("127.0.0.1", "::1"):
+        try:
+            socket.create_connection((host, port), 2).close()
+            return True
+        except Exception:
+            continue
+    return False
+
 def health():
     d, raw = parse_conf()
-    # Sin systemd en el contenedor: coturn corre como PID1; si respondemos y leemos su version, está activo
-    _sys = sh("systemctl is-active coturn 2>/dev/null") or sh("systemctl is-active coturn-turnserver 2>/dev/null")
-    active = _sys if _sys else ("active" if sh("turnserver --version 2>&1 | head -1") else "inactive")
+    active = "active" if turn_escucha() else "inactive"
     ver = sh("turnserver --version 2>&1 | head -1") or sh("turnserver -h 2>&1 | grep -i version | head -1")
     relay_sockets = sh("ss -lun 2>/dev/null | grep -cE '0.0.0.0|::'")
     user = d.get("user", ""); uname = user.split(":")[0] if user else ""
@@ -124,9 +147,11 @@ def save_config(b):
         if k not in seen: out.append(k + "=" + v)
     open(CONF + ".bak", "w").write(raw)
     open(CONF, "w").write("\n".join(out) + "\n")
-    r = subprocess.run("systemctl restart coturn", shell=True, capture_output=True, text=True)
+    subprocess.run("systemctl restart coturn", shell=True, capture_output=True, text=True)
     time.sleep(1.5)
-    return {"ok": sh("systemctl is-active coturn") == "active", "applied": list(setk.keys())}
+    # Mismo criterio que health(): lo que decide es que haya alguien escuchando, no lo
+    # que conteste un systemctl que en el contenedor ni existe.
+    return {"ok": turn_escucha(), "applied": list(setk.keys())}
 
 
 # ---------------------------------------------------------------------------
@@ -210,19 +235,36 @@ class H(BaseHTTPRequestHandler):
         if self.path.startswith("/service"):
             act = b.get("action")
             if act in ("start","stop","restart"):
-                subprocess.run("systemctl %s coturn" % act, shell=True); time.sleep(1.0)
-                return self._send(200, {"ok": sh("systemctl is-active coturn") == "active", "action": act})
+                # Bajo Docker el ciclo de vida del contenedor NO lo maneja este agente:
+                # lo maneja el reconciliador (docker/pbxng-reconciler.sh) leyendo
+                # pbxng_settings.mod_turn y llamando a `pbxng-ctl enable/disable turn`.
+                # Se contesta `queued` (que es lo que el panel ya sabe mostrar) en vez de
+                # correr un `systemctl` que no existe y devolver ok:false sin explicar nada.
+                subprocess.run("systemctl %s coturn" % act, shell=True,
+                               capture_output=True)   # sirve en un host con systemd (instalacion sin Docker)
+                time.sleep(1.0)
+                vivo = turn_escucha()
+                esperado = (act != "stop")
+                return self._send(200, {"ok": vivo == esperado, "action": act, "activo": vivo,
+                                        "queued": vivo != esperado,
+                                        "nota": "en Docker lo aplica el reconciliador (pbxng-ctl enable/disable turn)"})
             return self._send(400, {"error":"action invalida"})
         if self.path.startswith("/restart"):
-            subprocess.run("systemctl restart coturn", shell=True); time.sleep(1.2)
-            return self._send(200, {"ok": sh("systemctl is-active coturn") == "active"})
+            subprocess.run("systemctl restart coturn", shell=True, capture_output=True); time.sleep(1.2)
+            return self._send(200, {"ok": turn_escucha(),
+                                    "nota": "en Docker el reinicio real es `pbxng-ctl` / `docker compose restart coturn`"})
         if self.path.startswith("/config"):
             try: return self._send(200, save_config(b))
             except Exception as e: return self._send(500, {"error": str(e)})
         if self.path.startswith("/test"):
-            d, _ = parse_conf(); ip = "127.0.0.1"; user = d.get("user", "pbxng:x").split(":")
-            out = sh("turnutils_uclient -y -u %s -w %s -e %s -n 2 %s 2>&1 | tail -8" % (user[0], user[1] if len(user) > 1 else "x", ip, ip), 12)
-            return self._send(200, {"out": out or "turnutils_uclient no disponible"})
+            # RETIRADO A PROPOSITO. Antes corria `turnutils_uclient` contra 127.0.0.1
+            # DESDE ADENTRO del propio coturn: eso da OK siempre, incluso con el relay
+            # escuchando solo en la direccion del bridge de Docker (el caso real que dejo
+            # una central entera sin audio con el panel en verde). Una prueba que no puede
+            # fallar no es una prueba. La sonda de verdad la hace la API contra la
+            # direccion que se le reparte a los softphones: POST /api/turn/test o
+            # /api/turn/probe (control-plane/turn.js), y scripts/check-turn.py.
+            return self._send(410, {"error": "prueba local retirada: usa POST /api/turn/probe (mide contra la direccion publica, no contra loopback)"})
         self._send(404, {"error": "not found"})
 
 if __name__ == "__main__":

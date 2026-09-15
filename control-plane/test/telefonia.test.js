@@ -73,6 +73,61 @@ test('telefonía: features del interno, horarios, feriados, modo noche, códigos
     assert.equal((await api('PUT', '/api/extensions/1002/features', { token: age, body: { cfu: '1003' } })).status, 403);
   });
 
+  await t.test('sígueme/desvío: no se deja armar el ciclo, ni en dos pasos ni en tres', async () => {
+    /* El canal Local del sígueme arrancaba de cero el contador SALTOS del dialplan, así que
+     * A→B y B→A se pasaban la llamada para siempre. El tope se arregló en extensions.conf
+     * (`__SALTOS`, heredable); acá se verifica la otra mitad: que el ciclo OBVIO no se pueda
+     * ni guardar, que es donde se le puede explicar al usuario qué pasó. */
+    for (const e of ['1101', '1102', '1103']) {
+      assert.equal((await api('PUT', '/api/extensions/' + e + '/features', { token: admin, body: { dnd: false, cfu: '', cfb: '', cfnr: '', fm: '' } })).status, 200);
+    }
+    // Uno solo: desviarse a sí mismo.
+    assert.equal((await api('PUT', '/api/extensions/1101/features', { token: admin, body: { cfu: '1101' } })).status, 400);
+    // Dos pasos: A→B y B→A.
+    assert.equal((await api('PUT', '/api/extensions/1101/features', { token: admin, body: { fm: '1102' } })).status, 200);
+    const dos = await api('PUT', '/api/extensions/1102/features', { token: admin, body: { fm: '1101' } });
+    assert.equal(dos.status, 400, JSON.stringify(dos.json));
+    assert.match(String(dos.json.error), /bucle/i);
+    // Tres pasos, con banderas distintas (el sígueme y el desvío caen al mismo `internal`).
+    assert.equal((await api('PUT', '/api/extensions/1102/features', { token: admin, body: { cfnr: '1103' } })).status, 200);
+    assert.equal((await api('PUT', '/api/extensions/1103/features', { token: admin, body: { cfu: '1101' } })).status, 400, 'A→B→C→A también es un bucle');
+    // Y no queda nada guardado del intento rechazado.
+    assert.deepEqual((await api('GET', '/api/extensions/1103/features', { token: admin })).json,
+      { dnd: false, cfu: '', cfb: '', cfnr: '', fm: '', fm_seg: 15 });
+    // Una cadena que NO vuelve al principio se sigue pudiendo armar.
+    assert.equal((await api('PUT', '/api/extensions/1103/features', { token: admin, body: { fm: '099123456' } })).status, 200);
+    for (const e of ['1101', '1102', '1103']) {
+      assert.equal((await api('PUT', '/api/extensions/' + e + '/features', { token: admin, body: { dnd: false, cfu: '', cfb: '', cfnr: '', fm: '' } })).status, 200);
+    }
+  });
+
+  await t.test('ciclo YA guardado en la base: el interno igual puede apagar su DND y salir del ciclo', async () => {
+    /* La comprobación de ciclos es de 1.11.0, pero hay centrales con desvíos guardados de
+     * antes (o escritos desde el teléfono cuando la comprobación no existía). Si el ciclo
+     * viejo bloqueara cualquier guardado, el usuario quedaba encerrado: `f` es el merge de
+     * lo actual con el parcial, así que apagar el DND arrastraba los cfu/cfb viejos. Se
+     * siembra el ciclo directo en Postgres, que es como llega en una central real. */
+    for (const [e, cfu] of [['1111', '1112'], ['1112', '1111']]) {
+      await ctx.db.query(
+        `INSERT INTO pbxng_ext_features (ext,dnd,cfu,updated_at) VALUES ($1,true,$2,now())
+         ON CONFLICT (ext) DO UPDATE SET dnd=true, cfu=$2`, [e, cfu]);
+    }
+    // Apagar el DND no toca ningún destino: no se valida un ciclo que el usuario no armó.
+    const off = await api('PUT', '/api/extensions/1111/features', { token: admin, body: { dnd: false } });
+    assert.equal(off.status, 200, JSON.stringify(off.json));
+    assert.equal(off.json.dnd, false);
+    assert.equal(off.json.cfu, '1112', 'el desvío viejo queda como estaba: apagar el DND no lo borra');
+    // Y la salida del ciclo (borrar el desvío) también tiene que pasar.
+    assert.equal((await api('PUT', '/api/extensions/1111/features', { token: admin, body: { cfu: '' } })).status, 200);
+    // Pero volver a armarlo, ahora que la otra punta sigue puesta, sigue siendo 400.
+    const rearmar = await api('PUT', '/api/extensions/1111/features', { token: admin, body: { cfu: '1112' } });
+    assert.equal(rearmar.status, 400, JSON.stringify(rearmar.json));
+    assert.match(String(rearmar.json.error), /bucle/i);
+    for (const e of ['1111', '1112']) {
+      assert.equal((await api('PUT', '/api/extensions/' + e + '/features', { token: admin, body: { dnd: false, cfu: '', cfb: '', cfnr: '', fm: '' } })).status, 200);
+    }
+  });
+
   let horarioId = 0;
   await t.test('horarios: validación y CRUD', async () => {
     assert.equal((await api('POST', '/api/horarios', { token: admin, body: { nombre: 'mal', tramos: [{ dias: 'lunes', desde: '09:00', hasta: '18:00' }] } })).status, 400);
@@ -177,6 +232,23 @@ test('telefonía: features del interno, horarios, feriados, modo noche, códigos
     // marcar `*21**78` y meter un código de función como destino del desvío.
     // El exten guardado tiene que conservar el `_`: pbx_realtime sólo trata como patrón a
     // las filas que empiezan con guión bajo, sin él `*21*1002#` no matchearía nada.
+    /* *97 (buzón propio) publicado en realtime tiene que ser el MISMO dialplan que el *97
+     * estático de extensions.conf. El realtime GANA en cuanto el administrador mueve el
+     * código a otro número, y la versión vieja de acá era
+     * `VoiceMailMain(${CALLERID(num)}@default)` a secas: pedía PIN, pero el buzón al que
+     * entraba salía del CallerID, que es lo que el teléfono manda en el From. Un interno
+     * registrado ponía el número de otro y escuchaba sus mensajes. */
+    const vm = (await ctx.db.query("SELECT app, appdata FROM extensions WHERE context='internal' AND exten='*97' ORDER BY priority")).rows;
+    assert.ok(vm.some((x) => x.app === 'VoiceMailMain' && /^\$\{CHANNEL\(endpoint\)\}@[^,]+,s$/.test(x.appdata)),
+      'la identidad del buzón propio sale de CHANNEL(endpoint), no del CallerID: ' + JSON.stringify(vm));
+    assert.ok(vm.some((x) => x.app === 'GotoIf' && /CHANNEL\(channeltype\).*PJSIP/.test(x.appdata)),
+      'la opción s (saltear el PIN) sólo puede valer para un canal PJSIP: ' + JSON.stringify(vm));
+    assert.ok(vm.every((x) => !(x.app === 'VoiceMailMain' && /CALLERID\(num\).*,s/.test(x.appdata))),
+      'nunca se saltea el PIN identificando por CallerID');
+    // *98 (buzón de otro) NUNCA lleva la 's': sería dejar todos los buzones abiertos.
+    const vm98 = (await ctx.db.query("SELECT app, appdata FROM extensions WHERE context='internal' AND exten='*98' ORDER BY priority")).rows;
+    assert.ok(vm98.some((x) => x.app === 'VoiceMailMain' && !/,s$/.test(x.appdata)), JSON.stringify(vm98));
+
     const cfuRows = (await ctx.db.query("SELECT app, appdata FROM extensions WHERE context='internal' AND exten='_*21*.' ORDER BY priority")).rows;
     const cfu = cfuRows.filter((x) => x.app === 'Set');
     assert.ok(cfu.some((x) => /FDEST=\$\{FILTER\(0-9,\$\{EXTEN:4\}\)\}/.test(x.appdata)), JSON.stringify(cfu));

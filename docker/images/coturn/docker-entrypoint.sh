@@ -34,9 +34,13 @@ sed -i 's|^log-file=.*|log-file=stdout|' /etc/turnserver.conf
 
 # --- agente HTTP PBX-NG (:8091) en background ---
 # El script no valida token (la API manda X-PBXNG-Token pero el agente lo ignora).
-# NOTA: el agente usa "systemctl" para restart/estado de coturn, que NO existe en
-# el contenedor; /health, /config (GET) y /logs funcionan, pero restart/apply de
-# config y el flag "active" no operan bajo Docker (coturn corre como PID 1 via exec).
+# NOTA: bajo Docker coturn corre como PID 1 (exec) y no hay systemd, asi que el agente
+# NO puede arrancar ni parar el servicio: eso lo hace el reconciliador
+# (docker/pbxng-reconciler.sh -> pbxng-ctl enable/disable turn) a partir de
+# pbxng_settings.mod_turn. Lo que si mide el agente es si hay alguien escuchando el
+# listening-port (antes reportaba "active" con solo poder ejecutar el binario, o sea
+# siempre). El veredicto de si el TURN SIRVE no sale de aca: sale de la sonda
+# STUN+Allocate de la API (POST /api/turn/probe) y de scripts/check-turn.py.
 python3 /usr/local/bin/pbxng-turn-agent.py &
 
 exec "$@"

@@ -3,7 +3,8 @@
 Fecha: 2026-09-13 · Versión analizada: 1.8.0 (`45dd905`) · **Actualizado con lo que cerraron
 1.9.0** (sprint 6: horarios y modo noche, desvíos / DND / sígueme, catálogo de códigos de
 función) **y 1.10.0** (sprint 7: reportes de call center, failover de troncal, DISA / callback /
-dial-by-name / marcación abreviada, salas de reunión y fax T.38). Lo marcado **✅ 1.9.0** y
+dial-by-name / marcación abreviada, salas de reunión y fax T.38) **y con el retiro del fax en
+1.11.0** (ítem 7: fuera de alcance por decisión de producto). Lo marcado **✅ 1.9.0** y
 **✅ 1.10.0** se verificó contra el código de cada sprint, no contra el informe de quien lo
 hizo; el resto del inventario sigue siendo el de 1.8.0.
 Método: inventario real del repo (rutas de la API, pantallas del panel, dialplan que genera
@@ -21,7 +22,8 @@ que todo el mundo espera y que se notan en los primeros diez minutos de una demo
 modo noche, desvíos/DND/sígueme y un catálogo de códigos de función de verdad— están cerrados.
 **Con 1.10.0 se cerró casi todo el bloque B**, que es el que se pide por escrito: reportes de
 call center, failover de troncal, DISA/callback/dial-by-name/marcación abreviada, salas de
-reunión y fax. Queda abierto lo que sigue pesando en un pliego: **alta disponibilidad** (ítem 11,
+reunión y fax —éste último **se retiró en 1.11.0 por decisión de producto**, ver el ítem 7—.
+Queda abierto lo que sigue pesando en un pliego: **alta disponibilidad** (ítem 11,
 sin empezar) y, del bloque A, el **control de gasto saliente** (COS/PIN), las **listas negras y
 blancas** y el **import/export de internos por CSV**.
 
@@ -42,7 +44,7 @@ blancas** y el **import/export de internos por CSV**.
 | **Códigos de función** | ✅ **1.9.0** 15, con el código editable | ✅ decenas | ✅ decenas |
 | **COS / PIN de salida / códigos de autorización** | ❌ | ✅ | ✅ |
 | **Listas negras y blancas de entrantes** | ❌ | ✅ | ✅ |
-| **Fax (T.38, a correo, desde la web)** | ✅ **1.10.0** · el servidor todavía necesita paquetes (ver ítem 7) | ✅ | ✅ |
+| **Fax (T.38, a correo, desde la web)** | ⛔ **fuera de alcance** · estuvo en 1.10.0 y se retiró en 1.11.0 por decisión de producto (ver ítem 7) | ✅ | ✅ |
 | **DISA, callback, marcación abreviada, dial-by-name** | ✅ **1.10.0** (API y dialplan; falta la pantalla) | ✅ | ✅ |
 | **Portal de autoservicio del usuario** | ⚠️ **1.9.0** el agente cambia sus desvíos desde `/agente` y desde el teléfono; no hay portal aparte | ✅ | ✅ |
 | **Salas de reunión (PIN, agenda)** | ✅ **1.10.0** | ✅ | ✅ |
@@ -106,24 +108,17 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
 
 ### Bloque B — cierra licitaciones y clientes medianos
 
-7. **✅ 1.10.0 · Fax**: T.38 entrante/saliente, fax a correo y enviar desde el panel.
-   `control-plane/fax.js`, migración `0016_fax.sql`, pantalla `/fax` (bandeja de recibidos y de
-   enviados con descarga del PDF, formulario de envío y configuración de cajas y T.38). Una ruta
-   entrante se marca como **Fax** y entra a una caja: `ReceiveFAX` → TIFF → PDF → correo, con el
-   TIFF guardado. Detección de tono (CNG) en rutas de voz por `fax_detect` del endpoint, que manda
-   la llamada a la extensión `fax` del contexto. El envío es una **cola con reintentos** (un fax
-   que no entra a la primera es lo normal) y sale por la ruta saliente de siempre, con su troncal,
-   su prefijo y su failover. T.38 se pide con `z` pero siempre con respaldo en audio (`f`): con
-   SBC-NG en el medio o sin él, el fax sale. Contrato en `docs/CONTRATOS.md` §3 y §5.
-   *Queda, y es lo que hay que decir en una demo*: **el fax todavía no funciona en el servidor**.
-   La imagen de la API (node:20-slim) no trae `ghostscript` ni `libtiff-tools`, y la de Asterisk
-   compila sin `libspandsp-dev`, así que `res_fax_spandsp` no se construye y
-   `ReceiveFAX`/`SendFAX` no existen (verificado en `control-plane/Dockerfile` y
-   `docker/images/asterisk/Dockerfile`). **Pedido a `empaquetado`**, junto con un volumen de fax
-   propio: hoy usa un subdirectorio del volumen `recordings`. Mientras no estén, `GET
-   /api/fax/estado` lo detecta y la pantalla lo muestra en rojo con el nombre del paquete. El fax
-   por interno (un DID directo a un aparato de fax analógico detrás de un ATA) sigue siendo del
-   gateway, no de esto.
+7. **⛔ Fuera de alcance por decisión de producto · Fax**: PBX-NG **no lleva fax**. Estuvo
+   entero en 1.10.0 (T.38 entrante y saliente, fax a correo, envío desde el panel) y se **retiró
+   en 1.11.0**: el dueño del producto decidió que el fax no va en esta central. Acá queda anotado
+   porque la comparación con la UCM y la CompletePBX es una comparación de características y las
+   dos lo tienen: frente a un pliego que lo pida, la respuesta es que **no lo cubrimos** —no que
+   esté pendiente—, y se resuelve con un gateway ATA o un servicio de fax a correo de terceros.
+   No es una deuda técnica ni entra en ningún sprint: lo que se retiró fueron ~1.000 líneas de
+   API, una pantalla, cuatro tablas y dos dependencias de imagen, y ninguna instalación lo había
+   activado. El fax por interno (un DID directo a un aparato analógico detrás de un ATA) siempre
+   fue del gateway y sigue siéndolo. Detalle del retiro en el CHANGELOG de 1.11.0 y en la
+   migración `0018_sin_fax.sql`.
 8. **✅ 1.10.0 · Reportes de call center**: nivel de servicio, abandono, espera media y máxima
    y conversación media y total, por cola y por agente, con CSV, informe A4 (Imprimir → Guardar
    como PDF, con la misma marca que el informe del CDR) y envío programado por correo diario,
@@ -192,8 +187,8 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
 | Sprint | Contenido | Por qué en ese orden |
 |---|---|---|
 | ~~6~~ **hecho en 1.9.0** | Horarios + modo noche + desvíos/DND/sígueme + catálogo de códigos de función | Es lo que falta para que sea «una central normal» |
-| ~~7~~ **hecho en 1.10.0** | Reportes de call center + failover de troncal + DISA/callback/dial-by-name/abreviada + salas de reunión + fax T.38 | Bloque B: es lo que se pide por escrito en una licitación y lo que firma un supervisor |
-| 8 | Pantalla de DISA/callback/abreviada + los paquetes de fax + COS/PIN de salida + listas negras/blancas + import/export CSV | Cierra lo que 1.10.0 dejó a medias y lo que queda del Bloque A (control de gasto y migraciones desde otra central) |
+| ~~7~~ **hecho en 1.10.0** | Reportes de call center + failover de troncal + DISA/callback/dial-by-name/abreviada + salas de reunión (y fax T.38, **retirado en 1.11.0**) | Bloque B: es lo que se pide por escrito en una licitación y lo que firma un supervisor |
+| 8 | Pantalla de DISA/callback/abreviada + COS/PIN de salida + listas negras/blancas + import/export CSV | Cierra lo que 1.10.0 dejó a medias y lo que queda del Bloque A (control de gasto y migraciones desde otra central) |
 | 9 | Portal de autoservicio del usuario | Lo que se ve en la demo |
 | 10 | Alta disponibilidad | Pliegos de cliente mediano; es lo único del Bloque B sin empezar |
 | 11+ | Multi-tenant real, i18n (pt-BR/en), hotelería | Cambian el mercado, no el producto |

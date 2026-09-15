@@ -2,12 +2,12 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider, Alert } from '@mantine/core';
+import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, ActionIcon, Collapse, useMantineColorScheme, useComputedColorScheme, Menu, Avatar, UnstyledButton, Divider, Alert, Skeleton } from '@mantine/core';
 import {
   IconSitemap, IconServer2, IconDatabase, IconRouteAltLeft, IconDatabaseExport, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
-  IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk, IconReportAnalytics,
-  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconClockHour4, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff, IconPrinter } from '@tabler/icons-react';
+  IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk, IconReportAnalytics, IconCpu,
+  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconClockHour4, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff, IconDoorEnter, IconAddressBook } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, esAdmin, SUP_OK, logout } from './auth';
 import PbxLogo from './PbxLogo';
@@ -87,12 +87,23 @@ const groups = [
     { href: '/aplicaciones/paging', label: 'Paging', icon: IconBroadcast },
     { href: '/salas', label: 'Salas de reunión', icon: IconUsers },
     { href: '/aplicaciones/vm', label: 'Buzones', icon: IconMail },
-    { href: '/fax', label: 'Fax', icon: IconPrinter },
     { href: '/funciones', label: 'Aparcado · Captura · MoH', icon: IconAsterisk },
     { href: '/aplicaciones/codes', label: 'Códigos', icon: IconAsterisk },
     { href: '/aplicaciones/ai', label: 'AI IVR', icon: IconRobot },
     { href: '/ia-voz', label: 'IA & Voz', icon: IconMicrophone2 },
     { href: '/click-to-call', label: 'Click-to-Call', icon: IconWorldShare },
+  ] },
+  /* Portería (módulo `intercom`). Este grupo es la razón de que exista el agente `porteria`:
+   * las dos pantallas estaban enteras y con datos vivos en una central real, pero NUNCA
+   * estuvieron en el menú —la única forma de llegar era escribir la URL a mano—. Son dos y
+   * van juntas porque una sola no alcanza: «Portería» es la pared de video y «Clientes» es
+   * donde se dan de alta los porteros RTSP, los espacios y las personas autorizadas. Con el
+   * módulo apagado el grupo entero desaparece (el `filter` de más abajo esconde un grupo sin
+   * ítems visibles), y eso apaga el VIDEO: el screen-pop del panel de agente
+   * (`/api/clients/lookup`) sigue funcionando igual, ver CONTRATOS §3 «Portería». */
+  { label: 'Portería', icon: IconDoorEnter, items: [
+    { href: '/intercom', label: 'Portería', icon: IconDoorEnter },
+    { href: '/clientes', label: 'Clientes', icon: IconAddressBook },
   ] },
   { label: 'Operación', icon: IconDeviceAnalytics, items: [
     { href: '/monitor', label: 'Llamadas en vivo', icon: IconHeadphones },
@@ -103,6 +114,7 @@ const groups = [
     { href: '/telefonos', label: 'Teléfonos', icon: IconDeviceLandlinePhone },
   ] },
   { label: 'Sistema', icon: IconAdjustmentsCog, items: [
+    { href: '/sistema', label: 'Sistema', icon: IconCpu },
     { href: '/red', label: 'Red', icon: IconNetwork },
     { href: '/sbc', label: 'SBC-NG (conexión)', icon: IconRouteAltLeft },
     { href: '/empresas', label: 'Empresas', icon: IconBuilding },
@@ -133,7 +145,9 @@ export default function Shell({ children }) {
     fetch('/backend/api/modules').then((r) => (r.ok ? r.json() : null)).then((m) => { if (m) setMods(m); }).catch(() => {});
   }, [path]);
   const { user } = useAuth();
-  const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/sbc': 'sbc' };
+  /* Ruta del menú → id del módulo que la enciende. El id de Portería es `intercom` (así lo
+   * conocen el perfil del compose y el reconciliador), aunque la etiqueta diga «Portería». */
+  const MOD_MAP = { '/click-to-call': 'clicktocall', '/notificaciones': 'push', '/telefonos': 'autoprov', '/ia-voz': 'ai', '/sbc': 'sbc', '/intercom': 'intercom', '/clientes': 'intercom' };
   /* Menú por rol. La lista de lo que ve un supervisor es `SUP_OK` de `app/auth.jsx`
    * (espejo de control-plane/rbac.js, docs/CONTRATOS.md §2), la MISMA que usa el redirect
    * de esa pantalla: si el menú ofreciera un ítem que el redirect rebota, el supervisor
@@ -141,15 +155,22 @@ export default function Shell({ children }) {
    * 'agente' no ve nada porque no tiene ninguna pantalla de este shell (auth.jsx lo manda
    * a /agente).
    *
-   * El limbo de `user` (`undefined`, «todavía no sé quién entró») se resuelve del lado
-   * prudente con `esAdmin()`, como en el resto del panel (CONTRATOS §2): mientras no se
-   * sabe se dibuja el menú chico —el de operación— y no el de administración. Al revés,
-   * a un supervisor le parpadeaban Troncales, Usuarios y Respaldos en cada recarga. */
+   * El limbo de `user` (`undefined`, «todavía no sé quién entró», hasta que contesta
+   * `GET auth/me`) NO se dibuja: mientras no se sabe el menú es un esqueleto (ver
+   * `menuListo` más abajo). Cualquier respuesta que se elija para el limbo le parpadea a
+   * alguien —resolverlo como admin le mostraba Troncales, Usuarios y Respaldos al
+   * supervisor y lo dejaba apretar un botón que sólo sabe dar 403; resolverlo como no-admin
+   * le muestra al admin el menú chico de operación y después le aparece el resto—, así que
+   * la única salida sin parpadeo es no ofrecer ítems hasta saber quién entró. `roleOk`
+   * igual se queda del lado prudente (CONTRATOS §2) por si alguien lo llama antes. */
   const roleOk = (it) => {
     if (esAdmin(user)) return true;
     if (user && user.role === 'agente') return false;
     return it.href === '/supervisor' || SUP_OK.includes(it.href);
   };
+  /* `null` es «no hay sesión» (auth.jsx ya está redirigiendo al login): tampoco hay menú
+   * que dibujar, pero no es el limbo y no necesita esqueleto. */
+  const menuListo = user !== undefined;
   const visibleItem = (it) => roleOk(it) && (!MOD_MAP[it.href] || mods[MOD_MAP[it.href]] !== false);
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', logo: '' });
   useEffect(() => { fetch('/backend/api/branding').then((r) => r.json()).then((bb) => { setBrand(bb); if (bb && bb.name && typeof document !== 'undefined') document.title = bb.name; }).catch(() => {}); }, []);
@@ -208,10 +229,20 @@ export default function Shell({ children }) {
 
           {/* navegación */}
           <ScrollArea style={{ flex: 1, marginTop: 14 }} type="hover">
+            {/* Mientras no se sabe quién entró: esqueleto en vez de ítems. Dibujar el menú
+              * de un rol y corregirlo cuando contesta `auth/me` es un parpadeo que sufre
+              * siempre alguien; el esqueleto no miente y ocupa el mismo alto, así que el
+              * menú no salta cuando aparece. */}
+            {!menuListo && <Box aria-hidden>
+              {[...Array(9)].map((_, i) => (
+                <Skeleton key={i} height={rail ? 30 : 32} radius={10} mb={i === 0 ? 10 : 6}
+                  width={rail ? 30 : `${88 - (i % 3) * 9}%`} mx={rail ? 'auto' : undefined} />
+              ))}
+            </Box>}
             {/* La portada, suelta y siempre arriba: no es un ítem de "Telefonía". */}
-            {visibleItem(inicio) && <Box mb={10}>{navItem(inicio)}</Box>}
-            {!esAdmin(user) && user && user.role === 'supervisor' && <Box mb={10}>{navItem(inicioSup)}</Box>}
-            {groups.filter(g => g.items.some(visibleItem)).map(g => {
+            {menuListo && visibleItem(inicio) && <Box mb={10}>{navItem(inicio)}</Box>}
+            {menuListo && !esAdmin(user) && user && user.role === 'supervisor' && <Box mb={10}>{navItem(inicioSup)}</Box>}
+            {menuListo && groups.filter(g => g.items.some(visibleItem)).map(g => {
               const opened = rail ? true : abiertos.includes(g.label);
               const GIcon = g.icon;
               return (

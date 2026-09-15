@@ -26,8 +26,9 @@
  *    salamod/<nombre> = PIN de moderador
  *  Así cambiar un PIN o que se abra la reunión es un DBPut por AMI: no reescribe el
  *  dialplan, no corta a nadie y funciona con la sala llena. `syncSalas()` vuelca
- *  Postgres → AstDB al arrancar y en cada reconexión del AMI (la astdb nace vacía cuando
- *  se recrea el contenedor de Asterisk).
+ *  Postgres → AstDB al arrancar y en cada reconexión del AMI (red por si la astdb quedó
+ *  desincronizada de Postgres; desde 1.11.0 tiene volumen propio y ya no nace vacía al
+ *  recrear el contenedor de Asterisk).
  *
  *  Acceso (rbac.js): ver la lista y la vista en vivo, silenciar y expulsar es OPERACIÓN
  *  (admin + supervisor: es lo que hace el que modera la reunión desde el panel). Crear,
@@ -88,15 +89,19 @@ module.exports = function init(deps) {
   const pinNuevo = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 
   // ── AstDB ─────────────────────────────────────────────────────────────────
-  /* Los errores se tragan a propósito (mismo criterio que telefonia.js/recordings.js): si
-   * Asterisk está caído la verdad sigue en Postgres y syncSalas() la vuelve a volcar al
-   * reconectar. Fallar el guardado por un AMI caído dejaría al panel sin poder editar. */
+  /* El guardado NO se cae por un AMI caído (la verdad sigue en Postgres y syncSalas() la
+   * vuelve a volcar al reconectar), pero el error se REGISTRA y el resultado vuelve al que
+   * llamó: el `catch (_) {}` mudo de antes dejaba una sala que en el panel figuraba con PIN
+   * nuevo y en la central seguía abriéndose con el viejo, sin una sola línea de log. */
   async function astPut(family, key, val) {
-    try { await amiAction({ Action: 'DBPut', Family: family, Key: String(key), Val: String(val) }); } catch (_) {}
+    try { await amiAction({ Action: 'DBPut', Family: family, Key: String(key), Val: String(val) }); return true; }
+    catch (e) { log.error('AstDB: no se pudo escribir ' + family + '/' + key, e); return false; }
   }
   async function astDel(family, key) {
-    try { await amiAction({ Action: 'DBDel', Family: family, Key: String(key) }); } catch (_) {}
+    try { await amiAction({ Action: 'DBDel', Family: family, Key: String(key) }); return true; }
+    catch (e) { log.error('AstDB: no se pudo borrar ' + family + '/' + key, e); return false; }
   }
+  const AVISO_ASTDB = 'Guardado en la base, pero Asterisk no tomó el cambio (AMI caído): se aplica solo cuando la central vuelva.';
   /* Un PIN vacío NO se escribe: se borra la clave. En telefonia.js una clave ausente es
    * «sin desvío» y no pasa nada, pero acá `DB(salamod/<sala>)` vacío contra un SALAPIN
    * vacío daba $[""=""] → verdadero, o sea que el que se quedaba callado entraba de
@@ -104,8 +109,7 @@ module.exports = function init(deps) {
    * dialplan además rechaza el PIN vacío antes de comparar. */
   async function astPin(family, key, val) {
     const v = String(val === undefined || val === null ? '' : val).trim();
-    if (v) await astPut(family, key, v);
-    else await astDel(family, key);
+    return v ? await astPut(family, key, v) : await astDel(family, key);
   }
 
   // ── Agenda ────────────────────────────────────────────────────────────────
@@ -126,8 +130,11 @@ module.exports = function init(deps) {
   async function publicarEstado(sala) {
     const abierta = ventanaAbierta(sala) ? '1' : '0';
     if (publicado.get(sala.name) !== abierta) {
-      await astPut('sala', sala.name, abierta);
-      publicado.set(sala.name, abierta);
+      /* Sólo se anota como publicado si el DBPut SALIÓ. Antes se anotaba igual, así que un
+       * AMI caído en el momento justo dejaba la sala agendada abierta (o cerrada) para
+       * siempre: el reloj de la agenda comparaba contra este caché y no volvía a intentar. */
+      if (await astPut('sala', sala.name, abierta)) publicado.set(sala.name, abierta);
+      else publicado.delete(sala.name);
     }
     return abierta === '1';
   }
@@ -404,12 +411,18 @@ module.exports = function init(deps) {
       for (const f of ['sala', 'salapin', 'salamod']) await astDel(f, nombrePrevio);
       publicado.delete(nombrePrevio);
     }
-    await astPin('salapin', s.name, s.pin);
-    await astPin('salamod', s.name, s.pin_mod);
+    const okPin = await astPin('salapin', s.name, s.pin);
+    const okMod = await astPin('salamod', s.name, s.pin_mod);
     publicado.delete(s.name);
     await publicarEstado(s);
     broadcastSoon && broadcastSoon();
-    return await leerSala(s.name);
+    const out = await leerSala(s.name);
+    /* Sin esto, cambiar el PIN de una sala con el AMI caído se veía como un guardado
+     * perfecto y la reunión seguía abriéndose con el PIN anterior —justo el que se estaba
+     * cambiando porque se filtró—. La sala queda guardada igual (Postgres manda), pero el
+     * que apretó Guardar tiene que saber que todavía no está en la central. */
+    if (out && !(okPin && okMod)) { out.aviso = AVISO_ASTDB; log.warn('sala guardada sin llegar a la AstDB', { sala: s.name }); }
+    return out;
   }
 
   async function leerSala(name) {
@@ -646,8 +659,15 @@ module.exports = function init(deps) {
    * y corre igual; en las pruebas el módulo se carga sin servidor y, sin esto, el proceso
    * se quedaba nueve segundos esperándolo. */
   setTimeout(() => {
-    syncSalas().catch(() => {});
-    republicarDialplan().catch((e) => log.warn('republicar salas', e.message));
+    /* Encadenadas, y en este orden: el dialplan nuevo compara lo que marcó el que llama
+     * (`${SALAPIN}`) contra `${DB(salapin/<sala>)}`, y con la AstDB todavía vacía esa
+     * comparación falla cerrado y la sala rechaza a TODO el mundo. Disparar las dos a la
+     * vez dejaba una ventana —lo que tarde el volcado a la AstDB por AMI— en la que una
+     * sala con PIN no dejaba entrar a nadie. Primero se escriben los PIN, después se
+     * publica el dialplan que los lee. */
+    syncSalas()
+      .then(() => republicarDialplan())
+      .catch((e) => log.warn('republicar salas', e.message));
   }, 9000).unref();
 
   return { syncSalas, salaDialplan, ventanaAbierta, republicarDialplan };

@@ -17,7 +17,9 @@
  *      IPs privadas nunca se banean (un teléfono de la LAN con la clave vieja no
  *      puede dejar a la oficina sin central).
  *    - El bloqueo REAL lo hace nftables en el host, a través del agente HTTP de
- *      Asterisk (`/fw/ban`, `/fw/unban`, `/fw/sync`, `/fw/bans`). Acá vive la copia
+ *      Asterisk (`/fw/ban`, `/fw/unban`, `/fw/sync`, `/fw/bans`). Vale para IPv4 y para
+ *      IPv6 (sets `banned` y `banned6`): hasta 1.10.0 el evento de seguridad se descartaba
+ *      si no venía como `IPV4/…`, así que un ataque por v6 no se contaba ni se bloqueaba. Acá vive la copia
  *      persistente (`pbxng_blocked`) y cada 5 min se le manda el set completo al
  *      agente: un reinicio del contenedor de Asterisk no pierde los bans.
  *    - Geo-bloqueo por país (`pbxng_geoblock`, modo bloquear/permitir): la primera
@@ -28,6 +30,7 @@
 'use strict';
 
 const { EventEmitter } = require('events');
+const net = require('net');            // isIPv6: el mismo parser que usa Node para los sockets, en vez de una regex propia
 const { errorHttp } = require('./errores');   // errores de pg → mensaje genérico (docs/CONTRATOS.md §3)
 
 const MAX_BUFFER = 200;          // eventos en vivo que se guardan para `sec:hist` y GET /live
@@ -76,26 +79,104 @@ const CLASES = {
 const TIPOS_ATAQUE = ['auth', 'cuenta', 'acl', 'escaner', 'flood', 'ban', 'geo'];
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const CIDR = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/;
+const CIDR = /^(\S+)\/(\d{1,3})$/;
 function esIpv4(ip) { const m = IPV4.exec(String(ip || '')); return !!m && m.slice(1).every((o) => +o <= 255); }
-function esPrivada(ip) { return /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip); }
-function ip2n(ip) { return ip.split('.').reduce((a, o) => ((a << 8) + (+o)) >>> 0, 0); }
-/* ¿`ip` está en `regla`? La regla es una IP suelta o un CIDR (lista blanca). */
-function ipEn(ip, regla) {
-  const r = String(regla || '').trim();
-  if (!esIpv4(ip)) return false;
-  if (esIpv4(r)) return ip === r;
-  const m = CIDR.exec(r); if (!m || !esIpv4(m[1]) || +m[2] > 32) return false;
-  const bits = +m[2]; if (bits === 0) return true;
-  const mask = (0xffffffff << (32 - bits)) >>> 0;
-  return (ip2n(ip) & mask) === (ip2n(m[1]) & mask);
+/* Una IP (v4 o v6) en la ÚNICA forma con la que se guarda y se compara, o null si no lo es.
+ * Hace falta porque v6 se escribe de muchas maneras y todas son la misma dirección: sin
+ * unificar, `::1` y `0:0:0:0:0:0:0:1` dejaban dos filas en pbxng_blocked y el desbloqueo no
+ * encontraba la que había baneado. `net.isIPv6` valida (es el mismo parser que usa Node para
+ * los sockets) y el parser de URL comprime a la forma canónica. */
+function normalizarIp(raw) {
+  let t = String(raw || '').trim();
+  if (!t) return null;
+  if (t.startsWith('[') && t.endsWith(']')) t = t.slice(1, -1);
+  const z = t.indexOf('%'); if (z > 0) t = t.slice(0, z);   // fe80::1%eth0: el identificador de zona es local, nftables no lo quiere
+  if (esIpv4(t)) return t;
+  if (!net.isIPv6(t)) return null;
+  // ::ffff:1.2.3.4 es una IPv4 vista por un socket v6 (Asterisk escuchando en ambos): se
+  // guarda como v4 o el mismo atacante tiene dos identidades y el set v6 de nftables nunca
+  // lo corta, porque el paquete que llega sigue siendo IPv4.
+  const m = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(t);
+  if (m && esIpv4(m[1])) return m[1];
+  try { return new URL('http://[' + t + ']').hostname.replace(/^\[|\]$/g, ''); } catch (_) { return t.toLowerCase(); }
 }
-/* "IPV4/UDP/1.2.3.4/5060" → { ip, proto, puerto }. Asterisk también manda "IPV6/..." (se ignora: nftables acá es sólo v4). */
+const esIpv6 = (ip) => { const n = normalizarIp(ip); return !!n && !esIpv4(n); };
+const esIp = (ip) => !!normalizarIp(ip);
+/* Bytes de la IP (4 o 16) para comparar contra un CIDR sin depender de enteros de 32 bits:
+ * una /64 no entra en un Number. Devuelve null si no es una IP. */
+function ipABytes(ip) {
+  const s = normalizarIp(ip); if (!s) return null;
+  if (esIpv4(s)) return Uint8Array.from(s.split('.').map(Number));
+  let t = s;
+  const m4 = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(t);
+  if (m4) { const b = m4[1].split('.').map(Number); t = t.slice(0, m4.index) + ((b[0] << 8 | b[1]).toString(16)) + ':' + ((b[2] << 8 | b[3]).toString(16)); }
+  const partes = t.split('::');
+  if (partes.length > 2) return null;
+  const izq = partes[0] ? partes[0].split(':') : [];
+  const der = partes.length === 2 ? (partes[1] ? partes[1].split(':') : []) : null;
+  const grupos = der === null ? izq : izq.concat(new Array(8 - izq.length - der.length).fill('0'), der);
+  if (grupos.length !== 8) return null;
+  const out = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) { const v = parseInt(grupos[i], 16); if (!(v >= 0 && v <= 0xffff)) return null; out[i * 2] = v >> 8; out[i * 2 + 1] = v & 0xff; }
+  return out;
+}
+/* ¿`ip` está en `regla`? La regla es una IP suelta o un CIDR, v4 o v6 (lista blanca). Una
+ * regla v4 nunca tapa una v6 ni al revés: son espacios distintos y mezclarlos sería
+ * dejar entrar a quien el administrador no nombró. */
+function ipEn(ip, regla) {
+  const a = ipABytes(ip); if (!a) return false;
+  const r = String(regla || '').trim();
+  const m = CIDR.exec(r);
+  const b = ipABytes(m ? m[1] : r); if (!b) return false;
+  if (a.length !== b.length) return false;
+  const bits = m ? +m[2] : a.length * 8;
+  if (bits > a.length * 8) return false;
+  for (let i = 0; i < a.length; i++) {
+    const n = Math.min(8, bits - i * 8);
+    if (n <= 0) break;
+    const mask = n === 8 ? 0xff : (0xff << (8 - n)) & 0xff;
+    if ((a[i] & mask) !== (b[i] & mask)) return false;
+  }
+  return true;
+}
+/* Redes que nunca se banean: la LAN y todo lo que no es una IP de internet. En v6 la
+ * "LAN" son la ULA y la link-local (fe80::/10 es la que usan los teléfonos para hablar
+ * con la central en la misma placa), más loopback, multicast y los rangos de ejemplo. */
+const PRIVADAS6 = ['::1/128', '::/128', 'fc00::/7', 'fe80::/10', 'ff00::/8', '2001:db8::/32', '64:ff9b::/96'];
+function esPrivada(ip) {
+  const s = normalizarIp(ip);
+  if (!s) return false;
+  if (esIpv4(s)) return /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(s);
+  return PRIVADAS6.some((r) => ipEn(s, r));
+}
+/* "IPV4/UDP/1.2.3.4/5060" → { ip, proto, puerto }. En v6 Asterisk no manda una sola forma:
+ * según la versión y el transporte sale "IPV6/UDP/2001:db8::1/5060" o con la dirección
+ * entre corchetes y el puerto pegado ("IPV6/WSS/[2001:db8::1]:5060"), que partido por "/"
+ * deja todo junto en el tercer campo. Se aceptan las dos (y la IP pelada, que es lo que
+ * llega en algunos eventos): descartar la que no se esperaba era dejar sin contar —y sin
+ * banear— la mitad de los ataques por v6. */
 function parseRemote(s) {
   const p = String(s || '').split('/');
-  if (p.length >= 3 && p[0].toUpperCase() === 'IPV4' && esIpv4(p[2])) return { ip: p[2], proto: p[1], puerto: p[3] || '' };
-  if (esIpv4(p[0])) return { ip: p[0], proto: '', puerto: '' };
-  return null;
+  const fam = (p[0] || '').toUpperCase();
+  if (p.length >= 3 && (fam === 'IPV4' || fam === 'IPV6')) {
+    const hp = partirHostPuerto(p[2]);
+    const ip = normalizarIp(hp.host);
+    if (ip) return { ip, proto: p[1], puerto: hp.puerto || p[3] || '' };
+    return null;
+  }
+  const hp = partirHostPuerto(s);
+  const ip = normalizarIp(hp.host);
+  return ip ? { ip, proto: '', puerto: hp.puerto } : null;
+}
+/* "[2001:db8::1]:5060" / "1.2.3.4:5060" / "2001:db8::1" → { host, puerto }. Sin corchetes
+ * una v6 no se puede separar del puerto (los dos usan ":"), así que se toma entera. */
+function partirHostPuerto(s) {
+  const t = String(s || '').trim();
+  const b = /^\[([^\]]+)\](?::(\d{1,5}))?$/.exec(t);
+  if (b) return { host: b[1], puerto: b[2] || '' };
+  const v4 = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d{1,5})$/.exec(t);
+  if (v4) return { host: v4[1], puerto: v4[2] };
+  return { host: t, puerto: '' };
 }
 /* Bandera emoji desde el código de país (UY → 🇺🇾). */
 function bandera(cc) {
@@ -190,7 +271,9 @@ module.exports = function initGuard(deps) {
   /* ---------- geo (reutiliza el cache de app.js) ---------- */
   const geoEnVuelo = new Map();               // ip → Promise (una ráfaga desde una IP nueva hace UNA consulta a ip-api, no N)
   function geo(ip) {
-    if (!esIpv4(ip) || esPrivada(ip)) return Promise.resolve({ country: 'red local', cc: '', isp: '' });
+    // ip-api resuelve v6 igual que v4 (verificado contra el batch que usa geoLookup), así que
+    // el geo-bloqueo vale para las dos familias.
+    if (!esIp(ip) || esPrivada(ip)) return Promise.resolve({ country: 'red local', cc: '', isp: '' });
     // Con el cache de app.js frío, N eventos del mismo chunk AMI disparaban N POST al batch
     // de ip-api (límite 15/min → 429 → fila sin país). Se comparte la promesa en vuelo.
     let p = geoEnVuelo.get(ip);
@@ -249,9 +332,13 @@ module.exports = function initGuard(deps) {
   }
 
   /* ---------- bloquear / desbloquear ---------- */
-  async function banear(ip, opt) {
+  async function banear(dir, opt) {
     const o = opt || {};
-    if (!esIpv4(ip)) throw err(400, 'IP inválida');
+    // Todo lo que entra se lleva a la forma canónica ANTES de tocar la base o el agente: la
+    // misma v6 escrita de dos maneras son dos filas y dos bans, y el unban de una no suelta
+    // la otra.
+    const ip = normalizarIp(dir);
+    if (!ip) throw err(400, 'IP inválida');
     // Nunca sobre la LAN, ni a mano: el agente lo rechaza igual (400) y un admin que se
     // bloquea la propia oficina no tiene forma de volver a entrar a sacarse el ban.
     if (esPrivada(ip)) { if (o.manual) throw err(400, 'no se bloquean direcciones privadas o de la propia red'); return null; }
@@ -312,8 +399,9 @@ module.exports = function initGuard(deps) {
     }
     return fila;
   }
-  async function desbloquear(ip, por) {
-    if (!esIpv4(ip)) throw err(400, 'IP inválida');
+  async function desbloquear(dir, por) {
+    const ip = normalizarIp(dir);
+    if (!ip) throw err(400, 'IP inválida');
     const { rowCount } = await pool.query('DELETE FROM pbxng_blocked WHERE ip=$1', [ip]);
     bloqueadas.delete(ip); porIp.delete(ip);
     try { await fw('/unban', { ip }); } catch (e) { log.warn('no se pudo sacar el ban de nftables (se corrige en el sync)', { ip }, e); }
@@ -505,7 +593,7 @@ module.exports = function initGuard(deps) {
     const { rows: vistas } = await pool.query(`SELECT DISTINCT ip FROM (
         SELECT detail->>'ip' AS ip FROM pbxng_sec_events WHERE created_at > now() - interval '24 hours' AND detail ? 'ip'
         UNION SELECT ip FROM pbxng_blocked WHERE reason <> $1) x WHERE ip IS NOT NULL`, [REASON_GEO]);
-    const ips = vistas.map((r) => r.ip).filter((ip) => esIpv4(ip) && !esPrivada(ip) && !enWhitelist(ip));
+    const ips = vistas.map((r) => normalizarIp(r.ip)).filter((ip) => ip && !esPrivada(ip) && !enWhitelist(ip));
     let geos = {}; try { geos = await geoLookup(ips); } catch (_) {}
     for (const ip of ips) {
       const g = geos[ip]; if (!g || !paisVetado(g.cc)) continue;
@@ -548,16 +636,16 @@ module.exports = function initGuard(deps) {
     app.get('/api/security/enforcement', async (req, res) => { try { res.json(await sincronizarFw()); } catch (e) { errorHttp(res, e); } });
 
     app.post('/api/security/block', async (req, res) => {
-      const b = req.body || {}; const ip = String(b.ip || '').trim();
+      const b = req.body || {}; const ip = normalizarIp(b.ip);
       try {
-        if (!esIpv4(ip)) throw err(400, 'IP inválida');
+        if (!ip) throw err(400, 'IP inválida');
         const fila = await banear(ip, { manual: true, permanent: b.permanent === undefined ? true : !!b.permanent, reason: String(b.reason || REASON_MANUAL).slice(0, 120), por: (req.user && req.user.username) || 'panel' });
         res.json({ ok: true, ip, permanent: !!(fila && fila.permanent) });
       } catch (e) { errorHttp(res, e); }
     });
     app.post('/api/security/unblock', async (req, res) => {
-      const ip = String((req.body && req.body.ip) || '').trim();
-      try { if (!esIpv4(ip)) throw err(400, 'IP inválida'); const habia = await desbloquear(ip, 'desbloqueo manual (' + ((req.user && req.user.username) || 'panel') + ')'); res.json({ ok: true, ip, habia }); }
+      const ip = normalizarIp(req.body && req.body.ip);
+      try { if (!ip) throw err(400, 'IP inválida'); const habia = await desbloquear(ip, 'desbloqueo manual (' + ((req.user && req.user.username) || 'panel') + ')'); res.json({ ok: true, ip, habia }); }
       catch (e) { errorHttp(res, e); }
     });
 
@@ -575,7 +663,16 @@ module.exports = function initGuard(deps) {
     });
 
     // Lista blanca (IP o CIDR). Meter una IP también la desbloquea si estaba baneada.
-    const validarRegla = (v) => { const r = String(v || '').trim(); if (esIpv4(r)) return r; const m = CIDR.exec(r); if (m && esIpv4(m[1]) && +m[2] <= 32) return r; throw err(400, 'tiene que ser una IP (1.2.3.4) o un rango CIDR (1.2.3.0/24)'); };
+    /* La regla se guarda normalizada (y el prefijo acotado a la familia: /24 en v4, /64 en
+     * v6): un CIDR con más bits de los que tiene la familia exime a nadie y parecía puesto. */
+    const validarRegla = (v) => {
+      const r = String(v || '').trim();
+      const suelta = normalizarIp(r);
+      if (suelta) return suelta;
+      const m = CIDR.exec(r);
+      if (m) { const base = normalizarIp(m[1]); if (base && +m[2] <= (esIpv4(base) ? 32 : 128)) return base + '/' + (+m[2]); }
+      throw err(400, 'tiene que ser una IP (1.2.3.4 o 2001:db8::1) o un rango CIDR (1.2.3.0/24 o 2001:db8::/32)');
+    };
     app.get('/api/security/whitelist', async (req, res) => {
       try { const { rows } = await pool.query('SELECT ip, note, extract(epoch from created_at)::int AS created FROM pbxng_f2b_whitelist ORDER BY created_at'); res.json(rows); }
       catch (e) { errorHttp(res, e); }
@@ -586,7 +683,7 @@ module.exports = function initGuard(deps) {
         const regla = validarRegla(ip);
         await pool.query('INSERT INTO pbxng_f2b_whitelist (ip, note) VALUES ($1, $2) ON CONFLICT (ip) DO UPDATE SET note = EXCLUDED.note', [regla, note ? String(note).slice(0, 200) : null]);
         await cargarWhitelist();
-        if (esIpv4(regla) && bloqueadas.has(regla)) await desbloquear(regla, 'agregada a la lista blanca');
+        if (esIp(regla) && bloqueadas.has(regla)) await desbloquear(regla, 'agregada a la lista blanca');
         res.json({ ok: true, ip: regla });
       } catch (e) { errorHttp(res, e); }
     });
@@ -636,7 +733,7 @@ module.exports = function initGuard(deps) {
     // Geolocalización de IPs sueltas (banderitas en otras pantallas): ?ips=1.2.3.4,5.6.7.8
     app.get('/api/ipgeo', async (req, res) => {
       try {
-        const ips = String(req.query.ips || '').split(',').map((s) => s.trim()).filter(esIpv4).slice(0, 200);
+        const ips = String(req.query.ips || '').split(',').map(normalizarIp).filter(Boolean).slice(0, 200);
         if (!ips.length) return res.json({});
         res.json(await geoLookup(ips));
       } catch (e) { errorHttp(res, e); }
@@ -668,7 +765,7 @@ module.exports = function initGuard(deps) {
 
   return {
     iniciar, detener, unirSocket, resumen, detectarAtaque, procesar, clasificar, banear, desbloquear, expirar, sincronizarFw, aplicarGeoblock,
-    recientes: historial, bus, bandera, esIpv4, esPrivada, ipEn, parseRemote,
+    recientes: historial, bus, bandera, esIpv4, esIpv6, esIp, normalizarIp, esPrivada, ipEn, parseRemote,
     enforcement: () => ({ ...enforcement }), settings: () => ({ ...settings }),
     _cargar: { settings: cargarSettings, whitelist: cargarWhitelist, geoblock: cargarGeoblock, bloqueadas: cargarBloqueadas },
     _engancharAmi: engancharAmi,   // para test/guard.test.js (sin base no se puede llamar a iniciar())
@@ -678,3 +775,5 @@ module.exports.CLASES = CLASES;
 module.exports.DEFAULTS = DEFAULTS;
 module.exports.ipEn = ipEn;
 module.exports.parseRemote = parseRemote;
+module.exports.normalizarIp = normalizarIp;
+module.exports.esPrivada = esPrivada;

@@ -1,7 +1,13 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-let ICE = [{ urls: 'stun:stun.l.google.com:19302' }];   // se completa desde /backend/api/ice al conectar
+/* Arranca VACÍO a propósito: el ICE lo entrega la central por /backend/api/ice según el
+ * origen de TURN configurado en el panel. Antes el valor inicial era
+ * `stun:stun.l.google.com:19302`, así que una central sin salida a internet —lo normal en
+ * un organismo público— empezaba a juntar candidatos pidiéndole permiso a Google y se
+ * comía el timeout antes de fallar. Con la lista vacía, ICE junta candidatos `host`
+ * (misma LAN) al instante y, si /api/ice contesta, usa lo que diga la central. */
+let ICE = [];
 const LS = 'pbxng_softphone';
 const HIST = 'pbxng_softphone_hist';
 

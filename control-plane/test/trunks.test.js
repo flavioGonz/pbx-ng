@@ -71,6 +71,33 @@ test('trunks/routes: crear troncal SIP, listar, ruta saliente, borrar', async (t
     assert.equal((await ctx.db.query("SELECT 1 FROM extensions WHERE context='from-trunk' AND exten='24000000'")).rows.length, 0);
   });
 
+  /* El `dest_value` de una ruta entrante no es un dato que se muestre: es `appdata` de la
+   * tabla realtime que lee Asterisk. Una coma de más agrega argumentos a la aplicación y un
+   * `,1` de más cambia a qué extensión salta la llamada de un desconocido. Hasta 1.10.0 las
+   * únicas validaciones de contenido eran las del fax y al retirarlo quedó sin ninguna; esto
+   * verifica que la lista blanca valga para TODOS los tipos y que un 400 no deje dialplan. */
+  await t.test('ruta entrante: el destino pasa por lista blanca segun el tipo', async () => {
+    const crear = (body) => api('POST', '/api/routes/inbound', { token: admin, body });
+    for (const malo of [
+      { did: '24000001', dest_type: 'interno', dest_value: '1001,30' },      // argumentos extra al Dial
+      { did: '24000002', dest_type: 'ivr', dest_value: '9000,1' },           // salto a otra extensión
+      { did: '24000003', dest_type: 'cola', dest_value: 'soporte,tT,,,60' }, // opciones extra al Queue
+      { did: '24000004', dest_type: 'app', dest_value: '*28,1' },
+      { did: '24000005', dest_type: 'interno', dest_value: '${EXTEN}' },
+    ]) {
+      const r = await crear(malo);
+      assert.equal(r.status, 400, malo.dest_type + ' ' + malo.dest_value + ' -> ' + JSON.stringify(r.json));
+      assert.equal((await ctx.db.query("SELECT 1 FROM extensions WHERE context='from-trunk' AND exten=$1", [malo.did])).rows.length, 0);
+      assert.equal((await ctx.db.query('SELECT 1 FROM pbxng_inbound_routes WHERE did=$1', [malo.did])).rows.length, 0);
+    }
+    // Y lo legítimo de cada tipo sigue entrando (incluido el destino de fuera de hora).
+    const ok = await crear({ did: '24000006', dest_type: 'cola', dest_value: 'soporte', dest_cerrado_type: 'app', dest_cerrado_value: '*28' });
+    assert.equal(ok.status, 201, JSON.stringify(ok.json));
+    // El PUT valida la fila EFECTIVA: mandar sólo el valor, sin el tipo, no esquiva el filtro.
+    assert.equal((await api('PUT', '/api/routes/inbound/' + ok.json.id, { token: admin, body: { dest_value: 'soporte,tT' } })).status, 400);
+    assert.equal((await api('DELETE', '/api/routes/inbound/' + ok.json.id, { token: admin })).status, 200);
+  });
+
   /* Failover de troncal (ítem 10 de docs/BRECHA-UCM-XORCOM.md). Lo que se prueba acá es
    * lo que NO se puede ver a ojo en el dialplan generado: que la escalera salte siempre
    * hacia adelante (nada de bucles), que estén las dos troncales y que un respaldo que no

@@ -40,7 +40,7 @@ anterior salió de esta tabla y está en §1.
 | **Multi-inquilino** | Parcial (`TENANT_MODE`, pantalla de empresas) | Define si se puede vender la central **como servicio** a varios clientes desde una instalación |
 | **Alta disponibilidad** | No existe | Requisito para clientes medianos y para pliegos públicos |
 | **Horarios / condiciones de tiempo** | No existe | *Decisión de producto: fuera de alcance por ahora.* Se deja anotado porque es lo que más se pregunta en un pliego |
-| **Fax / T.38** | No existe | Sólo si aparece la demanda: es trabajo aparte y el mercado se achica todos los años |
+| **Fax / T.38** | No existe | *Decisión de producto: fuera de alcance.* Estuvo en 1.10.0 y se retiró en 1.11.0 sin que ninguna instalación lo usara; el mercado se achica todos los años. Quien lo pida se resuelve con un gateway ATA o un servicio de terceros |
 
 ### Implementado pero sin probar
 
@@ -80,7 +80,7 @@ Esto es deuda distinta: el código está, nadie lo ejerció.
 9. **IA aplicada**: ya hay TTS/STT propios. El salto es transcripción y **resumen automático de
    llamadas** en la ficha del cliente, y detección de intención en el IVR. Acá hay
    diferenciación real frente a centrales tradicionales.
-10. **Fax T.38**, sólo contra demanda concreta.
+10. ~~Fax T.38~~ — **fuera de alcance por decisión de producto** (estuvo en 1.10.0, retirado en 1.11.0).
 
 ---
 
