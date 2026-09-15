@@ -17,10 +17,18 @@ independientes que se activan según lo que necesite el cliente. Cada módulo es
 |---|---|---|
 | `core` | Asterisk, base de datos, API y panel de administración | **Sí** |
 | `sbc` | Borde SIP: seguridad, troncales, anclaje de medios | Solo si hay troncales SIP |
-| `turn` | Traversía de NAT para los teléfonos WebRTC | **Sí** si hay softphones fuera de la red |
+| `turn` | Traversía de NAT para los teléfonos WebRTC | **Sí · viene encendido de fábrica** (ver el aviso de abajo) |
 | `ai` | Motor de voz: TTS (anuncios) y STT (transcripciones) | Opcional |
-| `intercom` | Video de porteros y cámaras (RTSP → navegador) | Opcional |
+| `intercom` | Video de porteros y cámaras (RTSP → navegador). En el panel se llama **Portería** | Opcional |
 | `proxy` | Reverse proxy con certificados TLS | Solo si no tenés uno propio |
+
+> **El `turn` ya no se pregunta, y es a propósito.** Desde 1.11.0 el instalador deja
+> `COMPOSE_PROFILES=core,turn` en los dos roles y no ofrece apagarlo. Sin TURN, un softphone
+> detrás de un NAT simétrico se queda **sin audio**: eso es *roto*, no *mejorable*. Ya pasó una
+> vez —una central instalada sin el perfil estuvo meses repartiendo a siete softphones la
+> dirección de un relay que nadie corría—. La **única** excepción es que el TURN viva en **otro
+> host** (se instala con `--turn-ip=<ip>`): ahí ya hay uno, y un solo origen de TURN se declara a
+> la vez.
 
 ### 1.2 Requisitos
 
@@ -177,8 +185,8 @@ vas a ver, en orden, y qué conviene responder:
 | # | Pregunta | Opciones | Qué elegir |
 |---|---|---|---|
 | 1 | **Rol de la máquina** | `1) Todo` · `2) core` · `3) edge` | **Todo** si es un solo servidor (lo habitual). `core`/`edge` sólo si vas a separar núcleo y borde (ver 3.2) |
-| 2 | **Módulos (perfiles)** | `1) Todo` · `2) Elegir` · `3) Solo core` | **Todo** para una central completa. **Solo core** si no hay troncales SIP ni teléfonos remotos |
-| 2b | Si elegiste *Elegir*: `sbc`, `turn`, `ai`, `intercom` | s/n cada uno | `sbc` y `turn` si hay troncales o softphones fuera de la LAN; `ai` e `intercom` son opcionales |
+| 2 | **Módulos (perfiles)** | `1) Todo (core+turn+ai+intercom)` · `2) Elegir` · `3) Solo el núcleo (core+turn)` | **Todo** para una central completa. Ojo con la 3: **igual incluye `turn`**, porque `core` y `turn` van siempre |
+| 2b | Si elegiste *Elegir*: `ai`, `intercom` | s/n cada uno | Sólo esos dos son opcionales. **El `turn` no se pregunta** (ver el aviso del capítulo 1.1); `intercom` es el módulo que en el panel se llama **Portería** |
 | 3 | **¿Desplegar Nginx Proxy Manager?** | s/n (default **n**) | **n** si ya tenés un reverse proxy o certificados propios. **s** si querés que la central resuelva TLS sola |
 | 4 | **Dominio público** | texto (default `pbx.tu-dominio.com`) | El FQDN real que ya apunta a este servidor. **No inventes uno**: de acá salen los certificados y el WSS del softphone |
 | 5 | **IP pública (TURN/RTP)** | IP o vacío | La IP WAN por la que entra el audio. Dejala vacía sólo si el servidor ya tiene la IP pública en su interfaz |
@@ -344,7 +352,7 @@ Un módulo activo es un contenedor que existe; uno inactivo **no existe**. Se ma
 
 ```bash
 pbxng-ctl status              # qué módulos están activos
-pbxng-ctl enable  intercom    # crea el contenedor
+pbxng-ctl enable  intercom    # crea el contenedor (en el panel: modulo "Porteria")
 pbxng-ctl disable intercom    # lo destruye
 ```
 

@@ -4,7 +4,11 @@ Fecha: 2026-09-13 · Versión analizada: 1.8.0 (`45dd905`) · **Actualizado con 
 1.9.0** (sprint 6: horarios y modo noche, desvíos / DND / sígueme, catálogo de códigos de
 función) **y 1.10.0** (sprint 7: reportes de call center, failover de troncal, DISA / callback /
 dial-by-name / marcación abreviada, salas de reunión y fax T.38) **y con el retiro del fax en
-1.11.0** (ítem 7: fuera de alcance por decisión de producto). Lo marcado **✅ 1.9.0** y
+1.11.0** (ítem 7: fuera de alcance por decisión de producto). **Dos ítems de este inventario no
+son deuda: son decisiones tomadas por el dueño del producto** —el **fax**, retirado a propósito
+(ítem 7), y la **alta disponibilidad**, **postergada** a propósito (ítem 11)—. Están anotadas
+porque la comparación con la UCM y la CompletePBX es de características y las dos las tienen,
+no porque alguien se las haya olvidado. Lo marcado **✅ 1.9.0** y
 **✅ 1.10.0** se verificó contra el código de cada sprint, no contra el informe de quien lo
 hizo; el resto del inventario sigue siendo el de 1.8.0.
 Método: inventario real del repo (rutas de la API, pantallas del panel, dialplan que genera
@@ -23,9 +27,10 @@ modo noche, desvíos/DND/sígueme y un catálogo de códigos de función de verd
 **Con 1.10.0 se cerró casi todo el bloque B**, que es el que se pide por escrito: reportes de
 call center, failover de troncal, DISA/callback/dial-by-name/marcación abreviada, salas de
 reunión y fax —éste último **se retiró en 1.11.0 por decisión de producto**, ver el ítem 7—.
-Queda abierto lo que sigue pesando en un pliego: **alta disponibilidad** (ítem 11,
-sin empezar) y, del bloque A, el **control de gasto saliente** (COS/PIN), las **listas negras y
-blancas** y el **import/export de internos por CSV**.
+La **alta disponibilidad** (ítem 11) sigue pesando en un pliego y **no está**, pero es una
+**decisión de producto: está POSTERGADA**, no pendiente —se sabe qué es, cuánto cuesta y por
+qué no va ahora—. Lo que queda **abierto de verdad** es del bloque A: el **control de gasto
+saliente** (COS/PIN), las **listas negras y blancas** y el **import/export de internos por CSV**.
 
 ## 2. Dónde estamos parados
 
@@ -49,7 +54,7 @@ blancas** y el **import/export de internos por CSV**.
 | **Portal de autoservicio del usuario** | ⚠️ **1.9.0** el agente cambia sus desvíos desde `/agente` y desde el teléfono; no hay portal aparte | ✅ | ✅ |
 | **Salas de reunión (PIN, agenda)** | ✅ **1.10.0** | ✅ | ✅ |
 | **Reportes de call center (SLA, abandono)** | ✅ **1.10.0** (sin histórico previo a la actualización) | ✅ | ✅ |
-| **Alta disponibilidad** | ❌ **sigue pendiente** | ✅ Hot Standby | ✅ TwinStar |
+| **Alta disponibilidad** | ⏸️ **postergada** · decisión de producto, no deuda (ver ítem 11) | ✅ Hot Standby | ✅ TwinStar |
 | **Multi-tenant real** | ⚠️ `tenant_id` decorativo | — | ✅ MT Manager |
 | **Failover de troncal / LCR** | ✅ **1.10.0** el failover; el LCR sigue siendo del SBC-NG | ✅ | ✅ |
 | **Importar/exportar internos (CSV)** | ❌ | ✅ | ✅ |
@@ -141,11 +146,21 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
     transición**, no una por llamada. En el panel, en Rutas → Salientes, se ordenan los respaldos y
     se ve por cuál troncal está saliendo cada ruta ahora mismo. *Queda*: el LCR de verdad (elegir
     operador por costo y prefijo) sigue siendo del SBC-NG.
-11. **❌ SIGUE PENDIENTE · Alta disponibilidad** (un segundo nodo en espera con la base
-    replicada). UCM la vende como «Hot Standby» y Xorcom como «TwinStar»; en todo pliego de
-    licitación aparece. **Es lo único del bloque B que 1.10.0 no tocó**: no hay una línea de
-    código al respecto en el repo, y la respuesta honesta hoy es el procedimiento escrito de
-    §7, no una función del producto.
+11. **⏸️ POSTERGADA POR DECISIÓN DE PRODUCTO · Alta disponibilidad** (un segundo nodo en espera
+    con la base replicada). UCM la vende como «Hot Standby» y Xorcom como «TwinStar»; en todo
+    pliego de licitación aparece. **No hay una línea de código al respecto en el repo y no la va
+    a haber por ahora**: el dueño del producto decidió postergarla —no es un olvido ni deuda
+    técnica de ningún sprint—. El porqué, dicho sin vueltas: HA de verdad es **el doble de
+    appliance** (segundo nodo, réplica de Postgres, IP virtual, decidir quién manda sin partir
+    el cerebro y probar el failover en serio, que es la parte cara), y el mercado al que PBX-NG
+    le vende hoy —oficinas y organismos donde una caída se resuelve en horas— no lo paga. Contra
+    ese costo, lo que primero mueve la aguja es lo que está arriba en el plan.
+    **Qué se responde mientras tanto**: que **no lo cubrimos como función del producto** —no que
+    esté en camino— y que la continuidad se atiende con el **procedimiento escrito** de §7
+    (respaldo programado, respaldo previo a cada actualización, y restaurar sobre hardware de
+    repuesto), que es honesto y es lo que hoy existe. **Cuándo se revisa**: si aparece un pliego
+    que la exija como requisito excluyente, o un cliente que la pague. Ahí vuelve a la mesa con
+    un número, no antes.
 12. **✅ 1.10.0 · DISA, callback, dial-by-name y marcación abreviada** (`control-plane/marcacion.js`,
     migración `0015_marcacion.sql`). **DISA y callback nacen apagados**: son la puerta clásica del
     fraude de tarifación. El PIN vive en bcrypt en Postgres y **nunca** en el dialplan (ahí lo vería
@@ -190,7 +205,7 @@ en vez de comprar una caja, y ninguna de las dos las tiene.
 | ~~7~~ **hecho en 1.10.0** | Reportes de call center + failover de troncal + DISA/callback/dial-by-name/abreviada + salas de reunión (y fax T.38, **retirado en 1.11.0**) | Bloque B: es lo que se pide por escrito en una licitación y lo que firma un supervisor |
 | 8 | Pantalla de DISA/callback/abreviada + COS/PIN de salida + listas negras/blancas + import/export CSV | Cierra lo que 1.10.0 dejó a medias y lo que queda del Bloque A (control de gasto y migraciones desde otra central) |
 | 9 | Portal de autoservicio del usuario | Lo que se ve en la demo |
-| 10 | Alta disponibilidad | Pliegos de cliente mediano; es lo único del Bloque B sin empezar |
+| ~~10~~ **postergado** | Alta disponibilidad | **Decisión de producto** (ítem 11): sale del plan hasta que haya un pliego que la exija o un cliente que la pague. No se reasigna a otro sprint |
 | 11+ | Multi-tenant real, i18n (pt-BR/en), hotelería | Cambian el mercado, no el producto |
 
 Los sprints 6 y 7 son los que más movieron la aguja y fueron, casi todos, dialplan generado
@@ -206,8 +221,12 @@ faltan tres cosas que no son código de telefonía:
 
 - **Actualización desde el panel** (hoy la actualización es `git` + build en el servidor).
 - **Instalador y licenciamiento** presentables para un cliente que no es Infratec.
-- **Soporte y repuesto**: qué pasa si el servidor se muere un viernes. La alta disponibilidad
-  del bloque B es la mitad de la respuesta; la otra mitad es un procedimiento escrito.
+- **Soporte y repuesto**: qué pasa si el servidor se muere un viernes. Con la alta disponibilidad
+  **postergada por decisión de producto** (ítem 11), hoy la respuesta es **entera** el
+  procedimiento escrito: respaldo programado y verificado, respaldo previo a cada actualización,
+  y restaurar sobre hardware de repuesto con el tiempo de recuperación dicho de antemano. Eso hay
+  que **escribirlo y probarlo**, no darlo por sabido: es lo que se firma en un contrato de
+  soporte en lugar de un segundo nodo.
 
 Ver también: `docs/EVALUACION-2026-09.md` (deuda técnica interna) y `docs/CONTRATOS.md`.
 

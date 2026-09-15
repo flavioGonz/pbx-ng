@@ -9,6 +9,7 @@ import BrandingPanel from '../BrandingPanel';
 import ProxyPanel from '../ProxyPanel';
 import AlertsPanel from '../AlertsPanel';
 import TurnConsole from '../TurnConsole';
+import TurnOrigen from '../TurnOrigen';
 import SipPanel from '../SipPanel';
 /* El audio se baja con `raw: true` al primer clic (blob) en vez de dejarle la URL al
  * <audio>: así no se traen todos los audios de la tabla al abrir la pestaña. La ruta
@@ -39,6 +40,9 @@ export default function Configuracion() {
   const [prompts, setPrompts] = useState([]); const [pname, setPname] = useState(''); const [pup, setPup] = useState(false);
   const [ints, setInts] = useState({}); const [intForm, setIntForm] = useState({ telegram: {}, whatsapp: {} });
   const [tab, setTab] = useState('componentes');
+  /* Solapa de adentro de «WebRTC / TURN». Arranca en el origen porque es la pregunta que
+   * trae a alguien a esta pantalla: qué TURN entrega la central y si de verdad sirve. */
+  const [sub, setSub] = useState('origen');
   useEffect(() => { try { const t = new URLSearchParams(window.location.search).get('tab'); if (t) setTab(t); } catch (_) {} }, []);
   async function load() { setLoading(true); try { setData(await api('/system')); } catch (e) { setData(null); toast(e.message, 'bad'); } finally { setLoading(false); } }
   async function loadMail() { try { const d = await api('/email/config'); const arr = Array.isArray(d) ? d : []; setMails(arr); if (arr.length && tid == null) { setTid(String(arr[0].tenant_id)); setMform(arr[0]); } } catch (e) { toast(e.message, 'bad'); } }
@@ -120,11 +124,25 @@ export default function Configuracion() {
 
         <Tabs.Panel value="proxy"><ProxyPanel /></Tabs.Panel>
 
-        {/* WebRTC funciona sin SBC: el softphone entra por WSS (/ws -> Asterisk :8088, via el
-            proxy) y el audio va con ICE/STUN/TURN. Aca se administra el TURN propio y se
-            prueba el ICE real desde el navegador. */}
         <Tabs.Panel value="sip"><SipPanel /></Tabs.Panel>
-        <Tabs.Panel value="webrtc"><TurnConsole /></Tabs.Panel>
+
+        {/* WebRTC funciona sin SBC: el softphone entra por WSS (/ws → Asterisk :8088, por el
+            proxy) y el audio va con ICE/STUN/TURN.
+            Dos solapas, y en este orden a propósito: primero DE DÓNDE sale el TURN de esta
+            central (los tres orígenes de `GET|PUT /api/turn/origen`, que hasta ahora no
+            llamaba ninguna pantalla) con la sonda de verdad, y después la consola del coturn
+            propio. Al revés no servía: con el origen en «SBC-NG» o «externo» el coturn local
+            está apagado a propósito y la consola muestra un error rojo que no es una falla. */}
+        <Tabs.Panel value="webrtc">
+          <Tabs value={sub} onChange={setSub} variant="outline" radius="md" keepMounted={false}>
+            <Tabs.List mb="md">
+              <Tabs.Tab value="origen" leftSection={<IconPlugConnected size={14} />}>Origen y prueba</Tabs.Tab>
+              <Tabs.Tab value="coturn" leftSection={<IconServer2 size={14} />}>Servidor coturn</Tabs.Tab>
+            </Tabs.List>
+            <Tabs.Panel value="origen"><TurnOrigen /></Tabs.Panel>
+            <Tabs.Panel value="coturn"><TurnConsole /></Tabs.Panel>
+          </Tabs>
+        </Tabs.Panel>
 
         <Tabs.Panel value="componentes">
           {loading ?

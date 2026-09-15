@@ -35,29 +35,53 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
     (`200` + candidato relay), UDP y TCP. **Un relay en una dirección que ningún cliente puede
     usar sale FALLA**, no OK: loopback, `0.0.0.0`, link-local, o una IP privada con el TURN
     publicado en una pública — que es exactamente el coturn del SBC de la central real.
-    `scripts/check-turn.py` incorpora el mismo veredicto.
+  - **Una sola regla de agregación para las dos herramientas: `ok = udp.ok || tcp.ok`, alcanza
+    con UN transporte** (`agregar()` en `turn.js`, reimplementada en `scripts/check-turn.py`, y
+    escrita en `docs/CONTRATOS.md` §3). Lo que se mide es si un softphone detrás de un NAT
+    simétrico obtiene **un** candidato relay: con TURN sobre UDP ya lo tiene. Antes el panel
+    agregaba con OR y el script con AND, así que sobre el MISMO TURN —uno publicado sólo en
+    3478/udp, la configuración más común— el panel decía «TURN utilizable» y el instalador
+    cerraba cada instalación con «los clientes quedarán sin audio» y exit `1`. Un instalador que
+    grita cuando no pasa nada enseña a ignorar las alarmas. Ahora el transporte que falta sale
+    como **aviso** (exit `0`), y `ok:false` queda para cuando NINGUNO entrega relay.
+  - **El framing TCP arreglado también en `scripts/check-turn.py`** (acumular hasta tener los 20
+    bytes de cabecera más el `length` declarado) y el recorrido de atributos acotado al largo
+    REAL del buffer, que con una cabecera que declaraba de más terminaba en un `unpack requires
+    a buffer of 4 bytes`. Con un solo `recv()`, el Allocate firmado —el mensaje más largo— se
+    leía partido y el instalador declaraba muerto un TURN sano.
+  - **Pruebas de regresión con un TURN de mentira** (`control-plane/test/turn-sonda.test.js` +
+    `test/helpers/turn-falso.js`): responde STUN Binding, 401 con realm/nonce, Allocate firmado
+    y Refresh, y sabe partir la respuesta TCP en dos writes, escuchar sólo en UDP o mentir el
+    `length`. Cubre lo que hasta ahora se arreglaba sin red abajo —el host resuelto por nombre y
+    el framing— y compara el veredicto de la API contra el `exit` real de `check-turn.py`.
   - **Migración `0019_turn_origen.sql`** (nueva; las `0012`–`0018` no se tocan): siembra
     `mod_turn='1'` y `turn_origen='propio'` **sólo si no hay fila** y borra un `stun_url` que
     apunte a un STUN público. **`install.sh` deja `COMPOSE_PROFILES=core,turn`** en los dos roles
     (en `core` sólo se saltea si el TURN vive en otro host, `--turn-ip=`) y ya no pregunta por el
     perfil `turn`; `.env.example` también. El self-check real del TURN ahora corre en los dos roles.
+- **Pantalla nueva `Sistema → Sistema` (`/sistema`), el inventario de la plataforma.** Junta el
+  **núcleo de Asterisk** (versión, canales, endpoints, uptime del motor, transportes PJSIP y
+  módulos clave, de `GET /api/asterisk/core`) y el **inventario de nodos** (disco, memoria,
+  interfaces y servicios de cada nodo, de `GET /api/system/overview`). Están acá y no en el
+  Resumen porque **no se vigilan: se consultan** —cuando algo falla, o cuando hay que contarle a
+  alguien cómo está armada la central— y no cambian de un minuto a otro. Las dos consultas
+  mantienen la cadencia que traían (60 s, y `usePoll` se frena solo con la pestaña de fondo).
 
-### Fixed
-- **El reconciliador de módulos salteaba el caso «no hay fila», que era justo el default.**
-  `moduleEnabled()` de la API devuelve `true` cuando no hay fila en `pbxng_settings`, pero
-  `docker/pbxng-reconciler.sh` hacía `[ -z "$v" ] && continue`: el default existía en la API y no
-  llegaba nunca al contenedor. Por eso el panel mostraba «TURN/STUN» en ON con el coturn
-  inexistente, y **nadie lo prendía nunca porque para todos ya estaba prendido**. Ahora, sin fila,
-  se aplica el default declarado y **se escribe la fila**, así la decisión queda visible en el
-  panel. `turn=1` de fábrica. `ai` e `intercom` quedan deliberadamente fuera de esa tabla: sin
-  fila, levantar `ai` arranca faster-whisper (4 GB) en un appliance que pudo instalarse con
-  `--profiles=core` justamente para no tenerlo (queda anotado como decisión de `empaquetado`/`api`).
-- **El agente del contenedor coturn (`:8091`) decía «Operativo» siempre.** Resolvía `active` con
-  `turnserver --version` —o sea con poder ejecutar el binario— porque la rama de `systemctl`
-  devolvía vacío: en el contenedor no hay systemd (coturn es PID 1). Ahora mira si hay alguien
-  escuchando `listening-port`. Y su `POST /test` se retiró (`410`): corría `turnutils_uclient`
-  contra `127.0.0.1` **desde adentro del propio coturn**, o sea que no podía fallar ni con el
-  relay atado al bridge de Docker. Una prueba que no puede fallar no es una prueba.
+### Changed
+- **El Resumen se queda con lo que cambia en vivo y deja de repetirse.** Tenía cuatro filas de
+  tarjetas más el inventario de nodos diciendo tres veces lo mismo: «Estado del PBX» repetía los
+  números grandes de arriba, «Estado de interfaces» repetía «Servicios principales» y el núcleo
+  de Asterisk repetía canales y endpoints. **Se van «Estado del PBX» y «Estado de interfaces»**
+  (nadie perdía información: estaba dos veces en la misma pantalla) y el núcleo de Asterisk y el
+  inventario de nodos **se mudan a `/sistema`**, con un enlace desde el Resumen. Lo que queda es
+  lo que se mira de lejos: llamadas en curso, ataques, troncales y salud de los servicios, más
+  una fila de dos con espacio y recursos.
+- **La fila «Relay de medios (TURN)» del Resumen sale de `GET /api/turn/estado`.** Mostraba
+  `TURN_HOST`, que en la central de referencia apuntaba al SBC desde que se desconectó el borde:
+  un servicio de **otra máquina**, dado por «Operativo» porque un puerto contestaba. Ahora el
+  estado es el de la sonda real —Allocate y candidato relay—, así que un TURN que atiende pero
+  reparte una dirección privada sale **caído y con el motivo en la fila**, no «Operativo». Va
+  aparte de `/topology` justamente porque la topología sólo mide puertos.
 
 ### Removed
 - **Se retira el fax (T.38, fax a correo y envío desde el panel), que había entrado entero en
@@ -98,10 +122,22 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   (dev y release, que siguen siendo espejo). No había volumen propio de fax que sacar: el spool
   colgaba del volumen `recordings`.
 
-**Al actualizar** no hay nada que hacer a mano: la API corre la `0018` sola al arrancar. Conviene
-sí `docker compose build` (o bajar las imágenes nuevas), que es donde se nota la imagen más chica.
-
 ### Fixed
+- **El reconciliador de módulos salteaba el caso «no hay fila», que era justo el default.**
+  `moduleEnabled()` de la API devuelve `true` cuando no hay fila en `pbxng_settings`, pero
+  `docker/pbxng-reconciler.sh` hacía `[ -z "$v" ] && continue`: el default existía en la API y no
+  llegaba nunca al contenedor. Por eso el panel mostraba «TURN/STUN» en ON con el coturn
+  inexistente, y **nadie lo prendía nunca porque para todos ya estaba prendido**. Ahora, sin fila,
+  se aplica el default declarado y **se escribe la fila**, así la decisión queda visible en el
+  panel. `turn=1` de fábrica. `ai` e `intercom` quedan deliberadamente fuera de esa tabla: sin
+  fila, levantar `ai` arranca faster-whisper (4 GB) en un appliance que pudo instalarse con
+  `--profiles=core` justamente para no tenerlo (queda anotado como decisión de `empaquetado`/`api`).
+- **El agente del contenedor coturn (`:8091`) decía «Operativo» siempre.** Resolvía `active` con
+  `turnserver --version` —o sea con poder ejecutar el binario— porque la rama de `systemctl`
+  devolvía vacío: en el contenedor no hay systemd (coturn es PID 1). Ahora mira si hay alguien
+  escuchando `listening-port`. Y su `POST /test` se retiró (`410`): corría `turnutils_uclient`
+  contra `127.0.0.1` **desde adentro del propio coturn**, o sea que no podía fallar ni con el
+  relay atado al bridge de Docker. Una prueba que no puede fallar no es una prueba.
 - **Una cámara que no responde ya no cuelga el recuadro de video** (`dashboard/app/Intercom.jsx`).
   Un RTSP mudo dejaba el tile en el shimmer de «CARGANDO» para siempre: el WebSocket con go2rtc
   queda abierto esperando el primer segmento y no hay ningún evento que avise. Ahora cada
@@ -207,6 +243,34 @@ sí `docker compose build` (o bajar las imágenes nuevas), que es donde se nota 
   la AstDB y la republicación del dialplan a la vez; el dialplan compara `${SALAPIN}` contra
   `${DB(salapin/<sala>)}` y con la AstDB todavía vacía falla cerrado. Ahora se republica el
   dialplan **después** de que los PIN estén escritos.
+
+**Al actualizar** hay que **parar y recrear Asterisk, y eso corta las llamadas en curso**:
+programá una ventana. No alcanza con `up -d` a secas.
+
+1. `docker compose build asterisk` (o bajá las imágenes nuevas). `asterisk.conf` va **horneado
+   adentro de la imagen** (`COPY config/asterisk/ /etc/asterisk/`) y es el archivo que mueve
+   `astdbdir` a `/var/lib/asterisk/db`: con la imagen vieja, el volumen nuevo se monta sobre un
+   directorio que Asterisk no usa y la AstDB sigue siendo efímera, sin un solo error a la vista.
+   La imagen de la API conviene rearmarla también (es donde se nota la imagen más chica, sin los
+   paquetes de fax).
+2. `docker compose up -d` recrea el contenedor de Asterisk para tomar el **volumen nuevo
+   `asterisk_db`**. Recrear Asterisk **corta todas las llamadas en curso**; la AstDB arranca
+   vacía esta vez y el resync del AMI la vuelve a llenar desde Postgres a los ~30–40 s (de ahí en
+   adelante ya no se vacía nunca más, que es el punto del volumen).
+3. Las migraciones `0018_sin_fax.sql` y `0019_turn_origen.sql` las corre **sola la API al
+   arrancar**. La `0018` avisa con un `NOTICE` si tuvo que **borrar** alguna ruta entrante que
+   iba al fax por no haber ningún IVR al que repuntarla: a ese DID hay que darle un destino nuevo
+   desde el panel.
+4. Revisá `Configuración → TURN`: con `COMPOSE_PROFILES` sin el perfil `turn`, el coturn propio
+   —que ahora viene encendido de fábrica— no se levanta. `install.sh` y `.env.example` ya dejan
+   `core,turn`, pero una central instalada antes conserva el valor que tenía en su `.env`.
+
+**Volver a 1.10.0 NO es posible sin restaurar un respaldo de la base.** La `0018` **borra**
+`pbxng_fax_config`, `pbxng_fax_boxes`, `pbxng_fax_in` y `pbxng_fax_out`, y el `fax.js` de 1.10.0
+las consulta al arrancar: el downgrade es bajar las imágenes de 1.10.0 **y** restaurar el respaldo
+previo a la actualización. Sacá ese respaldo **antes** de empezar (`/respaldos` o
+`backup-cli.js`). Los documentos del spool (`/recordings/fax`) no los toca ninguna migración: si
+quedó algún fax recibido, es del cliente y hay que llevárselo a mano.
 
 ## [1.10.0] - 2026-09-14
 Sprint 7: cierra el **bloque B** de `docs/BRECHA-UCM-XORCOM.md` —lo que se pide en una

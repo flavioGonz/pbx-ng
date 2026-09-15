@@ -8,6 +8,24 @@ import { useEffect, useRef, useState, useCallback } from 'react';
  * comía el timeout antes de fallar. Con la lista vacía, ICE junta candidatos `host`
  * (misma LAN) al instante y, si /api/ice contesta, usa lo que diga la central. */
 let ICE = [];
+
+/* Cinturón del lado del cliente: una entrada con una `urls` que el navegador no sabe
+ * parsear (un `turn:` sin host, por ejemplo) NO degrada la llamada — Chrome y Edge tiran
+ * SyntaxError al construir el RTCPeerConnection y se cae el softphone entero, registro
+ * incluido. La API ya no puede publicar una así (control-plane/turn.js), pero este panel
+ * también habla con centrales que todavía no se actualizaron: descartar la entrada mala
+ * y llamar con el resto es siempre mejor que no poder llamar. */
+function iceUtil(lista) {
+  // Con corchetes también: `turn:[2001:db8::1]:3478` es una URL legítima y no se descarta.
+  const sana = (u) => /^(stuns?|turns?):(\[[0-9a-f:]+\]|[^\s:/?[\]]+)(:\d+)?(\?.*)?$/i.test(String(u || '').trim());
+  return (Array.isArray(lista) ? lista : [])
+    .map((e) => {
+      const urls = (Array.isArray(e && e.urls) ? e.urls : [e && e.urls]).filter(sana);
+      return urls.length ? { ...e, urls: urls.length === 1 ? urls[0] : urls } : null;
+    })
+    .filter(Boolean);
+}
+
 const LS = 'pbxng_softphone';
 const HIST = 'pbxng_softphone_hist';
 
@@ -157,7 +175,7 @@ export function useSoftphone() {
     wantConnected.current = true;
     setReg('connecting');
     try {
-      try { const ir = await fetch('/backend/api/ice'); if (ir.ok) { const id = await ir.json(); if (id && Array.isArray(id.iceServers) && id.iceServers.length) ICE = id.iceServers; } } catch (_) {}
+      try { const ir = await fetch('/backend/api/ice'); if (ir.ok) { const id = await ir.json(); const util = iceUtil(id && id.iceServers); if (util.length) ICE = util; } } catch (_) {}
       const SIP = await import('sip.js');
       const { UserAgent, Registerer } = SIP;
       const uri = UserAgent.makeURI(`sip:${ext}@${location.hostname}`);

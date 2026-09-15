@@ -126,3 +126,54 @@ const COLOR_ESTADO = {
 export function estadoColor(estado, porDefecto = 'gray') {
   return COLOR_ESTADO[String(estado || '').toLowerCase().trim()] || porDefecto;
 }
+
+/* ---------------------------------------------------------------- infraestructura
+ * Un módulo de infraestructura tiene DOS estados y no son el mismo: `deseado` es el
+ * interruptor que alguien dejó en ON (`pbxng_settings.mod_<id>`) y `corriendo` es lo
+ * que contestó el servicio cuando se lo fue a buscar. El release 1.11.0 salió
+ * justamente porque el panel dibujaba el primero y lo llamaba «activo»: switch en
+ * verde, contenedor inexistente y siete softphones sin audio. Acá se traduce el par a
+ * lo que hay que mostrar, en un solo lugar, para que el interruptor de
+ * `ModulesPanel` y la pantalla de WebRTC/TURN no se contradigan entre sí.
+ *
+ * `est` es lo que devuelve una sonda con forma `{deseado, corriendo, motivo, local}`
+ * (hoy `GET /api/turn/estado`). `est` nulo NO es «apagado»: es «no lo sé», y se dice
+ * así — inventar un verde sin haber medido es el bug original.
+ * Devuelve `{color, texto, detalle, medido}`.
+ */
+export function estadoInfra(est, { deseado } = {}) {
+  const on = est ? !!est.deseado : !!deseado;
+  /* `sondeado:false` = no salió un solo paquete (módulo apagado, origen sin host, enlace
+   * al SBC caído). Sin medición no se afirma NADA: pintar «NO responde» sobre algo que
+   * nadie preguntó es la misma clase de mentira que este release vino a matar, movida
+   * del backend al panel. Va antes que todo lo demás, incluido `local === false`. */
+  if (est && est.sondeado === false) {
+    return {
+      color: 'gray', medido: false,
+      texto: on ? 'no se pudo comprobar' : 'apagado',
+      detalle: est.motivo || (on ? 'el interruptor está en ON pero no se pudo medir el servicio.' : ''),
+    };
+  }
+  if (!est) {
+    return {
+      color: 'gray', medido: false,
+      texto: on ? 'encendido · no se puede comprobar' : 'apagado',
+      detalle: on ? 'este módulo todavía no tiene sonda: el panel sabe que el interruptor está en ON, pero no puede afirmar que el servicio esté respondiendo.' : '',
+    };
+  }
+  /* El servicio lo provee otro (el TURN del SBC-NG o uno externo): el contenedor local
+   * está apagado A PROPÓSITO, así que un interruptor en OFF no es una falla. */
+  if (est.local === false) {
+    return est.corriendo
+      ? { color: 'teal', medido: true, texto: 'lo provee otro servidor · responde', detalle: est.motivo || '' }
+      : { color: 'red', medido: true, texto: 'lo provee otro servidor · NO responde', detalle: est.motivo || '' };
+  }
+  if (on && !est.corriendo) {
+    return { color: 'red', medido: true, texto: 'encendido, pero el servicio no responde', detalle: est.motivo || '' };
+  }
+  if (!on && est.corriendo) {
+    return { color: 'yellow', medido: true, texto: 'apagado, pero todavía responde', detalle: est.motivo || 'el interruptor está en OFF y el servicio sigue contestando: quedó corriendo de antes.' };
+  }
+  if (on) return { color: 'teal', medido: true, texto: 'encendido y respondiendo', detalle: est.motivo || '' };
+  return { color: 'gray', medido: true, texto: 'apagado', detalle: '' };
+}

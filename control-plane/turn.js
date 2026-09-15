@@ -30,6 +30,16 @@
  *  salida a internet —lo normal en un organismo público— arranque el WebRTC
  *  pidiéndole permiso a Google y falle.
  *
+ *  DOS REGLAS QUE VALEN MÁS QUE CUALQUIER PARCHE PUNTUAL, aprendidas midiendo:
+ *   1. `/api/ice` NUNCA queda sin un `stun:` utilizable. Es la última red del WebRTC:
+ *      sin STUN el navegador junta sólo candidatos de host y cualquiera detrás de un
+ *      NAT se queda mudo, sin un mensaje de error. Si el origen elegido no da host, se
+ *      cae al host propio del appliance —inocuo en los tres orígenes, porque es esta
+ *      misma central— y nunca a un tercero.
+ *   2. NO SE APAGA LO QUE ANDA HASTA COMPROBAR QUE LO NUEVO SIRVE. Cambiar el origen a
+ *      uno ajeno apaga el coturn local; hacerlo antes de sondear el relay nuevo deja a
+ *      la central sin ningún TURN mientras se averigua si el nuevo existía.
+ *
  *  PROBAR DE VERDAD: que el puerto conteste no alcanza. `sondear()` hace lo
  *  mismo que un navegador juntando candidatos: STUN Binding → Allocate sin
  *  credenciales (tiene que dar 401+realm) → Allocate firmado (200 + candidato
@@ -54,6 +64,49 @@ const log = logger('TURN');
 
 const ORIGENES = ['propio', 'sbc', 'externo'];
 const PUERTO_TURN = 3478;
+
+/* ---------------------------------------------------------------------------
+ *  UNA SOLA lectura de una URL `turn:`/`turns:`, porque la usan TRES lugares: el
+ *  origen efectivo (de ahí saca host y puerto), la validación del PUT y el armado de
+ *  `/api/ice`. Mientras la validación fue una copia más floja que el parseo —«empieza
+ *  con turn:» y nada más—, un `turn:` pelado (sin host) pasaba el 400, no matcheaba el
+ *  parseo, dejaba el host vacío y con eso `/api/ice` salía SIN NINGUNA entrada `stun:`
+ *  y con una `turn:` inválida. Chrome y Edge tiran `SyntaxError` al construir el
+ *  RTCPeerConnection con una `urls` así: no degradan la llamada, la rompen entera. Y
+ *  como `auth.js` arma el QR de provisión con la MISMA función, un teléfono de
+ *  escritorio se llevaba esa configuración GRABADA y no se arreglaba sola cuando
+ *  alguien corregía el panel. Dos ideas de «qué es una URL de TURN válida» siempre
+ *  terminan en que la más floja decide.
+ * ------------------------------------------------------------------------- */
+const RE_URL_TURN = /^turns?:\[?([^\]/?]+?)\]?(?::(\d+))?(?:\?.*)?$/i;
+const RE_URL_STUN = /^stuns?:\[?([^\]/?]+?)\]?(?::(\d+))?(?:\?.*)?$/i;
+/* Un host suelto (el que se escribe en «host del TURN propio»): sin espacios, sin
+ * barras y sin esquema. `mi central` o `http://foo/bar` terminaban armando una `urls`
+ * que el navegador no puede construir, igual que la URL sin host. Los dos puntos sólo
+ * se aceptan DENTRO de corchetes (IPv6): si no, `turn:` pasaba como nombre de host. */
+const RE_HOST = /^(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9._-]{1,253})$/;
+
+/* Un host aceptable, venga con corchetes o sin ellos: la expresión de la URL ya se los
+ * saca, así que un IPv6 llega pelado y hay que volver a ponérselos para juzgarlo. */
+function hostOk(h) { const v = String(h == null ? '' : h).trim(); return RE_HOST.test(v) || RE_HOST.test('[' + v + ']'); }
+
+function conPuerto(m) {
+  if (!m || !m[1]) return null;
+  /* El host también se valida acá y no sólo «que haya algo»: la clase de caracteres de
+   * la expresión de arriba acepta espacios, así que `stun:no es una url` pasaba como
+   * una URL con host «no es una url» y se publicaba tal cual. */
+  if (!hostOk(m[1])) return null;
+  const puerto = m[2] ? +m[2] : PUERTO_TURN;
+  if (!(puerto > 0 && puerto <= 65535)) return null;
+  return { host: m[1], puerto };
+}
+function parseUrlTurn(u) { return conPuerto(RE_URL_TURN.exec(String(u == null ? '' : u).trim())); }
+/* La hermana de `parseUrlTurn`, y existe por la misma razón: el agujero se cerró para
+ * `turn:` y seguía abierto por la puerta de al lado. Un `stun:` pelado, un
+ * `http://stun.example` o un `stun:,,` pasaban sin que nadie los mirara y se publicaban
+ * en `/api/ice` —y de ahí al QR de provisión, o sea GRABADOS en el teléfono—. */
+function parseUrlStun(u) { return conPuerto(RE_URL_STUN.exec(String(u == null ? '' : u).trim())); }
+function hostSueltoOk(h) { return !!String(h == null ? '' : h).trim() && hostOk(h); }
 
 /* Claves en pbxng_settings. Todas con prefijo `turn_`/`stun_` para que se vean juntas
  * en Configuración → Base y para que un respaldo se lea. Las contraseñas se guardan en
@@ -98,15 +151,69 @@ function esPrivada(ip) {
   return o[0] === 10 || o[0] === 127 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168) || (o[0] === 169 && o[1] === 254) || o[0] === 0;
 }
 
+/**
+ * ¿Por qué este relay NO le sirve a un cliente? Devuelve el motivo o null.
+ * Está separado de `sondear()` a propósito: es la regla que decide si el panel pinta
+ * verde o rojo, y una regla que sólo se puede ejercitar levantando un TURN de verdad
+ * no se prueba nunca. `hostIp` es la IP **resuelta** del TURN, no la cadena que
+ * escribió el administrador: con un nombre (`DOMAIN`, que es el caso normal) la
+ * comparación de abajo daba falso siempre y un coturn anunciando 172.17.0.1 pasaba
+ * como OK — o sea, la sonda escrita para detectar ese caso no lo detectaba.
+ */
+function motivoRelay(relayIp, hostIp) {
+  const roto = relayInservible(relayIp);
+  if (roto) return roto;
+  /* El caso del coturn del SBC: el TURN se anuncia en una dirección pública o de otra
+   * red, pero el relay que reparte es privado. Desde adentro de esa misma LAN "anda";
+   * desde afuera —que es para lo que existe el TURN— no llega nadie. */
+  if (esPrivada(relayIp) && hostIp && !esPrivada(hostIp)) {
+    return 'el relay anuncia una dirección privada (' + relayIp + '): los clientes de afuera no la alcanzan. Falta `external-ip` en turnserver.conf o el port-forward del rango relay.';
+  }
+  return null;
+}
+
+/**
+ * LA REGLA DE AGREGACIÓN de la sonda, escrita UNA sola vez (docs/CONTRATOS.md §3).
+ * La comparten `POST /api/turn/probe`, `POST /api/turn/test` y `scripts/check-turn.py`
+ * (que la reimplementa en Python, con este mismo comentario como referencia).
+ *
+ * **Alcanza con UN transporte**: `ok = udp.ok || tcp.ok`.
+ * El porqué, que es lo único que importa acá: la pregunta que contesta la sonda es
+ * «¿un softphone detrás de un NAT simétrico va a tener audio?», y para eso necesita UN
+ * candidato relay, no dos. Con TURN sobre UDP andando ya lo tiene. Exigir los dos
+ * (AND) declaraba rota la configuración más común de todas —port-forward de 3478/udp y
+ * nada más— al final de CADA instalación.
+ * TURN sobre TCP es el plan B de la red que bloquea UDP saliente (un hotel, una oficina
+ * con proxy): sin él ese cliente puntual queda sin audio y el resto anda. O sea MEJORA,
+ * no ROMPE —la regla del producto—, así que va como `aviso`, no como falla.
+ */
+function agregar(udp, tcp) {
+  const partes = [udp, tcp].filter(Boolean);
+  const buenos = partes.filter((p) => p.ok);
+  const malos = partes.filter((p) => !p.ok);
+  const ok = buenos.length > 0;
+  return {
+    ok,
+    veredicto: ok ? buenos[0].veredicto : (partes[0] && partes[0].veredicto) || '',
+    // El aviso existe para el caso mixto: verde SÍ, pero diciendo a quién deja afuera.
+    aviso: ok && malos.length
+      ? malos.map((p) => p.proto === 'TCP'
+        ? 'TURN sobre TCP no entrega relay (' + p.veredicto + '): los clientes en redes que bloquean UDP saliente van a quedar sin audio. Falta abrir 3478/tcp.'
+        : 'TURN sobre UDP no entrega relay (' + p.veredicto + '): todo el medio va a ir por TCP, con más latencia y peor calidad. Falta abrir 3478/udp.').join(' · ')
+      : '',
+  };
+}
+
 /* ---------------------------------------------------------------------------
  *  Cliente STUN/TURN mínimo (RFC 5389 / 8656) sin dependencias.
  *  Es el mismo camino que scripts/check-turn.py, para que el panel y la consola
  *  del instalador den el MISMO veredicto.
  * ------------------------------------------------------------------------- */
 const MAGIC = 0x2112a442;
-const M_BINDING = 0x0001, M_ALLOCATE = 0x0003;
+const M_BINDING = 0x0001, M_ALLOCATE = 0x0003, M_REFRESH = 0x0004;
 const A_XOR_MAPPED = 0x0020, A_USERNAME = 0x0006, A_MI = 0x0008, A_ERROR = 0x0009;
 const A_REALM = 0x0014, A_NONCE = 0x0015, A_XOR_RELAYED = 0x0016, A_REQ_TRANSPORT = 0x0019;
+const A_LIFETIME = 0x000d;
 
 function attr(tipo, val) {
   const pad = (4 - (val.length % 4)) % 4;
@@ -148,41 +255,82 @@ function codigoError(at) {
   return b && b.length >= 4 ? b[2] * 100 + b[3] : null;
 }
 
-/* Un intercambio pedido→respuesta, UDP o TCP, con timeout duro. El socket se cierra
- * siempre: una sonda que deja descriptores abiertos termina tumbando la API. */
-function intercambio(host, puerto, msg, tcp, ms) {
-  return new Promise((resolve, reject) => {
-    let listo = false;
-    const fin = (err, d) => { if (listo) return; listo = true; try { cerrar(); } catch (_) {} err ? reject(err) : resolve(d); };
-    const t = setTimeout(() => fin(new Error('sin respuesta (timeout)')), ms);
-    let cerrar = () => clearTimeout(t);
+/* Una CONEXIÓN al TURN que sobrevive a varios intercambios, UDP o TCP, con timeout
+ * duro por pedido. Existe por una razón concreta: en UDP la asignación TURN queda atada
+ * a la 5-tupla (RFC 8656 §5), así que el `Refresh lifetime=0` que la LIBERA tiene que
+ * salir por el MISMO socket que hizo el Allocate. Con un socket por intercambio el
+ * Refresh llegaba desde otro puerto de origen y el servidor ni se enteraba.
+ * El socket se cierra siempre: una sonda que deja descriptores abiertos termina
+ * tumbando la API. */
+function conexion(host, puerto, tcp) {
+  let sock = null;
+  let buf = Buffer.alloc(0);
+  let pend = null;      // { resolve, reject, t } — los pedidos son de a uno, en orden
+  let roto = null;
+  const fallar = (e) => { roto = e; if (pend) { const p = pend; pend = null; clearTimeout(p.t); p.reject(e); } };
+  /* Se entrega sólo la respuesta al pedido EN CURSO: el transaction id tiene que
+   * coincidir. Con la conexión reusada, un datagrama duplicado o la retransmisión tardía
+   * del Allocate llegaría cuando ya se está esperando la respuesta del Refresh, y sin
+   * esta comparación se resolvería ese pedido con el mensaje equivocado. */
+  const entregar = (d) => {
+    if (!pend || d.length < 20) return;
+    if (!d.slice(8, 20).equals(pend.tid)) return;
+    const p = pend; pend = null; clearTimeout(p.t); p.resolve(d);
+  };
+
+  function abrir() {
+    if (sock) return;
     if (tcp) {
-      /* TCP no respeta los límites del mensaje: hay que acumular hasta tener la respuesta
-       * ENTERA (20 bytes de cabecera + el `length` que declara) antes de parsearla. Con
-       * `resolve` en el primer `data`, un Allocate firmado —que viene con realm, nonce y
-       * MESSAGE-INTEGRITY, o sea el más largo y el candidato natural a llegar partido—
-       * se leía truncado y la sonda declaraba «no se comporta como TURN» sobre un TURN
-       * sano. Un falso negativo en la herramienta que existe justamente para no creerle
-       * al panel es peor que no tener herramienta. */
-      const s = net.connect({ host, port: puerto });
-      let buf = Buffer.alloc(0);
-      cerrar = () => { clearTimeout(t); s.destroy(); };
-      s.on('connect', () => s.write(msg));
-      s.on('data', (d) => {
+      /* TCP no respeta los límites del mensaje: hay que acumular hasta tener la
+       * respuesta ENTERA (20 bytes de cabecera + el `length` que declara) antes de
+       * parsearla. Con `resolve` en el primer `data`, un Allocate firmado —que viene con
+       * realm, nonce y MESSAGE-INTEGRITY, o sea el más largo y el candidato natural a
+       * llegar partido— se leía truncado y la sonda declaraba «no se comporta como TURN»
+       * sobre un TURN sano. Un falso negativo en la herramienta que existe justamente
+       * para no creerle al panel es peor que no tener herramienta. Y al revés: dos
+       * respuestas pegadas en el mismo `data` se separan acá, porque ahora la conexión
+       * se reusa y la segunda es la del Refresh. */
+      sock = net.connect({ host, port: puerto });
+      sock.on('data', (d) => {
         buf = Buffer.concat([buf, d]);
-        if (buf.length < 20) return;
-        if (buf.length < 20 + buf.readUInt16BE(2)) return;
-        fin(null, buf);
+        while (buf.length >= 20 && buf.length >= 20 + buf.readUInt16BE(2)) {
+          const n = 20 + buf.readUInt16BE(2);
+          const msg = buf.slice(0, n);
+          buf = buf.slice(n);
+          entregar(msg);
+        }
       });
-      s.on('error', (e) => fin(e));
+      sock.on('error', fallar);
     } else {
-      const s = dgram.createSocket('udp4');
-      cerrar = () => { clearTimeout(t); try { s.close(); } catch (_) {} };
-      s.on('message', (d) => fin(null, d));
-      s.on('error', (e) => fin(e));
-      s.send(msg, puerto, host, (e) => { if (e) fin(e); });
+      sock = dgram.createSocket('udp4');
+      sock.on('message', (d) => entregar(d));
+      sock.on('error', fallar);
     }
-  });
+  }
+
+  return {
+    pedir(msg, ms) {
+      return new Promise((resolve, reject) => {
+        if (roto) return reject(roto);
+        try { abrir(); } catch (e) { return reject(e); }
+        pend = { resolve, reject, tid: msg.slice(8, 20), t: setTimeout(() => { pend = null; reject(new Error('sin respuesta (timeout)')); }, ms) };
+        try {
+          if (tcp) { if (sock.connecting) sock.once('connect', () => { try { sock.write(msg); } catch (e) { fallar(e); } }); else sock.write(msg); }
+          else sock.send(msg, puerto, host, (e) => { if (e) fallar(e); });
+        } catch (e) { fallar(e); }
+      });
+    },
+    cerrar() {
+      try { if (!sock) return; if (tcp) sock.destroy(); else sock.close(); } catch (_) {}
+      sock = null;
+    },
+  };
+}
+
+/* Un intercambio suelto pedido→respuesta: abre, pregunta y cierra. */
+async function intercambio(host, puerto, msg, tcp, ms) {
+  const cx = conexion(host, puerto, tcp);
+  try { return await cx.pedir(msg, ms); } finally { cx.cerrar(); }
 }
 
 /**
@@ -248,49 +396,61 @@ async function sondear({ host, puerto, usuario, clave, tcp, ms }) {
 
   // 3) Allocate firmado: 200 + XOR-RELAYED-ADDRESS = el candidato relay de verdad
   const key = crypto.createHash('md5').update(usuario + ':' + realm.toString('utf8') + ':' + clave).digest();
-  const attrs = Buffer.concat([
-    attr(A_REQ_TRANSPORT, Buffer.from([17, 0, 0, 0])),
-    attr(A_USERNAME, Buffer.from(usuario, 'utf8')),
-    attr(A_REALM, realm), attr(A_NONCE, nonce),
-  ]);
-  let at2;
+  const cred = [attr(A_USERNAME, Buffer.from(usuario, 'utf8')), attr(A_REALM, realm), attr(A_NONCE, nonce)];
+  const attrs = Buffer.concat([attr(A_REQ_TRANSPORT, Buffer.from([17, 0, 0, 0]))].concat(cred));
+  /* La misma conexión para el Allocate y para el Refresh que lo libera: en UDP la
+   * asignación vive atada a la 5-tupla, así que un Refresh desde otro socket no libera
+   * nada. */
+  const cx = conexion(host, puerto, tcp);
   try {
-    const r = leer(await intercambio(host, puerto, armar(M_ALLOCATE, crypto.randomBytes(12), attrs, key), tcp, tope));
-    at2 = r.at;
-    if (r.tipo !== 0x0103 || !at2[A_XOR_RELAYED]) {
-      const c = codigoError(at2);
-      pasos.push({ paso: 'Allocate firmado', ok: false, detalle: c ? 'error ' + c : 'respuesta inesperada' });
-      res.veredicto = (c === 401 || c === 403)
-        ? 'credenciales RECHAZADAS: el usuario/clave del panel no coinciden con los del servidor TURN'
-        : 'el Allocate falló' + (c ? ' (error ' + c + ')' : '');
+    let at2;
+    try {
+      const r = leer(await cx.pedir(armar(M_ALLOCATE, crypto.randomBytes(12), attrs, key), tope));
+      at2 = r.at;
+      if (r.tipo !== 0x0103 || !at2[A_XOR_RELAYED]) {
+        const c = codigoError(at2);
+        pasos.push({ paso: 'Allocate firmado', ok: false, detalle: c ? 'error ' + c : 'respuesta inesperada' });
+        res.veredicto = (c === 401 || c === 403)
+          ? 'credenciales RECHAZADAS: el usuario/clave del panel no coinciden con los del servidor TURN'
+          : 'el Allocate falló' + (c ? ' (error ' + c + ')' : '');
+        return res;
+      }
+    } catch (e) {
+      pasos.push({ paso: 'Allocate firmado', ok: false, detalle: e.message });
+      res.veredicto = 'el Allocate firmado no obtuvo respuesta';
       return res;
     }
-  } catch (e) {
-    pasos.push({ paso: 'Allocate firmado', ok: false, detalle: e.message });
-    res.veredicto = 'el Allocate firmado no obtuvo respuesta';
-    return res;
-  }
 
-  const relay = xorAddr(at2[A_XOR_RELAYED]);
-  res.relay = relay ? relay.ip + ':' + relay.port : null;
-  const roto = relayInservible(relay && relay.ip);
-  if (roto) {
-    pasos.push({ paso: 'Allocate firmado', ok: false, detalle: 'relay ' + res.relay + ' — ' + roto });
-    res.veredicto = roto;
+    const relay = xorAddr(at2[A_XOR_RELAYED]);
+    res.relay = relay ? relay.ip + ':' + relay.port : null;
+    const motivo = motivoRelay(relay && relay.ip, hostIp);
+    pasos.push(motivo
+      ? { paso: 'Allocate firmado', ok: false, detalle: 'relay ' + res.relay + ' — ' + motivo }
+      : { paso: 'Allocate firmado', ok: true, detalle: 'relay = ' + res.relay });
+
+    /* DEVOLVER LA ASIGNACIÓN (RFC 8656 §7), pase lo que pase con el veredicto: un
+     * Allocate que sale bien deja una asignación viva en coturn con su lifetime —600 s
+     * por defecto— y unos puertos de relay reservados. Esta sonda no la corre una
+     * persona de vez en cuando: la pantalla del TURN mide cada 30 s y el Resumen cada
+     * 60, así que irse sin cerrar era ir dejando asignaciones colgadas justo en el relay
+     * que la sonda existe para cuidar. Es «mejor esfuerzo»: si el Refresh no llega, la
+     * asignación vence igual, y por eso NO toca `res.ok` —el veredicto es sobre el
+     * relay, no sobre nuestra prolijidad—. */
+    let liberada;
+    try {
+      const rl = leer(await cx.pedir(armar(M_REFRESH, crypto.randomBytes(12), Buffer.concat([attr(A_LIFETIME, Buffer.from([0, 0, 0, 0]))].concat(cred)), key), tope));
+      liberada = rl.tipo === 0x0104 ? true : 'error ' + codigoError(rl.at);
+    } catch (e) { liberada = e.message; }
+    res.liberada = liberada === true;
+    pasos.push(res.liberada
+      ? { paso: 'Refresh lifetime=0', ok: true, detalle: 'asignación devuelta (la sonda no deja relay reservado)' }
+      : { paso: 'Refresh lifetime=0', ok: false, detalle: 'no se pudo devolver la asignación (' + liberada + '): vence sola al cumplirse el lifetime' });
+
+    if (motivo) { res.veredicto = motivo; return res; }
+    res.ok = true;
+    res.veredicto = 'el TURN entrega candidato relay: WebRTC funciona detrás de NAT simétrico';
     return res;
-  }
-  /* El caso del coturn del SBC: el TURN se anuncia en una dirección pública o de otra
-   * red, pero el relay que reparte es privado. Desde adentro de esa misma LAN "anda";
-   * desde afuera —que es para lo que existe el TURN— no llega nadie. */
-  if (relay && esPrivada(relay.ip) && hostIp && !esPrivada(hostIp)) {
-    pasos.push({ paso: 'Allocate firmado', ok: false, detalle: 'relay ' + res.relay + ' es una dirección privada y el TURN está publicado en una pública' });
-    res.veredicto = 'el relay anuncia una dirección privada (' + relay.ip + '): los clientes de afuera no la alcanzan. Falta `external-ip` en turnserver.conf o el port-forward del rango relay.';
-    return res;
-  }
-  pasos.push({ paso: 'Allocate firmado', ok: true, detalle: 'relay = ' + res.relay });
-  res.ok = true;
-  res.veredicto = 'el TURN entrega candidato relay: WebRTC funciona detrás de NAT simétrico';
-  return res;
+  } finally { cx.cerrar(); }
 }
 
 /* ========================================================================== */
@@ -330,19 +490,33 @@ module.exports = function init(deps) {
    * cae en silencio a otro: repartir un TURN que no es el configurado es el
    * mismo error que repartir uno que no existe.
    */
-  async function origenEfectivo() {
-    const s = await leerAjustes();
+  async function origenEfectivo(sCandidato) {
+    /* `sCandidato` permite resolver un origen que TODAVÍA NO SE GUARDÓ: lo usa el PUT
+     * para sondear lo nuevo antes de apagar lo que anda. Sin parámetro, lo de la base. */
+    const s = sCandidato || await leerAjustes();
     const origen = ORIGENES.includes(s[K.origen]) ? s[K.origen] : 'propio';
     const stunManual = String(s[K.stun] || process.env.STUN_URL || '').trim();
     const out = { origen, host: '', puerto: PUERTO_TURN, usuario: '', clave: '', usable: false, motivo: '', stun: [], modulo_local: false };
 
     if (origen === 'propio') {
       out.modulo_local = true;
-      out.host = String(s[K.host] || '').trim() || hostPropioEnv();
+      const hManual = String(s[K.host] || '').trim();
+      out.host = (hManual && hostSueltoOk(hManual) ? hManual : '') || (hostSueltoOk(hostPropioEnv()) ? hostPropioEnv() : '');
+      if (hManual && !hostSueltoOk(hManual)) out.motivo = 'el host del TURN propio («' + hManual + '») no es un nombre ni una dirección válida';
       out.puerto = +s[K.puerto] || PUERTO_TURN;
       out.usuario = process.env.TURN_USER || 'pbxng';
       out.clave = process.env.TURN_PASS || '';
       if (!out.host) out.motivo = 'el appliance no tiene dirección pública: cargá PUBLIC_IP/DOMAIN o el host del TURN en el panel';
+      /* EL BUG FUNDACIONAL DE ESTE MÓDULO, alcanzable con un solo interruptor: con el
+       * módulo `turn` apagado desde Configuración → Módulos, la API seguía repartiendo
+       * `turn:<host>` —con usuario y clave— de un coturn que ella misma acababa de parar.
+       * Es literalmente lo que dice el encabezado que vinimos a arreglar. El `stun:` se
+       * mantiene (el appliance sigue ahí y es la última red del WebRTC); lo que no se
+       * publica es la entrada `turn:`, ni se regala la clave por una ruta pública para
+       * un relay que no existe. */
+      else if (!(await moduleEnabled('turn'))) {
+        out.motivo = 'el coturn de este appliance está apagado desde Configuración → Módulos';
+      }
       else if (!out.clave) out.motivo = 'falta TURN_PASS en el .env (la genera install.sh): sin clave el coturn propio no reparte credenciales';
       else out.usable = true;
     } else if (origen === 'sbc') {
@@ -362,10 +536,15 @@ module.exports = function init(deps) {
       out.urls = urls;
       out.usuario = String(s[K.extUser] || '').trim();
       out.clave = String(s[K.extPass] || '');
-      const m = /^turns?:\[?([^\]/?]+?)\]?(?::(\d+))?(?:\?|$)/i.exec(urls[0] || '');
-      out.host = m ? m[1] : '';
-      out.puerto = m && m[2] ? +m[2] : PUERTO_TURN;
+      const m = parseUrlTurn(urls[0]);
+      out.host = m ? m.host : '';
+      out.puerto = m ? m.puerto : PUERTO_TURN;
+      /* Las URL mal formadas se filtran ACÁ además de en el PUT: en una central que ya
+       * guardó una `turn:` sin host —lo que el PUT dejaba pasar— el origen tiene que
+       * salir NO utilizable y decir por qué, en vez de quedar «usable» con host vacío. */
+      const malas = urls.filter((u) => !parseUrlTurn(u));
       if (!urls.length) out.motivo = 'no se cargó ninguna URL de TURN externo';
+      else if (malas.length) out.motivo = 'la URL «' + malas[0] + '» no tiene host: una URL así rompe el RTCPeerConnection del softphone en vez de degradarlo';
       else if (!out.usuario || !out.clave) out.motivo = 'faltan usuario y clave del TURN externo';
       else out.usable = true;
     }
@@ -373,9 +552,32 @@ module.exports = function init(deps) {
     /* STUN: lo elegido a mano, si no el propio origen. NUNCA un servicio público:
      * una central sin salida a internet no puede depender de Google para juntar
      * candidatos (es el mismo problema que bajar una librería de un CDN en runtime). */
-    out.stun = stunManual
-      ? stunManual.split(',').map((x) => x.trim()).filter(Boolean).map((u) => (/^stuns?:/i.test(u) ? u : 'stun:' + u))
-      : (out.host ? ['stun:' + out.host + ':' + out.puerto] : []);
+    /* Lo cargado a mano se NORMALIZA y se FILTRA: una entrada que no parsea no se
+     * publica, y si no queda ninguna sana se cae al propio appliance como si no hubiera
+     * nada configurado. Publicar lo que el administrador escribió mal es exactamente el
+     * camino por el que una URL rota llegaba al teléfono. */
+    const stunSano = stunManual
+      ? stunManual.split(',').map((x) => x.trim()).filter(Boolean)
+        .map((u) => (/^stuns?:/i.test(u) ? u : 'stun:' + u))
+        .filter((u) => parseUrlStun(u))
+      : [];
+    if (stunSano.length) {
+      out.stun = stunSano;
+    } else {
+      /* EL STUN ES LA ÚLTIMA RED DEL WebRTC y por eso esta lista no puede quedar vacía.
+       * Sin una sola entrada `stun:` el navegador arma la oferta sólo con candidatos de
+       * host: dos softphones en la misma LAN se escuchan, y cualquiera detrás de un NAT
+       * se queda mudo sin un solo mensaje de error. Pasaba justo cuando el origen
+       * elegido NO daba host (una URL externa sin host, el SBC sin enlace): el TURN ya
+       * estaba roto y encima se iba también el STUN, que es lo único que seguía
+       * sirviendo. Así que si el origen no da host se cae al host propio del appliance:
+       * es inocuo en los tres orígenes —es esta misma central, no un tercero— y es lo
+       * que promete CONTRATOS §3 («el STUN por defecto es el propio appliance»). */
+      const hPropio = hostPropioEnv();
+      const h = out.host || hPropio;
+      const pto = out.host ? out.puerto : (+s[K.puerto] || PUERTO_TURN);
+      out.stun = h ? ['stun:' + h + ':' + pto] : [];
+    }
     return out;
   }
 
@@ -390,13 +592,31 @@ module.exports = function init(deps) {
     const ice = e.stun.map((u) => ({ urls: u }));
     if (e.usable) {
       if (e.origen === 'externo') {
-        ice.push({ urls: e.urls, username: e.usuario, credential: e.clave });
+        /* Sólo las URL que PARSEAN. Una `urls` inválida (`turn:` pelado, por ejemplo) no
+         * degrada nada: Chrome y Edge tiran SyntaxError al construir el
+         * RTCPeerConnection y se cae la llamada entera —y el QR de provisión, que sale
+         * de esta misma función, se la graba al teléfono de escritorio—. Si no queda
+         * ninguna URL sana no se publica la entrada: mejor sólo STUN que una lista que
+         * el cliente no puede ni construir. */
+        const urls = (e.urls || []).filter((u) => parseUrlTurn(u));
+        if (urls.length) ice.push({ urls, username: e.usuario, credential: e.clave });
       } else {
         ice.push({ urls: 'turn:' + e.host + ':' + e.puerto + '?transport=udp', username: e.usuario, credential: e.clave });
         ice.push({ urls: 'turn:' + e.host + ':' + e.puerto + '?transport=tcp', username: e.usuario, credential: e.clave });
       }
     }
     return { iceServers: ice, origen: e.origen, motivo: e.motivo || undefined };
+  }
+
+  /* Los dos transportes en paralelo, con la regla de agregación. Lo comparten la
+   * verificación del PUT, `POST /api/turn/probe` y `POST /api/turn/test`: tres lugares
+   * que tienen que dar EL MISMO veredicto sobre el mismo relay. */
+  async function sondaDoble(e, ms) {
+    const [udp, tcp] = await Promise.all([
+      sondear({ host: e.host, puerto: e.puerto, usuario: e.usuario, clave: e.clave, tcp: false, ms }),
+      sondear({ host: e.host, puerto: e.puerto, usuario: e.usuario, clave: e.clave, tcp: true, ms }),
+    ]);
+    return { udp, tcp, ...agregar(udp, tcp) };
   }
 
   /* Estado REAL, cacheado 20 s. Se usa para que el interruptor del panel diga si el
@@ -408,12 +628,28 @@ module.exports = function init(deps) {
     if (!fresco && _cache.v && Date.now() - _cache.t < 20000) return _cache.v;
     const e = await origenEfectivo();
     const deseado = await moduleEnabled('turn');
-    const s = await sondear({ host: e.host, puerto: e.puerto, usuario: e.usuario, clave: e.clave, ms: 1800 });
+    /* NO se sondea cuando no hay nada que sondear. Esta función la piden dos pantallas
+     * en bucle (el TURN cada 30 s, el Resumen cada 60) y cada sonda son tres
+     * intercambios contra el relay: correrla con el coturn propio apagado a propósito
+     * —o sin host configurado— es gastar tiempo de request y ruido en los logs del
+     * relay para confirmar lo que el motivo ya explica. Ojo con la condición: con el
+     * origen `sbc` o `externo` el interruptor local está en OFF POR DISEÑO y ahí sí hay
+     * que medir, porque el relay lo corre otro. */
+    const apagadoAdrede = e.modulo_local && !deseado;
+    const sondeado = !!e.host && !apagadoAdrede;
+    const s = !sondeado
+      ? { ok: false, relay: null, mapped: null, veredicto: apagadoAdrede ? 'el coturn de este appliance está apagado desde Configuración → Módulos' : 'no hay ningún host de TURN configurado' }
+      : await sondear({ host: e.host, puerto: e.puerto, usuario: e.usuario, clave: e.clave, ms: 1800 });
     const v = {
       origen: e.origen, host: e.host, puerto: e.puerto,
       /* `deseado` es lo que dice pbxng_settings (el interruptor); `corriendo` es lo que
        * contestó el servidor. Cuando difieren, el que miente es el panel. */
       deseado, corriendo: s.ok, relay: s.relay, mapped: s.mapped,
+      /* `sondeado:false` = no se midió (el coturn propio está apagado a propósito, o no
+       * hay host configurado). Un `corriendo:false` sin medición no es lo mismo que uno
+       * medido, y esa diferencia se dice: el módulo entero existe para que el panel no
+       * afirme lo que no comprobó. */
+      sondeado,
       motivo: e.motivo || (s.ok ? '' : s.veredicto),
       // Sólo el origen `propio` tiene contenedor local que encender o apagar.
       local: e.modulo_local,
@@ -454,43 +690,114 @@ module.exports = function init(deps) {
     const origen = String(b.origen || '').trim();
     if (!ORIGENES.includes(origen)) return res.status(400).json({ error: 'origen inválido: usá propio, sbc o externo' });
     try {
+      const actuales = await leerAjustes();
       if (origen === 'sbc') {
         const lk = await sbcLink(true);
         if (!lk || !lk.active) return res.status(400).json({ error: 'no hay un enlace a SBC-NG activo: conectalo primero desde Configuración → SBC-NG' });
-        const u = b.sbc_usuario !== undefined ? String(b.sbc_usuario).trim() : String((await leerAjustes())[K.sbcUser] || '');
+        const u = b.sbc_usuario !== undefined ? String(b.sbc_usuario).trim() : String(actuales[K.sbcUser] || '');
         if (!u) return res.status(400).json({ error: 'hace falta el usuario TURN del SBC-NG' });
       }
       if (origen === 'externo') {
-        const urls = (b.externo_urls !== undefined ? String(b.externo_urls) : String((await leerAjustes())[K.extUrls] || '')).split(',').map((x) => x.trim()).filter(Boolean);
+        const urls = (b.externo_urls !== undefined ? String(b.externo_urls) : String(actuales[K.extUrls] || '')).split(',').map((x) => x.trim()).filter(Boolean);
         if (!urls.length) return res.status(400).json({ error: 'cargá al menos una URL de TURN externo (turn:host:3478)' });
-        const mala = urls.find((u) => !/^turns?:/i.test(u));
-        if (mala) return res.status(400).json({ error: 'la URL «' + mala + '» no empieza con turn: o turns:' });
+        /* La MISMA `parseUrlTurn()` que después saca el host y arma `/api/ice`, no una
+         * segunda copia más floja. Cuando acá sólo se miraba «empieza con turn:», un
+         * `turn:` sin host guardaba bien, dejaba el host vacío y el panel cantaba verde
+         * mientras `/api/ice` salía sin un solo `stun:` y con una URL que le hace tirar
+         * SyntaxError al navegador. La validación y el parseo tienen que ser la misma
+         * idea: si no, la más floja es la que manda. */
+        const mala = urls.find((u) => !parseUrlTurn(u));
+        if (mala) {
+          return res.status(400).json({ error: 'la URL «' + mala + '» no es una URL de TURN válida: tiene que ser turn:host[:puerto] o turns:host[:puerto] (con host, que es lo que se le reparte al softphone)' });
+        }
       }
 
-      await guardar(K.origen, origen);
-      if (b.propio_host !== undefined) await guardar(K.host, String(b.propio_host).trim());
-      if (b.propio_puerto !== undefined) await guardar(K.puerto, String(+b.propio_puerto || ''));
-      if (b.sbc_usuario !== undefined) await guardar(K.sbcUser, String(b.sbc_usuario).trim());
-      if (b.sbc_clave) await guardar(K.sbcPass, String(b.sbc_clave));   // vacío = no cambiar
-      if (b.sbc_puerto !== undefined) await guardar(K.sbcPuerto, String(+b.sbc_puerto || ''));
-      if (b.externo_urls !== undefined) await guardar(K.extUrls, String(b.externo_urls).trim());
-      if (b.externo_usuario !== undefined) await guardar(K.extUser, String(b.externo_usuario).trim());
-      if (b.externo_clave) await guardar(K.extPass, String(b.externo_clave));
-      if (b.stun_url !== undefined) await guardar(K.stun, String(b.stun_url).trim());
+      /* El STUN y el host propio van por el MISMO control que las URL de TURN, y no por
+       * uno más flojo: el bloqueante de la ronda anterior se cerró para `turn:` y seguía
+       * abierto acá al lado. Todo lo que termina en `/api/ice` termina también en el QR
+       * de provisión, o sea GRABADO en un teléfono de escritorio que no se arregla
+       * cuando alguien corrige el panel. */
+      if (b.stun_url !== undefined && String(b.stun_url).trim()) {
+        const malo = String(b.stun_url).split(',').map((x) => x.trim()).filter(Boolean)
+          .map((u) => (/^stuns?:/i.test(u) ? u : 'stun:' + u))
+          .find((u) => !parseUrlStun(u));
+        if (malo) return res.status(400).json({ error: 'el STUN «' + malo + '» no es válido: tiene que ser stun:host[:puerto] (o el host solo)' });
+      }
+      if (b.propio_host !== undefined && String(b.propio_host).trim() && !hostSueltoOk(b.propio_host)) {
+        return res.status(400).json({ error: 'el host del TURN propio no puede tener espacios, barras ni esquema: escribí el nombre o la dirección, por ejemplo central.ejemplo.com' });
+      }
+      if (b.propio_puerto !== undefined && String(b.propio_puerto).trim()) {
+        const pto = +b.propio_puerto;
+        if (!(pto > 0 && pto <= 65535)) return res.status(400).json({ error: 'el puerto del TURN propio tiene que estar entre 1 y 65535' });
+      }
+
+      /* Los cambios se arman UNA vez y se usan dos: primero para resolver el origen
+       * candidato sin escribir nada, después para guardarlo. Dos listas separadas
+       * —una para verificar y otra para guardar— es cómo se termina verificando una
+       * cosa y guardando otra. */
+      const cambios = [[K.origen, origen]];
+      const poner = (cond, k, v) => { if (cond) cambios.push([k, v]); };
+      poner(b.propio_host !== undefined, K.host, String(b.propio_host).trim());
+      poner(b.propio_puerto !== undefined, K.puerto, String(+b.propio_puerto || ''));
+      poner(b.sbc_usuario !== undefined, K.sbcUser, String(b.sbc_usuario).trim());
+      poner(!!b.sbc_clave, K.sbcPass, String(b.sbc_clave));   // vacío = no cambiar
+      poner(b.sbc_puerto !== undefined, K.sbcPuerto, String(+b.sbc_puerto || ''));
+      poner(b.externo_urls !== undefined, K.extUrls, String(b.externo_urls).trim());
+      poner(b.externo_usuario !== undefined, K.extUser, String(b.externo_usuario).trim());
+      poner(!!b.externo_clave, K.extPass, String(b.externo_clave));
+      poner(b.stun_url !== undefined, K.stun, String(b.stun_url).trim());
 
       /* UN SOLO ORIGEN A LA VEZ, y eso incluye el contenedor: si el TURN lo pone el SBC
        * o un tercero, el coturn local se apaga. Dos relays escuchando y uno solo
        * anunciado es el estado en el que nadie sabe cuál está sirviendo. */
       const local = origen === 'propio';
+
+      /* NO SE APAGA LO QUE ANDA HASTA COMPROBAR QUE LO NUEVO SIRVE.
+       * Antes esto guardaba, apagaba el coturn local y recién después alguien se
+       * enteraba —mirando el panel— de si el relay nuevo existía: la validación previa
+       * era de FORMA (que la URL empiece con turn:), no de funcionamiento. El resultado
+       * de un dedazo en el host era una central sin ningún relay, y sin aviso, porque
+       * las llamadas detrás de NAT simétrico se caen calladas.
+       * Así que el candidato se resuelve EN MEMORIA (nada escrito todavía) y se sondea
+       * de verdad; recién si entrega candidato relay se guarda y se apaga lo local.
+       * Volver a `propio` no pasa por acá a propósito: no apaga nada, ENCIENDE, y es la
+       * salida de emergencia que tiene que estar disponible siempre —incluso con el
+       * coturn caído, que es justo cuando hace falta—.
+       * `forzar: true` es la puerta del administrador que sabe lo que hace: un relay que
+       * sólo contesta desde afuera del NAT (sin hairpin) es un caso real y legítimo. */
+      const candidato = await origenEfectivo({ ...actuales, ...Object.fromEntries(cambios) });
+      let verificacion = null;
+      if (!local && !b.forzar) {
+        if (!candidato.usable) {
+          return res.status(400).json({ error: candidato.motivo || 'el origen nuevo no está utilizable', sin_cambios: true });
+        }
+        verificacion = await sondaDoble(candidato, 4000);
+        if (!verificacion.ok) {
+          log.warn('cambio de origen de TURN rechazado: el relay nuevo no contesta', { origen, host: candidato.host, veredicto: verificacion.veredicto });
+          return res.status(409).json({
+            error: 'el TURN nuevo no entrega candidato relay: ' + verificacion.veredicto
+              + ' · No se cambió nada y el coturn de este appliance sigue como estaba. Corregí los datos, o volvé a mandarlo con «cambiar igual» si sabés que ese relay sólo responde desde afuera.',
+            sin_cambios: true, verificacion,
+          });
+        }
+      }
+
+      for (const [k, v] of cambios) await guardar(k, v);
+
       let svc = null;
       try { await setModule('turn', local); } catch (e) { log.warn('no se pudo escribir mod_turn', { err: e.message }); }
       try { const r = await turnFwd('POST', '/service', { action: local ? 'start' : 'stop' }, 12000); svc = await r.json(); }
       catch (e) { svc = { error: e.message }; }   // sin contenedor coturn el reconciliador lo resuelve en el próximo ciclo
 
       invalidar();
-      log.info('origen de TURN cambiado', { origen, coturn_local: local });
+      log.info('origen de TURN cambiado', { origen, coturn_local: local, verificado: !!(verificacion && verificacion.ok), forzado: !!b.forzar });
       const e = await origenEfectivo();
-      res.json({ ok: true, origen, coturn_local: local, svc, efectivo: { host: e.host, puerto: e.puerto, usable: e.usable, motivo: e.motivo, stun: e.stun } });
+      res.json({
+        ok: true, origen, coturn_local: local, svc, forzado: !!b.forzar,
+        // Lo que midió la verificación viaja al panel: «guardado» no es «anda».
+        verificacion: verificacion ? { ok: verificacion.ok, veredicto: verificacion.veredicto, aviso: verificacion.aviso } : null,
+        efectivo: { host: e.host, puerto: e.puerto, usable: e.usable, motivo: e.motivo, stun: e.stun },
+      });
     } catch (e) { errorHttp(res, e); }
   });
 
@@ -504,19 +811,19 @@ module.exports = function init(deps) {
    * Es la misma que corre `scripts/check-turn.py` al terminar la instalación. */
   app.post('/api/turn/probe', async (req, res) => {
     try {
-      const b = req.body || {};
+      /* SIN CUERPO, a propósito: se sondea el origen EFECTIVO y nada más. Aceptar host,
+       * puerto, usuario y clave por el cuerpo convertía a este endpoint en una primitiva
+       * de escaneo de red desde la central —un admin del panel podía preguntarle a la
+       * PBX si tal IP:puerto de la LAN contesta, y con qué—, y además permitía probar
+       * algo distinto de lo que `/api/ice` le reparte a los softphones: un verde que no
+       * corresponde a la realidad es peor que no tener botón. El panel ya lo llama sin
+       * cuerpo (`TurnOrigen.jsx`); esto lo vuelve la única forma posible. */
       const e = await origenEfectivo();
-      const host = String(b.host || e.host || '').trim();
-      const puerto = +b.puerto || e.puerto;
-      const usuario = b.usuario !== undefined ? String(b.usuario) : e.usuario;
-      const clave = b.clave !== undefined ? String(b.clave) : e.clave;
-      const [udp, tcp] = await Promise.all([
-        sondear({ host, puerto, usuario, clave, tcp: false, ms: 5000 }),
-        sondear({ host, puerto, usuario, clave, tcp: true, ms: 5000 }),
-      ]);
+      const g = await sondaDoble(e, 5000);
       invalidar();
-      res.json({ origen: e.origen, host, puerto, ok: udp.ok || tcp.ok, udp, tcp,
-        veredicto: (udp.ok || tcp.ok) ? udp.veredicto || tcp.veredicto : (udp.veredicto || tcp.veredicto) });
+      // La regla de agregación vive en `agregar()`, no acá: es la MISMA que tiene que
+      // dar `scripts/check-turn.py` al final de la instalación (docs/CONTRATOS.md §3).
+      res.json({ origen: e.origen, host: e.host, puerto: e.puerto, ok: g.ok, udp: g.udp, tcp: g.tcp, veredicto: g.veredicto, aviso: g.aviso });
     } catch (e) { errorHttp(res, e); }
   });
 
@@ -534,15 +841,13 @@ module.exports = function init(deps) {
   app.post('/api/turn/test', async (req, res) => {
     try {
       const e = await origenEfectivo();
-      const [udp, tcp] = await Promise.all([
-        sondear({ host: e.host, puerto: e.puerto, usuario: e.usuario, clave: e.clave, tcp: false, ms: 5000 }),
-        sondear({ host: e.host, puerto: e.puerto, usuario: e.usuario, clave: e.clave, tcp: true, ms: 5000 }),
-      ]);
+      const g = await sondaDoble(e, 5000);
       invalidar();
       const linea = (p) => [p.proto + ' ' + e.host + ':' + e.puerto]
         .concat(p.pasos.map((x) => '  ' + (x.ok ? 'OK  ' : 'FALLA ') + x.paso + ' · ' + x.detalle))
         .concat(['  => ' + (p.ok ? 'OK · ' : 'FALLA · ') + p.veredicto]).join('\n');
-      res.json({ ok: udp.ok || tcp.ok, origen: e.origen, udp, tcp, out: linea(udp) + '\n\n' + linea(tcp) });
+      res.json({ ok: g.ok, origen: e.origen, udp: g.udp, tcp: g.tcp, veredicto: g.veredicto, aviso: g.aviso,
+        out: [linea(g.udp), linea(g.tcp)].concat(g.aviso ? ['AVISO · ' + g.aviso] : []).join('\n\n') });
     } catch (e) { errorHttp(res, e); }
   });
 
@@ -551,6 +856,9 @@ module.exports = function init(deps) {
 
 // Se exportan aparte para poder probarlas sin levantar Express ni Postgres.
 module.exports.sondear = sondear;
+module.exports.agregar = agregar;
+module.exports.parseUrlTurn = parseUrlTurn;
+module.exports.motivoRelay = motivoRelay;
 module.exports.relayInservible = relayInservible;
 module.exports.esPrivada = esPrivada;
 module.exports.ORIGENES = ORIGENES;

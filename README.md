@@ -107,8 +107,9 @@ La seguridad perimetral, el LCR con failover, la salud de operadores, la manipul
 - Colas/ACD, salas de reunión, grupos de timbrado, buzón visual, paging.
 - **Telefonía clásica de oficina (desde 1.9.0)**: horarios de atención con tramos, feriados (anuales y puntuales) y modo noche `auto|abierto|cerrado` aplicados a cada ruta entrante (`GotoIfTime` generado desde el panel); **desvíos** incondicional / si ocupado / si no contesta, **no molestar** y **sígueme** por interno, configurables desde el panel o desde el teléfono; y un **catálogo de 15 códigos de función con el código editable** (`*78`, `*21*…`, `*24*…`, `*28`…). La verdad vive en PostgreSQL y Asterisk la lee en caliente de la AstDB: cambiar un desvío no recarga el dialplan.
 - **Licitaciones y clientes medianos (desde 1.10.0)**: **reportes de call center** (nivel de servicio, abandono, esperas y conversación por cola y por agente, con CSV, informe A4 y envío programado por correo, calculados sobre los eventos de cola del AMI y no sobre el CDR); **failover de troncal** (una principal más una lista ordenada de respaldos, que salta sólo cuando el corte es de la troncal y no cuando lo dijo el destino); **DISA, callback, directorio por nombre y marcación abreviada** (el PIN en bcrypt en Postgres, nunca en el dialplan; DISA y callback nacen apagados); y **salas de reunión** con dos PIN, agenda, invitación por correo y moderación en vivo.
+- **Medio y plataforma (desde 1.11.0)**: el **coturn propio viene encendido de fábrica** y el **origen del TURN se elige desde el panel** —propio, el del SBC-NG o uno externo, **uno solo a la vez**—, con estado medido y sonda de verdad (STUN + Allocate firmado, UDP y TCP: un relay en una dirección que ningún cliente puede usar sale FALLA, no OK). El **STUN por defecto es el propio appliance**, no un servicio público. El módulo **Portería** (antes «Intercom») estrena grupo propio en el menú, con edición y prueba de porteros y las credenciales RTSP tapadas. La **AstDB dejó de ser efímera** (volumen `asterisk_db`). Y el **fax sale del producto** por decisión de producto: no va más en PBX-NG.
 - Grabación por interno o global (local/NAS/S3) con transcripción y análisis.
-- **Buzón de voz activado por defecto** en cada interno (PIN inicial = número de interno, `*97` para escucharlo), con MWI vía SUBSCRIBE/NOTIFY y buzón visual en el softphone.
+- **Buzón de voz activado por defecto** en cada interno, con **PIN al azar de seis dígitos** (desde 1.11.0; antes el PIN era el número del buzón, o sea ninguno). `*97` escucha el propio sin PIN —la identidad sale del endpoint que autenticó, no del CallerID— y `*98` entra al de otro pidiendo buzón y PIN. MWI vía SUBSCRIBE/NOTIFY y buzón visual en el softphone.
 - **Audios de la central en español rioplatense (voz uruguaya)**: los 326 prompts de Asterisk (buzón, números, fechas, colas, conferencias, directorio, agentes) generados con el TTS propio. Se regeneran con otra voz en un comando: `scripts/gen-sounds.py --voice es-UY-MateoNeural`.
 - Auto-aprovisionamiento de teléfonos por MAC (Yealink/Grandstream).
 - Rutas entrantes (DID) y salientes, dialplan realtime, wallboard TV-ready, mapa de llamadas.
@@ -157,9 +158,9 @@ El instalador es **interactivo**: te pregunta la topología, qué **módulos** l
 | Módulo | Perfil | Contenedor(es) | Función |
 |---|---|---|---|
 | core | `core` | postgres, asterisk, api, dashboard | Núcleo (siempre) |
-| turn | `turn` | coturn | TURN/STUN para WebRTC |
+| turn | `turn` | coturn | TURN/STUN para WebRTC. **Encendido de fábrica** desde 1.11.0: sin TURN, un softphone detrás de un NAT simétrico se queda sin audio |
 | ai | `ai` | voz | IVR con IA (TTS/STT) |
-| intercom | `intercom` | go2rtc | Video RTSP (intercom/cámaras) |
+| intercom | `intercom` | go2rtc | Video RTSP de porteros y cámaras. En el panel el módulo se llama **Portería**; el id se mantiene para no desconectar el interruptor de las centrales ya instaladas |
 | proxy | `proxy` | npm | Reverse proxy TLS/WSS (opcional) |
 
 Las **grabaciones** son función del `core` (volumen compartido `recordings`), no un contenedor aparte. El módulo `sbc` («Conexión a SBC-NG») es **lógico**: no levanta ningún contenedor, solo administra la troncal `to-sbc` y las rutas hacia un SBC-NG externo; viene apagado por defecto. Detalle completo en [`docs/PACKAGING.md`](docs/PACKAGING.md).

@@ -112,7 +112,8 @@ Cuando el punto de tu nombre está **verde**, estás en línea.
 ### 4.5 Entrar también a la plataforma
 
 Además del teléfono, tu acceso te conecta con el **sistema de la empresa**: así ves la ficha del
-cliente que te llama, el directorio y el intercom. Si el administrador te dio ese permiso, ya viene
+cliente que te llama, el directorio y el video de la **Portería**. Si el administrador te dio ese
+permiso, ya viene
 incluido en el enlace y no tenés que hacer nada.
 
 Si alguna vez te desconectás, en **Ajustes → Sistema** podés volver a entrar con tu usuario y

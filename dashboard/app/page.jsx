@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { usePoll, useApi } from './api';
-import { fmtBytes, fmtUptime, fmtFechaHora, fmtReloj } from './fmt';
+import { fmtBytes, fmtReloj, estadoInfra } from './fmt';
 import { SimpleGrid, Card, Group, Text, ThemeIcon, Badge, Stack, RingProgress, Progress, Box, Divider, Alert, Grid, Anchor } from '@mantine/core';
 import Link from 'next/link';
 import Slot from './Slot';
@@ -36,15 +36,6 @@ function Donut({ value, color, label, center, sub }) {
       <Text size="sm" c="dimmed">{label}</Text>
     </Stack>
   );
-}
-function StatRow({ icon, label, value, color = 'pbx' }) {
-  return <Group justify="space-between" wrap="nowrap" py={6} style={{ borderBottom: '1px solid var(--mantine-color-gray-1)' }}>
-    <Group gap={8} wrap="nowrap"><ThemeIcon size={26} radius="md" variant="light" color={color}>{icon}</ThemeIcon><Text size="sm" c="dimmed">{label}</Text></Group>
-    <Text fw={700} size="sm">{value}</Text></Group>;
-}
-function Bar({ label, value, total, color = 'pbx' }) {
-  const pct = total ? Math.round((value / total) * 100) : 0;
-  return <Box mb="sm"><Group justify="space-between" mb={3}><Text size="sm" c="dimmed">{label}</Text><Text size="sm" fw={600}>{value}{total != null ? ' / ' + total : ''}</Text></Group><Progress value={pct} color={color} radius="xl" size="sm" /></Box>;
 }
 
 
@@ -254,9 +245,17 @@ export default function Resumen() {
      * el estado sale de la sonda real (`/api/turn/estado`), que hace un Allocate y mira
      * el candidato relay: un TURN que contesta pero reparte una dirección privada es una
      * FALLA, no un OK. */
-    { n: 'Relay de medios (TURN)', est: !turn ? ESPERANDO : (turn.corriendo ? OK : CAIDO),
-      ip: (turn && turn.host) ? turn.host + ' · ' + turn.origen : '—',
-      detalle: (turn && !turn.corriendo && turn.motivo) || '' },
+    /* El veredicto lo arma `estadoInfra()` de fmt.js, el MISMO que usan Configuración →
+     * Módulos y la pantalla del TURN: si cada pantalla interpreta por su cuenta
+     * `deseado` + `corriendo` + `local`, tarde o temprano dicen cosas distintas del
+     * mismo servicio —que es el problema que vinimos a arreglar—. Acá sólo se traduce su
+     * color a los tres estados de esta pantalla. */
+    { n: 'Relay de medios (TURN)', ...(() => {
+      const e = estadoInfra(turn);
+      return { est: !e.medido ? ESPERANDO : e.color === 'teal' ? OK : CAIDO,
+        ip: (turn && turn.host) ? turn.host + ' · ' + turn.origen : '—',
+        detalle: e.color === 'teal' ? '' : (e.texto + (e.detalle ? ' — ' + e.detalle : '')) };
+    })() },
     { n: 'Proxy NPM (TLS/WSS)', est: combinar(estMed('proxy') ?? estComp(/Proxy/i)), ip: topo?.nodes?.npm || '-' },
     // Bordes EXTERNOS: otro producto, con su propio panel. Se listan aparte para que
     // se vea que su caida no es una falla de esta central, pero si le corta la salida.

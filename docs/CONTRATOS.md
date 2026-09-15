@@ -54,11 +54,19 @@ wallboard, pickup-groups). El resto vive en módulos con el patrón
 `module.exports = function init(deps) { …registra rutas en deps.app…; return {…} }`: reciben
 TODO por `deps` (nada global) y **se registran en `app.js` después del gate de auth y de
 `rbac.middleware`** (Express resuelve en orden: un módulo registrado antes queda sin token ni
-rol). Orden efectivo hoy: gate → `auth.js` → `sipconf.js` → `callengine.js` → `recordings.js`
-→ `apps.js` → `trunks.js` → `telefonia.js` → `marcacion.js` → `salas.js` →
-`ccreport.js` → `turn.js` → `guard.js` → 404 JSON + `errores.js` (`telefonia.js` va después de `trunks.js`
-porque usa su `regenerarEntrantes`; `marcacion.js` después de `telefonia.js` porque sus números
-cortos no pueden pisar los códigos de función de aquel).
+rol). **Orden efectivo hoy** (verificado contra el `require('./<módulo>')` de `app.js`, no de
+memoria): gate → `auth.js` → `sipconf.js` → `callengine.js` → `recordings.js` → `apps.js` →
+`turn.js` → `trunks.js` → `telefonia.js` → `marcacion.js` → `salas.js` → `ccreport.js` →
+`guard.js` → 404 JSON + `errores.js`.
+Los dos únicos órdenes que son una REGLA y no una casualidad: `telefonia.js` va después de
+`trunks.js` porque usa su `regenerarEntrantes`, y `marcacion.js` después de `telefonia.js` porque
+sus números cortos no pueden pisar los códigos de función de aquel. `turn.js` queda **antes** de
+`trunks.js` aunque le lea el enlace a SBC, y no es un descuido: recibe `sbcLink` envuelto en una
+lambda (`sbcLink: (...a) => sbcLink(...a)`), así que la referencia se resuelve recién en tiempo
+de request —mismo patrón que `auth.js`— y para entonces `trunks.js` ya se inicializó. Ninguno de
+los dos comparte rutas con el otro, así que el orden de registro en Express tampoco decide nada
+acá. **Si movés un `require` de módulo en `app.js`, esta línea se actualiza en el mismo cambio**:
+un contrato que miente sobre el orden es justo lo que §1.0 prohíbe.
 
 | Archivo | Dominio (rutas `/api/…`) | Devuelve a `app.js` |
 |---|---|---|
@@ -158,6 +166,29 @@ de cada archivo y en `.claude/agents/api.md`.
 
   El RBAC no aplica a rutas públicas (sin `req.user`) ni a tokens `scope:'phone'` (van por
   `FONO_PERMITIDO`).
+- **`/api/turn/*` es `admin`, y hoy lo es por el default.** `GET /api/ice` tiene regla propia
+  (`TODOS`: lo pide el softphone antes de tener sesión); **todo el resto de la familia `turn`
+  —`turn/origen`, `turn/estado`, `turn/probe`, `turn/test`, `turn/config`, `turn/restart`,
+  `turn/logs`— no tiene ninguna fila en `PERMISOS` y cae en el `return ADMIN` del final de
+  `rolesPara()`**. Eso es lo que queremos —elegir el origen del TURN es configuración de
+  sistema, y `turn/origen` maneja las credenciales del relay—, pero está apoyado en un
+  default, no escrito: el día que alguien agregue un comodín `['*', /^\/api\/turn(\/|$)/, SUP]`
+  para abrirle el estado al supervisor, se lleva puestas la escritura del origen y las
+  credenciales sin que nadie lo note (es exactamente el razonamiento de `mailboxes/:mailbox`).
+  **Falta la fila explícita en `control-plane/rbac.js` con ese comentario — pedido a `api`.**
+  Mientras tanto la única pantalla que consume la familia es Configuración → WebRTC / TURN,
+  que ya es admin entera, así que no hay `403` que esconder por rol.
+- **Módulos de infraestructura en el panel: se dibuja lo MEDIDO, no lo deseado.**
+  `GET /api/modules` es el interruptor (`pbxng_settings.mod_<id>`) y nada más. Para los
+  módulos marcados `infra: true` en `dashboard/app/ModulesPanel.jsx` (`turn`, `voz`,
+  `intercom`), el badge sale de `estadoInfra()` (`dashboard/app/fmt.js`), que traduce el par
+  `{deseado, corriendo}` de la sonda del módulo a una sola frase. Reglas: cuando los dos no
+  coinciden se dice con todas las letras («encendido, pero el servicio no responde») porque el
+  que miente es el panel; cuando el servicio lo provee otro (`local:false`, el TURN del SBC-NG
+  o uno externo) un interruptor en OFF **no** es una falla; y **un módulo sin sonda no se pinta
+  de verde**: dice «no se puede comprobar». Hoy el único con sonda es `turn`
+  (`GET /api/turn/estado`); `voz` e `intercom` no tienen endpoint que mida si el contenedor
+  contesta — **pedido a `api`**: hasta que exista, esos dos badges dicen «no se puede comprobar».
 - **`SUP_OK`: qué pantallas del shell abre un supervisor.** La lista vive en
   `dashboard/app/auth.jsx` (exportada) y es **una sola** para dos cosas: qué ítems se le
   dibujan en el menú (`app/shell.jsx`) y en qué rutas lo deja quedarse el redirect de
@@ -200,7 +231,7 @@ de cada archivo y en `.claude/agents/api.md`.
   recargar}`; los hooks cancelan con `AbortController` al desmontar y `usePoll` **pausa
   mientras `document.hidden`** y recarga al volver. Formateo compartido en
   `dashboard/app/fmt.js` (`fmtDur`, `fmtReloj`, `fmtFecha`, `fmtHora`, `fmtFechaHora`,
-  `fmtBytes`, `fmtUptime`, `codecLabel`, `banderaCC`, `estadoColor`).
+  `fmtBytes`, `fmtUptime`, `codecLabel`, `banderaCC`, `estadoColor`, `estadoInfra`).
 - **Política de encuestado del panel** (desde sprint1-seguridad; vale para pantallas nuevas):
   1) lo que ya viaja en el `snapshot` del socket (§4: `health`, `extensions`, `channels`,
   `queues`) **no se pide por HTTP** — Resumen, Extensiones, Monitor, Wallboard y Topología lo
@@ -315,7 +346,7 @@ de cada archivo y en `.claude/agents/api.md`.
 | `clients`, `persons`, `spaces`, `devices`, `intercom`, `survey` | Portería y CRM propio (`porteria`). Detalle abajo | `/intercom`, `/clientes`, `/clientes/<id>` |
 | `asterisk`, `net`, `sip`, `capture`, `system`, `topology`, `metrics` | núcleo, red, diagnóstico | `/asterisk`, `/red`, `/topologia`, `/` |
 | `sipconf` | ajustes SIP de la central (NAT, RTP, timers, TLS, códecs por defecto; sólo admin) | Configuración → SIP |
-| `turn`, `ice`, `acme`, `npm` | WebRTC/TURN (`control-plane/turn.js`, dueño `medios`), certificados, proxy. Detalle del ORIGEN del TURN abajo | Configuración |
+| `turn`, `ice`, `acme`, `npm` | WebRTC/TURN (`control-plane/turn.js`, dueño `medios`), certificados, proxy. Detalle del ORIGEN del TURN abajo | Configuración → solapa «WebRTC / TURN», con dos solapas adentro: **«Origen y prueba»** (`dashboard/app/TurnOrigen.jsx`: elige el origen, carga host/puerto/credenciales del que corresponda y corre la sonda) y **«Servidor coturn»** (`TurnConsole.jsx`: consola del contenedor propio). El orden importa: con el origen en `sbc` o `externo` el coturn local está apagado a propósito y la consola muestra un rojo que no es una falla |
 | `modules`, `settings`, `branding`, `integrations`, `alerts`, `email` | configuración | `/configuracion` |
 | `backup` | respaldo y restauración; `backup/schedule` (GET → `{enabled, hour, keep, last_run, last_ok, last_error, last_nombre, running, tz}`, POST `{enabled, hour, keep}` con `hour` entero 0–23, `keep` entero ≥ 1, `enabled` booleano, cada campo opcional, `400 {error}` si no valida; devuelve el estado nuevo. Se guarda en `pbxng_settings` (`backup_enabled` default `1`, `backup_hour` default 3, `backup_keep` default `BACKUP_KEEP`/14, `backup_last_run|ok|error|nombre`). Un planificador interno de la API revisa cada minuto: si está activo, es esa hora (reloj local del contenedor, `tz`) y hoy no hay marca `backup_last_run`, corre `backup.programado()` (crear sin grabaciones + retención). El cron del host (`backup-cli.js`) escribe las mismas claves, así que ninguno repite el del otro. El panel tolera 404 en versiones sin el endpoint) | `/respaldos` |
 | `push`, `c2c`, `enroll`, `phones`, `provision` | PWA, click-to-call, aprovisionamiento. `GET /api/push/vapid` → `{key}` con la pública VAPID vigente (`''` mientras la API no tenga un par que firme: el panel muestra «Servidor sin clave VAPID»). El par sale, en este orden, de `VAPID_PUBLIC`/`VAPID_PRIVATE` del `.env` si web-push lo acepta, de `pbxng_settings` (`vapid_public`/`vapid_private`) o, si ninguno sirve, la API genera uno al arrancar, lo guarda en `pbxng_settings` y lo avisa con un `warn` (las suscripciones hechas con otra pública fallan al enviar y se limpian solas con 404/410) | varios |
@@ -341,15 +372,49 @@ misma pieza en dos lugares.
     dueño `api`), que es el único lugar donde vive la dirección del borde; las credenciales van
     en `turn_sbc_user`/`turn_sbc_pass`. Exige el enlace **activo** (`400` si no) y **apaga el
     coturn local** (`mod_turn='0'`).
-  - `externo` · `turn_ext_urls` (csv, cada una tiene que empezar con `turn:`/`turns:`) +
-    `turn_ext_user`/`turn_ext_pass`. También apaga el coturn local.
+  - `externo` · `turn_ext_urls` (csv) + `turn_ext_user`/`turn_ext_pass`. También apaga el
+    coturn local. **Cada URL tiene que ser `turn:host[:puerto]` o `turns:host[:puerto]`,
+    CON host**: el `400` del PUT y el parseo que saca el host son la MISMA función
+    (`parseUrlTurn()`), no dos ideas distintas de qué es una URL válida. Cuando la
+    validación era la más floja de las dos («empieza con `turn:`»), un `turn:` pelado
+    guardaba bien, dejaba el host vacío, `/api/ice` salía sin un solo `stun:` y con una
+    `urls` que le hace tirar `SyntaxError` al `RTCPeerConnection` —o sea que ROMPE la
+    llamada en vez de degradarla—, y el mismo valor se le grababa al teléfono por QR.
   Si el origen elegido no está utilizable, `/api/ice` **no cae en silencio a otro** y devuelve
   `motivo`: repartir un TURN que no es el configurado es el mismo error que repartir uno que no
   existe.
+- **`/api/ice` NUNCA queda sin un `stun:` utilizable.** Es la última red del WebRTC: sin una
+  sola entrada `stun:` el navegador junta únicamente candidatos de host y cualquiera detrás de
+  un NAT se queda mudo, sin un mensaje de error. Si el origen elegido **no da host** (una URL
+  externa rota guardada de antes, el SBC sin enlace), el STUN cae al **host propio del
+  appliance** (`PUBLIC_IP`/`DOMAIN`), que es inocuo en los tres orígenes porque es esta misma
+  central y nunca un tercero. Lo que sí desaparece en ese caso es la entrada `turn:`, con su
+  `motivo`. Cubierto por `control-plane/test/turn.test.js` («/api/ice SIEMPRE trae al menos un
+  `stun:`»).
 - **`GET /api/ice`** (público, `Cache-Control: no-store`) → `{iceServers, origen, motivo?}`. Es la
   ÚNICA función que arma esa lista: `GET /api/provision` y `GET /api/enroll/:token` (auth.js) la
   reciben por `deps.iceMedio`, así que el QR no puede traer una configuración distinta de la que
   la central entrega. **Sin credenciales no se publica ninguna entrada `turn:`.**
+  - **Es público a propósito y reparte la clave del TURN a quien la pida: queda escrito acá.**
+    `ice` está en `PUBLIC_API` (§2) porque el softphone necesita la lista ICE **antes** de tener
+    sesión —la pide para armar el `RTCPeerConnection` en el arranque, y el enrolado por QR ocurre
+    justo cuando todavía no hay usuario—, y el `iceServers` que devuelve lleva `username` y
+    `credential` en claro. No es un agujero nuevo ni una regresión de 1.11.0 —el `/api/ice` de
+    `app.js` ya era público—, pero **1.11.0 cambia lo que hay del otro lado**: con origen `sbc`
+    reparte las credenciales del coturn del **SBC-NG** y con origen `externo` las de un TURN de
+    terceros, o sea la clave de un servicio que **no es de esta central** y que probablemente se
+    factura por tráfico. Cualquiera que llegue al panel por HTTPS sin sesión se las lleva, y con
+    ellas puede usar el relay para su propio tráfico. Mitigación que **no** alcanza: el
+    `origen`/`motivo` no dicen nada sensible y el rate limit de login no cubre esta ruta.
+  - **El camino para dejar de repartir una clave estática son las credenciales efímeras de
+    coturn** (`lt-cred-mech` con usuario `<timestamp>:<user>` y contraseña
+    `base64(HMAC-SHA1(clave_compartida, usuario))`, el esquema de REST API de TURN): la clave
+    compartida se queda en el appliance, `/api/ice` firma un usuario que **vence** (una hora
+    alcanza) y una credencial filtrada deja de servir sola. Hoy **no está implementado**: el
+    coturn de la imagen usa usuario y clave fijos (`TURN_USER`/`TURN_PASS`) y los tres orígenes
+    del selector guardan credenciales estáticas. Requiere tocar la config del coturn y `turn.js`
+    (**pedido a `medios`**), y en los orígenes `sbc` y `externo` depende de que ese TURN también
+    lo soporte, así que lo primero que puede salir es el origen `propio`.
 - **El STUN por defecto es el propio appliance** (`stun:<host del origen>:<puerto>`).
   `stun_url` (o `STUN_URL`) lo pisa. **Nada de servicios públicos**: el
   `stun:stun.l.google.com:19302` que estaba hardcodeado hacía que una central sin salida a
@@ -358,18 +423,70 @@ misma pieza en dos lugares.
   vacía y `softphone-app/src/config.js` con `stun: ''`.
 - `GET|PUT /api/turn/origen` (admin) · lee y cambia el origen. **Nunca devuelve contraseñas**,
   sólo `tiene_clave`. Una clave vacía en el PUT significa «no cambiar».
-- `GET /api/turn/estado` (admin) → `{origen, host, puerto, deseado, corriendo, relay, mapped,
-  motivo, local}`. **`deseado` es el interruptor; `corriendo` es lo que contestó el servidor.**
+  **No se apaga lo que anda hasta comprobar que lo nuevo sirve:** pasar a `sbc` o `externo`
+  apaga el coturn local, así que el PUT resuelve el origen candidato EN MEMORIA (todavía no
+  guardó nada), lo sondea de verdad (UDP+TCP) y sólo escribe si entrega candidato relay. Si no,
+  devuelve **`409 {error, sin_cambios:true, verificacion}`** y la central queda exactamente como
+  estaba. `forzar: true` en el cuerpo salta la verificación (un relay sin hairpin, que sólo
+  responde desde afuera, es un caso legítimo) y la respuesta lo dice con `forzado:true`. Volver
+  a `propio` **nunca** se verifica: no apaga nada, enciende, y es la salida de emergencia que
+  tiene que funcionar justo cuando el TURN está caído. La respuesta del `200` trae
+  `verificacion:{ok, veredicto, aviso}` (o `null` si no se sondeó). Lo dibuja
+  `dashboard/app/TurnOrigen.jsx` (Configuración → WebRTC / TURN → «Origen y prueba»). El PUT
+  manda **sólo el bloque del origen elegido**: mandar los tres haría que cambiar de origen
+  reescribiera credenciales de los otros dos sin que nadie las haya tocado.
+- `GET /api/turn/estado` (admin) → `{origen, host, puerto, deseado, corriendo, sondeado, relay,
+  mapped, motivo, local}`. **`sondeado:false` = no se midió** y entonces `corriendo:false` no
+  afirma nada: pasa cuando no hay host configurado o cuando el coturn propio está apagado a
+  propósito desde Configuración → Módulos. No se sondea en esos dos casos porque esta ruta la
+  piden dos pantallas en bucle (30 s y 60 s) y cada sonda son tres intercambios contra el relay.
+  Con origen `sbc` o `externo` el interruptor local está en OFF **por diseño** y ahí SÍ se mide:
+  el relay lo corre otro. **`deseado` es el interruptor; `corriendo` es lo que contestó el servidor.**
   Un switch de infraestructura tiene que dibujar `corriendo`: si el panel y la central no
-  coinciden, el bug es del panel. Cacheado 20 s; `?fresco=1` remide.
+  coinciden, el bug es del panel. Cacheado 20 s; `?fresco=1` remide. Lo consumen
+  `dashboard/app/ModulesPanel.jsx` (el interruptor del módulo `turn`) y `TurnOrigen.jsx`, los
+  dos a 30 s y traduciendo el par con el **mismo** helper `estadoInfra()` de
+  `dashboard/app/fmt.js` — dos traducciones del mismo par terminan contradiciéndose en la
+  misma central.
 - `POST /api/turn/probe` y `POST /api/turn/test` (admin) · la **sonda de verdad**, UDP y TCP:
   STUN Binding → Allocate sin credenciales (tiene que dar `401`+realm) → Allocate firmado
-  (`200` + `XOR-RELAYED-ADDRESS`). **Que el puerto conteste no alcanza**, y por eso un relay en
+  (`200` + `XOR-RELAYED-ADDRESS`) → **`Refresh lifetime=0`, que DEVUELVE la asignación**
+  (RFC 8656 §7) por el mismo socket que la pidió —en UDP la asignación está atada a la 5-tupla—.
+  Sin eso, cada sonda dejaba una asignación viva en coturn con su lifetime (600 s por defecto) y
+  con la pantalla del TURN abierta (30 s) más el Resumen (60 s) se iban acumulando solas. Es
+  mejor esfuerzo: si el Refresh no llega, la asignación vence igual y el veredicto no cambia.
+  **Los dos van SIN CUERPO y sondean el origen EFECTIVO, y nada más**: aceptar host, puerto,
+  usuario y clave por el cuerpo convertía a `probe` en una primitiva de escaneo de red desde la
+  central, y además dejaba probar algo distinto de lo que `/api/ice` reparte. **Que el puerto conteste no alcanza**, y por eso un relay en
   una dirección que ningún cliente puede usar sale **FALLA**: loopback, `0.0.0.0`, link-local, o
   una IP privada cuando el TURN está publicado en una pública (el caso real: un coturn
   escuchando sólo en `172.17.0.1`, el bridge de Docker, autenticaba perfecto y no le servía a
-  nadie). `scripts/check-turn.py` —que corre `install.sh` al terminar— hace exactamente los
-  mismos pasos y da el mismo veredicto.
+  nadie).
+- **Regla de agregación de la sonda: `ok = udp.ok || tcp.ok`. Alcanza con UN transporte.**
+  Vale para `POST /api/turn/probe`, `POST /api/turn/test` y `scripts/check-turn.py --tcp` —que
+  corre `install.sh` al terminar CADA instalación—, y está escrita una sola vez en la función
+  `agregar()` de `control-plane/turn.js` (el script la reimplementa en Python, con el mismo
+  comentario). El criterio no es cuál es más fácil de programar, es qué necesita un softphone
+  detrás de un NAT simétrico: **un** candidato relay. Con TURN sobre UDP andando ya lo tiene.
+  TURN sobre TCP es el plan B de la red que bloquea UDP saliente (un hotel, una oficina con
+  proxy): sin él, ese cliente puntual queda sin audio y el resto anda — o sea MEJORA, no ROMPE,
+  y por la regla del producto eso no puede ser una falla. Cuando un transporte anda y el otro
+  no, la respuesta trae **`aviso`** (el script lo imprime como `Aviso:` y sale `0`) diciendo a
+  quién deja afuera; `ok:false` y exit `1` quedan para cuando NINGUNO entrega relay, que es
+  cuando de verdad no hay audio para nadie. Hasta 1.11.0 acá decía que las dos herramientas
+  «dan el mismo veredicto» y era falso: el script exigía los DOS transportes (AND), así que un
+  TURN publicado sólo en 3478/udp —la configuración más común— salía verde en el panel y
+  «los clientes quedarán sin audio» en el instalador. Un instalador que grita cuando no pasa
+  nada enseña a ignorar las alarmas, que es peor que no tener alarma.
+  Las dos herramientas leen además el cable igual (acumulador TCP hasta tener 20 bytes + el
+  `length` declarado, e índice de atributos acotado al largo REAL del buffer): TCP es un flujo y
+  la respuesta puede llegar partida. `control-plane/test/turn-sonda.test.js` levanta un TURN de
+  mentira y verifica las dos cosas contra las DOS herramientas, incluido el `exit` del script.
+- En el panel la sonda es el botón «Probar» de
+  `TurnOrigen.jsx`, que va **sin cuerpo** (o sea, contra el origen EFECTIVO, que es lo que
+  `/api/ice` le reparte a los softphones: probar lo tipeado y todavía no guardado daría un
+  verde que no corresponde a lo que la central entrega) y muestra los `pasos` de cada
+  intercambio tal como vienen, el relay y el veredicto.
 - El agente del contenedor (`docker/images/coturn/pbxng-turn-agent.py`, :8091) **ya no miente**:
   `active` se decide por si hay alguien escuchando `listening-port`, no por poder ejecutar
   `turnserver --version` (que daba «Operativo» siempre). Su `POST /test` local se retiró (`410`):
@@ -431,7 +548,9 @@ guardar— pero se registra y vuelve como `aviso` en la respuesta (§5, AstDB).
   midigito vm_propio vm_otro`. **`vm_propio` publica el MISMO dialplan que el `*97` estático de
   `docker/config/asterisk/extensions.conf`** (1.11.0), no una versión corta: `GotoIf` sobre
   `CHANNEL(channeltype)`, `VoiceMailMain(${CHANNEL(endpoint)}@<VM_CONTEXT>,s)` para el canal PJSIP
-  y `VoiceMailMain(${CALLERID(num)}@<VM_CONTEXT>)` —con PIN— para cualquier otro. El estático hoy
+  y `VoiceMailMain(${CALLERID(num)}@<VM_CONTEXT>)` —con PIN— para cualquier otro. La única diferencia está en el
+  contexto: el realtime usa `vmpin.VM_CTX` y el estático tiene `default` fijo (§5, buzones de
+  voz). El estático hoy
   gana porque `*97` está ahí escrito, pero **en cuanto el administrador mueve el código a otro
   número manda el realtime**, y lo que había antes era `VoiceMailMain(${CALLERID(num)}@default)` a
   secas: pedía PIN, pero identificaba al que llama por el CallerID, que es lo que el teléfono manda
@@ -607,12 +726,27 @@ vive en la columna `password` de la tabla realtime `voicemail`, que es la que le
 `app_voicemail`; **no hay migración de esquema** y **ninguna migración toca un PIN existente**
 (el porqué, abajo).
 
-- **El contexto del buzón lo decide un solo lugar: `vmpin.VM_CTX`** (`VM_CONTEXT`, default
-  `default`). Lo usan `vmpin.seed`, todas las rutas `/api/mailboxes` de `apps.js`, el
-  `ps_endpoints.mailboxes` que escribe `app.js` al crear un interno y el `*97`/`*98` que publica
-  `telefonia.js`. Antes `apps.js` lo leía del entorno y los otros tres tenían `'default'` escrito
-  a mano: con `VM_CONTEXT` distinto, el alta de internos dejaba los buzones en un contexto, el
-  panel listaba y rotaba los de otro y `VoiceMailMain` buscaba en un tercero.
+- **El contexto del buzón lo decide un solo lugar EN LA API: `vmpin.VM_CTX`** (`VM_CONTEXT`,
+  default `default`). Lo usan `vmpin.seed`, todas las rutas `/api/mailboxes` de `apps.js`, el
+  `ps_endpoints.mailboxes` que escribe `app.js` al crear un interno y los códigos `vm_propio` /
+  `vm_otro` que publica `telefonia.js` en **realtime**. Antes `apps.js` lo leía del entorno y los
+  otros tres tenían `'default'` escrito a mano: con `VM_CONTEXT` distinto, el alta de internos
+  dejaba los buzones en un contexto, el panel listaba y rotaba los de otro y `VoiceMailMain`
+  buscaba en un tercero.
+- **El dialplan ESTÁTICO queda AFUERA de esa regla, y hay que decirlo.** El `*97` y el `*98` de
+  `docker/config/asterisk/extensions.conf` tienen **`default` escrito a mano** en sus tres
+  `VoiceMailMain` (`${CHANNEL(endpoint)}@default,s`, `${CALLERID(num)}@default` y `@default`).
+  Ese archivo va **horneado en la imagen** de Asterisk y no lo genera nadie, así que no puede
+  leer `VM_CONTEXT`. **Hoy no muerde porque `VM_CONTEXT` no está seteado en ningún lado**
+  —ni en `.env.example`, ni en los dos compose, ni en `install.sh`—, o sea que `vmpin.VM_CTX`
+  también resuelve `default` y los dos caminos coinciden. Pero la promesa de arriba es
+  condicional, no absoluta: **`VM_CONTEXT` distinto de `default` NO es una variable soportada
+  mientras `*97`/`*98` sigan en el estático** —quedarían los buzones en un contexto y el `*97`
+  del teléfono buscando en `default`, que es exactamente el síntoma que este arreglo vino a
+  sacar—. Para cambiarlo de verdad hay que **mover esos dos códigos a realtime**: darles otro
+  número desde `/funciones` (ahí el realtime le gana al estático, §3 `featurecodes`) o pedirle a
+  `telefonia` que saque el bloque del `extensions.conf`. Recién ahí el contexto sale de
+  `vmpin.VM_CTX` de punta a punta.
 
 - **El PIN se genera al azar, siempre** (`vmpin.pinNuevo()`, seis dígitos con `crypto`). Hasta
   1.10.0 el buzón nacía con `password = mailbox`, o sea sin PIN: cualquiera con un teléfono

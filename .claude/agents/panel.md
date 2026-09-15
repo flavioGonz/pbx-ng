@@ -7,7 +7,7 @@ Principios: el HTML del servidor tiene que coincidir con el primer render del cl
 
 Obligatorio en toda pantalla o componente nuevo (y al tocar uno viejo):
 - **Todo pedido a la API va por `app/api.js`** (`api`, `apiGet/apiPost/apiPut/apiDel`, `usePoll`, `useApi`). Nada de `fetch('/backend/api/...')` suelto ni de un helper `api()` local: el error ya llega como excepción con `.status` y `.message` en español (`toast(e.message, 'bad')` alcanza), y con `raw: true` se bajan audios y descargas **con** el token (un `<a href download>` o un `<audio src>` no pasa por el parche de `auth.jsx` y baja un 401). Excepciones: lo que no cuelga de `/api` (`/backend/health`, `/version.json`, `/manuales/*`).
-- **Todo formateo va por `app/fmt.js`** (`fmtDur`, `fmtReloj`, `fmtFecha`, `fmtHora`, `fmtFechaHora`, `fmtBytes`, `fmtUptime`, `codecLabel`, `banderaCC`, `estadoColor`). Si falta un formato, se agrega ahí, no una copia local en la pantalla.
+- **Todo formateo va por `app/fmt.js`** (`fmtDur`, `fmtReloj`, `fmtFecha`, `fmtHora`, `fmtFechaHora`, `fmtBytes`, `fmtUptime`, `codecLabel`, `banderaCC`, `estadoColor`, `estadoInfra`). Si falta un formato, se agrega ahí, no una copia local en la pantalla.
 - **Encuestado**: seguí la «Política de encuestado del panel» de `docs/CONTRATOS.md` §2 — lo que viene en el `snapshot` de `useLive()` no se pide por HTTP, la configuración va a 30 s o más con `usePoll`, y nada de `setInterval` sin comprobar `document.hidden`.
 
 Reglas comunes a todo el equipo PBX-NG (obligatorias):

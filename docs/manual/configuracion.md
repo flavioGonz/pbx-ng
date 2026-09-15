@@ -91,7 +91,7 @@ tenés que volver atrás a rehacer algo que ya habías configurado.
 |---|---|---|---|
 | **0** | **Entrar por la IP** | `http://<IP-del-servidor>:3001` | **Primero comprobá que la aplicación está viva.** Antes de meterse con dominios, DNS o certificados, entrá directo por la IP: si el panel carga, el problema (si después aparece) es de red o de proxy, no del sistema. Es el paso que ahorra horas de diagnóstico. |
 | 1 | Cambiar la contraseña | Panel → primer ingreso | El instalador imprimió una clave inicial y el sistema te obliga a cambiarla. |
-| 2 | Módulos activos | Configuración → Módulos | Define qué contenedores existen (SBC, TURN, IA, Intercom). Encender un módulo lo crea; apagarlo lo destruye. |
+| 2 | Módulos activos | Configuración → Módulos | Define qué contenedores existen (SBC, TURN, IA, Portería). Encender un módulo lo crea; apagarlo lo destruye. |
 | 3 | **Dominio y certificado** | Configuración → Proxy / TLS | **Recién ahora** el dominio: apuntás el DNS, emitís el certificado y pasás a entrar por `https://tu-dominio`. Sin TLS, las extensiones WebRTC no funcionan (el navegador no da micrófono sin HTTPS). |
 | 4 | Componentes (IPs) | Configuración → Componentes | El panel necesita saber dónde vive cada pieza. |
 | 5 | Marca | Configuración → Branding | Aparece en el panel, en los correos y en los informes. |
@@ -193,12 +193,12 @@ restringidos. **Nunca las edites a mano**: el instalador aborta si detecta un se
 | Base de datos | Postgres | `.env` |
 | JWT | Firma las sesiones del panel | `.env` |
 | ARI / AMI | El panel conversa con Asterisk | `.env` |
-| **TURN** | Los softphones usan el relay de audio | `.env` · SBC → TURN |
+| **TURN** | Los softphones usan el relay de audio | `.env` · Configuración → WebRTC / TURN |
 | Admin del panel | Tu primer ingreso | Salida del instalador |
 
 > **Lo primero que hay que rotar en producción** es la contraseña del TURN si quedó con el valor de
-> ejemplo (`pbxng-turn-changeme`). Se cambia en **SBC → TURN**, y hay que actualizarla también en el
-> `.env` para que la central se la entregue a los teléfonos.
+> ejemplo (`pbxng-turn-changeme`). Se cambia en **Configuración → WebRTC / TURN**, y hay que
+> actualizarla también en el `.env` para que la central se la entregue a los teléfonos.
 
 ### 3.5 Hay tres paneles, no uno
 
@@ -228,8 +228,20 @@ Todo esto vive en **Configuración**, y son los cimientos.
 » Configuración → Módulos
 
 Un módulo activo **es** un contenedor corriendo; uno inactivo **no existe**. Acá prendés y apagás
-el SBC, el TURN, el motor de voz (IA) y el intercom. El cambio crea o destruye el contenedor de
-verdad: no es una casilla decorativa.
+el SBC, el **TURN**, el motor de voz (IA) y la **Portería**. El cambio crea o destruye el
+contenedor de verdad: no es una casilla decorativa.
+
+Dos cosas que conviene saber de esta pantalla:
+
+- **El TURN viene encendido de fábrica** (desde 1.11.0). Sin él, un softphone detrás de un NAT
+  simétrico se queda **sin audio**: no es una mejora opcional. Si te aparece apagado en una
+  central instalada antes, mirá la solapa **WebRTC / TURN** de esta misma pantalla antes de tocar
+  otra cosa: ahí se elige el **origen** del TURN (el propio de la central, el del SBC-NG o uno
+  externo) y se lo **prueba** de verdad.
+- **Portería** (el switch que en el `.env` y en el compose se sigue llamando `intercom`, y así
+  se quedó para no desconectar el interruptor de las centrales ya instaladas) prende y apaga el
+  **grupo Portería del menú** con sus dos pantallas. Apagarlo apaga **el video**, no el CRM: la
+  ficha del que llama le sigue apareciendo al agente igual (ver el capítulo de Portería).
 
 ![Módulos activos](img/cfg-16-modulos.png)
 
@@ -302,7 +314,8 @@ fábrica.
 Los dos síntomas:
 
 - Desde afuera (4G, casa) todo anda; **desde la oficina el softphone no registra**.
-- El diagnóstico ICE del panel (SBC → TURN) da **error 701** cuando lo probás desde la LAN.
+- La prueba del TURN del panel (Configuración → WebRTC / TURN → **Origen y prueba**) falla cuando
+  la corrés desde la LAN.
 
 La solución depende del router, pero la idea es siempre la misma: que el tráfico interno hacia la IP
 pública se redirija al servidor, igual que el que viene de Internet. En routers MikroTik, esto se
@@ -329,8 +342,11 @@ router hacia el servidor**. Estos son los mínimos:
 > 2. Abrir `3478/UDP` y **no `3478/TCP`**. Muchas redes corporativas bloquean el UDP saliente.
 
 **No confíes en que "está abierto" porque lo configuraste.** Verificalo de verdad: el panel tiene el
-**diagnóstico ICE en vivo** (SBC → TURN), que levanta una conexión real y te dice si el TURN
-responde y autentica. Y desde la terminal:
+botón **Probar** de Configuración → WebRTC / TURN → **Origen y prueba**, que hace lo mismo que el
+script de abajo: STUN, un Allocate sin clave (tiene que rebotar) y un Allocate firmado, por UDP y
+por TCP. Y **que el puerto conteste no alcanza**: si el relay que te devuelve es una dirección que
+ningún cliente puede usar —loopback, link-local, o una IP privada con el TURN publicado en una
+pública— la prueba sale **FALLA**, no OK. Desde la terminal es el mismo veredicto:
 
 ```bash
 scripts/check-turn.py --env docker/.env --tcp
@@ -861,7 +877,7 @@ configure nada:
   escritorio (botón QR → "Pegar código").
 - Se puede generar y reenviar las veces que haga falta.
 
-> **Para que el usuario vea el CRM completo o el intercom** desde el softphone, tiene que tener un
+> **Para que el usuario vea el CRM completo o el video de la Portería** desde el softphone, tiene que tener un
 > **usuario** en **Usuarios** (con su rol) e iniciar sesión con él. El enlace configura el teléfono
 > igual, con el acceso de teléfono.
 
@@ -1465,7 +1481,7 @@ teléfono, qué historial y qué buzón son "los suyos".
 | Rol | Qué puede hacer |
 |---|---|
 | **Administrador** | Todo |
-| **Supervisor** | Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, **reportes de call center** (verlos y exportarlos), grabaciones, clientes (CRM completo), intercom, aprovisionar y enrolar internos. Desde 1.10.0 también: **moderar una sala de reunión** (ver quién está, silenciar, expulsar), **ver por qué troncal está saliendo cada ruta** y **el registro de uso de DISA y callback**. **Nada** de configuración del sistema (troncales, rutas, usuarios, respaldos…), ni programar los envíos de informes, ni crear salas o invitar (la invitación lleva el PIN) |
+| **Supervisor** | Operar el call center: llamadas en vivo, colas (agregar y sacar agentes), monitorear, escuchar/susurrar/irrumpir, historial, **reportes de call center** (verlos y exportarlos), grabaciones, clientes (CRM completo), Portería, aprovisionar y enrolar internos. Desde 1.10.0 también: **moderar una sala de reunión** (ver quién está, silenciar, expulsar), **ver por qué troncal está saliendo cada ruta** y **el registro de uso de DISA y callback**. **Nada** de configuración del sistema (troncales, rutas, usuarios, respaldos…), ni programar los envíos de informes, ni crear salas o invitar (la invitación lleva el PIN) |
 | **Agente** | Su softphone, su historial, su buzón, sus grabaciones (sólo las llamadas en las que participó), la ficha del cliente y la encuesta de la llamada — todo sobre **su** extensión |
 
 Reglas que aplica la central (no sólo el panel: la API rechaza con *"no tenés permiso para esta
@@ -1487,7 +1503,7 @@ acción"* lo que el rol no puede):
 
 ## 18. Clientes (CRM)
 
-» Menú lateral → Operación → Clientes
+» Menú lateral → **Portería → Clientes** (el ítem aparece con el módulo **Portería** encendido)
 
 ### 18.1 Para qué existe
 
@@ -1511,7 +1527,7 @@ la información le llega sola.
 | **Teléfonos** | Todos los números por los que puede llamar | `099123456`, `24001234` |
 | **Personas autorizadas** | Quién puede actuar en su nombre, con vencimiento | *Juan Pérez (hijo), hasta 31/12* |
 | **Espacios** | Lugares asociados | *Garaje 12*, *Baulera 7* |
-| **Dispositivos** | Porteros y cámaras del cliente | *Portero principal* (ver Intercom) |
+| **Dispositivos** | Porteros y cámaras del cliente | *Portero principal* (ver Portería) |
 
 El reconocimiento se hace por el **teléfono**: cualquier número cargado en la ficha identifica al
 cliente cuando llama.
@@ -1542,11 +1558,11 @@ qué información sale de la central hacia la computadora de cada persona.
 El teléfono y la plataforma son **dos accesos distintos**:
 
 - **Registro SIP** (extensión + contraseña): le permite llamar y recibir llamadas. Nada más.
-- **Sesión de plataforma** (usuario del panel): le permite ver directorio, clientes e intercom.
+- **Sesión de plataforma** (usuario del panel): le permite ver directorio, clientes y el video de la Portería.
 
 El enlace de acceso que mandás por correo trae **las dos cosas** — pero la segunda **solo si el
 extensión tiene un usuario asociado** en *Usuarios*. Si no lo tiene, el teléfono funciona igual, pero
-el softphone no muestra clientes ni intercom.
+el softphone no muestra clientes ni video de Portería.
 
 > **Consecuencia práctica:** si querés que un agente vea la ficha del cliente que lo llama, no
 > alcanza con crearle la extensión. Hay que crearle **también el usuario** y asignarle esa extensión.
@@ -1562,7 +1578,7 @@ el softphone no muestra clientes ni intercom.
 | **Editar personas autorizadas y espacios** | ❌ | ✅ | ✅ |
 | **Definir la encuesta post-llamada** | ❌ | ✅ | ✅ |
 | Responder la encuesta al cortar | ✅ | ✅ | ✅ |
-| Ver las cámaras del intercom | ✅ | ✅ | ✅ |
+| Ver las cámaras de la Portería | ✅ | ✅ | ✅ |
 | Escuchar / susurrar / irrumpir en llamadas ajenas | ❌ | ✅ | ✅ |
 
 El agente **lee** el CRM porque lo necesita para atender; **no lo modifica**. Si un agente intenta
@@ -1576,15 +1592,23 @@ administración.
 
 ---
 
-## 20. Intercom · porteros y cámaras
+## 20. Portería · porteros y cámaras
 
-» Menú lateral → Telefonía → Intercom
+» Menú lateral → **Portería → Portería** (la pared de video) y **Portería → Clientes** (donde se
+dan de alta los porteros, los espacios y las personas autorizadas, capítulo anterior)
+
+> **El módulo se llama «Portería» desde 1.10.0.** Antes se llamaba «Intercom» y, peor, **sus dos
+> pantallas nunca estuvieron en el menú**: existían y funcionaban, pero la única forma de llegar
+> era escribir la URL a mano. Hoy son un grupo propio del menú, y con el módulo apagado el grupo
+> entero desaparece. En el `.env`, en el compose y en `pbxng-ctl` el id sigue siendo `intercom`:
+> renombrarlo habría dejado el interruptor desconectado del contenedor en las centrales ya
+> instaladas.
 
 ### 20.1 Para qué existe
 
 Un **portero** que llama a la extensión de recepción es una llamada como cualquier otra: se escucha,
-pero no se ve. El módulo de Intercom agrega **el video**: cuando el portero del cliente llama, el
-que atiende ve la cámara asociada, en vivo, dentro del mismo panel.
+pero no se ve. El módulo de **Portería** agrega **el video**: cuando el portero del cliente llama,
+el que atiende ve la cámara asociada, en vivo, dentro del mismo panel.
 
 **Ejemplo:** llama el portero del edificio. En la pantalla del portero (la persona) aparece la ficha
 del cliente **y la imagen de la cámara de entrada**, sin que tenga que abrir otra aplicación ni
@@ -1600,11 +1624,25 @@ Los dispositivos se asocian a un **cliente** del CRM (por eso este capítulo va 
 | **Etiqueta** | Cómo se lo llama | *Portero principal* |
 | **Tipo** | Portero o cámara | — |
 | **URL RTSP** | El flujo de video del dispositivo | `rtsp://usuario:clave@192.168.1.50:554/Streaming/Channels/101` |
+| **Habilitado** | Un portero apagado deja de pedirle video a la cámara | — |
 
 La URL RTSP la da el fabricante del portero o la cámara. Es la misma que usarías en un grabador de
 video (NVR).
 
-![Intercom: dispositivos por cliente](img/cfg-39-intercom.png)
+Además del alta y la baja, desde la ficha del cliente se puede **editar** un portero (etiqueta,
+tipo, si está habilitado y la URL) y **probarlo**: el botón de probar le pide al traductor de
+video que se conecte a la cámara **de verdad** y te contesta si anduvo y, si no, por qué. Así el
+que carga un portero no tiene que adivinar si el problema es la IP, la clave o el camino del
+stream. El alta, la edición y la baja se aplican **en el acto**; y la baja además **borra el
+flujo**, que antes quedaba tirándole RTSP a una cámara que ya no era de nadie.
+
+> **La clave de la cámara ya no se muestra entera.** Usuario y contraseña viajan dentro de la URL
+> RTSP y se veían tal cual en la ficha del cliente, en la pared de video y en la libreta del
+> supervisor. Desde 1.11.0 la central las **tapa** antes de mostrarlas. En el formulario, **dejar
+> el campo de la URL vacío significa «dejala como está»**: cambiar la etiqueta no te borra la
+> clave. Si querés cambiar la URL, pegala entera de nuevo.
+
+![Portería: dispositivos por cliente](img/cfg-39-intercom.png)
 
 ### 20.3 Cómo llega el video al navegador
 
@@ -1613,17 +1651,36 @@ flujo de la cámara a algo que el navegador entiende (WebRTC), en tiempo real y 
 
 Eso significa dos cosas prácticas:
 
-- El módulo **intercom** tiene que estar activo (Configuración → Módulos).
+- El módulo **Portería** tiene que estar activo (Configuración → Módulos).
 - La central tiene que **alcanzar la cámara por la red**. Si la cámara está en la LAN del cliente y
   la central en otra red, no hay magia: hay que darle camino (VPN o publicación).
+
+**Apagar Portería apaga el video, no el CRM.** Con el módulo apagado, al agente que atiende le
+sigue apareciendo la ficha de quien llama —nombre, documento, espacios, personas autorizadas y
+notas—: lo único que viene vacío son los canales de video, porque con el módulo apagado no hay
+traductor que los sirva. Era importante que fuera así: apagar las cámaras no puede dejar ciego al
+que atiende el teléfono.
 
 > **Las credenciales de la cámara viajan dentro de la URL RTSP.** Usá un usuario de solo lectura
 > creado para esto, no el administrador de la cámara.
 
 ### 20.4 Probar que funciona
 
-Al guardar el dispositivo, el panel intenta levantar el flujo. Si la cámara no responde, lo vas a
-ver ahí mismo — no esperes a la primera llamada real para enterarte.
+Al guardar el dispositivo, el panel intenta levantar el flujo, y el botón **Probar** lo repite
+cuando quieras. Si la cámara no responde, lo vas a ver ahí mismo — no esperes a la primera
+llamada real para enterarte.
+
+### 20.5 Un portero mudo ya no cuelga la pared
+
+En la pared de video, un portero que no contesta **degrada solo a los 12 segundos**: el recuadro
+pasa a decir **«Sin señal»** con el nombre del portero, **el motivo en una línea** y un botón para
+reintentar. Antes se quedaba en el cartel de «CARGANDO» para siempre, porque la conexión con el
+traductor de video queda abierta esperando un primer cuadro que nunca llega y **no hay ningún
+aviso que avise de eso**. Lo mismo cuando falta la dirección del traductor, cuando el dispositivo
+no tiene canal o cuando el navegador no soporta el códec.
+
+En criollo: una pared con ocho porteros ahora **muestra los siete que andan** y te dice qué le
+pasa al octavo.
 
 ---
 
@@ -1700,7 +1757,7 @@ alcanza con supervisor**.
 
 ---
 
-## 22. Monitoreo en vivo, Wallboard y Mapa
+## 22. Las pantallas de mirar: vivo, Wallboard, Mapa, Resumen y Sistema
 
 ### 22.1 Llamadas en vivo
 
@@ -1731,10 +1788,56 @@ para ver de dónde te llaman.
 
 ### 22.4 Resumen
 
-» Menú lateral → Operación → Resumen
+» Menú lateral → Operación → Resumen (y es a dónde te deja el login)
 
-La portada del panel: salud de los componentes, llamadas de hoy, lo que está pasando. Es la primera
-pantalla que ves al entrar.
+La portada del panel. Desde 1.11.0 muestra **solamente lo que cambia en vivo**, que es lo único
+que tiene sentido mirar de lejos:
+
+- **Los números grandes de arriba**: llamadas en curso, llamadas de hoy, internos registrados,
+  bloqueos. Se ponen **en rojo sólo cuando hay que hacer algo** —una troncal caída, un ataque en
+  curso—; el resto del tiempo son negros y no gritan.
+- **Las llamadas en curso**, con su cronómetro corriendo.
+- **El globo de ataques**, para que un ataque en curso se vea **al entrar**, sin acordarse de
+  abrir la pantalla de Seguridad.
+- **Troncales** y **Servicios principales**, con espacio y recursos en una fila de dos.
+
+**Qué se fue, y por qué.** Tenía cuatro filas de tarjetas diciendo tres veces lo mismo: «Estado
+del PBX» repetía los números grandes de arriba y «Estado de interfaces» repetía «Servicios
+principales», así que **las dos salieron sin que se pierda un solo dato**. El **núcleo de
+Asterisk** y el **inventario de nodos** se mudaron a la pantalla nueva **Sistema** (abajo), con un
+enlace desde acá: eso no se vigila, se consulta.
+
+**La fila «Relay de medios (TURN)» ahora dice la verdad.** Antes mostraba la dirección que
+figuraba en la configuración y la daba por **Operativo** porque un puerto contestaba —en una
+central real eso era un servicio de **otra máquina**, que hacía meses no tenía nada que ver—.
+Hoy sale de la **sonda de verdad**, que pide un relay y mira qué dirección le devuelven: un TURN
+que atiende pero reparte una dirección privada aparece **caído, con el motivo en la misma fila**.
+Y una caída tiene que **sostenerse unos segundos** para que salte el cartel rojo, así que un
+reinicio del AMI ya no te hace saltar de la silla.
+
+### 22.5 Sistema
+
+» Menú lateral → Sistema → Sistema
+
+**El inventario de la plataforma**, la pantalla nueva de 1.11.0. Es lo que se consulta cuando algo
+falla —o cuando hay que contarle a alguien cómo está armada la central—, y trae dos cosas:
+
+- **Núcleo de Asterisk**: versión del motor, canales activos, endpoints, hace cuánto está
+  levantado, los **transportes PJSIP** configurados (UDP, TCP, TLS, WSS) y los **módulos clave**
+  con su estado —cargado o no—. Arriba a la derecha, dos etiquetas dicen si la central está
+  hablando por **AMI** y por **ARI**: si alguna está en rojo, la mitad del panel va a estar
+  «esperando» y el problema es ese, no la pantalla que estés mirando.
+- **Cada nodo con sus recursos**: disco, memoria, interfaces de red y servicios de cada máquina
+  de la instalación.
+
+**Por qué está separada del Resumen:** nada de esto cambia de un minuto a otro. Cargaba la portada
+sin aportar, y lo que se mira todo el día —llamadas, ataques, troncales, servicios— quedaba más
+abajo. Acá se consulta cuando hace falta, y se pide cada 60 segundos (con la pestaña en segundo
+plano, ni eso: el panel no le habla a la central cuando nadie lo mira).
+
+> Si lo que buscás es **el dibujo** de cómo se conectan los componentes —quién habla con quién y
+> por qué puerto—, eso es **Topología**, el capítulo que sigue. «Sistema» es el inventario;
+> «Topología» es el mapa.
 
 ---
 
