@@ -306,8 +306,12 @@ services:
 
   voz:
     build:
-      context: ../voice-service
-      dockerfile: ../docker/images/voz/Dockerfile
+      # Contexto = raiz del repo (no voice-service/) porque la imagen necesita dos arboles:
+      # el servicio y docker/images/common/pbxng_nodo.py, la medicion del nodo compartida con
+      # los agentes de asterisk y coturn. Lo que entra al contexto lo recorta el .dockerignore
+      # de la raiz (lista blanca), asi que esto no arrastra el repo entero.
+      context: ..
+      dockerfile: docker/images/voz/Dockerfile
     image: pbxng/voz
     profiles: ["ai"]
     restart: unless-stopped

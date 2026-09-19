@@ -1,0 +1,26 @@
+# Contexto de build de la imagen `voz`, que es el UNICO build cuyo contexto es la raiz del
+# repo (docker/docker-compose.yml). Lo es porque esa imagen necesita DOS arboles: el codigo
+# del servicio (voice-service/) y la medicion del nodo compartida con los otros dos agentes
+# (docker/images/common/pbxng_nodo.py). Un contexto por arbol obligaria a duplicar ese
+# archivo, que es justo el error que se esta corrigiendo.
+#
+# Va como lista blanca —negar todo y re-incluir— a proposito: con una lista negra, cualquier
+# carpeta nueva del repo (o un .next de cientos de MB) se cuela en el contexto sin que nadie
+# lo note y el build se hace lento en silencio. Las otras dos imagenes construyen con
+# contexto docker/ y no miran este archivo.
+#
+# Cada nivel se re-incluye explicito (`!docker` + `docker/*` + `!docker/images` + ...) en vez
+# de confiar en que el matcher deduzca los directorios padre: la deduccion cambio entre
+# versiones de Docker y lo que se lleva puesto es un COPY que no encuentra el archivo.
+*
+!voice-service
+!docker
+docker/*
+!docker/images
+docker/images/*
+!docker/images/common
+
+# Basura que no tiene por que viajar aunque su carpeta este re-incluida.
+**/__pycache__
+**/*.pyc
+**/node_modules

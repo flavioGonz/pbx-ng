@@ -1,4 +1,14 @@
 import os, json, subprocess, time, glob
+import sys
+
+# Medicion del nodo: UNA sola implementacion para los tres agentes de PBX-NG (asterisk,
+# coturn y este). La imagen la deja en /usr/local/lib/pbxng/ y el Dockerfile verifica que
+# se pueda importar. El segundo path es el del repo (docker/images/common/), para correr el
+# servicio a mano desde el arbol.
+sys.path[:0] = [os.environ.get("PBXNG_COMMON_DIR", "/usr/local/lib/pbxng"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "docker", "images", "common")]
+from pbxng_nodo import metricas_nodo   # noqa: E402
 import numpy as np
 from fastapi import FastAPI, Request, Response
 from faster_whisper import WhisperModel
@@ -77,19 +87,16 @@ WMODEL = WhisperModel(WMODEL_NAME, device="cpu", compute_type="int8")
 print("[voz] whisper listo", flush=True)
 
 def sys_metrics():
+    """Metricas de ESTE contenedor, no de la maquina de abajo (ver docker/images/common/
+    pbxng_nodo.py: en un contenedor /proc/meminfo y /proc/uptime son del host, y por eso
+    los tres agentes informaban los mismos 35948 MB y los mismos 36 dias de uptime).
+
+    El disco no se incluye: el panel no lo usa para este nodo y el volumen que importa acá
+    (los modelos de voz) ya se informa aparte."""
     try:
-        load = float(open("/proc/loadavg").read().split()[0])
-        mem = {}
-        for line in open("/proc/meminfo"):
-            p = line.split(":")
-            if len(p) == 2: mem[p[0]] = int(p[1].split()[0])
-        total = mem.get("MemTotal", 1); avail = mem.get("MemAvailable", 0)
-        up = int(float(open("/proc/uptime").read().split()[0]))
-        ncpu = os.cpu_count() or 1
-        return {"load": round(load, 2), "cpu_pct": round(min(100.0, load / ncpu * 100), 1),
-                "mem_pct": round((total - avail) * 100.0 / total, 1),
-                "mem_used_mb": round((total - avail) / 1024), "mem_total_mb": round(total / 1024),
-                "uptime_s": up, "ncpu": ncpu}
+        m = metricas_nodo(con_disco=False)
+        if m.get("load") is not None: m["load"] = round(m["load"], 2)
+        return m
     except Exception:
         return {}
 

@@ -118,8 +118,17 @@ COPY images/asterisk/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # fuera del build context de compose, que es docker/) y quedo dos versiones atras sin que
 # nadie lo notara, porque lo que se construye, se prueba en CI y se despliega es este.
 COPY images/asterisk/pbxng-ast-agent.py /usr/local/bin/pbxng-ast-agent.py
+# Medicion del nodo compartida por las TRES imagenes (asterisk, coturn, voz). Vive una sola
+# vez en docker/images/common/: las metricas estaban copiadas en los tres agentes y, al
+# leer /proc directo, los tres informaban el hipervisor (misma RAM, mismos vCPU, mismo
+# uptime al segundo) en vez del contenedor.
+COPY images/common/pbxng_nodo.py /usr/local/lib/pbxng/pbxng_nodo.py
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/pbxng-ast-agent.py \
  && chown -R asterisk:asterisk /var/lib/asterisk/sounds
+# Gate: que el agente pueda importar el modulo se verifica ACA y no en el arranque. Si
+# faltara, el agente se caeria en produccion contestando 500 al panel justo cuando alguien
+# esta mirando si la central esta viva.
+RUN python3 -c "import sys; sys.path.insert(0, '/usr/local/lib/pbxng'); import pbxng_nodo; assert pbxng_nodo.metricas_nodo()"
 
 EXPOSE 5060/udp 5060/tcp 5061/tcp 8088/tcp 10000-20000/udp
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

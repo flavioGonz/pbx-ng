@@ -10,8 +10,8 @@
  *  llega acá con un enlace.
  * ==========================================================================*/
 import { usePoll } from '../api';
-import { SimpleGrid, Card, Group, Text, ThemeIcon, Badge, Stack } from '@mantine/core';
-import { IconServer2, IconBolt, IconPlugConnected, IconCpu } from '@tabler/icons-react';
+import { SimpleGrid, Card, Group, Text, ThemeIcon, Badge, Stack, Alert } from '@mantine/core';
+import { IconServer2, IconBolt, IconPlugConnected, IconCpu, IconAlertTriangle } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import SystemOverview from '../SystemOverview';
 import { useLive } from '../useLive';
@@ -20,8 +20,8 @@ export default function Sistema() {
   const { snap } = useLive();
   /* Mismas cadencias que traía el Resumen: lo que cambia poco se pide cada 60 s, y
    * `usePoll` se frena solo con la pestaña de fondo. */
-  const { data: ov } = usePoll('/system/overview', 60000);
-  const { data: core } = usePoll('/asterisk/core', 60000);
+  const { data: ov, error: ovError } = usePoll('/system/overview', 60000);
+  const { data: core, error: coreError } = usePoll('/asterisk/core', 60000);
   const h = snap?.health || {};
   const ch = snap?.channels || [];
   const eps = snap?.extensions || [];
@@ -29,6 +29,15 @@ export default function Sistema() {
   return (
     <Stack gap="lg">
       <PageHeader icon={<IconCpu size={24} />} title="Sistema" subtitle="Cómo está armada la central: motor, módulos y nodos" color="pbx" />
+
+      {/* Si el motor no contestó, la ficha de abajo se llena de guiones y eso se lee como
+          «no hay nada configurado». El porqué se dice acá, una vez, en vez de dejar que
+          cada recuadro lo insinúe. */}
+      {coreError && (
+        <Alert color="red" variant="light" radius="md" icon={<IconAlertTriangle size={18} />} title="No se pudo consultar el motor de Asterisk">
+          {coreError.message}
+        </Alert>
+      )}
 
       <Card withBorder radius="lg" padding="lg" shadow="sm">
         <Group justify="space-between" mb="md">
@@ -52,7 +61,7 @@ export default function Sistema() {
       </Card>
 
       {/* Cada nodo con sus recursos, interfaces y servicios */}
-      <SystemOverview data={ov} />
+      <SystemOverview data={ov} error={ovError} />
     </Stack>
   );
 }

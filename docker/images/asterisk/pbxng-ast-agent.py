@@ -2,6 +2,15 @@
 # PBX-NG Asterisk agent (CT103) - stdlib only. HTTP :8092. Estado nucleo + red + rutas.
 import json, os, re, subprocess, time, sys, hmac, ipaddress, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Medicion del nodo: UNA sola implementacion para los tres agentes (asterisk, coturn y voz).
+# La imagen la deja en /usr/local/lib/pbxng/ y el Dockerfile verifica que se pueda importar,
+# asi que si falta, falla el build y no el arranque de la central.
+# El segundo path es el del repo (docker/images/common/), para poder correr el agente a
+# mano desde el arbol sin armar la imagen.
+sys.path[:0] = [os.environ.get("PBXNG_COMMON_DIR", "/usr/local/lib/pbxng"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common")]
+from pbxng_nodo import metricas_nodo   # noqa: E402
 ROUTES_FILE = "/etc/pbxng-ast-routes.json"
 # Token compartido con la API (mismo volumen "certs" montado en /etc/pbxng). La API lo
 # manda en X-PBXNG-Token; se exige en todo POST y en los GET que devuelven configuración
@@ -54,20 +63,9 @@ def reapply_all():
     for r in load_routes(): apply_route(r)
 
 def metrics():
-    m = {}
-    try:
-        m["load"] = float(open("/proc/loadavg").read().split()[0])
-        m["uptime_s"] = int(float(open("/proc/uptime").read().split()[0]))
-        mem = {}
-        for ln in open("/proc/meminfo"):
-            p = ln.split(":")
-            if len(p) == 2: mem[p[0]] = int(p[1].strip().split()[0])
-        tot = mem.get("MemTotal", 0); av = mem.get("MemAvailable", 0)
-        m["mem_total_mb"] = round(tot/1024); m["mem_used_mb"] = round((tot-av)/1024)
-        m["mem_pct"] = round((tot-av)*100.0/tot, 1) if tot else 0
-        m["ncpu"] = os.cpu_count() or 1
-    except Exception: pass
-    return m
+    """Metricas de ESTE nodo. La medicion vive en images/common/pbxng_nodo.py (una sola
+    copia para los tres agentes): aca solo se la llama."""
+    return metricas_nodo("/")
 
 def ifaces():
     out = sh("ip -br addr 2>/dev/null"); res = []

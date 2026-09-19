@@ -177,3 +177,77 @@ export function estadoInfra(est, { deseado } = {}) {
   if (on) return { color: 'teal', medido: true, texto: 'encendido y respondiendo', detalle: est.motivo || '' };
   return { color: 'gray', medido: true, texto: 'apagado', detalle: '' };
 }
+
+/* ------------------------------------------------------------------- nodos
+ * Misma idea que `estadoInfra()`, pero para un nodo del inventario
+ * (`GET /api/system/overview` → `nodes[]`). El bug era idéntico y de la misma
+ * familia: la tarjeta pintaba un «EN LÍNEA» de adorno y un juego de barras para
+ * CADA nodo, hubiera contestado su agente o no. Un nodo cuyo agente no contestó no
+ * se sabe cómo está: no se afirma, se dice que no se pudo medir.
+ *
+ * `n` es un elemento de `nodes[]`. Devuelve la MISMA forma que `estadoInfra()`
+ * —`{color, texto, detalle, medido}`— para que las dos pantallas que muestran
+ * infraestructura hablen el mismo idioma; `medido:false` significa siempre lo
+ * mismo en las dos: acá no hay número que mostrar.
+ */
+export function estadoNodo(n) {
+  if (!n) {
+    return { color: 'gray', medido: false, texto: 'no se pudo medir', detalle: 'el panel no recibió nada de este nodo.' };
+  }
+  /* `ok:false` = se le preguntó al agente y no contestó. Eso NO mide el nodo: mide
+   * que no se lo puede alcanzar. Sus recursos siguen siendo desconocidos, así que va
+   * gris (no medido) igual que el `sondeado:false` de `estadoInfra()`. Que algo esté
+   * caído lo grita el cartel de arriba de la pantalla, no un verde a medias. */
+  if (n.ok === false) {
+    return {
+      color: 'gray', medido: false, texto: 'no se pudo medir',
+      detalle: n.motivo || 'el agente de este nodo no contestó: no hay medición de CPU, memoria ni disco.',
+    };
+  }
+  /* Contestó, pero sin una sola métrica adentro. Pasa cuando el agente responde el
+   * health y el cuerpo viene vacío o con otra forma: tampoco hay nada que afirmar. */
+  const hayAlgo = [n.cpu_pct, n.mem_pct, n.mem_total_mb, n.uptime_s, n.ncpu].some((v) => v != null) || !!n.disk;
+  if (!hayAlgo) {
+    return {
+      color: 'gray', medido: false, texto: 'respondió, pero sin datos',
+      detalle: 'el agente contestó y no mandó ninguna métrica: no se puede decir cómo está este nodo.',
+    };
+  }
+  return { color: 'teal', medido: true, texto: 'en línea', detalle: '' };
+}
+
+/* Campos que, dentro de un contenedor, salen del kernel de la máquina de abajo:
+ * `/proc/meminfo`, `os.cpu_count()` y `/proc/uptime` no están namespaceados, así que
+ * un agente que los lee directo reporta el hipervisor y no su CT. El disco NO está en
+ * la lista a propósito: se mide sobre el sistema de archivos propio y sí es del nodo. */
+const FIRMA_HOST = ['mem_total_mb', 'ncpu', 'uptime_s'];
+
+/* Dos nodos DISTINTOS no pueden tener la misma memoria total, los mismos vCPU y el
+ * mismo uptime al segundo: el uptime es el que delata, porque dos máquinas que
+ * arrancaron por separado no coinciden al segundo. Cuando coinciden, lo que se está
+ * mirando es una sola máquina física reportada con varios nombres —el caso real: tres
+ * agentes devolviendo los 35 GB, los 12 vCPU y los 36 días del hipervisor— y el panel
+ * no tiene que dibujar cuatro tarjetas iguales como si nada.
+ *
+ * Devuelve `{ grupos, ids }`: `grupos` son los conjuntos de nodos que comparten firma
+ * (para el cartel) e `ids` es un Set con los nodos afectados (para tachar sus números).
+ * Es detección, no diagnóstico: el panel no puede arreglar el agente, pero sí puede
+ * negarse a presentar como propio un número que evidentemente es de otra máquina. */
+export function metricasClonadas(nodes = []) {
+  const porFirma = new Map();
+  for (const n of nodes) {
+    if (!n || n.ok === false) continue;
+    if (FIRMA_HOST.some((k) => n[k] == null)) continue;   // sin los tres, no hay firma que comparar
+    const firma = FIRMA_HOST.map((k) => n[k]).join('|');
+    if (!porFirma.has(firma)) porFirma.set(firma, []);
+    porFirma.get(firma).push({ id: n.id, name: n.name });
+  }
+  const grupos = [];
+  const ids = new Set();
+  for (const [firma, nodos] of porFirma) {
+    if (nodos.length < 2) continue;
+    grupos.push({ firma, nodos });
+    for (const x of nodos) ids.add(x.id);
+  }
+  return { grupos, ids };
+}

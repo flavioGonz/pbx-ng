@@ -189,6 +189,24 @@ de cada archivo y en `.claude/agents/api.md`.
   de verde**: dice «no se puede comprobar». Hoy el único con sonda es `turn`
   (`GET /api/turn/estado`); `voz` e `intercom` no tienen endpoint que mida si el contenedor
   contesta — **pedido a `api`**: hasta que exista, esos dos badges dicen «no se puede comprobar».
+- **Nodos del inventario: el mismo criterio que los módulos, y en el mismo lugar.**
+  `GET /api/system/overview` → `nodes[]` lo dibuja `dashboard/app/SystemOverview.jsx`
+  (hoy sólo desde `/sistema`), y el veredicto por nodo lo arma `estadoNodo()` de
+  `dashboard/app/fmt.js`, hermano de `estadoInfra()` y con la misma forma
+  (`{color, texto, detalle, medido}`). Reglas: un nodo con `ok:false` —su agente no
+  contestó— o que contestó sin una sola métrica sale **gris, «no se pudo medir»**, y la
+  tarjeta **no dibuja barras, ni uptime, ni los chips de servicios**: barras en cero se
+  leen como «ocioso» y un chip verde es el «EN LÍNEA» de adorno que este release vino a
+  matar. Además, `metricasClonadas(nodes)` marca los nodos **distintos** que reportan la
+  misma `mem_total_mb` + `ncpu` + `uptime_s` (al segundo): eso no es una coincidencia,
+  es un agente leyendo `/proc/meminfo`, `/proc/uptime` y `os.cpu_count()` adentro de un
+  contenedor, o sea el hipervisor. El panel lo dice con un cartel arriba de las tarjetas
+  y muestra esos tres valores como no medidos; el disco se sigue mostrando porque se mide
+  sobre el sistema de archivos propio del nodo. El arreglo de fondo es de los agentes y
+  vive en `docker/images/common/pbxng_nodo.py` (dueño `empaquetado`); la detección del
+  panel **no se saca cuando ese arreglo llega**: es la red que atrapa a un agente viejo
+  durante una actualización a medias, que es exactamente cuando una tarjeta con números
+  prestados vuelve a parecer creíble.
 - **`SUP_OK`: qué pantallas del shell abre un supervisor.** La lista vive en
   `dashboard/app/auth.jsx` (exportada) y es **una sola** para dos cosas: qué ítems se le
   dibujan en el menú (`app/shell.jsx`) y en qué rutas lo deja quedarse el redirect de
@@ -231,7 +249,8 @@ de cada archivo y en `.claude/agents/api.md`.
   recargar}`; los hooks cancelan con `AbortController` al desmontar y `usePoll` **pausa
   mientras `document.hidden`** y recarga al volver. Formateo compartido en
   `dashboard/app/fmt.js` (`fmtDur`, `fmtReloj`, `fmtFecha`, `fmtHora`, `fmtFechaHora`,
-  `fmtBytes`, `fmtUptime`, `codecLabel`, `banderaCC`, `estadoColor`, `estadoInfra`).
+  `fmtBytes`, `fmtUptime`, `codecLabel`, `banderaCC`, `estadoColor`, `estadoInfra`,
+  `estadoNodo`, `metricasClonadas`).
 - **Política de encuestado del panel** (desde sprint1-seguridad; vale para pantallas nuevas):
   1) lo que ya viaja en el `snapshot` del socket (§4: `health`, `extensions`, `channels`,
   `queues`) **no se pide por HTTP** — Resumen, Extensiones, Monitor, Wallboard y Topología lo
@@ -1319,6 +1338,29 @@ esperando y no hay evento que avise. Al desmontar se cierra el WebSocket: el vid
   identificador de zona `%eth0`, y `::ffff:1.2.3.4` guardada como IPv4): dos formas de la misma
   dirección eran dos filas en `pbxng_blocked` y un `unblock` que no encontraba lo que había
   baneado.
+- **Métricas del nodo: una sola implementación para los tres agentes.**
+  `docker/images/common/pbxng_nodo.py` (dueño `empaquetado`) es el ÚNICO lugar donde se mide
+  RAM, CPU y uptime. Lo importan los tres agentes —`docker/images/asterisk/pbxng-ast-agent.py`,
+  `docker/images/coturn/pbxng-turn-agent.py` y `voice-service/server.py`— y las tres imágenes
+  lo copian a `/usr/local/lib/pbxng/pbxng_nodo.py` con un gate de build que falla si no se
+  puede importar. Por qué: adentro de un contenedor `/proc/meminfo`, `/proc/uptime` y
+  `os.cpu_count()` son del kernel de abajo, así que con la función triplicada los tres agentes
+  informaban el hipervisor (`mem_total_mb` 35948, `ncpu` 12, `uptime_s` idéntico al segundo)
+  y el panel dibujaba la misma máquina física cuatro veces. Ahora: memoria del cgroup
+  (`memory.max`/`memory.current` menos `inactive_file` en v2, `memory.limit_in_bytes`/
+  `memory.usage_in_bytes` en v1) con caída a `/proc/meminfo` sólo si no hay tope; CPU por
+  `cpu.max`/`cpu.cfs_quota_us` y `cpuset` (gana el más chico) antes que `os.cpu_count()`;
+  uptime contra el arranque de PID 1, que es lo que el panel quiere decir con «activo hace…».
+  **Claves del JSON**: las de siempre (`mem_total_mb`, `mem_used_mb`, `mem_pct`, `ncpu`,
+  `load`, `cpu_pct`, `uptime_s`, `disk_*`) más `origen` (`{mem, cpu, load, uptime, disk}`),
+  que dice si el valor salió del cgroup o de `/proc`. `sysmon.js` hoy no lo reenvía —**pedido
+  a `api`**— y el panel todavía no lo muestra —**pedido a `panel`**—; el campo ya viaja.
+  El invariante lo cuida `control-plane/test/metricas-nodo.test.js`: si un agente vuelve a
+  leer `/proc` por su cuenta, si una imagen deja de copiar el módulo, o si aparece una
+  segunda copia de cualquiera de los tres archivos en el árbol, `npm test` se pone rojo.
+  Por eso la imagen `voz` construye con **contexto en la raíz del repo** (`context: ..`,
+  `dockerfile: docker/images/voz/Dockerfile`) y no en `voice-service/`: necesita los dos
+  árboles, y el `.dockerignore` de la raíz —lista blanca— es el que recorta lo que viaja.
 - Agente de Asterisk `:8092` (`docker/images/asterisk/pbxng-ast-agent.py`; la API le habla
   con `astFwd()` y `sysmon.js` con `get()`, ambos mandan `X-PBXNG-Token`). **Autenticación**:
   todo `POST` (`/fw/*`, `/route`, `/iface`, `/netmode`, `/diag`, `/sound`, `/reload`) y los

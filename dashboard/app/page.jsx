@@ -191,7 +191,11 @@ export default function Resumen() {
   useEffect(() => {
     if (!m) return;
     const pct = m.mem ? Math.round((m.mem.used / m.mem.total) * 100) : 0;
-    histRef.current = { cpu: [...histRef.current.cpu, m.cpu || 0].slice(-40), mem: [...histRef.current.mem, pct].slice(-40) };
+    /* Un `null` de CPU no es un 0: la primera medición del cgroup no tiene anterior con
+     * la cual restar, y meter un 0 en la serie dibuja un valle que nunca pasó. Se saltea
+     * el punto hasta que haya dato real. */
+    if (m.cpu == null) return;
+    histRef.current = { cpu: [...histRef.current.cpu, m.cpu].slice(-40), mem: [...histRef.current.mem, pct].slice(-40) };
     setHist(histRef.current);
   }, [m]);
 
@@ -348,7 +352,7 @@ export default function Resumen() {
           <Group align="flex-start" wrap="nowrap" gap="md">
             <Box style={{ flex: 1, minWidth: 0 }}><AreaChart cpu={hist.cpu} mem={hist.mem} /></Box>
             <Stack gap={2} w={92}>
-              <Text fw={800} fz={26} lh={1} c="#4f7fd9"><Slot value={m?.cpu ?? 0} />%</Text><Text size="xs" c="dimmed" mb="sm">CPU</Text>
+              <Text fw={800} fz={26} lh={1} c="#4f7fd9">{m?.cpu == null ? '—' : <><Slot value={m.cpu} />%</>}</Text><Text size="xs" c="dimmed" mb="sm">CPU</Text>
               <Text fw={800} fz={26} lh={1} c="#b06ad6"><Slot value={memPct} />%</Text><Text size="xs" c="dimmed">Memoria</Text>
             </Stack>
           </Group>

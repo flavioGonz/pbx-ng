@@ -4,6 +4,15 @@ import json
 import os, re, socket, subprocess, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Medicion del nodo: UNA sola implementacion para los tres agentes (asterisk, coturn y voz).
+# La imagen la deja en /usr/local/lib/pbxng/ y el Dockerfile verifica que se pueda importar,
+# asi que si falta, falla el build y no el arranque del TURN. El segundo path es el del repo
+# (docker/images/common/), para correr el agente a mano desde el arbol.
+import sys
+sys.path[:0] = [os.environ.get("PBXNG_COMMON_DIR", "/usr/local/lib/pbxng"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common")]
+from pbxng_nodo import metricas_nodo   # noqa: E402
+
 CONF = "/etc/turnserver.conf"
 CLI_HOST, CLI_PORT = "127.0.0.1", 5766
 CLI_PASS = "pbxngturn"
@@ -26,20 +35,13 @@ def parse_conf():
     return d, raw
 
 def metrics():
-    m = {}
-    try:
-        with open("/proc/loadavg") as f: m["load"] = float(f.read().split()[0])
-        with open("/proc/uptime") as f: m["uptime_s"] = int(float(f.read().split()[0]))
-        mem = {}
-        for ln in open("/proc/meminfo"):
-            p = ln.split(":"); 
-            if len(p) == 2: mem[p[0]] = int(p[1].strip().split()[0])
-        tot = mem.get("MemTotal", 0); av = mem.get("MemAvailable", 0)
-        m["mem_total_mb"] = round(tot/1024); m["mem_used_mb"] = round((tot-av)/1024)
-        m["mem_pct"] = round((tot-av)*100.0/tot, 1) if tot else 0
-        m["ncpu"] = os.cpu_count() or 1
-    except Exception: pass
-    return m
+    """Metricas de ESTE nodo (el contenedor de coturn), no del hipervisor. La medicion vive
+    en images/common/pbxng_nodo.py, una sola copia para los tres agentes.
+
+    Antes habia DOS funciones casi iguales en este mismo archivo: esta, para /health, y otra
+    para /core que ya habia empezado a diferir (calculaba cpu_pct y disco; esta no). Ahora
+    las dos rutas contestan lo mismo, que es lo minimo que se le puede pedir a un agente."""
+    return metricas_nodo("/")
 
 def cli_cmd(cmd):
     try:
@@ -155,33 +157,9 @@ def save_config(b):
 
 
 # ---------------------------------------------------------------------------
-# Metricas del nodo de borde (el mismo host donde viven kamailio, rtpengine y
-# coturn). El Resumen del panel las consume para mostrar CPU, RAM, disco e
-# interfaces de red de cada componente, no solo del core.
+# Interfaces del nodo. Las metricas (CPU, RAM, disco, uptime) las da metrics(),
+# arriba, que llama al modulo compartido: /health y /core informan lo MISMO.
 # ---------------------------------------------------------------------------
-def _metrics():
-    m = {}
-    try:
-        m["load"] = float(open("/proc/loadavg").read().split()[0])
-        m["uptime_s"] = int(float(open("/proc/uptime").read().split()[0]))
-        mem = {}
-        for ln in open("/proc/meminfo"):
-            p = ln.split(":")
-            if len(p) == 2: mem[p[0]] = int(p[1].strip().split()[0])
-        tot = mem.get("MemTotal", 0); av = mem.get("MemAvailable", 0)
-        m["mem_total_mb"] = round(tot / 1024); m["mem_used_mb"] = round((tot - av) / 1024)
-        m["mem_pct"] = round((tot - av) * 100.0 / tot, 1) if tot else 0
-        m["ncpu"] = os.cpu_count() or 1
-        m["cpu_pct"] = round(min(100.0, m["load"] * 100.0 / max(1, m["ncpu"])), 1)
-    except Exception: pass
-    try:
-        st = os.statvfs("/")
-        tot = st.f_blocks * st.f_frsize; free = st.f_bavail * st.f_frsize
-        m["disk_total"] = tot; m["disk_free"] = free; m["disk_used"] = tot - free
-        m["disk_pct"] = round((tot - free) * 100.0 / tot, 1) if tot else 0
-    except Exception: pass
-    return m
-
 def _ifaces():
     """Interfaces del host. El contenedor de coturn no trae `ip`, asi que leemos /sys
     y sacamos la IPv4 con un ioctl (SIOCGIFADDR): stdlib pura, sin dependencias."""
@@ -221,7 +199,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
     def do_GET(self):
         if self.path.startswith("/health"): return self._send(200, health())
-        if self.path.startswith("/core"): return self._send(200, {"ok": True, "metrics": _metrics()})
+        if self.path.startswith("/core"): return self._send(200, {"ok": True, "metrics": metrics()})
         if self.path.startswith("/net"): return self._send(200, {"ifaces": _ifaces()})
         if self.path.startswith("/config"):
             d, raw = parse_conf(); return self._send(200, {"raw": raw, "parsed": {k: (v if v is not True else True) for k, v in d.items()}})

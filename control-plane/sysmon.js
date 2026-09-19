@@ -12,6 +12,7 @@
  *  responde, el nodo sale marcado como caido y el resto igual se muestra.
  * ==========================================================================*/
 const os = require('os');
+const cg = require('./cgroup');
 const fsx = require('fs');
 
 let pool, NODES = {}, state = {}, AGENT_TOKEN = '';
@@ -69,8 +70,13 @@ function sizeOf(dir) {
   } catch (_) { return null; }
 }
 
+/* El nodo `core` es la tarjeta más visible del panel —el Resumen arma sus números de CPU,
+ * memoria y uptime a partir de ella— y era el CUARTO lugar con el mismo bug: `os.totalmem()`
+ * y compañía miden el kernel de abajo, no el contenedor. Ahora sale de `cgroup.js`, que es
+ * la traducción a node de `docker/images/common/pbxng_nodo.py`; una prueba corre las dos
+ * sobre el mismo árbol falso y exige el mismo número. */
 function nodeLocal() {
-  const tm = os.totalmem(), fm = os.freemem();
+  const mem = cg.memoria(), cpu = cg.cpus(), up = cg.uptime(), prop = cg.cpuPct(cg.cpus().ncpu);
   const ifaces = [];
   const nis = os.networkInterfaces();
   for (const name of Object.keys(nis)) {
@@ -80,15 +86,22 @@ function nodeLocal() {
   }
   return {
     ok: true,
-    cpu_pct: cpuLocal(),
-    ncpu: os.cpus().length,
+    /* El uso propio sale del acumulado del cgroup; `cpuLocal()` (los tiempos de os.cpus())
+     * mide el HIPERVISOR y queda sólo como respaldo para una instalación sin contenedor.
+     * La primera medición devuelve null a propósito: hace falta una anterior para restar,
+     * y un 0 inventado se lee como «ocioso». */
+    cpu_pct: prop.cpu_pct != null ? prop.cpu_pct : (prop.origen.startsWith('sin cgroup') ? cpuLocal() : null),
+    ncpu: cpu.ncpu,
     load: os.loadavg()[0],
-    mem_total_mb: Math.round(tm / 1048576),
-    mem_used_mb: Math.round((tm - fm) / 1048576),
-    mem_pct: Math.round(((tm - fm) * 100) / tm),
-    uptime_s: Math.round(os.uptime()),
+    mem_total_mb: mem.total_mb,
+    mem_used_mb: mem.usado_mb,
+    mem_pct: mem.pct,
+    uptime_s: up.uptime_s,
     disk: diskOf('/'),
     ifaces: ifaces.filter(REAL_IF),
+    // De dónde salió cada número: sin esto, la próxima vez que algo no cierre hay que
+    // adivinar si contestó el cgroup o /proc.
+    origen: { mem: mem.origen, cpu: cpu.origen, uso: prop.origen, uptime: up.origen },
   };
 }
 
