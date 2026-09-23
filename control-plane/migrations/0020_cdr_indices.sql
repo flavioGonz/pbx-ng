@@ -1,0 +1,49 @@
+-- PBX-NG · 0020 · La tabla `cdr` no tenía UN SOLO índice.
+--
+-- POR QUÉ: `cdr` es la única tabla que crece para siempre —una fila por llamada, sin
+-- purga— y es la que alimenta el historial del panel, la pantalla del agente, los
+-- reportes de call center y el emparejado de grabaciones. No tenía índices ni clave
+-- primaria: cada consulta era un Seq Scan de la tabla entera más un sort.
+--
+-- Medido acá mismo, sobre 500.000 filas generadas (una central mediana llega a eso en
+-- un año), promedio de 5 corridas, base local y caché caliente:
+--
+--   historial completo   ORDER BY start DESC LIMIT 100      63,0 ms  ->  1,4 ms   (45×)
+--   historial del agente WHERE src=$1 OR dst=$1              27,8 ms  ->  5,4 ms   (5×)
+--   emparejado de grabación (rango de ±300 s + interno)      30,4 ms  ->  2,4 ms   (13×)
+--
+-- En la central real es peor que esto: acá la tabla entera entra en caché, y allá el Seq
+-- Scan va a disco. La auditoría reportó 100× y 270× sobre otra máquina; el orden de
+-- magnitud es el mismo y la conclusión no depende de cuál de las dos mediciones se tome.
+--
+-- Los tres índices, y por qué esos tres:
+--
+--   · `start DESC` sirve al historial completo, que es el que abre el panel al entrar:
+--     con el índice, Postgres lee las primeras 100 filas y para (no ordena nada).
+--   · `(src, start DESC)` y `(dst, start DESC)` sirven a la consulta del agente, que
+--     SIEMPRE filtra por su interno. Van dos índices y no uno compuesto porque el
+--     predicado es `src=$1 OR dst=$1`: con dos, el planner hace BitmapOr y usa los dos;
+--     con uno compuesto `(src,dst)` no podría usar ninguno para el lado del OR.
+--
+-- Costo, medido sobre esas mismas 500.000 filas: la tabla ocupa 40 MB y los tres
+-- índices suman 70 MB. Y cada llamada escribe ahora tres índices más: una central que
+-- cursa 10 llamadas por segundo no lo nota; una consulta que barre 500.000 filas
+-- mientras retiene una conexión del pool, sí.
+--
+-- CONCURRENTLY no se usa a propósito: el runner corre cada migración dentro de una
+-- transacción (y CONCURRENTLY no puede vivir en una), y esto se aplica al arrancar el
+-- contenedor, antes de que la API atienda. Sobre una tabla grande el CREATE INDEX toma
+-- unos segundos y bloquea escrituras: es el único momento del día en que eso no molesta.
+--
+-- NO se agrega clave primaria: `uniqueid` no es único (una llamada con varios tramos
+-- escribe varias filas) y la tabla la escribe Asterisk, no nosotros. La identidad de
+-- llamada (`call_id = linkedid`, `leg_id = uniqueid`) se define en la Tanda 1, con el
+-- contrato del backoffice, y ahí se decide si lleva restricción.
+CREATE INDEX IF NOT EXISTS idx_cdr_start     ON cdr (start DESC);
+CREATE INDEX IF NOT EXISTS idx_cdr_src_start ON cdr (src, start DESC);
+CREATE INDEX IF NOT EXISTS idx_cdr_dst_start ON cdr (dst, start DESC);
+
+-- El emparejado de grabaciones (`/api/recordings/match` y el indexador) buscaba por
+-- `abs(extract(epoch from start) - $2) < 300`: una función sobre la columna, que ningún
+-- índice puede usar. La consulta se reescribió como un rango sobre `start` (ver
+-- recordings.js) para que estos índices sirvan también ahí.

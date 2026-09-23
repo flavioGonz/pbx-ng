@@ -536,6 +536,10 @@ pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
  * indexador de /recordings, audio/transcripción/picos, almacenamiento remoto (recstore),
  * historial e informe. Sus rutas se registran acá, DESPUÉS del gate de auth + RBAC;
  * `setRecFlag` lo usan las rutas de internos y `wavToPcm`/`analyzeText` el buzón de voz. */
+/* Texto único del aviso cuando la marca quedó en Postgres pero no en la AstDB. Mismo
+ * patrón (y mismo contrato) que el AVISO_ASTDB de telefonia.js y salas.js: el panel lo
+ * muestra tal cual, y syncRecFlags() vuelve a volcar todo cuando el AMI regresa. */
+const AVISO_ASTDB_REC = 'Guardado en la base, pero Asterisk no tomó la marca de grabación (AMI caído): se aplica sola cuando la central vuelva.';
 const { setRecFlag, syncRecFlags, wavToPcm, analyzeText } = require('./recordings')({
   app, pool, ami, amiAction, amiCommand, getAri: () => ari, state, extPropia, exigirExt, vozBase, errorHttp, logger,
 });
@@ -1641,7 +1645,16 @@ app.post('/api/endpoints', async (req, res) => {
   vmSeed = await vmpin.seed(c, id);
     }
     if (req.body && req.body.name) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
-    await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.status(201).json({ created: id, webrtc, video, vm_mailbox: id, vm_pin: (vmSeed && vmSeed.pin) || null });
+    /* La marca de grabación va DENTRO de la transacción. Antes salía después del COMMIT
+     * con `.catch(() => {})`: si ese UPDATE fallaba, el interno quedaba creado con la
+     * grabación apagada y nadie se enteraba —y acá el error mudo es un problema legal,
+     * no una molestia—. Y el `setRecFlag` (AstDB por AMI) se espera y se informa: es lo
+     * que el dialplan consulta en tiempo de llamada. */
+    const _rec = !!(req.body && req.body.record);
+    await c.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]);
+    await c.query('COMMIT'); broadcastSoon();
+    const _enAst = await setRecFlag(id, _rec);
+    res.status(201).json(Object.assign({ created: id, webrtc, video, vm_mailbox: id, vm_pin: (vmSeed && vmSeed.pin) || null }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
   } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/endpoints/:id', async (req, res) => {
@@ -1662,7 +1675,16 @@ app.put('/api/endpoints/:id', async (req, res) => {
       await c.query("UPDATE ps_endpoints SET transport=$2, context=COALESCE($3,context), disallow='all', allow=$4, webrtc='no', media_encryption='no', direct_media='no', rtp_symmetric='yes', force_rport='yes', rewrite_contact='yes', dtmf_mode=COALESCE($5,dtmf_mode) WHERE id=$1", [id, transport, context, allow, dtmf]);
     }
     if (req.body && req.body.name !== undefined) await c.query("INSERT INTO pbxng_directory (ext,name) VALUES ($1,$2) ON CONFLICT (ext) DO UPDATE SET name=EXCLUDED.name", [id, req.body.name]);
-    await c.query('COMMIT'); broadcastSoon(); const _rec = !!(req.body && req.body.record); await pool.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]).catch(() => {}); setRecFlag(id, _rec); res.json({ updated: id, webrtc, video });
+    /* Igual que en el alta, y con una corrección más: si el body NO trae `record`, no se
+     * toca. Antes `!!req.body.record` lo interpretaba como «apagar», así que guardar el
+     * nombre de un interno desde cualquier pantalla que no mandara el campo dejaba de
+     * grabarlo en silencio. Mismo criterio que `dtmf_mode` con su COALESCE. */
+    const _pedido = (req.body || {}).record;
+    const _rec = _pedido === undefined ? null : !!_pedido;
+    if (_rec !== null) await c.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]);
+    await c.query('COMMIT'); broadcastSoon();
+    const _enAst = _rec === null ? true : await setRecFlag(id, _rec);
+    res.json(Object.assign({ updated: id, webrtc, video }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
   } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/endpoints/:id', async (req, res) => {

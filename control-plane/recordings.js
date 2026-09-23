@@ -300,8 +300,21 @@ module.exports = function init(deps) {
         if (ex.rows.length) continue;
         let src = rext, dst = null;
         try {
+          /* El rango va sobre la COLUMNA, no sobre una función de la columna: con
+           * `abs(extract(epoch from start) - $2) < 300` ningún índice servía y cada
+           * grabación nueva costaba un Seq Scan del CDR entero (medido: 270× más lento
+           * con 500.000 filas, y el indexador corre en bucle sobre el directorio).
+           * `to_timestamp(...) AT TIME ZONE 'UTC'` devuelve `timestamp without time
+           * zone` en UTC, que es exactamente lo que `extract(epoch from start)` asumía
+           * de esta columna: el criterio de comparación no cambia, sólo la forma.
+           * El `abs()` queda en el ORDER BY, sobre las pocas filas que ya pasaron el
+           * rango: ahí no hace daño. */
           const cq = await pool.query(
-            "SELECT src, dst FROM cdr WHERE (src=$1 OR dst=$1) AND abs(extract(epoch from start) - $2) < 300 ORDER BY abs(extract(epoch from start) - $2) ASC LIMIT 1",
+            `SELECT src, dst FROM cdr
+              WHERE (src=$1 OR dst=$1)
+                AND start >= to_timestamp($2::bigint - 300) AT TIME ZONE 'UTC'
+                AND start <= to_timestamp($2::bigint + 300) AT TIME ZONE 'UTC'
+              ORDER BY abs(extract(epoch from start) - $2::bigint) ASC LIMIT 1`,
             [rext, epoch]);
           if (cq.rows[0]) { src = cq.rows[0].src; dst = cq.rows[0].dst; }
         } catch (e) {}

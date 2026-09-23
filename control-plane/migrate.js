@@ -40,12 +40,34 @@ const LOCK = 7264790;   // id arbitrario del candado (pg_advisory_lock), fijo pa
     let files = [];
     try { files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort(); }
     catch (e) { log.info('sin migrations/ — nada que hacer'); return; }
-    const done = new Set((await c.query('SELECT filename FROM pbxng_schema_migrations')).rows.map(r => r.filename));
+  /* Se traen los checksums, no sólo los nombres: el checksum se venía calculando y
+   * guardando desde el primer día, y no se comparaba con nada. Una migración YA APLICADA
+   * que cambia de contenido —alguien edita un .sql viejo en vez de escribir el siguiente,
+   * o dos ramas numeran igual— se salteaba en silencio y el contenedor arrancaba con un
+   * esquema que no es el que dice el repo. Eso NO se descubre al migrar: se descubre en
+   * producción, con tres pantallas devolviendo 500. Ahora corta el arranque: es un
+   * problema humano y se arregla escribiendo una migración nueva, no editando la vieja. */
+    const previas = new Map((await c.query('SELECT filename, checksum FROM pbxng_schema_migrations')).rows.map(r => [r.filename, r.checksum]));
+    const suma = (sql) => crypto.createHash('sha256').update(sql).digest('hex').slice(0, 16);
+    const cambiadas = [];
+    for (const f of files) {
+      if (!previas.has(f)) continue;
+      const esperado = previas.get(f);
+      const ahora = suma(fs.readFileSync(path.join(DIR, f), 'utf8'));
+      if (esperado !== ahora) cambiadas.push(f + ' (aplicada con ' + esperado + ', en disco ' + ahora + ')');
+    }
+    if (cambiadas.length) {
+      log.error('migraciones YA APLICADAS que cambiaron en disco: ' + cambiadas.join('; '));
+      log.error('esta base no es la que describe el repo. Una migración aplicada no se edita: escribí la siguiente. '
+        + 'Si el cambio es cosmético y estás seguro, actualizá el checksum a mano en pbxng_schema_migrations.');
+      process.exit(1);
+    }
+    const done = new Set(previas.keys());
     let applied = 0;
     for (const f of files) {
       if (done.has(f)) continue;
       const sql = fs.readFileSync(path.join(DIR, f), 'utf8');
-      const sum = crypto.createHash('sha256').update(sql).digest('hex').slice(0, 16);
+      const sum = suma(sql);
       try {
         await c.query('BEGIN'); await c.query(sql);
         await c.query('INSERT INTO pbxng_schema_migrations (filename, checksum) VALUES ($1,$2)', [f, sum]);
