@@ -2152,21 +2152,46 @@ ami.on('managerevent', (e) => {
 asegurarVapid().catch(e => logger('PUSH').error('asegurarVapid', e));
 
 let CRMGO2RTC = process.env.GO2RTC_URL || '';
-const GO2RTC_MGMT = process.env.GO2RTC_MGMT || 'http://pbxng-go2rtc:1984';
+/* go2rtc responde a dos nombres según cómo lo hayan levantado: `go2rtc` (alias del
+ * servicio, si lo trajo compose) o `pbxng-go2rtc` (si alguien lo arrancó a mano con
+ * --name). Se probaba uno solo, y cuando no era ese, TODO lo que sigue fallaba sin
+ * ruido: los `catch(e){}` de acá abajo se tragaban el ENOTFOUND, así que las cámaras
+ * nuevas no se registraban nunca en go2rtc y desde el panel se veía como si el alta
+ * hubiera funcionado. Ahora se prueban los dos y se recuerda el que contestó. */
+const GO2RTC_CANDIDATOS = (process.env.GO2RTC_MGMT || 'http://go2rtc:1984,http://pbxng-go2rtc:1984')
+  .split(',').map((s)=>s.trim().replace(/\/+$/,'')).filter(Boolean);
+let GO2RTC_MGMT = GO2RTC_CANDIDATOS[0];
+let g2buscando = null;   // sondeo en curso, para no probar en paralelo
+let g2vivo = false;      // ya sabemos cuál contesta: no se vuelve a probar
+async function go2rtcBase(){
+  if (GO2RTC_CANDIDATOS.length < 2) return GO2RTC_MGMT;
+  if (g2vivo) return GO2RTC_MGMT;
+  if (!g2buscando) g2buscando = (async () => {
+    for (const c of GO2RTC_CANDIDATOS) {
+      try {
+        const r = await fetch(c + '/api', { signal: AbortSignal.timeout(2500) });
+        if (r.status < 500) { GO2RTC_MGMT = c; g2vivo = true; break; }
+      } catch (_) { /* siguiente candidato */ }
+    }
+    g2buscando = null;
+    return GO2RTC_MGMT;
+  })();
+  return g2buscando;
+}
 async function _g2refresh(){ try{ const q=await pool.query("SELECT value FROM pbxng_settings WHERE key='go2rtc_url'"); if(q.rows[0]&&q.rows[0].value!=null) CRMGO2RTC=q.rows[0].value; }catch(e){} }
 _g2refresh(); setInterval(_g2refresh, 30000);
-async function syncGo2rtc(){ try{ const q=await pool.query("SELECT go2rtc_src, rtsp_url FROM pbxng_client_devices WHERE enabled AND rtsp_url IS NOT NULL AND rtsp_url<>''"); for(const d of q.rows){ try{ await fetch(GO2RTC_MGMT+'/api/streams?name='+encodeURIComponent(d.go2rtc_src)+'&src='+encodeURIComponent(d.rtsp_url),{method:'PUT'}); }catch(e){} } }catch(e){} }
+async function syncGo2rtc(){ try{ const q=await pool.query("SELECT go2rtc_src, rtsp_url FROM pbxng_client_devices WHERE enabled AND rtsp_url IS NOT NULL AND rtsp_url<>''"); for(const d of q.rows){ try{ await fetch((await go2rtcBase())+'/api/streams?name='+encodeURIComponent(d.go2rtc_src)+'&src='+encodeURIComponent(d.rtsp_url),{method:'PUT'}); }catch(e){} } }catch(e){} }
 setTimeout(syncGo2rtc, 10000); setInterval(syncGo2rtc, 60000);
 /* Alta/baja de UN stream en go2rtc. El barrido de arriba corre cada 60 s; estas dos existen
  * para que agregar, editar o sacar un portero se vea en el acto y —sobre todo— para que al
  * borrarlo go2rtc deje de tirarle RTSP a una camara que ya no es de nadie. */
 async function g2alta(src, rtsp){
   if(!src || !rtsp) return;
-  try{ await fetch(GO2RTC_MGMT+'/api/streams?name='+encodeURIComponent(src)+'&src='+encodeURIComponent(rtsp),{method:'PUT'}); }catch(e){}
+  try{ await fetch((await go2rtcBase())+'/api/streams?name='+encodeURIComponent(src)+'&src='+encodeURIComponent(rtsp),{method:'PUT'}); }catch(e){}
 }
 async function g2baja(src){
   if(!src) return;
-  try{ await fetch(GO2RTC_MGMT+'/api/streams?src='+encodeURIComponent(src),{method:'DELETE'}); }catch(e){}
+  try{ await fetch((await go2rtcBase())+'/api/streams?src='+encodeURIComponent(src),{method:'DELETE'}); }catch(e){}
 }
 /* «Probar» un portero: go2rtc intenta conectarse de verdad y contesta que encontro. Lo unico
  * que sale de aca es si anduvo y, si no, POR QUE en una linea — nunca el cuerpo de go2rtc,
@@ -2174,7 +2199,7 @@ async function g2baja(src){
 async function g2probar(src){
   if(!src) return { ok:false, motivo:'el dispositivo no tiene canal asignado' };
   let r;
-  try{ r = await fetch(GO2RTC_MGMT+'/api/probe?src='+encodeURIComponent(src), { signal: AbortSignal.timeout(12000) }); }
+  try{ r = await fetch((await go2rtcBase())+'/api/probe?src='+encodeURIComponent(src), { signal: AbortSignal.timeout(12000) }); }
   catch(e){ return { ok:false, motivo: /timeout|abort/i.test(e.name+' '+e.message) ? 'la camara no contesto en 12 segundos' : 'no se pudo hablar con go2rtc' }; }
   if(!r.ok) return { ok:false, motivo:'go2rtc respondio '+r.status+' (revisa la URL RTSP, el usuario y la clave)' };
   let d = null; try{ d = await r.json(); }catch(e){}
@@ -2186,6 +2211,51 @@ async function g2probar(src){
 app.get('/api/intercom/config', async (req,res)=>{ try{ const q=await pool.query("SELECT value FROM pbxng_settings WHERE key='go2rtc_url'"); res.json({ go2rtc_url: (q.rows[0]&&q.rows[0].value)||'', mgmt: GO2RTC_MGMT }); }catch(e){ errorHttp(res, e); } });
 app.post('/api/intercom/config', async (req,res)=>{ const u=(req.body&&req.body.go2rtc_url)||''; try{ const up=await pool.query("UPDATE pbxng_settings SET value=$1 WHERE key='go2rtc_url'",[u]); if(up.rowCount===0) await pool.query("INSERT INTO pbxng_settings(key,value) VALUES('go2rtc_url',$1)",[u]); CRMGO2RTC=u; syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
 app.post('/api/intercom/sync', async (req,res)=>{ try{ await syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
+
+/* ── Entradas de un solo uso para ver un stream ─────────────────────────────────
+ *  El video se reproduce por WebSocket, y un WebSocket del navegador NO puede llevar
+ *  la cabecera Authorization: el estándar no lo permite. Por eso, si el camino a
+ *  go2rtc se publicara tal cual, cualquiera que conociera el nombre del canal podría
+ *  mirar la puerta de un cliente sin haber iniciado sesión nunca. Eso en un equipo que
+ *  se vende no se hace.
+ *
+ *  La salida es una entrada (ticket): el panel, ya autenticado, pide una; la usa como
+ *  parámetro al abrir el WebSocket; el servidor del panel la canjea contra esta API
+ *  antes de dejar pasar el tráfico. Dura 60 s y sirve UNA vez, así que ni sirve de nada
+ *  si queda escrita en un log ni se puede pasar de mano en mano.
+ *
+ *  Vive en memoria a propósito: reiniciar la API tiene que invalidar todo lo que haya
+ *  suelto, y son objetos de 60 segundos — no merecen una tabla. */
+const entradasVideo = new Map();   // ticket -> { src, exp }
+function limpiarEntradas(){ const t=Date.now(); for(const [k,v] of entradasVideo) if(v.exp<=t) entradasVideo.delete(k); }
+setInterval(limpiarEntradas, 60000).unref?.();
+
+app.get('/api/intercom/ticket', async (req,res)=>{
+  const src = String(req.query.src||'');
+  if(!src) return res.status(400).json({ error:'falta el canal' });
+  try{
+    // Que el canal exista y esté habilitado: no se emiten entradas para cualquier texto
+    // que mande el navegador, sólo para dispositivos que el panel dio de alta.
+    const q = await pool.query('SELECT 1 FROM pbxng_client_devices WHERE go2rtc_src=$1 AND enabled LIMIT 1',[src]);
+    if(!q.rows.length) return res.status(404).json({ error:'ese canal no existe' });
+    limpiarEntradas();
+    const ticket = crypto.randomBytes(24).toString('base64url');
+    entradasVideo.set(ticket, { src, exp: Date.now()+60000 });
+    res.set('Cache-Control','no-store');
+    res.json({ ticket, expira_en: 60 });
+  }catch(e){ errorHttp(res, e); }
+});
+
+/* Canje. Lo llama el servidor del panel (server.js), no el navegador. Va sin sesión a
+ * propósito: el secreto ES la entrada. Se borra al canjearla — un solo uso. */
+app.get('/api/intercom/ticket/verify', (req,res)=>{
+  const t = String(req.query.t||''), src = String(req.query.src||'');
+  const e = entradasVideo.get(t);
+  res.set('Cache-Control','no-store');
+  if(!e || e.exp <= Date.now() || e.src !== src){ entradasVideo.delete(t); return res.status(403).json({ ok:false }); }
+  entradasVideo.delete(t);
+  res.json({ ok:true });
+});
 function crmNormNum(s){ return String(s||'').replace(/[^0-9]/g,''); }
 
 /* Las credenciales del portero viajan DENTRO de la URL RTSP (`rtsp://usuario:clave@ip/...`) y

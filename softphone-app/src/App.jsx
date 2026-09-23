@@ -257,6 +257,8 @@ export default function App() {
   const [recState, setRecState] = useState('idle');
   const [dir, setDir] = useState(null);
   const [cls, setCls] = useState(null);
+  const [errCls, setErrCls] = useState('');        // por qué la lista de clientes vino vacía
+  const [errStreams, setErrStreams] = useState('');// por qué no hay cámaras para este cliente
   const [selClient, setSelClient] = useState(null);
   const [streams, setStreams] = useState(null);
   const [clsFull, setClsFull] = useState(null); const [clientDet, setClientDet] = useState(null);
@@ -396,8 +398,11 @@ export default function App() {
     return () => sounds.stopRingback();
   }, [sp.inCall, sp.callInfo, sp.incoming, ring]); // eslint-disable-line
   useEffect(() => { if (apiOn && dir === null) api.directory().then(d => setDir(Array.isArray(d) ? d : [])).catch(() => setDir([])); }, [tab, apiOn, dir]);
-  useEffect(() => { if ((tab === 'clientes' || tab === 'intercom') && apiOn && cls === null) api.clients().then(d => setCls(Array.isArray(d) ? d : [])).catch(() => setCls([])); }, [tab, apiOn, cls]);
-  useEffect(() => { if (selClient && tab === 'intercom') { setStreams(null); api.clientStreams(selClient.id).then(d => setStreams(Array.isArray(d) ? d : [])).catch(() => setStreams([])); } }, [selClient, tab]);
+  /* El `.catch(() => set…([]))` de antes hacía que un error del servidor (típicamente
+   * un 403 de permisos) se viera como "no hay nada". Ahora el motivo se guarda y se
+   * muestra: si la lista está vacía porque el usuario no tiene permiso, que lo diga. */
+  useEffect(() => { if ((tab === 'clientes' || tab === 'intercom') && apiOn && cls === null) api.clients().then(d => { setCls(Array.isArray(d) ? d : []); setErrCls(''); }).catch(e => { setCls([]); setErrCls(e.message || 'no se pudo leer la lista'); }); }, [tab, apiOn, cls]);
+  useEffect(() => { if (selClient && tab === 'intercom') { setStreams(null); setErrStreams(''); api.clientStreams(selClient.id).then(d => setStreams(Array.isArray(d) ? d : [])).catch(e => { setStreams([]); setErrStreams(e.message || 'no se pudieron leer las cámaras'); }); } }, [selClient, tab]);
   useEffect(() => { if (tab === 'clientes' && apiOn && clsFull === null) api.clientsFull().then(d => setClsFull(Array.isArray(d) ? d : [])).catch(() => setClsFull([])); }, [tab, apiOn, clsFull]);
   useEffect(() => { setCliTab('datos'); }, [selClient]);
   useEffect(() => { if (tab === 'clientes' && selClient) { setClientDet(null); api.clientDetail(selClient.id).then(d => setClientDet(d || {})).catch(() => setClientDet({})); } }, [selClient, tab]);
@@ -847,7 +852,7 @@ export default function App() {
                 <div style={S.scroll}>
                   {!apiOn ? <EmptySystem onGo={() => setTab('ajustes')} /> :
                     cls === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
-                    cls.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin clientes</div> :
+                    cls.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errCls ? '#b91c1c' : C.sub }}>{errCls ? 'No se pudo leer la lista: ' + errCls : 'Sin clientes'}</div> :
                     (() => { const clsF = cls.filter(c => !clientQ || (c.name || '').toLowerCase().includes(clientQ.toLowerCase())); return clsF.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin resultados</div> : clsF.map((c, i) => (
                       <div key={i} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? '#eef4ff' : 'transparent' }} onClick={() => setSelClient(c)}>
                         <Ava txt={initials(c.name)} size={38} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
@@ -860,7 +865,7 @@ export default function App() {
                 <div style={{ ...S.scroll, padding: tab === 'intercom' ? '0 18px 18px' : S.scroll.padding }}>
                   {!apiOn ? null : !selClient ? <div style={{ color: C.sub, textAlign: 'center', padding: 40 }}>Elegí un cliente para ver sus {tab === 'intercom' ? 'cámaras/porteros en vivo' : 'dispositivos'}.</div> :
                     streams === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
-                    streams.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Este cliente no tiene dispositivos.</div> :
+                    streams.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errStreams ? '#b91c1c' : C.sub }}>{errStreams ? 'No se pudieron leer las cámaras: ' + errStreams : 'Este cliente no tiene dispositivos.'}</div> :
                     tab === 'intercom' ?
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => <MseTile key={(d.id || i) + ':' + (d.src || '')} stream={d} />)}</div> :
                       streams.map((d, i) => (

@@ -69,6 +69,16 @@ const PERMISOS = [
   ['GET',      /^\/api\/clients\/lookup$/,                  TODOS],
   ['GET',      /^\/api\/survey\/fields$/,                   TODOS],
   ['POST',     /^\/api\/survey$/,                           TODOS],
+  /* Porteros y cámaras de los clientes: LECTURA para cualquiera con sesión.
+   * El agente que atiende la llamada del portero es justamente el que necesita ver
+   * quién está en la puerta; dejarlo en SUP hacía que el softphone mostrara la lista
+   * de clientes vacía (se tragaba el 403) y parecía que la función no existía.
+   * Ojo con lo que NO abre esto: dar de alta o borrar un portero, y el resto del CRM,
+   * siguen cayendo en la regla `(clients|persons|spaces|devices)` de más abajo, que es
+   * SUP — y `crmWrite` vuelve a filtrar la escritura por su cuenta. */
+  ['GET',      /^\/api\/intercom\/(clients|streams|ticket)$/, TODOS],
+  ['GET',      /^\/api\/clients$/,                          TODOS],
+  ['GET',      /^\/api\/clients\/\d+$/,                     TODOS],
 
   /* ── Operación / call center (admin + supervisor) ────────────────────────── */
   ['*',        /^\/api\/calls(\/|$)/,                       SUP],     // live, hangup/hold por canal, spy
@@ -85,8 +95,10 @@ const PERMISOS = [
   ['GET',      /^\/api\/recordings$/,                       SUP],
   ['GET',      /^\/api\/recordings\/\d+\/(transcript|peaks)$/, SUP],
   ['POST',     /^\/api\/recordings\/\d+\/transcribe$/,      SUP],
-  ['*',        /^\/api\/(clients|persons|spaces|devices)(\/|$)/, SUP], // CRM (crmWrite ya limita la escritura a estos roles)
-  ['GET',      /^\/api\/intercom\/(clients|streams)$/,      SUP],
+  // CRM (crmWrite ya limita la escritura a estos roles). La LECTURA de la ficha y de
+  // los porteros ya se resolvió más arriba con TODOS; acá quedan las escrituras y el
+  // resto del CRM, que sigue siendo de supervisor para arriba.
+  ['*',        /^\/api\/(clients|persons|spaces|devices)(\/|$)/, SUP],
   ['*',        /^\/api\/survey(\/|$)/,                      SUP],
   ['GET',      /^\/api\/(extensions|tenants|metrics)$/,     SUP],
   ['GET',      /^\/api\/provision$/,                        SUP],     // config completa de un teléfono (la ruta ya lo exigía)

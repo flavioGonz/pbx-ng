@@ -30,11 +30,27 @@ async function call(method, path, body) {
     const r = await window.sphone.api({ method, url, body, token });
     if (r.error) throw new Error(r.error);
     if (r.status === 401) { setToken(''); throw new Error('sesión vencida'); }
+    if (r.status >= 400) throw fallo(r.status, r.json);
     return r.json;
   }
   const r = await fetch(url, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}), body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) { setToken(''); throw new Error('sesión vencida'); }
-  return r.json().catch(() => null);
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw fallo(r.status, j);
+  return j;
+}
+
+/* Antes cualquier respuesta que no fuera 200 se devolvía tal cual, y como el cuerpo de
+ * un error es `{error:"..."}` y no un array, el `Array.isArray(d) ? d : []` de la
+ * pantalla lo convertía en lista vacía. Resultado: un 403 de permisos se veía
+ * exactamente igual que "este cliente no tiene cámaras" — sin un solo mensaje. Un
+ * permiso que falta tiene que doler, no esconderse. */
+function fallo(status, cuerpo) {
+  const msg = (cuerpo && (cuerpo.error || cuerpo.message))
+    || (status === 403 ? 'tu usuario no tiene permiso para esto' : 'el servidor respondió ' + status);
+  const e = new Error(msg);
+  e.status = status;
+  return e;
 }
 
 export async function apiLogin(base, username, password) {

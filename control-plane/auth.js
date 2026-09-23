@@ -93,6 +93,13 @@ module.exports = function init(deps) {
     // lecturas. /api/cdr fuerza ext = la del token (ver la ruta).
     ['GET',  /^\/api\/cdr$/],
     ['GET',  /^\/api\/clients\/lookup$/],
+    /* Porteros y cámaras de los clientes, sólo lectura. Es lo que el aparato necesita
+     * para mostrar quién está en la puerta cuando suena el portero: sin esto, la
+     * pantalla de Intercom de la PWA pide la lista, se come un 403 y queda vacía.
+     * Son tres GET y nada más — no abre el alta ni el borrado de dispositivos, que
+     * siguen siendo del panel. */
+    ['GET',  /^\/api\/intercom\/(clients|streams|ticket)$/],
+    ['GET',  /^\/api\/clients$/],
   ];
 
   /* ¿El que pide puede meterse con la extensión `ext`?
@@ -134,6 +141,12 @@ module.exports = function init(deps) {
     ['GET',  /^\/api\/push\/vapid$/],
     ['POST', /^\/api\/push\/(subscribe|register|unsubscribe)$/],
     ['GET',  /^\/api\/internal\/wake$/],
+    /* Canje de la entrada de video. La llama el servidor del panel (server.js) para
+     * decidir si deja pasar un WebSocket hacia go2rtc, y no tiene sesión que mandar.
+     * Pública sin riesgo: no devuelve datos, sólo sí/no, y lo que autentica es la
+     * entrada misma — que la emitió esta API hace menos de un minuto, para ESE canal,
+     * a alguien con sesión, y que se destruye al primer canje. */
+    ['GET',  /^\/api\/intercom\/ticket\/verify$/],
     // El dialplan avisa por CURL qué hizo el usuario desde el teléfono (DND, desvíos,
     // modo noche) para que Postgres y el panel queden al día. Pública porque el CURL no
     // tiene sesión, pero la ruta sólo acepta LOOPBACK, sin cabecera de proxy y con el

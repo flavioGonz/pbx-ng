@@ -16,7 +16,13 @@ function MseTile({ stream }) {
    * «Sin señal» con el motivo y el botón de reintentar, que es lo que el operador necesita. */
   const ESPERA_MS = 12000;
   useEffect(() => {
-    const base = stream && stream.base, src = stream && stream.src;
+    /* Sin dirección configurada, el video lo sirve el propio equipo en /camaras (ver
+     * dashboard/server.js). Antes esto era un error — "falta configurar la dirección de
+     * go2rtc" — y obligaba a que alguien publicara go2rtc a mano en el proxy de adelante
+     * para que se viera la puerta. Un appliance tiene que andar recién sacado de la caja;
+     * el campo sigue existiendo para quien quiera apuntar a un go2rtc propio. */
+    const base = (stream && stream.base) || (typeof window !== 'undefined' ? window.location.origin + '/camaras' : '');
+    const src = stream && stream.src;
     const video = videoRef.current;
     if (!video || typeof MediaSource === 'undefined') { setStatus('error'); setMotivo('el navegador no puede reproducir este video'); return; }
     if (!base) { setStatus('error'); setMotivo('falta configurar la dirección de go2rtc'); return; }
@@ -30,8 +36,21 @@ function MseTile({ stream }) {
     video.muted = true;
     const flush = () => { if (!sb || sb.updating || !queue.length) return; try { sb.appendBuffer(queue.shift()); } catch (e) {} };
     const trim = () => { try { if (sb && sb.buffered.length) { const end = sb.buffered.end(sb.buffered.length - 1); if (video.currentTime < end - 2 || video.currentTime > end) video.currentTime = end - 0.4; if (sb.buffered.start(0) < end - 10 && !sb.updating) sb.remove(0, end - 8); } } catch (e) {} };
-    ms.addEventListener('sourceopen', () => {
-      const wsUrl = base.replace(/^http/, 'ws').replace(/\/$/, '') + '/api/ws?src=' + encodeURIComponent(src);
+    ms.addEventListener('sourceopen', async () => {
+      /* El WebSocket del navegador no puede llevar Authorization, así que la sesión
+       * viaja como una entrada de un solo uso que el panel pide primero y el servidor
+       * canjea antes de abrir el caño. Si no se consigue (sesión vencida, canal que ya
+       * no existe), se abre igual sin ella: en instalaciones donde go2rtc se publica
+       * por afuera —un proxy propio del cliente— no hay nada que canjear, y ahí el
+       * comportamiento tiene que ser el de siempre. */
+      let ticket = '';
+      try {
+        const r = await fetch('/backend/api/intercom/ticket?src=' + encodeURIComponent(src));
+        if (r.ok) { const j = await r.json(); ticket = (j && j.ticket) || ''; }
+      } catch (_) { /* sin entrada: se intenta igual */ }
+      if (stopped) return;
+      const wsUrl = base.replace(/^http/, 'ws').replace(/\/$/, '') + '/api/ws?src=' + encodeURIComponent(src)
+        + (ticket ? '&t=' + encodeURIComponent(ticket) : '');
       try { ws = new WebSocket(wsUrl); } catch (e) { setStatus('error'); return; }
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => {

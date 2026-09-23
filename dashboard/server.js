@@ -53,9 +53,19 @@ const REGLAS = [
   { test: /^\/socket\.io(\/|\?|$)/, reescribir: (u) => u },
   { test: /^\/prov(\/|$)/, reescribir: (u) => u },
   { test: /^\/descargas\/softphone(\/|$)/, reescribir: (u) => u.replace(/^\/descargas\/softphone/, '/softphone') },
+  /* Video de los porteros y cámaras. Antes esto dependía de que alguien agregara a mano
+   * una regla en el proxy de adelante apuntando a go2rtc; si no estaba —y en pbx01 no
+   * estaba, devolvía 403— el intercom no mostraba imagen y no había forma de saber por
+   * qué desde el panel. Un equipo que se vende no puede pedirle al cliente que configure
+   * un reverse proxy para que se vea la puerta: lo sirve él.
+   *
+   * SÓLO reproducción. El API de administración de go2rtc (PUT/DELETE de streams, la
+   * consola de configuración) queda del lado de adentro: publicarlo sería regalarle a
+   * cualquiera con un navegador la capacidad de apuntar un canal a donde quiera. */
+  { test: /^\/camaras\/api\/(ws|frame\.jpeg|stream\.mjpeg)(\?|$)/, reescribir: (u) => u.replace(/^\/camaras/, ''), arriba: 'go2rtc', entrada: true },
 ];
 function destino(url) {
-  for (const r of REGLAS) if (r.test.test(url)) return r.reescribir(url);
+  for (const r of REGLAS) if (r.test.test(url)) return { path: r.reescribir(url), arriba: r.arriba || 'api', entrada: !!r.entrada };
   return null;
 }
 
@@ -101,10 +111,61 @@ function cabecerasProxy(req) {
 
 const agente = new http.Agent({ keepAlive: true, maxSockets: 256 });
 
-function proxyHttp(req, res, pathApi) {
+/* go2rtc puede estar corriendo con dos nombres distintos: `go2rtc` si lo levantó
+ * compose (alias del servicio) o `pbxng-go2rtc` si alguien lo arrancó a mano con
+ * --name. En pbx01 estaba el segundo, y como el resto del sistema buscaba el primero,
+ * el video daba 502 y el sincronizador de canales de la API fallaba en silencio —tiene
+ * el catch vacío—, así que nadie se enteraba. En vez de elegir un nombre y esperar que
+ * sea el correcto, se prueban los dos y se recuerda el que contestó. */
+const CANDIDATOS = (process.env.GO2RTC_URL_INTERNA || 'http://go2rtc:1984,http://pbxng-go2rtc:1984')
+  .split(',').map((s) => s.trim()).filter(Boolean).map((s) => new URL(s));
+let GO2RTC = null;          // el que contestó; null = todavía no se probó
+let buscando = null;        // promesa en curso, para no sondear en paralelo
+function vivo(c) {
+  return new Promise((resolve) => {
+    const r = http.request({ hostname: c.hostname, port: c.port || 80, path: '/api', method: 'GET', timeout: 2500 },
+      (resp) => { resp.resume(); resolve(resp.statusCode < 500 ? c : null); });
+    r.on('error', () => resolve(null));
+    r.on('timeout', () => { r.destroy(); resolve(null); });
+    r.end();
+  });
+}
+async function resolverGo2rtc() {
+  if (GO2RTC) return GO2RTC;
+  if (!buscando) {
+    buscando = Promise.all(CANDIDATOS.map(vivo))
+      .then((r) => { GO2RTC = r.find(Boolean) || null; buscando = null; return GO2RTC; });
+  }
+  return buscando;
+}
+// Se sondea al arrancar para que la primera cámara que alguien abra no espere.
+resolverGo2rtc().then((u) => console.log('[panel] go2rtc ' + (u ? 'en ' + u.origin : 'no encontrado (' + CANDIDATOS.map((c) => c.origin).join(', ') + ')')));
+
+/* Canjea la entrada de un solo uso contra la API antes de dejar pasar video. Un
+ * WebSocket del navegador no puede mandar Authorization, así que la sesión viaja como
+ * este parámetro `t`, que la API emitió hace menos de un minuto para ESE canal y que
+ * se destruye al usarse. Sin esto, el que supiera el nombre del canal miraba la puerta
+ * de un cliente sin haber iniciado sesión jamás. */
+function entradaValida(url) {
+  return new Promise((resolve) => {
+    let q; try { q = new URL(url, 'http://x'); } catch (_) { return resolve(false); }
+    const t = q.searchParams.get('t') || '', src = q.searchParams.get('src') || '';
+    if (!t || !src) return resolve(false);
+    const r = http.request({
+      protocol: API.protocol, hostname: API.hostname, port: API.port || 80, method: 'GET',
+      path: '/api/intercom/ticket/verify?t=' + encodeURIComponent(t) + '&src=' + encodeURIComponent(src),
+      timeout: 4000,
+    }, (resp) => { resp.resume(); resolve(resp.statusCode === 200); });
+    r.on('error', () => resolve(false));
+    r.on('timeout', () => { r.destroy(); resolve(false); });
+    r.end();
+  });
+}
+
+function proxyHttp(req, res, pathApi, U = API) {
   const headers = cabecerasProxy(req);
   const up = http.request({
-    protocol: API.protocol, hostname: API.hostname, port: API.port || 80,
+    protocol: U.protocol, hostname: U.hostname, port: U.port || 80,
     method: req.method, path: pathApi, headers, agent: agente,
   }, (r) => {
     res.writeHead(r.statusCode, r.statusMessage, r.headers);
@@ -120,12 +181,12 @@ function proxyHttp(req, res, pathApi) {
   req.pipe(up);
 }
 
-function proxyUpgrade(req, socket, head, pathApi) {
+function proxyUpgrade(req, socket, head, pathApi, U = API) {
   const headers = cabecerasProxy(req);
   headers.connection = 'Upgrade';
   headers.upgrade = req.headers.upgrade;
   const up = http.request({
-    protocol: API.protocol, hostname: API.hostname, port: API.port || 80,
+    protocol: U.protocol, hostname: U.hostname, port: U.port || 80,
     method: req.method, path: pathApi, headers,
   });
   up.on('upgrade', (r, upSocket, upHead) => {
@@ -157,16 +218,28 @@ const handle = app.getRequestHandler();
 const handleUpgrade = typeof app.getUpgradeHandler === 'function' ? app.getUpgradeHandler() : null;
 
 app.prepare().then(() => {
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const d = destino(req.url);
-    if (d !== null) return proxyHttp(req, res, d);
-    return handle(req, res);
+    if (d === null) return handle(req, res);
+    if (d.arriba === 'api') return proxyHttp(req, res, d.path, API);
+    // Video: primero la entrada, después averiguar dónde está go2rtc.
+    if (d.entrada && !(await entradaValida(req.url))) {
+      res.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ error: 'entrada de video inválida o vencida' }));
+    }
+    const U = await resolverGo2rtc();
+    if (!U) { res.writeHead(502, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ error: 'el servicio de video no está corriendo' })); }
+    proxyHttp(req, res, d.path, U);
   });
-  server.on('upgrade', (req, socket, head) => {
+  server.on('upgrade', async (req, socket, head) => {
     const d = destino(req.url);
-    if (d !== null) return proxyUpgrade(req, socket, head, d);
-    if (handleUpgrade) return handleUpgrade(req, socket, head);   // HMR de Next en dev
-    socket.destroy();
+    if (d === null) { if (handleUpgrade) return handleUpgrade(req, socket, head); return socket.destroy(); }  // HMR de Next en dev
+    if (d.arriba === 'api') return proxyUpgrade(req, socket, head, d.path, API);
+    const cortar = (linea) => { try { socket.write('HTTP/1.1 ' + linea + '\r\nConnection: close\r\n\r\n'); } catch (_) {} socket.destroy(); };
+    if (d.entrada && !(await entradaValida(req.url))) return cortar('403 Forbidden');
+    const U = await resolverGo2rtc();
+    if (!U) return cortar('502 Bad Gateway');
+    proxyUpgrade(req, socket, head, d.path, U);
   });
   /* socket.io en long-polling deja pedidos abiertos ~25 s; el timeout por defecto de
    * node (0 = sin límite en el server, pero keepAlive) alcanza. Sin límite de headers. */

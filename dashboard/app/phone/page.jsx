@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { IconRefresh, IconTrash } from '@tabler/icons-react';
 import { useSoftphone } from '../useSoftphone';
 import Scratchpad from '../Scratchpad';
+import Intercom from '../Intercom';   // misma pared de video que usa el panel (go2rtc por MSE)
 import { pushSupported, pushStatus, enablePush, disablePush, testPush } from '../push';
 import {
   IconPhone, IconPhoneOff, IconBackspace, IconMicrophone, IconMicrophoneOff,
@@ -65,6 +66,16 @@ export default function Phone() {
   const sp = useSoftphone();
   const [ext, setExt] = useState(''); const [pass, setPass] = useState(''); const [video, setVideo] = useState(false); const [scratch, setScratch] = useState(false); const [appVer, setAppVer] = useState(''); const [pendIn, setPendIn] = useState(null);
   const [tab, setTab] = useState('teclado'); const [dial, setDial] = useState(''); const [kp, setKp] = useState(false);
+  /* Intercom: los porteros y cámaras que el panel asoció a cada cliente. Esta pantalla
+   * no existía en la PWA — el softphone de escritorio la tenía desde el principio y la
+   * web no, así que quien usaba el teléfono del navegador simplemente no veía la puerta.
+   * `icCli` es la lista de clientes con dispositivos; `icSel` el elegido; `icStreams`
+   * sus canales listos para reproducir (go2rtc por MSE, igual que el panel). */
+  const [icCli, setIcCli] = useState(null);
+  const [icSel, setIcSel] = useState(null);
+  const [icStreams, setIcStreams] = useState(null);
+  const [icErr, setIcErr] = useState('');
+  const [hayIntercom, setHayIntercom] = useState(false);
   const [contacts, setContacts] = useState([]); const [q, setQ] = useState('');
   const [addOpen, setAddOpen] = useState(false); const [nc, setNc] = useState({ name: '', number: '' });
   const [push, setPush] = useState('off'); const [pushBusy, setPushBusy] = useState(false);
@@ -242,6 +253,38 @@ export default function Phone() {
   function addContact() { if (!nc.name || !nc.number) return; const c = [...contacts, { id: Date.now(), ...nc }].sort((a, b) => a.name.localeCompare(b.name)); setContacts(c); saveC(c); setNc({ name: '', number: '' }); setAddOpen(false); }
   function delContact(id) { const c = contacts.filter(x => x.id !== id); setContacts(c); saveC(c); }
   function callNum(n, video) { setTab('teclado'); sp.placeCall(n, video); }
+
+  /* Se piden al entrar a la pestaña, no al cargar la app: abrir el teléfono no tiene
+   * por qué despertar a go2rtc ni pedir la lista de clientes. */
+  const icCargarClientes = useCallback(async () => {
+    setIcErr('');
+    try {
+      const r = await fetch('/backend/api/intercom/clients');
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((j && j.error) || (r.status === 403 ? 'tu usuario no tiene permiso para ver los porteros' : 'error ' + r.status));
+      setIcCli(Array.isArray(j) ? j : []);
+    } catch (e) { setIcCli([]); setIcErr(e.message || 'no se pudo leer la lista'); }
+  }, []);
+  const icCargarStreams = useCallback(async (id) => {
+    setIcStreams(null); setIcErr('');
+    try {
+      const r = await fetch('/backend/api/intercom/streams?client=' + encodeURIComponent(id));
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((j && j.error) || (r.status === 403 ? 'tu usuario no tiene permiso para ver estas cámaras' : 'error ' + r.status));
+      setIcStreams(Array.isArray(j) ? j : []);
+    } catch (e) { setIcStreams([]); setIcErr(e.message || 'no se pudieron leer las cámaras'); }
+  }, []);
+  // Sondeo único al arrancar: decide si la pestaña Intercom se muestra o no.
+  useEffect(() => {
+    let vivo = true;
+    fetch('/backend/api/intercom/clients')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (vivo && Array.isArray(j) && j.length) { setHayIntercom(true); setIcCli(j); } })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+  useEffect(() => { if (tab === 'intercom' && icCli === null) icCargarClientes(); }, [tab, icCli, icCargarClientes]);
+  useEffect(() => { if (tab === 'intercom' && icSel) icCargarStreams(icSel.id); }, [tab, icSel, icCargarStreams]);
   const isOnline = (num) => { const st = presence[String(num)]; return st === 'online' || st === 'in_call'; };
   const statusOf = (num) => presence[String(num)] || 'offline';
   const stLabel = { online: 'En línea', in_call: 'En llamada', offline: 'Desconectado' };
@@ -337,6 +380,39 @@ export default function Phone() {
             )}
           </div>
         )}
+        {tab === 'intercom' && (
+          <div style={{ padding: '0 0 8px' }}>
+            <div style={S.head}>
+              <div style={S.title}>{icSel ? icSel.name : 'Intercom'}</div>
+              {icSel
+                ? <button style={S.addBtn} onClick={() => { setIcSel(null); setIcStreams(null); setIcErr(''); }}><IconX size={22} color="#007aff" /></button>
+                : <button style={S.addBtn} onClick={() => { setIcCli(null); }}><IconRefresh size={20} color="#007aff" /></button>}
+            </div>
+
+            {icErr && <div style={{ ...S.empty, color: '#ff3b30', padding: '18px 8px' }}>{icErr}</div>}
+
+            {/* Un solo cliente: no tiene sentido hacer elegir de una lista de uno. Se
+                entra derecho a sus cámaras. */}
+            {!icSel ? (
+              icCli === null ? <div style={S.empty}>Cargando…</div> :
+              icCli.length === 0 ? (icErr ? null : <div style={S.empty}>No hay clientes con porteros o cámaras asociados.</div>) :
+              icCli.map((c) => (
+                <div key={c.id} style={S.crow} onClick={() => setIcSel(c)}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(0,122,255,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                    <IconVideo size={19} color="#007aff" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0, fontWeight: 600 }}>{c.name}</div>
+                  <IconArrowForwardUp size={18} color="#8e8e93" />
+                </div>
+              ))
+            ) : (
+              icStreams === null ? <div style={S.empty}>Cargando cámaras…</div> :
+              icStreams.length === 0 ? (icErr ? null : <div style={S.empty}>Este cliente no tiene dispositivos.</div>) :
+              <div style={{ paddingTop: 4 }}><Intercom streams={icStreams} columns={1} /></div>
+            )}
+          </div>
+        )}
+
         {tab === 'ajustes' && (
           <div style={{ padding: '8px 0' }}>
             <div style={S.title}>Ajustes</div>
@@ -380,7 +456,13 @@ export default function Phone() {
       </div>
 
       <div style={S.tabbar}>
-        {[['llamadas', IconClockHour4, 'Llamadas'], ['contactos', IconUser, 'Contactos'], ['teclado', IconGridDots, 'Teclado'], ['ajustes', IconSettings, 'Ajustes']].map(([id, Ic, lbl]) => (
+        {/* La pestaña Intercom sólo aparece si hay algún cliente con dispositivos: en una
+            central sin porteros sería un botón que no lleva a ninguna parte. Se sondea una
+            vez al arrancar, y si la API dice que no hay nada (o que no tenés permiso), la
+            barra queda igual que siempre. */}
+        {[['llamadas', IconClockHour4, 'Llamadas'], ['contactos', IconUser, 'Contactos'], ['teclado', IconGridDots, 'Teclado'],
+          ...(hayIntercom ? [['intercom', IconVideo, 'Intercom']] : []),
+          ['ajustes', IconSettings, 'Ajustes']].map(([id, Ic, lbl]) => (
           <button key={id} className="ph-tab" style={{ ...S.tabBtn, color: tab === id ? '#007aff' : '#8e8e93', position: 'relative' }} onClick={() => setTab(id)}><Ic size={24} />{id === 'llamadas' && vmNew > 0 && <span style={{ position: 'absolute', top: 4, left: 'calc(50% + 6px)', minWidth: 16, height: 16, borderRadius: 8, background: '#ff3b30', color: '#fff', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{vmNew}</span>}<span style={{ fontSize: 10.5, marginTop: 2 }}>{lbl}</span></button>
         ))}
       </div>
