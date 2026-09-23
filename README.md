@@ -13,6 +13,7 @@ Asterisk 22 · WebRTC · IVR con IA · PWA softphone · Multi-WAN · Borde opcio
 ![Node 20+](https://img.shields.io/badge/Node-20%2B-339933)
 
 </div>
+<img width="1914" height="944" alt="image" src="https://github.com/user-attachments/assets/16eeadaf-a510-4ed6-855c-19d1299c30f3" />
 
 ---
 
