@@ -93,4 +93,30 @@ test('datos: índices del CDR y migraciones que no se pueden reescribir', async 
     await db.query('UPDATE pbxng_schema_migrations SET checksum=$2 WHERE filename=$1', [rows[0].filename, rows[0].checksum]);
     assert.equal(correr().status, 0);
   });
+
+  await t.test('D2 · la deriva histórica conocida se acepta UNA vez y se cura sola', async () => {
+    /* Al encender el control, la primera central que actualizó encontró una de verdad:
+     * `0009` se editó en 1.6.0 ya estando aplicada (se sacaron dos CREATE TABLE que la
+     * migración siguiente borra igual, así que la base termina idéntica). La excepción
+     * está escrita a mano, con su motivo, y tiene que actualizar la fila para que valga
+     * una sola vez por central. */
+    const VIEJO = 'cf77574963cf458a';
+    const correr = () => spawnSync(process.execPath, ['migrate.js'], { cwd: RAIZ, env: Object.assign({}, process.env, db.env), encoding: 'utf8' });
+    const { rows: antes } = await db.query("SELECT checksum FROM pbxng_schema_migrations WHERE filename='0009_schema_runtime.sql'");
+    assert.ok(antes[0], 'la base de prueba no tiene aplicada la 0009');
+    const bueno = antes[0].checksum;
+
+    await db.query("UPDATE pbxng_schema_migrations SET checksum=$1 WHERE filename='0009_schema_runtime.sql'", [VIEJO]);
+    const r = correr();
+    assert.equal(r.status, 0, 'la deriva conocida no se aceptó:\n' + r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /deriva histórica aceptada/);
+
+    const { rows: despues } = await db.query("SELECT checksum FROM pbxng_schema_migrations WHERE filename='0009_schema_runtime.sql'");
+    assert.equal(despues[0].checksum, bueno, 'la excepción no actualizó la fila: quedaría abierta para siempre');
+
+    // Y cualquier OTRA diferencia sobre el mismo archivo sigue cortando.
+    await db.query("UPDATE pbxng_schema_migrations SET checksum='dead0000dead0000' WHERE filename='0009_schema_runtime.sql'");
+    assert.equal(correr().status, 1, 'la lista de excepciones está perdonando cualquier cosa');
+    await db.query("UPDATE pbxng_schema_migrations SET checksum=$1 WHERE filename='0009_schema_runtime.sql'", [bueno]);
+  });
 });

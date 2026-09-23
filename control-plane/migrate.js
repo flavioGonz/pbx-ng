@@ -40,6 +40,27 @@ const LOCK = 7264790;   // id arbitrario del candado (pg_advisory_lock), fijo pa
     let files = [];
     try { files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort(); }
     catch (e) { log.info('sin migrations/ — nada que hacer'); return; }
+/* ── Deriva HISTÓRICA aceptada, con nombre y apellido ───────────────────────────
+ * Al encender el control por checksum, la primera central que actualizó lo encontró de
+ * verdad: `0009_schema_runtime.sql` se editó en 1.6.0 DESPUÉS de estar aplicada. Lo que
+ * se sacó fueron dos `CREATE TABLE` de un fail2ban que ninguna imagen instalaba, y que
+ * `0010_soc.sql` —la migración siguiente— borra igual. O sea: una base que aplicó la
+ * versión vieja y otra que aplique la nueva terminan EXACTAMENTE iguales, y por eso esta
+ * excepción es segura. No se perdona por ser vieja: se perdona porque se miró.
+ *
+ * Es una lista cerrada de pares (archivo, checksum viejo) escrita a mano. Cualquier otra
+ * diferencia sigue cortando el arranque. Y se cura sola: cuando se reconoce una, se
+ * actualiza la fila al checksum de hoy, así la excepción se usa una vez por central y no
+ * queda como una puerta abierta para siempre.
+ *
+ * Para agregar una entrada hay que poder escribir, como acá, POR QUÉ el estado final de
+ * la base es el mismo. Si no se puede, la respuesta es una migración nueva. */
+const DERIVA_ACEPTADA = {
+  '0009_schema_runtime.sql': {
+    'cf77574963cf458a': 'en 1.6.0 se sacaron dos CREATE TABLE de fail2ban que 0010_soc.sql borra igual: el estado final de la base es idéntico',
+  },
+};
+
   /* Se traen los checksums, no sólo los nombres: el checksum se venía calculando y
    * guardando desde el primer día, y no se comparaba con nada. Una migración YA APLICADA
    * que cambia de contenido —alguien edita un .sql viejo en vez de escribir el siguiente,
@@ -54,7 +75,14 @@ const LOCK = 7264790;   // id arbitrario del candado (pg_advisory_lock), fijo pa
       if (!previas.has(f)) continue;
       const esperado = previas.get(f);
       const ahora = suma(fs.readFileSync(path.join(DIR, f), 'utf8'));
-      if (esperado !== ahora) cambiadas.push(f + ' (aplicada con ' + esperado + ', en disco ' + ahora + ')');
+      if (esperado === ahora) continue;
+      const perdon = (DERIVA_ACEPTADA[f] || {})[esperado];
+      if (perdon) {
+        log.warn('deriva histórica aceptada en ' + f + ': ' + perdon + ' — se actualiza el checksum guardado');
+        await c.query('UPDATE pbxng_schema_migrations SET checksum=$2 WHERE filename=$1', [f, ahora]);
+        continue;
+      }
+      cambiadas.push(f + ' (aplicada con ' + esperado + ', en disco ' + ahora + ')');
     }
     if (cambiadas.length) {
       log.error('migraciones YA APLICADAS que cambiaron en disco: ' + cambiadas.join('; '));
