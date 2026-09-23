@@ -256,7 +256,9 @@ module.exports = function init(deps) {
     } catch (e) { errorHttp(res, e); }
   });
   app.get('/api/recordings', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id, filename, ext, src, dst, started_at, bytes, duration, storage, remote_url FROM pbxng_recordings WHERE deleted=false ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 500'); res.json(rows); }
+    /* `linkedid` sale como `call_id`: es lo que empareja una grabación con su llamada en
+     * el CDR y con los eventos, sin tener que adivinar por número y hora. */
+    try { const { rows } = await pool.query('SELECT id, filename, ext, src, dst, started_at, bytes, duration, storage, remote_url, linkedid AS call_id FROM pbxng_recordings WHERE deleted=false ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 500'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   app.delete('/api/recordings/:id', async (req, res) => {
@@ -284,7 +286,14 @@ module.exports = function init(deps) {
 
   /* Historial: admin y supervisor ven todo (con ?ext= filtran); agente y token de softphone
    * SIEMPRE ven sólo su interno, se ignore lo que manden en ?ext=. */
-  app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); const propio = extPropia(req); const ext = propio ? propio : (req.query.ext ? String(req.query.ext) : null); if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' }); try { const q = ext ? await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr WHERE src=$2 OR dst=$2 ORDER BY start DESC LIMIT $1", [limit, ext]) : await pool.query("SELECT start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata FROM cdr ORDER BY start DESC LIMIT $1", [limit]); res.json(q.rows); } catch (e) { errorHttp(res, e); } });
+  /* `call_id` y `leg_id` (docs/CONTRATOS.md §3.1) viajan desde acá: son `linkedid` y
+   * `uniqueid` de Asterisk, tal cual, sin reempaquetar. Es la identidad con la que el
+   * backoffice va a conciliar CDR, grabaciones y eventos, y agregarlos es aditivo: el
+   * panel sigue leyendo el mismo arreglo. La columna se nombra en el SELECT en vez de
+   * usar `*` a propósito: `cdr` la escribe Asterisk y puede traer columnas nuevas entre
+   * versiones. */
+  const CAMPOS_CDR = 'start, clid, src, dst, dcontext, duration, billsec, disposition, channel, dstchannel, lastapp, lastdata, linkedid AS call_id, uniqueid AS leg_id';
+  app.get('/api/cdr', async (req, res) => { const limit = Math.min(+(req.query.limit || 100), 500); const propio = extPropia(req); const ext = propio ? propio : (req.query.ext ? String(req.query.ext) : null); if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' }); try { const q = ext ? await pool.query('SELECT ' + CAMPOS_CDR + ' FROM cdr WHERE src=$2 OR dst=$2 ORDER BY start DESC LIMIT $1', [limit, ext]) : await pool.query('SELECT ' + CAMPOS_CDR + ' FROM cdr ORDER BY start DESC LIMIT $1', [limit]); res.json(q.rows); } catch (e) { errorHttp(res, e); } });
 
   // ==================== Indexador de grabaciones (MixMonitor -> pbxng_recordings) ====================
   async function indexRecordings() {

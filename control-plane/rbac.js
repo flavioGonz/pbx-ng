@@ -155,6 +155,12 @@ const PERMISOS = [
   // las dos de arriba, y con más razón: de un saque le cambia el PIN a toda la central.
   ['POST',     /^\/api\/mailboxes\/rotar-pin$/,             ADMIN],
 
+  /* Credenciales de SISTEMA (`clientes-api.js`): alta, rotación y revocación de los
+   * clientes de `/api/v1`. Sólo admin —caería igual en el default, pero está escrito
+   * porque una credencial que puede originar llamadas y leer el historial de todos
+   * merece una línea explícita en la tabla, no un silencio. */
+  ['*',        /^\/api\/api-clients(\/|$)/,                 ADMIN],
+
   /* ── Todo lo demás (configuración del sistema) queda en ADMIN por defecto:
    *    users, settings, trunks, routes, sbc-link, modules (escritura), backup,
    *    asterisk, net, system, turn, acme, npm, integrations, branding (escritura),

@@ -134,6 +134,14 @@ module.exports = function init(deps) {
     ['POST', /^\/api\/auth\/login$/],
     ['POST', /^\/api\/phone\/token$/],
     ['GET',  /^\/api\/auth\/setup$/],
+    /* `/api/v1` es el contrato público con SISTEMAS y tiene su propia puerta: una
+     * credencial de servicio verificada contra `pbxng_api_clients` en cada pedido
+     * (clientes-api.js). Pasa de largo por ESTE gate —que es el de las sesiones de
+     * persona— y NO queda abierta: el router de v1 exige el token de servicio en todo
+     * lo que cuelga de él, incluido su propio 404. Una sesión de panel tampoco sirve
+     * ahí, a propósito: si un navegador con sesión pudiera usar el contrato público,
+     * cualquier CSRF del panel sería un agujero del contrato. */
+    ['*',    /^\/api\/v1(\/|$)/],
     ['GET',  /^\/api\/ice$/],
     ['GET',  /^\/api\/branding$/],
     ['GET',  /^\/api\/enroll\/[^/]+$/],
@@ -168,7 +176,8 @@ module.exports = function init(deps) {
     // Sólo la LECTURA es pública (subir y borrar siguen pidiendo sesión).
     ['GET',  /^\/api\/manuales\/img\/[A-Za-z0-9._-]+$/],
   ];
-  function isPublicApi(req) { const full = (req.baseUrl || '') + req.path; return PUBLIC_API.some(([m, re]) => m === req.method && re.test(full)); }
+  /* `m` puede ser '*' (cualquier método): lo usa /api/v1, que tiene su propia puerta. */
+  function isPublicApi(req) { const full = (req.baseUrl || '') + req.path; return PUBLIC_API.some(([m, re]) => (m === '*' || m === req.method) && re.test(full)); }
 
   /* IP del cliente = req.ip: Express ya aplicó `trust proxy = 1`, así que es la que
    * agregó el proxy al FINAL de X-Forwarded-For. Antes se leía el PRIMER elemento del

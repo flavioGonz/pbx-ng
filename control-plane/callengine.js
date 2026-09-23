@@ -147,6 +147,19 @@ module.exports = function initCallEngine(deps) {
     return { peer, to: String(to) };
   }
 
+  /* Originar una llamada, sin Express en el medio. Lo usan la ruta del panel y `/api/v1`
+   * (el contrato con el backoffice): una sola implementación, porque el día que cambie el
+   * CallerID o las variables del canal tiene que cambiar para los dos a la vez. */
+  async function originar({ from, to, context }) {
+    if (!from || !to) { const e = new Error('from y to son obligatorios'); e.status = 400; throw e; }
+    if (!ari) { const e = new Error('ARI no disponible'); e.status = 503; throw e; }
+    const ch = await ari.channels.originate({
+      endpoint: PJSIP + String(from), extension: String(to), context: context || 'internal', priority: 1,
+      callerId: '"' + to + '" <' + to + '>', timeout: 40, variables: { PBXNG_C2D: '1' },
+    });
+    return { channel: ch.id };
+  }
+
   /* ---------- rutas ---------- */
   const need = (v, what) => { if (!v) { const e = new Error(what + ' requerido'); e.status = 400; throw e; } return v; };
   const wrap = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { errorHttp(res, e); } };
@@ -156,9 +169,7 @@ module.exports = function initCallEngine(deps) {
   // click-to-dial: llama al interno y, cuando atiende, marca el destino por el dialplan
   app.post('/api/calls/dial', auth, wrap(async (req) => {
     const from = soloPropia(req, need(req.body && req.body.from, 'from')); const to = need(req.body && req.body.to, 'to');
-    if (!ari) { const e = new Error('ARI no disponible'); e.status = 503; throw e; }
-    const ch = await ari.channels.originate({ endpoint: PJSIP + from, extension: String(to), context: (req.body && req.body.context) || 'internal', priority: 1, callerId: '"' + to + '" <' + to + '>', timeout: 40, variables: { PBXNG_C2D: '1' } });
-    return { ok: true, channel: ch.id };
+    return { ok: true, ...(await originar({ from, to, context: req.body && req.body.context })) };
   }));
   app.post('/api/calls/:id/hangup', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.hangup({ channelId: req.params.id }); return { ok: true }; }));
   app.post('/api/calls/:id/hold', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.hold({ channelId: req.params.id }); return { ok: true }; }));
@@ -170,5 +181,5 @@ module.exports = function initCallEngine(deps) {
   app.post('/api/calls/spy', auth, wrap(async (req) => { const b = req.body || {}; need(b.sup, 'supervisor'); need(b.target, 'destino'); if (String(b.sup) === String(b.target)) throw Object.assign(new Error('el supervisor no puede espiarse a si mismo'), { status: 400 }); return { ok: true, ...(await startSpy({ sup: b.sup, target: b.target, mode: b.mode })) }; }));
   app.delete('/api/calls/spy/:id', auth, wrap(async (req) => ({ ok: await stopSpy(req.params.id) })));
 
-  return { attach, detach, getChannels, endpointStates, handleStasis, startSpy, stopSpy, blindTransfer, spies };
+  return { attach, detach, getChannels, endpointStates, handleStasis, startSpy, stopSpy, blindTransfer, originar, spies };
 };

@@ -377,7 +377,7 @@ async function setModule(id, on) {
  * arriba (en tiempo de request), el alcance por extensión (mismaExt/exigirExt/extPropia),
  * el freno a la fuerza bruta y las rutas de sesión, usuarios, enrolado y provisión.
  * Va ANTES de callengine.js porque ese módulo recibe `auth` y `mismaExt` al inicializarse. */
-const { auth, isPublicApi, mismaExt, exigirExt, extPropia, clientIp } = require('./auth')({
+const { auth, isPublicApi, mismaExt, exigirExt, extPropia, clientIp, limiteIntentos } = require('./auth')({
   app, pool, SECRET, NODES, alerts,
   sbcLink: (...a) => sbcLink(...a), broadcastSoon: (...a) => broadcastSoon(...a),
   createWebrtcEndpoint: (...a) => createWebrtcEndpoint(...a), smtpHint: (...a) => smtpHint(...a),
@@ -391,6 +391,30 @@ const { auth, isPublicApi, mismaExt, exigirExt, extPropia, clientIp } = require(
 const sipConf = require('./sipconf')({ app, pool, amiCommand, escribir: astconf.escribir, log: (...a) => logger('sipconf').info(...a) });
 const callEngine = require('./callengine')({ app, auth, mismaExt, amiAction, amiCommand, broadcastSoon: (...a) => broadcastSoon(...a), appName: CFG.ari.app, log: (...a) => logger('calls').info(...a) });
 async function endpointStates() { return callEngine.endpointStates(); }
+
+/* ── Contrato público con SISTEMAS (`/api/v1`) ─────────────────────────────────────
+ * Dos piezas que van juntas y en este orden:
+ *   · `clientes-api.js`  las credenciales de sistema (`pbxng_api_clients`): alta, rotación
+ *     y revocación desde el panel (sólo admin por el RBAC), y el cambio de
+ *     client_id+secreto por un token corto que se verifica CONTRA LA TABLA en cada
+ *     pedido, para que revocar sea un UPDATE y no una espera.
+ *   · `v1.js`  el subconjunto congelado que se le entrega al backoffice, con su propia
+ *     forma de respuesta (sobre con `tope_aplicado`, nunca un arreglo pelado) y su
+ *     política de compatibilidad escrita en el encabezado del archivo.
+ * Van DESPUÉS de callengine porque v1 usa `getChannels`/`endpointStates`, y el router se
+ * monta en `/api/v1`, que el gate de sesiones deja pasar a propósito (auth.js): la puerta
+ * de v1 es la credencial de sistema, no una sesión de persona. */
+const apiClients = require('./clientes-api')({
+  app, pool, auth, errorHttp, logger, secret: SECRET, clientIp, limiteIntentos,
+});
+const apiV1 = require('./v1')({
+  pool, errorHttp, logger,
+  authServicio: apiClients.authServicio, exigirAlcance: apiClients.exigirAlcance,
+  getChannels: (...a) => callEngine.getChannels(...a),
+  endpointStates: (...a) => callEngine.endpointStates(...a),
+  originar: (...a) => callEngine.originar(...a),
+});
+app.use('/api/v1', apiV1.router);
 setTimeout(() => { sipConf.ensure().then(() => amiCommand('module reload res_pjsip.so').catch(() => {})).catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados antes de que el panel toque nada
 
 async function getExtensions() {

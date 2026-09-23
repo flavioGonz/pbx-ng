@@ -358,6 +358,122 @@ Esto se cuenta así desde la auditoría de entrega: el número anterior (285, de
 se podía reproducir porque nunca se dijo cómo se había contado, y cinco mediciones
 distintas daban cinco resultados. Si el número cambia, se cambia acá y se explica por qué.
 
+### 3.1 Identidad de llamada: `call_id` y `leg_id`
+
+**Una llamada es `call_id`. Cada tramo de esa llamada es `leg_id`.** Son, tal cual y sin
+reempaquetar, dos valores que Asterisk ya genera:
+
+| Campo | Es | Ejemplo | Dónde vive |
+|---|---|---|---|
+| `call_id` | `linkedid` de Asterisk | `1790203912.41` | `cdr.linkedid`, `pbxng_recordings.linkedid` |
+| `leg_id` | `uniqueid` de Asterisk | `1790203912.42` | `cdr.uniqueid` |
+
+Por qué así y no un identificador propio:
+
+- **Ya existe y ya es consistente.** Asterisk le pone el mismo `linkedid` a todos los canales
+  que nacen de la misma llamada: el que entra por la troncal, el que timbra el interno, el
+  que sale por la transferencia. El primer tramo cumple `uniqueid == linkedid`.
+- **Un identificador nuestro tendría que generarse en algún lado y viajar por el dialplan**,
+  y cualquier camino que no lo pusiera (una transferencia, un Local channel, un failover de
+  troncal) rompería la conciliación justo en los casos difíciles.
+- **Una llamada escribe VARIAS filas en `cdr`** —una por tramo—. Por eso `uniqueid` no sirve
+  como clave de llamada y `linkedid` no sirve como clave de fila. Hacen falta los dos, y por
+  eso el CDR no tiene clave primaria (ver la migración `0020`).
+
+Reglas que no se negocian, porque de ellas cuelgan la idempotencia, el orden y la
+conciliación del backoffice:
+
+1. **Los dos viajan en TODA respuesta y TODO evento que hable de una llamada.** Hoy:
+   `GET /api/cdr` (`call_id`, `leg_id`), `GET /api/recordings` (`call_id`). Cuando exista el
+   outbox, el sobre de cada evento los lleva a los dos (§3.9 de la auditoría de entrega).
+2. **Son opacos.** Formato `<epoch>.<secuencia>`, pero el que los consume NO parsea: no se
+   ordena por `call_id` ni se saca la hora de ahí. Para ordenar está `start`; para el orden
+   dentro de una llamada, la secuencia del evento.
+3. **Se pasan como texto.** `1790203912.41` no es un número: convertirlo a float pierde
+   precisión y junta dos llamadas distintas en el mismo valor.
+4. **Pueden faltar en filas viejas.** `cdr.linkedid` existe desde siempre, pero una central
+   con datos migrados puede tener filas con el campo vacío. `null` significa «no lo sé», no
+   «es otra llamada».
+
+### 3.2 `/api/v1` — el contrato PÚBLICO (lo que se entrega a un tercero)
+
+Las 346 rutas de `/api` son la API **privada de nuestro panel**: nacieron con él y cambian
+con él, y eso está bien porque los dos se despliegan juntos. El backoffice del cliente no
+se despliega con nosotros. `/api/v1` es, entonces, **un subconjunto chico y congelado**,
+con su propia credencial, su propia forma de respuesta y su propia política de cambios.
+Que sean pocas rutas es la característica, no una etapa.
+
+**Política de compatibilidad, en una línea citable:** *dentro de `v1` sólo se AGREGAN
+campos opcionales y rutas nuevas; quitar o renombrar un campo, cambiar su tipo o su
+significado, o endurecer una validación, es `v2`, y las dos versiones conviven 12 meses.*
+Corolario para quien consume: **ignorá los campos que no conocés**. Un cliente que se
+rompe porque apareció un campo nuevo no es un cambio incompatible nuestro.
+
+**Credencial: de SISTEMA, no de persona** (`control-plane/clientes-api.js`,
+tabla `pbxng_api_clients`, migración `0021`).
+
+- Alta desde el panel (`POST /api/api-clients`, sólo admin): devuelve `client_id` y
+  `secreto`. **El secreto se ve UNA vez**; se guarda hasheado con bcrypt. Si se pierde, se
+  rota (`POST /api/api-clients/:id/rotar`).
+- `POST /api/v1/auth/token` con `{client_id, secreto}` → `{token, expira_en: 3600,
+  alcances}`. Tiene el mismo freno de fuerza bruta que el login del panel.
+- El token se verifica **contra la tabla en cada pedido**, no sólo por firma: por eso
+  `POST /api/api-clients/:id/revocar` corta el acceso sin esperar a que venza nada. El
+  retraso real es la caché de clientes: **hasta 5 segundos**, y la respuesta del revocar lo
+  dice.
+- **Una sesión de panel NO sirve en `/api/v1`** (da 403). Es a propósito: si un navegador
+  con sesión pudiera usar el contrato público, cualquier CSRF del panel sería un agujero
+  del contrato.
+
+**Alcances** (deny-by-default, como `rbac.js`; un cliente sin el alcance recibe 403 con el
+nombre del que le falta):
+
+| Alcance | Habilita |
+|---|---|
+| `cdr:leer` | historial de llamadas y su detalle |
+| `grabaciones:leer` | listado de grabaciones |
+| `llamadas:ver` | llamadas en curso (sólo lectura) |
+| `llamadas:ordenar` | originar, transferir, colgar, aparcar |
+| `internos:ver` | estado de los internos y del directorio |
+| `eventos:recibir` | ser destino del outbox de eventos |
+
+**Forma de las respuestas.** Toda lista devuelve un SOBRE, nunca un arreglo pelado:
+
+```json
+{ "items": [ … ], "next_cursor": "…|null", "tope_aplicado": 100, "truncado": false }
+```
+
+`tope_aplicado` y `truncado` existen para que **un recorte nunca sea silencioso**: hoy
+`/api/cdr` corta en 500 filas y el que pregunta no se entera, que es exactamente cómo se
+arma un reporte al que le faltan llamadas sin que nadie lo note. La paginación va por
+**cursor sobre `(start, uniqueid)`**, no por OFFSET: el CDR crece por la punta y con OFFSET
+una llamada nueva entre dos pedidos corre las filas y el que pagina se saltea una.
+
+**Rutas de `v1` (primera tanda: leer, más originar)**
+
+| Ruta | Alcance | Notas |
+|---|---|---|
+| `POST /api/v1/auth/token` | — | pública: la credencial es el cuerpo |
+| `GET /api/v1/yo` | (cualquiera) | quién sos, qué podés y la política de compatibilidad |
+| `GET /api/v1/cdr` | `cdr:leer` | `desde`/`hasta` (ISO), `interno`, `limite` (máx 500), `cursor`. Rango máximo **92 días** |
+| `GET /api/v1/cdr/:call_id` | `cdr:leer` | todos los tramos de una llamada; 404 si no existe |
+| `GET /api/v1/grabaciones` | `grabaciones:leer` | metadatos; filtra por `call_id`. El audio va aparte (enlace firmado, pendiente) |
+| `GET /api/v1/llamadas` | `llamadas:ver` | en curso. **503 si la central no responde** —nunca una lista vacía, que sería mentir en un tablero de operación— |
+| `GET /api/v1/internos` | `internos:ver` | estado y nombre de cada interno |
+| `POST /api/v1/llamadas/originar` | `llamadas:ordenar` | `{desde, hacia}` → `202 {aceptado, canal}`. Acepta `Idempotency-Key` |
+
+**Idempotencia** (`Idempotency-Key`, tabla `pbxng_idempotencia`, 24 h de retención). El
+caso que resuelve: el backoffice ordena una llamada, la llamada **sale**, y ahí se le corta
+la red antes de recibir la respuesta; reintentar es lo único razonable que puede hacer, y
+sin esto reintentar llama dos veces al mismo cliente. Con la clave, el segundo pedido
+devuelve la **misma** respuesta y la cabecera `Idempotent-Replay: true`. La misma clave con
+**otro cuerpo** es un error del que llama: **409**, nunca la respuesta vieja. No es
+obligatoria (un consumidor que recién arranca no la tiene), pero para escrituras se manda
+siempre.
+
+**Errores**: siempre `{error, detalle?}` con el status HTTP correcto. Un `200` con `{error}`
+adentro no es un error: es una respuesta buena que miente.
+
 Familias y su dueño funcional en el panel:
 
 | Familia | Para qué | Pantalla |
