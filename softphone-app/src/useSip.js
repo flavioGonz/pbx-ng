@@ -3,6 +3,7 @@
 // Porta el manejo de media/estado probado del PWA de producción (useSoftphone.js),
 // pero agnóstico de PBX (todo sale de cfg, no de location.host).
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { iceServersFrom } from './ice.js';
 import { UserAgent, Registerer, Inviter, RegistererState, SessionState } from 'sip.js';
 
 const HIST = 'sp_hist';
@@ -71,20 +72,10 @@ function preferCodec(nombre, forzar) {
   };
 }
 
-function iceServersFrom(cfg) {
-  const list = [];
-  // Sin STUN configurado NO se inventa uno público: el aprovisionamiento (QR / enrolado)
-  // trae el del propio appliance, y una central sin internet no puede depender de Google.
-  String(cfg.stun || '').split(',').map(s => s.trim()).filter(Boolean)
-    .forEach(u => list.push({ urls: u.startsWith('stun:') ? u : 'stun:' + u }));
-  // TURN solo si trae usuario y clave; un credential vacío puede romper el RTCPeerConnection/ICE
-  if (cfg.turn && cfg.turnUser && cfg.turnPass) {
-    const urls = cfg.turn.split(',').map(s => s.trim()).filter(Boolean)
-      .map(u => (u.startsWith('turn:') || u.startsWith('turns:')) ? u : 'turn:' + u);
-    list.push({ urls, username: cfg.turnUser, credential: cfg.turnPass });
-  }
-  return list;
-}
+/* Los servidores ICE los entrega la CENTRAL (`ice.js`): lo guardado a mano quedó como
+ * red de emergencia. Acá había una segunda copia de la construcción de la lista —la otra
+ * estaba en ice.js—, y eso es justamente cómo el probador de la pantalla y la llamada de
+ * verdad terminaban usando servidores distintos. */
 
 // ---------- tonos DTMF locales (se oyen al marcar) ----------
 const DTMF = { '1':[697,1209],'2':[697,1336],'3':[697,1477],'4':[770,1209],'5':[770,1336],'6':[770,1477],'7':[852,1209],'8':[852,1336],'9':[852,1477],'*':[941,1209],'0':[941,1336],'#':[941,1477] };

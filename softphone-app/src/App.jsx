@@ -9,7 +9,7 @@ import QRCode from 'qrcode';
 import { gsap } from 'gsap';
 import { gEnter, gPop, gSplash, gModal, gStagger } from './anim.js';
 import * as sounds from './sounds.js';
-import { testIce } from './ice.js';
+import { testIce, refrescarIce, iceEfectivos } from './ice.js';
 import QrProvision from './QrProvision.jsx';
 
 function withVT(fn) { try { if (typeof document !== 'undefined' && document.startViewTransition) { document.startViewTransition(() => flushSync(fn)); return; } } catch {} fn(); }
@@ -414,9 +414,29 @@ export default function App() {
     setTimeout(() => startEngine(cfgLatest.current), 250);
   }
   const cfgLatest = useRef(cfg); cfgLatest.current = cfg;
-  function runTurnTest() { setTurnT({ state: 'testing' }); testIce(cfgLatest.current).then(r => setTurnT(r)).catch(e => setTurnT({ state: 'error', errors: [String(e && e.message || e)], host: 0, srflx: 0, relay: 0 })); }
+  const [iceInfo, setIceInfo] = useState(() => iceEfectivos(cfg));
+  /* Traer el ICE de la central ANTES de probar: si no, el probador mide contra lo que
+   * quedó guardado en este aparato, que es justo lo que puede estar viejo. */
+  async function refrescarYProbar(silencioso) {
+    if (!silencioso) setTurnT({ state: 'testing' });
+    const r = await refrescarIce(cfgLatest.current);
+    setIceInfo(iceEfectivos(cfgLatest.current));
+    if (!r.ok) setIceErr(r.error || ''); else setIceErr('');
+    return r;
+  }
+  const [iceErr, setIceErr] = useState('');
+  function runTurnTest() {
+    setTurnT({ state: 'testing' });
+    refrescarYProbar(true)
+      .then(() => testIce(cfgLatest.current))
+      .then(r => setTurnT(r))
+      .catch(e => setTurnT({ state: 'error', errors: [String(e && e.message || e)], host: 0, srflx: 0, relay: 0 }));
+  }
   useEffect(() => { if (tab === 'ajustes' && aTab === 'red') runTurnTest(); }, [tab, aTab]); // eslint-disable-line
-  useEffect(() => { if (authed && cfgLatest.current && cfgLatest.current.turn) setTimeout(runTurnTest, 1200); }, [authed]); // eslint-disable-line
+  /* Al registrarse: es el momento en que se sabe cuál es la central y que está viva. Se
+   * refresca el ICE aunque no haya nada cargado a mano —antes esto sólo corría si había
+   * un TURN guardado, o sea nunca en el aparato que más lo necesita—. */
+  useEffect(() => { if (authed) setTimeout(() => { refrescarYProbar(true).then(() => runTurnTest()); }, 1200); }, [authed]); // eslint-disable-line
   const startEngineRef = useRef(startEngine); startEngineRef.current = startEngine;
   useEffect(() => {
     const reconnect = (why) => {
@@ -939,19 +959,45 @@ export default function App() {
                   {aTab === 'red' && <Section title="ICE / TURN" icon={IcShield({ c: C.sub, s: 14 })}>
                     <div style={{ display: 'flex', gap: 18 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
+                        {/* Quién manda acá: la central. Los campos de abajo son el plan C, y
+                            tienen que decirlo, o alguien va a pasar una hora corrigiendo un
+                            TURN que el aparato ya ni usa (pasó: un interno con el relay del
+                            SBC guardado contra una central que entrega el suyo propio). */}
+                        {(() => {
+                          const desde = iceInfo.fuente === 'central'
+                            ? 'Lo entrega la central' + (iceInfo.origen ? ' · origen «' + iceInfo.origen + '»' : '')
+                            : iceInfo.fuente === 'manual' ? 'Cargado a mano en este aparato' : 'Sin servidores ICE';
+                          const cuando = iceInfo.at ? new Date(iceInfo.at).toLocaleString() : '';
+                          const col = iceInfo.fuente === 'central' ? C.green : iceInfo.fuente === 'manual' ? '#f59e0b' : C.red;
+                          return (
+                            <div style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${col}`, borderRadius: 9, padding: '10px 12px', marginBottom: 10, background: '#fff' }}>
+                              <div style={{ fontWeight: 700, fontSize: 13 }}>{desde}</div>
+                              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3 }}>
+                                {iceInfo.fuente === 'central'
+                                  ? (iceInfo.lista.length + ' servidor(es) · actualizado ' + cuando)
+                                  : iceInfo.fuente === 'manual'
+                                    ? 'La central no contestó todavía: se usa lo de abajo hasta que conteste.'
+                                    : 'Conectate a la central o cargá un TURN abajo.'}
+                              </div>
+                              {iceErr ? <div style={{ fontSize: 11.5, color: C.red, marginTop: 4 }}>{iceErr}</div> : null}
+                              <button onClick={() => { sounds.uiClick(); runTurnTest(); }} style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: '#fff', color: C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>Actualizar desde la central</button>
+                            </div>
+                          );
+                        })()}
+                        <div style={{ fontSize: 11.5, color: C.sub, margin: '2px 0 6px' }}>Respaldo manual (sólo se usa si la central no contesta):</div>
                         {F('STUN', 'stun')}{F('TURN', 'turn', 'text', 'turn:host:3478')}{F('TURN usuario', 'turnUser')}
                         <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>TURN clave</div><input style={S.inp} type="password" value={cfg.turnPass || ''} onChange={e => setCfg(c => ({ ...c, turnPass: e.target.value }))} /></div>
                         <button onClick={() => { sounds.uiClick(); saveConfig(cfg); runTurnTest(); }} style={{ width: '100%', marginTop: 8, padding: 10, borderRadius: 9, border: `1px solid ${C.accent}`, background: 'rgba(47,128,255,.06)', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600 }}>Probar TURN ahora</button>
                       </div>
                       {(() => {
                         const t = turnT || { state: 'idle' };
-                        const configured = !!(cfg.turn && cfg.turnUser && cfg.turnPass);
+                        const configured = iceInfo.lista.some((x) => String(Array.isArray(x.urls) ? x.urls[0] : x.urls || '').startsWith('turn'));
                         const inUse = sp.usingRelay === true;
                         const ok = t.state === 'ok';
                         const bad = t.state === 'turn-auth' || t.state === 'turn-unreachable' || t.state === 'error';
                         const col = ok ? C.green : bad ? C.red : configured ? '#f59e0b' : '#c2c9d6';
                         const title = t.state === 'testing' ? 'Probando…' : ok ? (inUse ? 'TURN en uso' : 'TURN operativo') : t.state === 'turn-auth' ? 'Credenciales rechazadas' : t.state === 'turn-unreachable' ? 'TURN no responde' : t.state === 'error' ? 'Error' : configured ? 'Sin probar' : 'TURN off';
-                        const sub = t.state === 'testing' ? 'levantando ICE…' : ok ? (inUse ? 'la llamada pasa por relay' : 'alcanzable y autenticado') : t.state === 'turn-auth' ? 'usuario/clave inválidos (401)' : t.state === 'turn-unreachable' ? 'no llegó candidato relay' : configured ? 'tocá "Probar TURN ahora"' : 'sin configurar';
+                        const sub = t.state === 'testing' ? 'levantando ICE…' : ok ? (inUse ? 'la llamada pasa por relay' : 'alcanzable y autenticado') : t.state === 'turn-auth' ? (iceInfo.fuente === 'central' ? 'la central dio esta credencial y el relay la rechazó (401)' : 'usuario/clave inválidos (401): probá actualizar desde la central') : t.state === 'turn-unreachable' ? 'no llegó candidato relay' : configured ? 'tocá "Probar TURN ahora"' : 'sin configurar';
                         return (
                           <div style={{ width: 160, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderLeft: `1px solid ${C.line}`, paddingLeft: 18, textAlign: 'center' }}>
                             <div className={(ok && inUse) ? 'turn-live' : ''} style={{ width: 88, height: 88, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: ok ? 'rgba(34,197,94,.12)' : bad ? 'rgba(239,68,68,.1)' : '#f1f3f8' }}>

@@ -60,6 +60,25 @@ export async function apiLogin(base, username, password) {
   return { error: (r && r.error) || 'login falló' };
 }
 
+/* ICE de la central. Es PÚBLICA (no pide sesión): la central la sirve para que cualquier
+ * softphone suyo sepa contra qué relay hablar, y eso incluye a uno recién instalado que
+ * todavía no se conectó a la API. Por eso no se usa `call()`, que exige base+token. */
+export async function iceDeLaCentral(base) {
+  const b = String(base || getApiBase() || '').replace(/\/$/, '');
+  if (!b) throw new Error('no sé cuál es la central: falta la URL del panel');
+  const url = b + '/backend/api/ice';
+  if (typeof window !== 'undefined' && window.sphone && window.sphone.api) {
+    const r = await window.sphone.api({ method: 'GET', url, token: getToken() });
+    if (r.error) throw new Error(r.error);
+    if (r.status >= 400) throw fallo(r.status, r.json);
+    return r.json;
+  }
+  const r = await fetch(url, { headers: { Accept: 'application/json' } });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw fallo(r.status, j);
+  return j;
+}
+
 export const directory = () => call('GET', '/directory');
 export const clients = () => call('GET', '/intercom/clients');
 export const clientsFull = () => call('GET', '/clients');
