@@ -16,6 +16,7 @@ const aiPipeline = require('./ai-pipeline');
 const AsteriskManager = require('asterisk-manager');
 const jwt = require('jsonwebtoken');   // sólo para el handshake del socket; las sesiones HTTP las firma/verifica auth.js
 const helmet = require('helmet');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');   // freno del click-to-call publico (el del login vive en auth.js)
 const rbac = require('./rbac');         // tabla de permisos por rol (docs/CONTRATOS.md §2)
 const webpush = require('web-push');
 const pushProviders = require('./push-providers');
@@ -638,24 +639,63 @@ function hostMetrics() {
   try { const st = fsx.statfsSync('/'); disk = { total: st.blocks * st.bsize, used: (st.blocks - st.bfree) * st.bsize, free: st.bfree * st.bsize }; } catch (_) {}
   return { cpu: cpuPct(), mem: { total: tm, used: tm - fm, free: fm }, disk, load: os.loadavg(), uptime: os.uptime(), cores: os.cpus().length };
 }
-// Wake interno (sin auth, LAN): el dialplan lo invoca por CURL para despertar la PWA
+/* ── Wake interno: lo invoca el dialplan por CURL para despertar la PWA de un interno
+ * que no tiene contacto registrado. NO lleva sesión, porque el que llama es Asterisk.
+ *
+ * Estaba abierta: cualquiera que llegara al puerto podía hacer sonar el push de
+ * «llamada entrante» en el teléfono de cualquier interno, tantas veces como quisiera y
+ * sin dejar rastro de sesión. Ahora pasa por el MISMO filtro que los otros dos caminos
+ * que el dialplan usa sin sesión (`telefonia.js` y `marcacion.js`):
+ *   · nada de X-Forwarded-For / X-Real-IP: si el pedido pasó por un proxy, no vino del
+ *     dialplan de esta máquina, y la IP de origen ya no prueba nada;
+ *   · origen loopback: Asterisk corre con `network_mode: host` y la API sólo escucha en
+ *     127.0.0.1, así que el CURL del dialplan llega por loopback y nadie de la LAN puede
+ *     falsificarlo;
+ *   · y el token compartido (`/etc/pbxng/agent.token`), comparado en tiempo constante.
+ * El token es «si viene, tiene que estar bien»: en el PRIMER arranque de una instalación
+ * el dialplan puede haberse escrito antes de que la API generara el archivo, y ahí el
+ * loopback es lo que sostiene la puerta (igual que en telefonia.js sin token). Desde el
+ * segundo arranque el entrypoint de Asterisk ya lo hornea en el CURL. */
+function wakeDesdeLaCentral(req) {
+  if (req.headers['x-forwarded-for'] || req.headers['x-real-ip']) return false;
+  const ip = String(clientIp(req) || '').replace(/^::ffff:/, '');
+  if (!(ip === '::1' || ip === '127.0.0.1' || /^127\./.test(ip))) return false;
+  const dado = String((req.query || {}).tok || '');
+  if (!dado) return true;                       // ver comentario: sin token, manda el loopback
+  const a = Buffer.from(dado, 'utf8'), b = Buffer.from(String(AGENT_TOKEN || ''), 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 app.get('/api/internal/wake', (req, res) => {
+  if (!wakeDesdeLaCentral(req)) return res.status(403).type('text/plain').send('no');
   try { notifyIncomingPush(String(req.query.ext || ''), String(req.query.from || ''), String(req.query.name || '')); } catch (_) {}
   res.json({ ok: true });
 });
 // ============================================================
 //  Click-to-Call publico (WebRTC sin registro) - parte publica
 // ============================================================
-const c2cRate = new Map();
-function c2cAllow(ip) { const now = Date.now(); const arr = (c2cRate.get(ip) || []).filter(t => now - t < 300000); arr.push(now); c2cRate.set(ip, arr); return arr.length <= 6; }
+/* ── Freno del click-to-call público. Dos cosas estaban mal y las dos se medían:
+ *   1. la IP salía del PRIMER elemento de X-Forwarded-For, que lo escribe el cliente:
+ *      con un header distinto por pedido entraban 30 de 30 sesiones. Ahora `req.ip`, que
+ *      con `trust proxy = 1` es la que agregó NUESTRO proxy (el mismo criterio que
+ *      `clientIp()` en auth.js, y por el mismo motivo).
+ *   2. el `Map` no se podaba nunca: una IP nueva por pedido lo hacía crecer sin techo
+ *      contra un `mem_limit` de 768m. `express-rate-limit` —que ya es dependencia y ya
+ *      frena el login— vence sus propias entradas.
+ * El cupo no cambia: 6 sesiones cada 5 minutos por IP. Cada sesión crea un endpoint
+ * WebRTC y filas de dialplan, así que esto es lo que separa un enlace público de una
+ * fábrica de internos. */
+const c2cLimite = rateLimit({
+  windowMs: 5 * 60 * 1000, limit: 6,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(clientIp(req)),
+  handler: (req, res) => res.status(429).json({ error: 'Demasiados intentos, probá en unos minutos.' }),
+});
 function c2cDestRoute(type, val) { if (type === 'extension') return ['internal', val]; return ['ivr', val]; }
 app.get('/api/c2c/public/:token', async (req, res) => {
   try { const { rows } = await pool.query('SELECT name,intro,require_name,collect_geo,video,enabled FROM pbxng_click2call WHERE token=$1', [req.params.token]); if (!rows[0] || !rows[0].enabled) return res.status(404).json({ error: 'enlace no disponible' }); res.json(rows[0]); }
   catch (e) { errorHttp(res, e); }
 });
-app.post('/api/c2c/public/:token/session', async (req, res) => {
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  if (!c2cAllow(ip)) return res.status(429).json({ error: 'Demasiados intentos, probá en unos minutos.' });
+app.post('/api/c2c/public/:token/session', c2cLimite, async (req, res) => {
   const b = req.body || {}; const c = await pool.connect();
   try {
     const { rows } = await c.query('SELECT * FROM pbxng_click2call WHERE token=$1', [req.params.token]);

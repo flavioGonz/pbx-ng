@@ -91,6 +91,26 @@ done
 # --- resolver la URL de la API en el dialplan (wake webhook, etc.) ---
 sed -i "s|@@API_URL@@|${API_URL:-127.0.0.1:3000}|g" /etc/asterisk/extensions.conf 2>/dev/null || true
 
+# --- token compartido en el CURL del wake ---
+# El wake despierta la PWA de un interno sin contacto registrado y NO lleva sesion: la API
+# lo acepta por loopback y, si el CURL trae token, lo exige correcto. El archivo lo genera
+# la API al arrancar en el volumen `certs`; en la PRIMERA instalacion puede no existir
+# todavia cuando arranca Asterisk, asi que se espera un rato corto y, si no aparece, el
+# CURL va sin token (la API lo sigue aceptando por loopback) y el proximo arranque lo
+# hornea. No se reintenta en caliente a proposito: extensions.conf se lee al iniciar.
+AGENT_TOKEN_FILE=/etc/pbxng/agent.token
+TOK=""
+for i in $(seq 1 10); do
+  [ -s "$AGENT_TOKEN_FILE" ] && { TOK="$(tr -d '\r\n' < "$AGENT_TOKEN_FILE")"; break; }
+  sleep 1
+done
+if [ -n "$TOK" ]; then
+  sed -i "s|@@AGENT_TOK@@|${TOK}|g" /etc/asterisk/extensions.conf 2>/dev/null || true
+else
+  echo "aviso: no aparecio $AGENT_TOKEN_FILE; el wake del dialplan va sin token (la API lo acepta solo por loopback)"
+  sed -i "s|&tok=@@AGENT_TOK@@||g" /etc/asterisk/extensions.conf 2>/dev/null || true
+fi
+
 # --- firewall del módulo /seguridad (nftables en el kernel del host) ---
 # Idempotente: crea tabla inet pbxng + set banned + regla drop sólo si faltan, y nunca
 # borra los bloqueos vigentes. También deja 8088 (ARI/WS) y 5038 (AMI) sólo para redes

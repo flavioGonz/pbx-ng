@@ -371,6 +371,15 @@ module.exports = function init(deps) {
     const qsNum = 'accion=marcar&id=' + d.id + '&num=${FNUM}&cid=${URIENCODE(${CALLERID(num)})}';
     return armar([
       ['NoOp', 'DISA ' + (d.nombre || '') + ' (#' + d.id + ')'],
+    /* TOPE DEL CURL (¡importante!): `CURL()` bloquea el canal mientras espera. Sin tope,
+     * una API que acepta la conexión y no contesta deja al que llamó escuchando silencio
+     * hasta que se aburre —el default de libcurl no corta nunca por lectura—. `CURLOPT` es
+     * por canal, así que se fija acá, antes del primer CURL del contexto, y vale para
+     * todos los que siguen. 2 s para conectar y 4 s en total: la API está en el mismo
+     * host, si tarda más es que no está, y el dialplan ya sabe qué hacer con la respuesta
+     * vacía (rechaza; el fallo cae del lado seguro). */
+      ['Set', 'CURLOPT(conntimeout)=2'],
+      ['Set', 'CURLOPT(timeout)=4'],
       ['Answer', ''],
       ['Wait', '1'],
       ['Set', 'INTENTO=0'],
@@ -584,12 +593,16 @@ module.exports = function init(deps) {
     if (!conPin) {
       return armar([
         ['NoOp', 'Callback ' + (cb.nombre || '') + ' (#' + cb.id + ')'],
+      ['Set', 'CURLOPT(conntimeout)=2'],
+      ['Set', 'CURLOPT(timeout)=4'],
         ['Set', 'CRES=' + curlA('/api/internal/callback', qs)],
         ['Hangup', ''],
       ]);
     }
     return armar([
       ['NoOp', 'Callback ' + (cb.nombre || '') + ' (#' + cb.id + ')'],
+      ['Set', 'CURLOPT(conntimeout)=2'],
+      ['Set', 'CURLOPT(timeout)=4'],
       ['Answer', ''],
       ['Wait', '1'],
       ['Read', 'CPIN,vm-password,12,,1,8'],

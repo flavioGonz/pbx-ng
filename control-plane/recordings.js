@@ -76,6 +76,12 @@ module.exports = function init(deps) {
       if (!rows[0]) return res.status(404).end();
       // Un agente escucha sólo las llamadas en las que estuvo su interno; el resto es de supervisión.
       const propio = extPropia(req);
+      /* Alcance limitado SIN interno asignado. `extPropia()` devuelve '' en ese caso, y la
+       * comparación de abajo lo daba por bueno: `['', '', ''].includes('')` es true, así
+       * que un agente sin interno escuchaba CUALQUIER grabación cuyos campos estuvieran
+       * vacíos. `/api/cdr` ya cortaba este caso; acá faltaba. Sin interno no hay «mis
+       * llamadas», así que no hay nada que escuchar. */
+      if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' });
       if (propio !== null && ![rows[0].ext, rows[0].src, rows[0].dst].map(v => String(v || '')).includes(propio)) return res.status(403).json({ error: 'no podés acceder a las grabaciones de otra extensión' });
       const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
       if (!r.ok) return res.status(502).end();
@@ -229,9 +235,14 @@ module.exports = function init(deps) {
       const a = (req.query.from || '').toString().slice(0, 40);
       const b = (req.query.to || '').toString().slice(0, 40);
       const ts = parseInt(req.query.ts, 10) || 0;
-      if (!a && !b) return res.json({});
       // Un agente sólo puede buscar grabaciones de llamadas en las que participó su interno.
       const propio = extPropia(req);
+      /* Mismo caso que en /audio, y acá el agujero era más fino: con `from=` vacío y
+       * `to=1002`, la comparación `a !== propio && b !== propio` era `'' !== ''` → false,
+       * o sea la guarda no se aplicaba y volvían las grabaciones del interno ajeno. Va
+       * ANTES del atajo de «ni from ni to», que si no tapa la prueba. */
+      if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' });
+      if (!a && !b) return res.json({});
       if (propio !== null && a !== propio && b !== propio) return res.status(403).json({ error: 'no podés acceder a las grabaciones de otra extensión' });
       const { rows } = await pool.query(
         `SELECT id, duration, src, dst, extract(epoch from started_at)*1000 AS started_ms

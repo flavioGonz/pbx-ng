@@ -532,6 +532,13 @@ module.exports = function init(deps) {
     const yo = '${MIEXT}';
     const cab = [
       [null, 'NoOp', (nombre || accion) + ' (' + code + ')'],
+      /* TOPE DEL CURL (¡importante!): `CURL()` bloquea el canal mientras espera, y sin
+       * tope una API que acepta y no contesta deja al interno escuchando silencio hasta
+       * que corta. `CURLOPT` es por canal: va en la cabecera que TODOS los códigos de
+       * función comparten, así ninguno puede nacer sin tope. 2 s para conectar, 4 s en
+       * total; la API está en el mismo host. */
+      [null, 'Set', 'CURLOPT(conntimeout)=2'],
+      [null, 'Set', 'CURLOPT(timeout)=4'],
       [null, 'Answer', ''],
       [null, 'Set', 'MIEXT=${IF($["${CHANNEL(channeltype)}"="PJSIP"]?${CHANNEL(endpoint)}:${CALLERID(num)})}'],
     ];

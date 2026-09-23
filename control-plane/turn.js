@@ -327,12 +327,6 @@ function conexion(host, puerto, tcp) {
   };
 }
 
-/* Un intercambio suelto pedido→respuesta: abre, pregunta y cierra. */
-async function intercambio(host, puerto, msg, tcp, ms) {
-  const cx = conexion(host, puerto, tcp);
-  try { return await cx.pedir(msg, ms); } finally { cx.cerrar(); }
-}
-
 /**
  * Sonda REAL del TURN: STUN Binding → Allocate sin auth (401) → Allocate firmado (relay).
  * Devuelve { ok, veredicto, pasos:[{paso, ok, detalle}], relay, mapped }.

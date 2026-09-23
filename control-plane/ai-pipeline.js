@@ -19,6 +19,35 @@ const BARGE_MS = 280;                 // ms de voz sostenida para cortar TTS
 const SPEECH_RMS = 500;               // umbral de voz para VAD
 const END_SILENCE_MS = 750;           // silencio que cierra una frase
 
+/* ---------------------------------------------------------------------------
+ *  TOPES DE RED, Y POR QUE EXISTEN
+ *  ------------------------------
+ *  Todo lo que hay en este archivo corre CON LA LLAMADA ABIERTA y con la persona
+ *  esperando del otro lado. Un `fetch` sin tope no falla: se queda. Medido contra un
+ *  servidor que acepta la conexion y no contesta nunca, `crmLookup()` tardaba 90 s en
+ *  volver —el tope por defecto de undici— y en ese tiempo el llamante escucha silencio,
+ *  cuelga, y el CDR anota una llamada atendida que nadie atendio.
+ *
+ *  El codigo YA TENIA escrita la frase de degradacion («No pude consultar el CRM en este
+ *  momento»): lo unico que faltaba era llegar a ella. Por eso los topes son cortos y
+ *  distintos segun lo que pasa si vencen:
+ *    · CRM (2,5 s)  el asistente sigue hablando sin el dato. Es el mas corto: el dato es
+ *                   un lujo, la llamada no.
+ *    · STT (6 s)    sin transcripcion no hay turno; se pide repetir.
+ *    · LLM (8 s)    idem, y encima es el unico que a veces tarda de verdad.
+ *    · TTS (8 s)    si vence, abajo hay espeak-ng local que no depende de la red.
+ *  `AbortSignal.timeout()` corta la conexion de verdad (no deja el socket colgado) y el
+ *  `catch` de cada funcion ya devuelve el camino degradado que corresponde.
+ * ------------------------------------------------------------------------ */
+const TOPE_CRM_MS = 2500;
+const TOPE_STT_MS = 6000;
+const TOPE_LLM_MS = 8000;
+const TOPE_TTS_MS = 8000;
+/* `fetch` con tope. Se agrega `signal` sin pisar uno que venga del llamador. */
+function fetchTope(url, opts, ms) {
+  return fetch(url, Object.assign({}, opts, { signal: AbortSignal.timeout(ms) }));
+}
+
 let ARI = null, POOL = null, APP = 'pbxng', MEDIA_HOST = process.env.MEDIA_HOST || '127.0.0.1';
 const sessions = new Map();           // uuid -> session
 const pendingByUuid = new Map();      // uuid -> session (antes de conectar AudioSocket)
@@ -58,10 +87,10 @@ function espeakTTS(text, voice) {
 // --- TTS OpenAI (24k -> sox -> slin16) ---
 async function openaiTTS(text, voice, key) {
   try {
-    const r = await fetch('https://api.openai.com/v1/audio/speech', {
+    const r = await fetchTope('https://api.openai.com/v1/audio/speech', {
       method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'tts-1', voice: voice && /^(alloy|echo|fable|onyx|nova|shimmer)$/.test(voice) ? voice : 'nova', input: text, response_format: 'wav' }),
-    });
+    }, TOPE_TTS_MS);
     if (!r.ok) return null;
     const wav = Buffer.from(await r.arrayBuffer());
     return await new Promise((resolve) => {
@@ -78,7 +107,7 @@ async function whisperSTT(pcm, key) {
     const form = new FormData();
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'a.wav');
     form.append('model', 'whisper-1'); form.append('language', 'es');
-    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key }, body: form });
+    const r = await fetchTope('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key }, body: form }, TOPE_STT_MS);
     if (!r.ok) return '';
     const j = await r.json(); return (j.text || '').trim();
   } catch (_) { return ''; }
@@ -92,7 +121,7 @@ function pcmToWav(pcm, rate) {
 // --- Voz neural self-hosted (Piper TTS + faster-whisper STT) ---
 async function neuralTTS(text, vozUrl, voice, speed) {
   try {
-    const r = await fetch(vozUrl + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, rate: RATE, length_scale: parseFloat(speed) || 1.0 }) });
+    const r = await fetchTope(vozUrl + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, rate: RATE, length_scale: parseFloat(speed) || 1.0 }) }, TOPE_TTS_MS);
     if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     return buf.length ? buf : null;
@@ -100,17 +129,17 @@ async function neuralTTS(text, vozUrl, voice, speed) {
 }
 async function neuralSTT(pcm, vozUrl) {
   try {
-    const r = await fetch(vozUrl + '/stt?rate=' + RATE, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pcm });
+    const r = await fetchTope(vozUrl + '/stt?rate=' + RATE, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pcm }, TOPE_STT_MS);
     if (!r.ok) return '';
     const j = await r.json(); return (j.text || '').trim();
   } catch (_) { return ''; }
 }
 // --- LLM OpenAI chat con tools ---
 async function openaiLLM(messages, tools, model, key) {
-  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+  const r = await fetchTope('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: model || 'gpt-4o-mini', messages, tools, tool_choice: 'auto', temperature: 0.4 }),
-  });
+  }, TOPE_LLM_MS);
   if (!r.ok) throw new Error('llm ' + r.status);
   const j = await r.json(); return j.choices[0].message;
 }
@@ -133,11 +162,20 @@ function ruleLLM(text, session) {
 async function crmLookup(query, session) {
   const url = session.agent.crm_webhook;
   if (!url) return 'No tengo el CRM configurado todavía, pero puedo pasarte con una persona si querés.';
-  try {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, caller: session.callerId, agent: session.agent.name }) });
+  /* Dos cinturones a proposito. `AbortSignal` corta la conexion, que es lo correcto; la
+   * carrera es el piso duro: cubre el caso en que el backoffice contesta los headers al
+   * instante y despues gotea el cuerpo, donde el abort llega pero no manda nadie a
+   * devolver una respuesta a tiempo. Vence el tope -> se sigue hablando sin el dato. */
+  const degradado = 'No pude consultar el CRM en este momento.';
+  const pedido = (async () => {
+    const r = await fetchTope(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, caller: session.callerId, agent: session.agent.name }) }, TOPE_CRM_MS);
     const j = await r.json().catch(() => ({}));
     return (j.result || j.text || j.message || 'No encontré datos para esa consulta.');
-  } catch (_) { return 'No pude consultar el CRM en este momento.'; }
+  })();
+  const reloj = new Promise((ok) => setTimeout(() => ok(degradado), TOPE_CRM_MS + 250).unref());
+  try {
+    return await Promise.race([pedido, reloj]);
+  } catch (_) { return degradado; }
 }
 
 // ============================================================
@@ -400,3 +438,7 @@ async function startAiSession(channel, agent) {
 }
 
 module.exports = { init, startAiSession, close };
+/* Se exportan SOLO para la prueba del tope (test/ia-topes.test.js): el camino de la
+ * llamada no tolera un `fetch` sin corte, y esa prueba es la que lo deja clavado. */
+module.exports._crmLookup = crmLookup;
+module.exports._TOPE_CRM_MS = TOPE_CRM_MS;
