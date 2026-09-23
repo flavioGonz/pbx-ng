@@ -357,9 +357,21 @@ async function sondear({ host, puerto, usuario, clave, tcp, ms }) {
   if (!hostIp) { try { hostIp = (await dns.lookup(host, { family: 4 })).address; } catch (_) { hostIp = ''; } }
   res.host_ip = hostIp || null;
 
+  /* UNA SOLA conexión para toda la secuencia, y esto no es una optimización: es
+   * correctitud. coturn ata el `nonce` a la DIRECCIÓN Y PUERTO del cliente. Pedirlo con
+   * un socket efímero y usarlo desde otro llega con un puerto de origen distinto, y el
+   * servidor lo rechaza —bien— con **438 Stale Nonce**. Así estaba la sonda: el panel
+   * mostraba «encendido, pero el servicio no responde — el Allocate falló (error 438)»
+   * sobre un coturn sano. Medido contra el servidor real: mismo socket → relay; dos
+   * sockets → 438, en el mismo segundo y con las mismas credenciales.
+   *   Es la tercera vez que esta sonda da un falso negativo (antes fue el host por
+   * nombre y el framing de TCP). La herramienta existe justamente para no tener que
+   * creerle al panel: cuando ELLA miente, es peor que no tenerla. */
+  const cx = conexion(host, puerto, tcp);
+  try {
   // 1) ¿contesta STUN? (y de paso, cómo nos ve)
   try {
-    const { at } = leer(await intercambio(host, puerto, armar(M_BINDING, crypto.randomBytes(12)), tcp, tope));
+    const { at } = leer(await cx.pedir(armar(M_BINDING, crypto.randomBytes(12)), tope));
     const m = xorAddr(at[A_XOR_MAPPED]);
     res.mapped = m ? m.ip + ':' + m.port : null;
     pasos.push({ paso: 'STUN Binding', ok: true, detalle: m ? 'nos ve como ' + res.mapped : 'responde' });
@@ -379,7 +391,7 @@ async function sondear({ host, puerto, usuario, clave, tcp, ms }) {
   // 2) Allocate sin credenciales: el 401 con realm+nonce es lo que prueba que es TURN
   let realm, nonce;
   try {
-    const { at } = leer(await intercambio(host, puerto, armar(M_ALLOCATE, crypto.randomBytes(12), attr(A_REQ_TRANSPORT, Buffer.from([17, 0, 0, 0]))), tcp, tope));
+    const { at } = leer(await cx.pedir(armar(M_ALLOCATE, crypto.randomBytes(12), attr(A_REQ_TRANSPORT, Buffer.from([17, 0, 0, 0]))), tope));
     const c = codigoError(at);
     if (c !== 401 || !at[A_REALM] || !at[A_NONCE]) {
       pasos.push({ paso: 'Allocate sin credenciales', ok: false, detalle: 'esperaba 401 + realm y llegó ' + (c === null ? 'otra cosa' : 'error ' + c) });
@@ -395,24 +407,38 @@ async function sondear({ host, puerto, usuario, clave, tcp, ms }) {
   }
 
   // 3) Allocate firmado: 200 + XOR-RELAYED-ADDRESS = el candidato relay de verdad
-  const key = crypto.createHash('md5').update(usuario + ':' + realm.toString('utf8') + ':' + clave).digest();
-  const cred = [attr(A_USERNAME, Buffer.from(usuario, 'utf8')), attr(A_REALM, realm), attr(A_NONCE, nonce)];
-  const attrs = Buffer.concat([attr(A_REQ_TRANSPORT, Buffer.from([17, 0, 0, 0]))].concat(cred));
-  /* La misma conexión para el Allocate y para el Refresh que lo libera: en UDP la
-   * asignación vive atada a la 5-tupla, así que un Refresh desde otro socket no libera
-   * nada. */
-  const cx = conexion(host, puerto, tcp);
-  try {
+  /* Clave de credencial de largo plazo (RFC 5389 §15.4). Depende del realm, así que si
+   * el servidor manda otro en el 438 hay que recalcularla o la firma no valida. */
+  const clavear = () => crypto.createHash('md5').update(usuario + ':' + realm.toString('utf8') + ':' + clave).digest();
+  let key = clavear();
+  /* Firma con el nonce vigente. Se arma cada vez porque un 438 trae uno nuevo. */
+  const credenciales = () => Buffer.concat([
+    attr(A_USERNAME, Buffer.from(usuario, 'utf8')), attr(A_REALM, realm), attr(A_NONCE, nonce),
+  ]);
+  const firmar = () => Buffer.concat([attr(A_REQ_TRANSPORT, Buffer.from([17, 0, 0, 0])), credenciales()]);
     let at2;
     try {
-      const r = leer(await cx.pedir(armar(M_ALLOCATE, crypto.randomBytes(12), attrs, key), tope));
+      let r = leer(await cx.pedir(armar(M_ALLOCATE, crypto.randomBytes(12), firmar(), key), tope));
+      /* 438 = Stale Nonce, y NO es una falla: es parte normal del protocolo. El nonce
+       * caduca solo (coturn lo rota cada `stale-nonce` segundos) y el servidor contesta
+       * con uno nuevo esperando que el cliente reintente UNA vez. Un cliente que no
+       * reintenta declara caído un TURN sano; uno que reintenta para siempre se queda
+       * en un bucle, así que es exactamente un reintento. */
+      if (r.tipo !== 0x0103 && codigoError(r.at) === 438 && r.at[A_NONCE]) {
+        nonce = r.at[A_NONCE];
+        if (r.at[A_REALM]) { realm = r.at[A_REALM]; key = clavear(); }
+        pasos.push({ paso: 'Allocate firmado', ok: true, detalle: '438 (nonce vencido): reintento con el nuevo' });
+        r = leer(await cx.pedir(armar(M_ALLOCATE, crypto.randomBytes(12), firmar(), key), tope));
+      }
       at2 = r.at;
       if (r.tipo !== 0x0103 || !at2[A_XOR_RELAYED]) {
         const c = codigoError(at2);
         pasos.push({ paso: 'Allocate firmado', ok: false, detalle: c ? 'error ' + c : 'respuesta inesperada' });
         res.veredicto = (c === 401 || c === 403)
           ? 'credenciales RECHAZADAS: el usuario/clave del panel no coinciden con los del servidor TURN'
-          : 'el Allocate falló' + (c ? ' (error ' + c + ')' : '');
+          : c === 438
+            ? 'el servidor sigue rechazando el nonce después de reintentar (¿hay más de un coturn detrás del mismo puerto?)'
+            : 'el Allocate falló' + (c ? ' (error ' + c + ')' : '');
         return res;
       }
     } catch (e) {
@@ -438,7 +464,14 @@ async function sondear({ host, puerto, usuario, clave, tcp, ms }) {
      * relay, no sobre nuestra prolijidad—. */
     let liberada;
     try {
-      const rl = leer(await cx.pedir(armar(M_REFRESH, crypto.randomBytes(12), Buffer.concat([attr(A_LIFETIME, Buffer.from([0, 0, 0, 0]))].concat(cred)), key), tope));
+      const refresh = () => armar(M_REFRESH, crypto.randomBytes(12),
+        Buffer.concat([attr(A_LIFETIME, Buffer.from([0, 0, 0, 0])), credenciales()]), key);
+      let rl = leer(await cx.pedir(refresh(), tope));
+      /* Mismo 438 que arriba: el nonce puede haber rotado entre el Allocate y esto. */
+      if (rl.tipo !== 0x0104 && codigoError(rl.at) === 438 && rl.at[A_NONCE]) {
+        nonce = rl.at[A_NONCE];
+        rl = leer(await cx.pedir(refresh(), tope));
+      }
       liberada = rl.tipo === 0x0104 ? true : 'error ' + codigoError(rl.at);
     } catch (e) { liberada = e.message; }
     res.liberada = liberada === true;
