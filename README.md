@@ -201,7 +201,7 @@ Desde el **panel** (Módulos), el toggle escribe `pbxng_settings.mod_<id>` y un 
 
 ### Opción B — Docker, todo en un contenedor (demo/pruebas)
 
-Para levantar rápido en un solo contenedor (no recomendado para producción). El instalador lo ofrece como opción; usa `Dockerfile.allinone`.
+Para levantar rápido en un solo contenedor (no recomendado para producción). **No es una opción del instalador** —su menú tiene 1) `all` y 2) `core`, las dos de producción—: se levanta a mano con `docker/Dockerfile.allinone`.
 Sirve para mostrar el panel y la API. **No es equivalente a la de producción y no sirve para validar telefonía**: usa el Asterisk de Debian sin `docker/config/asterisk/` (sin los `require =` de `modules.conf`, sin dialplan PBX-NG, sin realtime ni ARI/AMI). Ver el encabezado de `docker/Dockerfile.allinone`.
 
 ### Opción C — Bare-metal / LXC (sin Docker)

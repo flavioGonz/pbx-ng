@@ -258,8 +258,12 @@ de cada archivo y en `.claude/agents/api.md`.
   agentes IA, tablas de `CrudPanel`, `/asterisk/core`, `/asterisk/net`, `/turn`, `/db`) se
   encuesta cada **30 s o más**, porque lo cambia una persona desde este mismo panel y el
   cambio propio ya recarga a mano; 3) sólo se deja cadencia de segundos donde el dato se
-  mueve solo y se lo está mirando: traza SIP (`SipLadder`, 3 s), plazas de aparcado
+  mueve solo y se lo está mirando: la captura de paquetes mientras corre (`PcapCapture`,
+  colgado de `/asterisk`, 2 s y sólo con el modal abierto), plazas de aparcado
   (`/funciones`, 5 s) y el tablero del supervisor (`/presence`, `/queues/*/live`, 6 s);
+  (hasta acá decía «traza SIP (`SipLadder`, 3 s)»: ese componente estaba muerto —sin un
+  solo importador— desde el rediseño de `/troncales`, así que el contrato autorizaba una
+  cadencia que no existía. Se borró con el resto del código muerto del panel.)
   4) ningún poll pide nada con `document.hidden` (lo garantiza `usePoll`; los pocos
   `setInterval` que quedan lo comprueban a mano). Con esto una pestaña abierta en el Resumen
   hace 5 pedidos por minuto (`/system/overview` cada 30 s + `/trunks`, `/asterisk/core` y
@@ -346,7 +350,15 @@ de cada archivo y en `.claude/agents/api.md`.
 
 ## 3. API HTTP (`/api`, servida por control-plane :3000; el panel la ve en `/backend/api`)
 
-285 rutas (contadas como `app.<método>('/api…')` en `control-plane/*.js`, 1.6.0). Familias y su dueño funcional en el panel:
+**346 rutas**, con la definición escrita para que cualquiera pueda reproducir el número:
+un *par método+path único* cuyo path empieza con `/api`, contando los registros
+`app.<método>('…')` de `control-plane/*.js` sin colapsar los `:id` y sin contar `app.use`.
+Con esa cuenta hay además 350 registros (cuatro paths repiten método en dos archivos).
+Esto se cuenta así desde la auditoría de entrega: el número anterior (285, de la 1.6.0) no
+se podía reproducir porque nunca se dijo cómo se había contado, y cinco mediciones
+distintas daban cinco resultados. Si el número cambia, se cambia acá y se explica por qué.
+
+Familias y su dueño funcional en el panel:
 
 | Familia | Para qué | Pantalla |
 |---|---|---|
@@ -536,12 +548,12 @@ guardar— pero se registra y vuelve como `aviso` en la respuesta (§5, AstDB).
   guardar sería frágil. Cuando el rechazo llega por `POST /api/internal/feature` (el usuario
   marcó el código en el teléfono, y **el dialplan ya escribió la AstDB** antes de avisar), la API
   reescribe la AstDB desde Postgres antes de devolver el `400`, para no dejarlas desparejas.
-- `GET|POST|PUT|DELETE /api/horarios` (admin) → `[{id, nombre, tramos, activo}]`; `tramos` es
+- `GET|POST /api/horarios` · `PUT|DELETE /api/horarios/:id` (admin) → `[{id, nombre, tramos, activo}]`; `tramos` es
   `[{dias, desde, hasta}]` en el formato de `GotoIfTime`: `dias` = `*` o `mon-fri` (rangos con
   vuelta de semana incluidos), `desde`/`hasta` = `HH:MM` 24 h, máximo 20 tramos. Cruzar
   medianoche se hace con **dos tramos**. Cambiar o borrar un horario **regenera el dialplan de
   las rutas entrantes que lo usan**; borrarlo deja esas rutas en `horario_id = NULL` (24 h).
-- `GET|POST|PUT|DELETE /api/feriados` (admin) → `[{id, md, fecha, nombre, anual}]`. Anual: `md` =
+- `GET|POST /api/feriados` · `PUT|DELETE /api/feriados/:id` (admin) → `[{id, md, fecha, nombre, anual}]`. Anual: `md` =
   `MM-DD`. Puntual: `anual:false` + `fecha` = `YYYY-MM-DD`. Se reflejan en la AstDB como
   `hol/<clave> = 1`.
 - `GET|PUT /api/nightmode` (**GET = SUP**, PUT = admin) → `{modo, estado, motivo, horario_id}`.
@@ -578,9 +590,9 @@ guardar— pero se registra y vuelve como `aviso` en la respuesta (§5, AstDB).
   sin `_` (`*21*.`), pero a la tabla realtime `extensions` se escribe **con** `_` cuando es un
   patrón, porque `pbx_realtime` sólo corre `ast_extension_match` sobre las filas cuyo `exten`
   empieza con `_` (misma convención que `outExten()` de `trunks.js`).
-- `POST /api/routes/inbound/:id` → ver `PUT /api/routes/inbound/:id` y las columnas nuevas
+- `PUT /api/routes/inbound/:id` → las columnas nuevas
   `horario_id`, `dest_cerrado_type`, `dest_cerrado_value` de `pbxng_inbound_routes` (§5).
-- `POST|PUT /api/routes/inbound`: `dest_type` ∈ `interno | ivr | cola | app` (el `fax` salió en
+- `POST /api/routes/inbound` y `PUT /api/routes/inbound/:id`: `dest_type` ∈ `interno | ivr | cola | app` (el `fax` salió en
   1.11.0) y **el valor también se valida, por tipo**, porque termina crudo en el `appdata` de la
   tabla realtime: `interno` → `[0-9]{1,32}`, `ivr` y `app` → `[*#0-9]{1,16}`, `cola` →
   `[A-Za-z0-9_-]{1,64}`. Lo mismo para `dest_cerrado_type`/`dest_cerrado_value`. Se comprueba
@@ -646,7 +658,7 @@ evento llegue a la tabla y hasta un lote perdido si el proceso se cae entre dos 
   tope de agentes, al revés que la pantalla.
 - `GET /api/ccreport/report?…` (SUP) → HTML A4 para **Imprimir → Guardar como PDF**, con el CSS,
   los gráficos SVG y la marca de `report.js` (el mismo informe ejecutivo del CDR, no una copia).
-- `GET|POST|PUT|DELETE /api/ccreport/schedules[/:id]` (admin) → `[{id, nombre, cola, periodo, hora,
+- `GET|POST /api/ccreport/schedules` · `PUT|DELETE /api/ccreport/schedules/:id` · `POST /api/ccreport/schedules/:id/test` (admin) → `[{id, nombre, cola, periodo, hora,
   dia, sla_seg, destinatarios, enabled, last_run_at}]`. `periodo` ∈ `diario|semanal|mensual`
   (ventana: el día anterior / los últimos 7 días / el mes anterior), `hora` 0–23 del reloj del
   contenedor (§6, `TZ`), `dia` = 1–7 (lunes a domingo) en semanal y **1–28** en mensual (un envío
@@ -1065,7 +1077,7 @@ usuario en un toast**, así que tiene que estar en español y ser entendible (lo
 `status(400).json({error: e.message})` que quedan en rutas admin/supervisor, §5 bloque 3 de la
 evaluación, hoy llegan a la pantalla). Una respuesta `200` con `{error}` en el cuerpo **no** es
 un error para la capa: hay que devolver el status HTTP correcto. Los cuatro casos que quedan
-así (`GET /api/npm/cert`, `GET /api/npm/hosts`, `GET /api/npm/test` y `topology.error_medicion`)
+así (`GET /api/npm/cert`, `GET /api/npm/hosts`, `POST /api/npm/test` y `topology.error_medicion`)
 son estados previsibles, no fallos, y el panel los trata a mano. La CSP del panel (§2) cierra
 `connect-src` en `'self'`: la API, el socket y el SIP tienen que seguir viniendo por el mismo
 origen (`/backend`, `/socket.io`, `wss://<host>/ws`); mover cualquiera de los tres a otro host
@@ -1567,8 +1579,12 @@ ajuste `cc_retencion_dias` (365).
 siembra la regla de alerta `trunk.failover`.
 `0014_salas_reunion.sql` (1.10.0) amplía `pbxng_conferences` (`pin_mod`, `max_part`,
 `moh_hasta_moderador`, `anunciar`, `grabar`, `agenda_inicio`, `agenda_min`, `aviso_cerrada`,
-`invitados`, `invitado_at`) y le pone un PIN al azar a las salas viejas que no tenían: una sala
-sin PIN que además ahora se puede moderar es una sala abierta a cualquiera que marque el número.
+`invitados`, `invitado_at`). **NO toca ninguna fila existente**: las salas que ya estaban no
+reciben PIN. (Este párrafo decía lo contrario —«le pone un PIN al azar a las salas viejas»—, que
+era la versión ANTERIOR de la migración; el `UPDATE` se sacó y el propio archivo dedica 28 líneas
+a explicar por qué: la migración no reescribe el dialplan, así que la base habría quedado
+diciendo un PIN que el dialplan no pedía, y una sala sin PIN es una decisión que alguien tomó.
+Lo correcto está en la sección de Salas de este mismo documento, que ahora no se contradice.)
 `0015_marcacion.sql` (1.10.0) crea `pbxng_disa`, `pbxng_callback`, `pbxng_dialbyname`,
 `pbxng_abreviados` y `pbxng_marcacion_log`. **DISA y callback nacen con `enabled=false`**: una
 actualización no enciende sola algo que gasta plata.

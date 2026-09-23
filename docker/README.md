@@ -103,8 +103,10 @@ Detalles que importan:
 - **Logs de la API en JSON** (una línea por evento, `{ts, level, mod, msg, …}`), filtrables
   con `jq`: `docker compose logs --no-color api | jq -c 'select(.level=="error")'`. Para
   leer a mano, `LOG_FORMAT=text`; para ver más, `LOG_LEVEL=debug` (default `info`). Estas
-  variables las lee la API de su entorno: hoy hay que agregarlas al `environment:` del
-  servicio `api` (el compose todavía no las reenvía desde el `.env`).
+  variables las lee la API de su entorno y **el compose ya las reenvía desde el `.env`**:
+  se escriben ahí y listo. (Decía que había que agregarlas a mano al `environment:` del
+  servicio `api`; eso es editar el archivo que la compuerta de paridad compara contra el
+  compose de release, así que seguir la instrucción rompía el `release`.)
 - `docker stop api` / `pbxng-ctl down` es ordenado: la API cierra socket.io, corta las
   supervisiones, cierra ARI/AMI y espera hasta 10 s a las consultas (tope duro 15 s, dentro
   de los 20 s de `stop_grace_period`); en el log se ven los pasos `cierre: …`.

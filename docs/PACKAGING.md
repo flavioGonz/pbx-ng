@@ -37,7 +37,9 @@ empaquetan acá.
      recomendado) / núcleo + voz / separado (core, turn, ai, intercom, proxy) / custom.
    - Crea los LXC, instala Docker, clona el repo, escribe `.env` con `COMPOSE_PROFILES`
      por rol e instala `pbxng-ctl` + reconciliador en cada CT.
-3. **All-in-one** (1 contenedor, demo) → `install.sh` opción 2.
+3. **All-in-one** (1 contenedor, demo) → **no lo ofrece el instalador**: se levanta a mano
+   con `docker/Dockerfile.allinone`. El menú de `install.sh` tiene dos opciones y las dos
+   son de producción: 1) `all` (todo en esta máquina) y 2) `core` (sólo el núcleo).
 
 ## Por dónde se entra al panel
 
@@ -88,10 +90,12 @@ compose, bloque «ROBUSTEZ».
 > límite: subí el `MEM_*` correspondiente en `.env` y `pbxng-ctl up`. Los defaults cubren el uso
 > normal; `MEM_VOZ` depende del modelo whisper elegido.
 
-Variables que la API lee pero que **el compose todavía no reenvía** desde el `.env`
-(agregarlas a mano al `environment:` del servicio `api` si hace falta): `LOG_LEVEL`,
-`LOG_FORMAT`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `CORS_ORIGINS`, `TZ`. Ver
-`docs/CONTRATOS.md` §6.
+Variables de ajuste que la API lee y que **el compose ya reenvía** desde el `.env`:
+`LOG_LEVEL`, `LOG_FORMAT`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `CORS_ORIGINS` y `TZ`.
+Se escriben en `.env`, nunca editando el `environment:` del servicio. (Este párrafo decía
+que el compose «todavía no las reenvía» y mandaba a agregarlas a mano: eso es tocar
+justo el archivo que la compuerta de paridad compara contra el compose de release, así
+que seguir la instrucción rompía el `release`.) Ver `docs/CONTRATOS.md` §6.
 
 ## CI (`.github/workflows/ci.yml`)
 

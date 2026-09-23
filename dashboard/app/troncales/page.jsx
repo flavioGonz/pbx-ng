@@ -63,7 +63,8 @@ export default function Troncales() {
    * escondida y `load()` (botón Refrescar, alta y baja) fuerza las dos consultas. */
   const { data: trunksData, recargar: recargarTrunks } = usePoll('/trunks', 30000, { inicial: [] });
   const { data: topo, recargar: recargarTopo } = usePoll('/topology', 30000);
-  /* Memoizado a propósito (mismo motivo que en SbcFlow.jsx): `trunksData` es null hasta
+  /* Memoizado a propósito (mismo motivo por el que se cayó /topologia en su momento):
+   * `trunksData` es null hasta
    * que contesta la API, y un `: []` suelto devuelve un arreglo NUEVO en cada render.
    * Como `trunks` es dependencia del useMemo que arma los nodos, y el useEffect de más
    * abajo hace setRfNodes con el resultado de ese memo, la cadena se realimentaba en

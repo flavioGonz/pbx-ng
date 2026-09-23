@@ -19,7 +19,7 @@ la unica fuente de verdad.
    - `pbxng-X.Y.Z.tar.gz` — compose de release + scripts + config + migraciones.
 
 ## Imagenes que se construyen
-`asterisk, api, dashboard, coturn, voz` (las de terceros —postgres, redis, go2rtc, npm— se usan
+`asterisk, api, dashboard, coturn, voz` (las de terceros —postgres, go2rtc, npm— se usan
 pinneadas, no se construyen). Kamailio, rtpengine y wsbridge ya no forman parte de PBX-NG: son
 imagenes de **SBC-NG**, que se releasea y licencia aparte.
 

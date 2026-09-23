@@ -4,8 +4,10 @@
  * El síntoma es siempre el mismo: `const x = Array.isArray(d) ? d : []` (o `d || {}`)
  * devuelve un objeto NUEVO en cada render; si esa variable es dependencia de un
  * useMemo/useEffect que termina llamando a un setState, la cadena se realimenta y React
- * corta con «Maximum update depth exceeded» (#185). Pasó en SbcFlow.jsx y volvió a pasar
- * en troncales/page.jsx: por eso es una verificación y no un comentario.
+ * corta con «Maximum update depth exceeded» (#185). Pasó dos veces en la misma pantalla
+ * -/topologia primero y troncales/page.jsx después-: por eso es una verificación y no un
+ * comentario. (El ejemplo original citaba `SbcFlow.jsx`, que se borró junto con el resto
+ * del código muerto del panel: el archivo no existe, el error sí.)
  *
  * Conservador a propósito: sólo marca variables con fallback literal `[]`/`{}` que NO
  * estén envueltas en useMemo/useState/useRef y que aparezcan en un arreglo de
