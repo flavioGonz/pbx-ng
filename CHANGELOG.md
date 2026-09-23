@@ -2,6 +2,48 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.13.0] - 2026-09-23
+### Added
+- **`/api/v1`: el contrato público con sistemas** (Tanda 1 de la auditoría de entrega). No es
+  un alias de `/api` —que es la API privada del panel— sino un subconjunto chico y congelado,
+  con su propia puerta y su propia política: *dentro de `v1` sólo se agregan campos opcionales
+  y rutas nuevas; un cambio incompatible es `v2` y conviven 12 meses*. Detalle en
+  `docs/CONTRATOS.md` §3.2.
+- **Credencial de SISTEMA** (`pbxng_api_clients`, migración `0021`): `client_id` + secreto que
+  se ve una vez, token de 1 h verificado **contra la tabla en cada pedido** —así revocar corta
+  en 5 segundos en vez de esperar a que venza algo ya emitido— y **alcances explícitos**
+  (`cdr:leer`, `grabaciones:leer`, `llamadas:ver`, `llamadas:ordenar`, `internos:ver`,
+  `eventos:recibir`). Una sesión de panel **no** sirve en `/api/v1`, a propósito.
+- **Identidad de llamada**: `call_id` = `linkedid`, `leg_id` = `uniqueid` (§3.1). Viaja además
+  en `/api/cdr` y `/api/recordings` de forma aditiva, y las grabaciones nuevas guardan su
+  `linkedid` para poder pedirlas por llamada.
+- **Outbox de eventos salientes** (`pbxng_eventos_salida`, migración `0022`): siete tipos, sobre
+  común, entrega **push firmada con HMAC** o **pull con acuse** para el que no puede exponer un
+  webhook. Un destino caído no pierde nada (cursor por destino, backoff de 5 s a 10 min, alerta
+  a los 12 intentos). Hasta acá la central no avisaba **nada** hacia afuera.
+- **Idempotencia** por `Idempotency-Key` en las escrituras del contrato: el backoffice ordena
+  una llamada, se le corta la red, reintenta, y no llama dos veces al mismo cliente.
+- **Paginación del CDR por cursor** con `tope_aplicado` y `truncado`, para que un recorte nunca
+  sea silencioso (hoy `/api/cdr` corta en 500 filas sin decirlo).
+- `docs/AGENTE-IA-PORTERIA.md`: la idea del agente de IA en cola para portería remota, ordenada
+  con sus decisiones, sus fases y las dos reglas escritas antes de programarlas.
+### Fixed
+- **El filtro «sólo desde la central» rechazaba al propio dialplan.** Exigía origen loopback, y
+  con la API detrás del bridge de Docker el origen que llega es el gateway (`docker-proxy` abre
+  una conexión nueva). Los desvíos, el no-molestar, el sígueme, la DISA y el callback marcados
+  **desde un teléfono** devolvían 403 sin un error en el log; desde el panel funcionaban. Ahora
+  el filtro vive en un solo archivo para los cuatro caminos, con el token del agente como
+  autenticación real y la IP privada como segunda barrera.
+- **Los tres dedup en memoria hacían `clear()` al llenarse**, o sea borraban la memoria de todas
+  las llamadas en vez de las entradas viejas: una central con 201 llamadas en vuelo volvía a
+  disparar el push de una llamada ya notificada. Vencimiento por entrada.
+- **Softphone de escritorio 0.5.1: el ICE lo entrega la central.** Guardaba STUN/TURN/usuario/
+  clave de la última provisión y no los volvía a mirar, así que un aparato con el TURN del SBC
+  guardado quedaba sin audio detrás de un NAT simétrico —con un 401 que el usuario no puede
+  explicar— mientras la central estaba perfecta. Ahora pide `/api/ice` al registrarse y antes de
+  cada prueba, cae a la última respuesta de la central si no contesta, y sólo entonces a lo
+  cargado a mano. La pantalla dice de dónde salió la lista.
+
 ## [1.12.0] - 2026-09-23
 ### Added
 - **Tanda 0 de la auditoría de entrega**: los catorce ítems que la auditoría marcó como «ya está
