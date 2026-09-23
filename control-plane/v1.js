@@ -289,12 +289,17 @@ module.exports = function init(deps) {
     }
   });
 
-  /* Un 404 con forma de contrato: el equipo externo tiene que ver la diferencia entre
-   * «esa ruta no existe en v1» y «te faltó el alcance». */
-  router.use((req, res) => res.status(404).json({
-    error: 'esa ruta no existe en /api/v1',
-    detalle: 'v1 es un subconjunto chico y congelado, no un espejo de /api. Ver docs/CONTRATOS.md §3.2.',
-  }));
+  /* El 404 va ÚLTIMO, y por eso se registra desde afuera: otros módulos (el outbox, con
+   * `/eventos`) cuelgan rutas de este mismo router después de que init() vuelve, y un
+   * `router.use` catch-all registrado acá se las comería a todas sin un solo error
+   * visible —la ruta existiría y contestaría «esa ruta no existe»—. `app.js` llama a
+   * `cerrar()` cuando ya no queda nadie por montar. */
+  function cerrar() {
+    router.use((req, res) => res.status(404).json({
+      error: 'esa ruta no existe en /api/v1',
+      detalle: 'v1 es un subconjunto chico y congelado, no un espejo de /api. Ver docs/CONTRATOS.md §3.2.',
+    }));
+  }
 
-  return { router, idempotente, TOPE_MAX, RANGO_MAX_DIAS };
+  return { router, idempotente, cerrar, TOPE_MAX, RANGO_MAX_DIAS };
 };

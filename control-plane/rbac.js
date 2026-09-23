@@ -160,6 +160,10 @@ const PERMISOS = [
    * porque una credencial que puede originar llamadas y leer el historial de todos
    * merece una línea explícita en la tabla, no un silencio. */
   ['*',        /^\/api\/api-clients(\/|$)/,                 ADMIN],
+  /* Suscripciones del outbox: a dónde se entregan los eventos de la central. Mismo
+   * criterio que las credenciales de sistema: una integración nueva la da de alta un
+   * admin, no un supervisor. */
+  ['*',        /^\/api\/eventos(\/|$)/,                     ADMIN],
 
   /* ── Todo lo demás (configuración del sistema) queda en ADMIN por defecto:
    *    users, settings, trunks, routes, sbc-link, modules (escritura), backup,

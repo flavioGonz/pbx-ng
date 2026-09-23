@@ -414,6 +414,15 @@ const apiV1 = require('./v1')({
   endpointStates: (...a) => callEngine.endpointStates(...a),
   originar: (...a) => callEngine.originar(...a),
 });
+/* Outbox de eventos salientes (outbox.js): la mitad «la central avisa» del contrato.
+ * Registra las suscripciones en `/api/eventos/**` (panel, admin) y el modo PULL en el
+ * router de v1, por eso va ANTES de cerrarlo con su 404. */
+const outbox = require('./outbox')({
+  app, pool, logger, alerts, auth, errorHttp,
+  routerV1: apiV1.router, authServicio: apiClients.authServicio, exigirAlcance: apiClients.exigirAlcance,
+  nombreCentral: NODES.domain || process.env.DOMAIN || '',
+});
+apiV1.cerrar();
 app.use('/api/v1', apiV1.router);
 setTimeout(() => { sipConf.ensure().then(() => amiCommand('module reload res_pjsip.so').catch(() => {})).catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados antes de que el panel toque nada
 
@@ -566,6 +575,9 @@ pool.query('SELECT count(*)::int n FROM tenants').then(async ({ rows }) => {
 const AVISO_ASTDB_REC = 'Guardado en la base, pero Asterisk no tomó la marca de grabación (AMI caído): se aplica sola cuando la central vuelva.';
 const { setRecFlag, syncRecFlags, wavToPcm, analyzeText } = require('./recordings')({
   app, pool, ami, amiAction, amiCommand, getAri: () => ari, state, extPropia, exigirExt, vozBase, errorHttp, logger,
+  /* Lambda y no la función: el outbox se construye más abajo (necesita el router de v1),
+   * así que en este punto todavía no existe. Resuelve en tiempo de evento. */
+  emitirEvento: (...a) => (typeof outbox !== 'undefined' && outbox ? outbox.emitir(...a) : null),
 });
 
 app.get('/api/prompts/:id/audio', async (req, res) => {
@@ -2091,20 +2103,36 @@ const guard = require('./guard')({ app, pool, ami, io, astFwd, escribir: astconf
 guard.iniciar().catch((e) => logger('guard').error('arranque', e));
 setInterval(broadcast, 15000);   // reconciliado: el refresco real llega por eventos ARI/AMI (broadcastSoon)
 ami.on('managerevent', (e) => { const t = e && e.event; if (['Newchannel', 'Hangup', 'Newstate', 'DeviceStateChange', 'ContactStatus', 'QueueMemberStatus', 'QueueCallerJoin', 'QueueCallerLeave', 'PeerStatus'].includes(t)) broadcastSoon(); });
+/* Dedup con vencimiento POR ENTRADA. Los tres dedup de este archivo hacían
+ * `map.clear()` al pasar el tope: borraban la memoria de TODAS las llamadas, no las
+ * entradas viejas, así que una central con 201 llamadas en vuelo llegaba al tope y el
+ * siguiente `DialBegin` de una llamada YA notificada volvía a disparar el push. O sea,
+ * el modo de falla aparecía exactamente en el momento de más carga. Poda por edad, y el
+ * tope sólo fuerza una poda antes de tiempo. */
+function dedupConVencimiento(ventanaMs, tope) {
+  const m = new Map();
+  return {
+    visto(clave) {
+      const ahora = Date.now();
+      const t = m.get(clave);
+      if (t && ahora - t < ventanaMs) return true;
+      m.set(clave, ahora);
+      if (m.size > tope) for (const [k, v] of m) { if (ahora - v >= ventanaMs) m.delete(k); }
+      return false;
+    },
+  };
+}
+
 // Push de llamada entrante con dedupe por interno (lo usan el wake del dialplan y AMI)
-const incomingPushDedup = new Map();
+const incomingPushDedup = dedupConVencimiento(6000, 300);
 function notifyIncomingPush(ext, from, name) {
   if (!ext) return;
-  const now = Date.now();
-  const last = incomingPushDedup.get(ext);
-  if (last && now - last < 6000) return;
-  incomingPushDedup.set(ext, now);
-  if (incomingPushDedup.size > 300) incomingPushDedup.clear();
+  if (incomingPushDedup.visto(ext)) return;
   sendPushToExt(ext, { type: 'call', title: 'Llamada entrante', from: from || 'desconocido', body: 'Llamada de ' + (name ? name + ' (' + (from || '') + ')' : (from || 'desconocido')), url: '/phone', tag: 'pbxng-call-' + ext });
 }
 
 // Disparo de Web Push al sonar un interno (despierta la PWA en background)
-const pushDedup = new Map();
+const pushDedup = dedupConVencimiento(8000, 200);
 ami.on('managerevent', (e) => {
   if (!e || e.event !== 'DialBegin') return;
   const dest = e.destchannel || e.DestChannel || '';
@@ -2113,30 +2141,85 @@ ami.on('managerevent', (e) => {
   const ext = m[1];
   const from = e.calleridnum || e.CallerIDNum || e.connectedlinenum || 'desconocido';
   const name = e.calleridname || e.CallerIDName || '';
-  const key = ext + ':' + (e.linkedid || e.Linkedid || dest);
-  const now = Date.now();
-  if (pushDedup.get(key) && now - pushDedup.get(key) < 8000) return;
-  pushDedup.set(key, now);
-  if (pushDedup.size > 200) pushDedup.clear();
+  const linked = e.linkedid || e.Linkedid || '';
+  const key = ext + ':' + (linked || dest);
+  if (pushDedup.visto(key)) return;
   notifyIncomingPush(ext, from, name);
+  /* Mismo momento, mismo dedup: el evento saliente sale cuando el interno EMPIEZA a
+   * timbrar, que es lo que el backoffice necesita para levantar la ficha antes de que la
+   * persona atienda. */
+  outbox.emitir('llamada.entrante', {
+    call_id: linked || null, leg_id: e.destuniqueid || e.DestUniqueid || null,
+    datos: { interno: ext, desde: String(from || ''), nombre: String(name || ''), contexto: e.context || e.Context || '' },
+  });
 });
 
 // Notificación de llamada perdida a las integraciones (Telegram/WhatsApp)
-const missedDedup = new Map();
+const missedDedup = dedupConVencimiento(10000, 200);
+const finDedup = dedupConVencimiento(10000, 400);
 ami.on('managerevent', (e) => {
   if (!e || e.event !== 'DialEnd') return;
   const status = (e.dialstatus || e.DialStatus || '').toUpperCase();
-  if (!['NOANSWER', 'BUSY', 'CANCEL', 'CONGESTION'].includes(status)) return;
   const dest = e.destchannel || e.DestChannel || '';
   const m = /PJSIP\/([^-]+)-/.exec(dest); if (!m) return;
   const ext = m[1];
   const from = e.calleridnum || e.CallerIDNum || e.connectedlinenum || 'desconocido';
-  const key = ext + ':' + (e.linkedid || e.Linkedid || dest);
-  const now = Date.now();
-  if (missedDedup.get(key) && now - missedDedup.get(key) < 10000) return;
-  missedDedup.set(key, now); if (missedDedup.size > 200) missedDedup.clear();
+  const linked = e.linkedid || e.Linkedid || '';
+  const key = ext + ':' + (linked || dest);
+
+  /* Atendida: es el evento que el backoffice usa para empezar a contar el tiempo de
+   * atención y para saber QUIÉN atendió, que con una cola no se sabe hasta este momento. */
+  if (status === 'ANSWER' && !finDedup.visto('ans:' + key)) {
+    outbox.emitir('llamada.contestada', {
+      call_id: linked || null, leg_id: e.destuniqueid || e.DestUniqueid || null,
+      datos: { interno: ext, desde: String(from || '') },
+    });
+  }
+
+  if (!['NOANSWER', 'BUSY', 'CANCEL', 'CONGESTION'].includes(status)) return;
+  if (missedDedup.visto(key)) return;
   const sLabel = status === 'BUSY' ? 'ocupado' : status === 'CANCEL' ? 'cancelada' : 'sin respuesta';
   notifyIntegrations('📞 Llamada perdida al interno <b>' + ext + '</b> desde <b>' + from + '</b> (' + sLabel + ').');
+  outbox.emitir('llamada.terminada', {
+    call_id: linked || null, leg_id: e.destuniqueid || e.DestUniqueid || null,
+    datos: { interno: ext, desde: String(from || ''), resultado: status, atendida: false },
+  });
+});
+
+/* Fin de la llamada con su duración. Se emite en el `Hangup` del canal que ES la llamada
+ * —el que tiene `uniqueid == linkedid`—, y no en cada tramo: una llamada con transferencia
+ * cuelga tres o cuatro canales y el backoffice no quiere tres «terminada» para una misma
+ * conversación. */
+ami.on('managerevent', (e) => {
+  if (!e || e.event !== 'Hangup') return;
+  const uniq = e.uniqueid || e.Uniqueid || '';
+  const linked = e.linkedid || e.Linkedid || '';
+  if (!uniq || !linked || uniq !== linked) return;
+  if (finDedup.visto('fin:' + linked)) return;
+  outbox.emitir('llamada.terminada', {
+    call_id: linked, leg_id: uniq,
+    datos: {
+      canal: String(e.channel || e.Channel || ''),
+      desde: String(e.calleridnum || e.CallerIDNum || ''),
+      hacia: String(e.exten || e.Exten || ''),
+      causa: String(e.cause || e.Cause || ''),
+      causa_txt: String(e['cause-txt'] || e.causetxt || ''),
+      atendida: undefined,
+    },
+  });
+});
+
+/* Registro de internos, con debounce: un teléfono con red mala hace flapping y no hay que
+ * contarlo cuarenta veces. 30 s por interno, con vencimiento por entrada. */
+const regDedup = dedupConVencimiento(30000, 500);
+ami.on('managerevent', (e) => {
+  if (!e || e.event !== 'ContactStatus') return;
+  const aor = String(e.aor || e.AOR || '').split('/')[0];
+  const estado = String(e.contactstatus || e.ContactStatus || '').toLowerCase();
+  if (!aor || !['reachable', 'unreachable', 'removed', 'created'].includes(estado)) return;
+  const arriba = estado === 'reachable' || estado === 'created';
+  if (regDedup.visto('reg:' + aor + ':' + (arriba ? '1' : '0'))) return;
+  outbox.emitir('interno.registrado', { datos: { interno: aor, registrado: arriba, estado } });
 });
 
 

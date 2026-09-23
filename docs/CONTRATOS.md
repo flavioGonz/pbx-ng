@@ -474,6 +474,59 @@ siempre.
 **Errores**: siempre `{error, detalle?}` con el status HTTP correcto. Un `200` con `{error}`
 adentro no es un error: es una respuesta buena que miente.
 
+### 3.3 Eventos salientes (outbox) — «la central avisa»
+
+La otra mitad del contrato. Hasta 1.12.0 PBX-NG tenía todo para SABER qué pasa y nada para
+CONTARLO: el backoffice sólo podía preguntar, y preguntar cada dos segundos por si sonó un
+teléfono no es una integración.
+
+**Se escribe primero, se entrega después** (`control-plane/outbox.js`, tablas
+`pbxng_eventos_salida` y `pbxng_suscripciones`, migración `0022`). Un POST suelto se pierde
+cuando el destino está caído; una fila, no.
+
+**Sobre común de todo evento:**
+
+```json
+{ "secuencia": 1841, "evento_id": "uuid", "tipo": "llamada.terminada", "version": 1,
+  "ts": "2026-09-23T22:41:07.881Z", "call_id": "…", "leg_id": "…", "datos": { … } }
+```
+
+**Siete tipos, y la `version` es POR TIPO** (que `llamada.terminada` gane un campo no obliga
+a nadie a revisar `grabacion.lista`): `llamada.entrante`, `llamada.contestada`,
+`llamada.terminada`, `llamada.transferida`, `grabacion.lista`, `interno.registrado`
+(con debounce de 30 s: un teléfono con red mala hace flapping) y `seguridad.ataque`.
+
+**Garantías, dichas como son:**
+
+- **Al menos una vez.** `evento_id` es único, así que el que recibe descarta el repetido.
+  No se promete «exactamente una vez» porque no se puede: entre el POST y el acuse hay red.
+- **Orden POR LLAMADA, no global.** Dos llamadas simultáneas pueden entregarse
+  entrelazadas; los eventos de una misma llamada llegan en orden. Prometer orden global
+  obligaría a una sola entrega a la vez para toda la central, y con 30 llamadas en curso el
+  destino no alcanza nunca.
+- **Un destino caído no pierde nada.** El avance es un **cursor por destino**; mientras no
+  haya acuse, los eventos siguen ahí. Backoff de 5 s a 10 min, y a los 12 intentos fallidos
+  **suena una alerta** (`outbox.destino_caido`): el modo de falla de una integración es
+  silencioso y diferido, que es el peor para un producto que se entrega a un tercero.
+- **Retención 7 días**, y nunca por delante del cursor más atrasado de las suscripciones
+  activas.
+
+**Dos modos de entrega:**
+
+| Modo | Cómo | Cuándo |
+|---|---|---|
+| push | POST al `url` de la suscripción, firmado `X-PBXNG-Firma: sha256=HMAC(secreto, cuerpo)` | el destino puede exponer un webhook |
+| pull | `GET /api/v1/eventos` + `POST /api/v1/eventos/acuse` (alcance `eventos:recibir`) | el destino está detrás de un NAT corporativo — la mitad de los casos reales |
+
+En pull, **el cursor sólo avanza**: un acuse hacia atrás le reenviaría eventos a sí mismo
+para siempre. Para releer está `desde_cursor`, que no toca el acuse.
+
+**Alta de destinos**: `/api/eventos/suscripciones` (panel, admin). Una suscripción **nace
+en el último evento**, no en el primero: dar de alta un destino no tiene que dispararle una
+semana de historia de golpe. El secreto se muestra una vez. `POST /api/eventos/prueba` emite
+un evento de juguete por el mismo camino que los de verdad, para que el equipo externo pueda
+enchufar su webhook sin esperar a que alguien llame.
+
 Familias y su dueño funcional en el panel:
 
 | Familia | Para qué | Pantalla |

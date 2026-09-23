@@ -40,6 +40,9 @@ const report = require('./report');       // informe ejecutivo del CDR (HTML A4)
  */
 module.exports = function init(deps) {
   const { app, pool, ami, amiAction, amiCommand, getAri, state, extPropia, exigirExt, vozBase, errorHttp, logger } = deps;
+  /* Lo pasa app.js cuando el outbox ya existe; si no está (pruebas), no se emite nada y
+   * el indexador funciona igual. */
+  const emitirEvento = deps.emitirEvento || null;
 
   /* Marca de grabación en la AstDB (familia `rec`): el dialplan la consulta al armar
    * la llamada; se re-sincroniza desde la base al arrancar porque la AstDB no sobrevive
@@ -307,7 +310,7 @@ module.exports = function init(deps) {
         const rext = m[1]; const epoch = parseInt(m[2], 10);
         const ex = await pool.query('SELECT 1 FROM pbxng_recordings WHERE filename=$1 LIMIT 1', [f.filename]);
         if (ex.rows.length) continue;
-        let src = rext, dst = null;
+        let src = rext, dst = null, cq0 = null;
         try {
           /* El rango va sobre la COLUMNA, no sobre una función de la columna: con
            * `abs(extract(epoch from start) - $2) < 300` ningún índice servía y cada
@@ -319,19 +322,30 @@ module.exports = function init(deps) {
            * El `abs()` queda en el ORDER BY, sobre las pocas filas que ya pasaron el
            * rango: ahí no hace daño. */
           const cq = await pool.query(
-            `SELECT src, dst FROM cdr
+            `SELECT src, dst, linkedid FROM cdr
               WHERE (src=$1 OR dst=$1)
                 AND start >= to_timestamp($2::bigint - 300) AT TIME ZONE 'UTC'
                 AND start <= to_timestamp($2::bigint + 300) AT TIME ZONE 'UTC'
               ORDER BY abs(extract(epoch from start) - $2::bigint) ASC LIMIT 1`,
             [rext, epoch]);
-          if (cq.rows[0]) { src = cq.rows[0].src; dst = cq.rows[0].dst; }
+          if (cq.rows[0]) { src = cq.rows[0].src; dst = cq.rows[0].dst; cq0 = cq.rows[0]; }
         } catch (e) {}
         const dur = Math.max(0, Math.round((f.bytes - 44) / 16000));
+        /* `linkedid` se toma de la fila del CDR emparejada: es lo que después permite
+         * pedir la grabación por `call_id` sin adivinar por número y hora. */
+        const callId = (cq0 && cq0.linkedid) || null;
         try {
-          await pool.query(
-            "INSERT INTO pbxng_recordings (filename, ext, src, dst, started_at, bytes, duration, storage, deleted) VALUES ($1,$2,$3,$4,to_timestamp($5),$6,$7,'local',false)",
-            [f.filename, rext, src, dst, epoch, f.bytes, dur]);
+          const ins = await pool.query(
+            "INSERT INTO pbxng_recordings (filename, ext, src, dst, started_at, bytes, duration, storage, deleted, linkedid) VALUES ($1,$2,$3,$4,to_timestamp($5),$6,$7,'local',false,$8) RETURNING id",
+            [f.filename, rext, src, dst, epoch, f.bytes, dur, callId]);
+          /* El evento sale DESPUÉS de que la fila existe, no antes: un `grabacion.lista`
+           * que llega y no tiene grabación detrás es peor que uno que llega tarde. */
+          if (emitirEvento && ins.rows[0]) {
+            emitirEvento('grabacion.lista', {
+              call_id: callId, leg_id: null,
+              datos: { grabacion_id: ins.rows[0].id, interno: rext, desde: src, hacia: dst, duracion_s: dur, bytes: f.bytes },
+            });
+          }
         } catch (e) {}
       }
     } catch (e) {}
