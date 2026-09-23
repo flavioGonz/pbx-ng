@@ -120,7 +120,7 @@ gen_shared_secrets(){  # genera lo que falte O sea débil (re-run idempotente y 
 # Chequeaba CUATRO de los siete: TURN_PASS, TURN_CLI_PASS y ADMIN_DEFAULT_PASS quedaban
 # afuera, que son justo los que se heredan de un .env copiado (y el TURN se reparte a
 # cada softphone por /api/ice). Ahora la lista es una sola, en lib-secrets.sh.
-preflight_secrets(){ pbxng_preflight_secrets .env || exit 1; }
+preflight_secrets(){ pbxng_preflight_secrets .env instalacion || exit 1; }
 install_ctl(){
   [[ -f "$HERE/pbxng-ctl" ]] && { install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl 2>/dev/null || sudo install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl; sed -i "s|^DIR=.*|DIR=\"\${PBXNG_DIR:-$HERE}\"|" /usr/local/bin/pbxng-ctl 2>/dev/null || true; }
   if [[ -f "$HERE/pbxng-reconciler.sh" ]] && command -v systemctl >/dev/null; then
