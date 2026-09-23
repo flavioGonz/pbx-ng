@@ -135,9 +135,14 @@ module.exports = function init(deps) {
    * freno de fuerza bruta que el login del panel, con la misma razón. */
   app.post('/api/v1/auth/token', ...(deps.limiteIntentos ? deps.limiteIntentos('client_id') : []), async (req, res) => {
     const b = req.body || {};
-    const id = limpiarId(b.client_id);
+    const crudo = String(b.client_id || '').trim();
+    const id = limpiarId(crudo);
     const sec = String(b.secreto || b.secret || '');
-    if (!id || !sec) return res.status(400).json({ error: 'client_id y secreto son obligatorios' });
+    /* Tres errores distintos con tres mensajes distintos: es el primer endpoint que toca
+     * el equipo externo y «400 obligatorios» cuando en realidad el id tiene un formato
+     * inválido cuesta media hora de ida y vuelta. */
+    if (!crudo || !sec) return res.status(400).json({ error: 'client_id y secreto son obligatorios' });
+    if (!id) return res.status(400).json({ error: 'client_id con formato inválido: minúsculas, números, punto, guion y guion bajo, entre 3 y 64 caracteres' });
     try {
       const { rows } = await pool.query('SELECT client_id, nombre, secreto_hash, alcances, revocado_at FROM pbxng_api_clients WHERE client_id=$1', [id]);
       const c = rows[0];
