@@ -24,6 +24,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"; HERE="$(pwd)"
 
+# Politica de secretos (lista de los siete + valores de fabrica) compartida con deploy.sh:
+# el chequeo tiene que ser el MISMO al instalar y al actualizar, o sobrevive un secreto
+# de ejemplo entre una cosa y la otra.
+# shellcheck source=lib-secrets.sh
+. "$HERE/lib-secrets.sh"
+
 c(){ printf "\033[1;36m%s\033[0m\n" "$*"; }
 g(){ printf "\033[1;32m%s\033[0m\n" "$*"; }
 y(){ printf "\033[1;33m%s\033[0m\n" "$*"; }
@@ -35,18 +41,18 @@ lanip(){ hostname -I 2>/dev/null | awk '{print $1}'; }
 put(){ local k="$1" v="$2"; grep -q "^$k=" .env && sed -i "s|^$k=.*|$k=$v|" .env || echo "$k=$v" >> .env; }
 has(){ grep -q "^$1=..*" .env 2>/dev/null; }               # clave con valor no vacio
 getv(){ grep "^$1=" .env | head -1 | cut -d= -f2-; }
-WEAK="cambia_esta_clave cambia_este_secreto_jwt changeme admin pbxng-turn-changeme pbxng-cli pbxng-turn-cli x test testpass"
+WEAK="$PBXNG_WEAK"      # la lista vive en lib-secrets.sh (la comparte deploy.sh)
 need(){ local v w; v="$(getv "$1")"; [[ -z "$v" ]] && return 0; for w in $WEAK; do [[ "$v" == "$w" ]] && return 0; done; return 1; }
 tcpok(){ timeout 3 bash -c "echo > /dev/tcp/$1/$2" 2>/dev/null && echo ok || echo fail; }
 
 # ---------------- flags ----------------
-ROLE=""; PROFILES=""; TURN_IP=""; PUBLIC_IP_F=""; DOMAIN_F=""; TENANT_F=""; RELEASE=0; YES=0; PRINT_FW=0
+ROLE=""; PROFILES=""; TURN_IP=""; PUBLIC_IP_F=""; DOMAIN_F=""; TENANT_F=""; RELEASE=0; YES=0; PRINT_FW=0; VERSION_F=""
 for a in "$@"; do case "$a" in
   --role=*) ROLE="${a#*=}";; --profiles=*) PROFILES="${a#*=}";;
   --turn-ip=*) TURN_IP="${a#*=}";; --edge-ip=*) TURN_IP="${a#*=}";;   # --edge-ip: compatibilidad
   --public-ip=*) PUBLIC_IP_F="${a#*=}";; --domain=*) DOMAIN_F="${a#*=}";;
   --join=*) ;; --tenant=*) TENANT_F="${a#*=}";;
-  --release) RELEASE=1;; --yes|-y) YES=1;;
+  --release) RELEASE=1;; --version=*) VERSION_F="${a#*=}";; --yes|-y) YES=1;;
   --print-firewall) PRINT_FW=1;;
   -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
   *) r "arg desconocido: $a"; exit 1;;
@@ -74,6 +80,26 @@ fi
 LAN="$(lanip)"; LAN="${LAN:-127.0.0.1}"
 CF="docker-compose.yml"; UP=(up -d --build)
 [[ "$RELEASE" == 1 ]] && { CF="docker-compose.release.yml"; UP=(up -d); }
+
+# El compose de release NO construye nada: resuelve las imagenes por
+# ${PBXNG_REGISTRY}/<svc>:${PBXNG_VERSION}. Esos dos valores tienen que quedar EN EL .env,
+# porque quien despues levanta la central es `docker compose` o `pbxng-ctl`, no este
+# script. Sin eso, el .env.example dejaba `latest` y un bundle air-gapped cargado con
+# `docker load` (que trae las imagenes tagueadas :1.11.2) no arrancaba: compose buscaba
+# :latest, no lo encontraba, e intentaba bajarlo de un registry al que esa maquina no
+# llega. Ese era EXACTAMENTE el sintoma de «el camino --release no arranca».
+grabar_version_release(){
+  local v="${VERSION_F:-${PBXNG_VERSION:-$(cat ../VERSION 2>/dev/null || echo latest)}}"
+  local reg="${PBXNG_REGISTRY:-$(getv PBXNG_REGISTRY)}"; reg="${reg:-pbxng}"
+  put PBXNG_VERSION "$v"; put PBXNG_REGISTRY "$reg"
+  g "  Release: imagenes $reg/<servicio>:$v  (escrito en .env)"
+  # Aviso temprano y claro: si las imagenes no estan cargadas y no hay registry, el `up`
+  # falla despues de haber tocado el .env, y el mensaje de compose no dice esto.
+  if ! docker image inspect "$reg/api:$v" >/dev/null 2>&1; then
+    y "  Ojo: no encuentro la imagen $reg/api:$v en este host."
+    y "  Si es una instalacion air-gapped, carga el bundle primero:  gunzip -c pbxng-$v-images.tar.gz | docker load"
+  fi
+}
 g "  Rol: $ROLE   ·   IP LAN detectada: $LAN"; echo
 
 ensure_env(){ [[ -f .env ]] || { cp -n .env.example .env 2>/dev/null || : > .env; }; chmod 600 .env 2>/dev/null || true; }
@@ -91,14 +117,10 @@ gen_shared_secrets(){  # genera lo que falte O sea débil (re-run idempotente y 
   has AMI_USER || put AMI_USER pbxng-ami
   has TURN_USER || put TURN_USER pbxng
 }
-preflight_secrets(){
-  local k miss=0
-  for k in DB_PASS JWT_SECRET AMI_PASS ARI_PASS; do
-    if need "$k"; then r "  ✗ Secreto ausente o débil: $k"; miss=1; fi
-  done
-  [[ "$miss" == 1 ]] && { r "Abortado: hay secretos sin generar. Usá el instalador, no edites .env a mano."; exit 1; }
-  g "  ✓ Secretos por-deployment verificados"
-}
+# Chequeaba CUATRO de los siete: TURN_PASS, TURN_CLI_PASS y ADMIN_DEFAULT_PASS quedaban
+# afuera, que son justo los que se heredan de un .env copiado (y el TURN se reparte a
+# cada softphone por /api/ice). Ahora la lista es una sola, en lib-secrets.sh.
+preflight_secrets(){ pbxng_preflight_secrets .env || exit 1; }
 install_ctl(){
   [[ -f "$HERE/pbxng-ctl" ]] && { install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl 2>/dev/null || sudo install -m 0755 "$HERE/pbxng-ctl" /usr/local/bin/pbxng-ctl; sed -i "s|^DIR=.*|DIR=\"\${PBXNG_DIR:-$HERE}\"|" /usr/local/bin/pbxng-ctl 2>/dev/null || true; }
   if [[ -f "$HERE/pbxng-reconciler.sh" ]] && command -v systemctl >/dev/null; then
@@ -226,6 +248,7 @@ all)
   put TURN_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
   put_dashboard_bind "$CPROFILES"
   put COMPOSE_PROFILES "$CPROFILES"; put PBXNG_COMPOSE_FILE "$CF"
+  [[ "$RELEASE" == 1 ]] && grabar_version_release
   deploy
   echo; g "================================================================"
   if [[ ",$CPROFILES," == *",proxy,"* ]]; then
@@ -260,6 +283,7 @@ core)
   put TURN_HOST "${TURN_IP:-$LAN}"
   put_dashboard_bind "$CPROFILES"
   put COMPOSE_PROFILES "$CPROFILES"; put PBXNG_COMPOSE_FILE "$CF"
+  [[ "$RELEASE" == 1 ]] && grabar_version_release
   deploy
   echo; g "================================================================"
   if [[ ",$CPROFILES," == *",proxy,"* ]]; then

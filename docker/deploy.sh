@@ -18,6 +18,18 @@ for a in "$@"; do case "$a" in --images=*) IMAGES="${a#*=}";; --version=*) VERSI
 export PBXNG_VERSION="$VERSION" PBXNG_REGISTRY="$REGISTRY"
 [ -f .env ] || { echo "Falta docker/.env (copia .env.example y completa secretos)"; exit 1; }
 
+# Los mismos siete secretos que exige el instalador, exigidos TAMBIEN al actualizar.
+# Antes el chequeo existia solo en install.sh, o sea exactamente en el unico momento en
+# que los secretos acababan de generarse; un .env copiado a mano de otra central, o
+# completado a medias desde .env.example, pasaba por aca sin que nadie lo mirara nunca
+# mas. Medido en produccion: TURN_PASS seguia siendo el valor de fabrica.
+if [ -f "$(dirname "$0")/lib-secrets.sh" ]; then
+  . "$(dirname "$0")/lib-secrets.sh"
+  pbxng_preflight_secrets .env || exit 1
+else
+  echo "Falta lib-secrets.sh junto a deploy.sh: no puedo verificar los secretos de esta central"; exit 1
+fi
+
 if [ -n "$IMAGES" ]; then
   echo "== Cargando imagenes de $IMAGES =="
   case "$IMAGES" in *.gz) gunzip -c "$IMAGES" | docker load;; *) docker load -i "$IMAGES";; esac

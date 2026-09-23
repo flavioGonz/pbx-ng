@@ -50,13 +50,13 @@ RUN set -e; \
 # --- Control plane (API) ---
 WORKDIR /opt/api
 COPY control-plane/package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
+RUN npm ci --omit=dev   # sin `|| npm install`: ver el comentario en control-plane/Dockerfile
 COPY control-plane/ ./
 
 # --- Dashboard (build) ---
 WORKDIR /opt/dashboard
 COPY dashboard/package*.json ./
-RUN npm ci || npm install
+RUN npm ci   # sin `|| npm install`: ver el comentario en control-plane/Dockerfile
 COPY dashboard/ ./
 RUN npm run build || echo "dashboard build best-effort"
 

@@ -1,3 +1,17 @@
+# PBX-NG · dashboard · qué NO entra al contexto de build.
+#
+# `node_modules/` y `.next/` del desarrollador pisaban lo que instalaba y construía la
+# etapa de build: una imagen armada desde una laptop podía llevarse un `.next` viejo o
+# módulos compilados para otro sistema. Y son los dos directorios más grandes del repo,
+# así que además el contexto entero viajaba al daemon en cada build.
 node_modules
 .next
-npm-debug.log
+out
+npm-debug.log*
+.env
+.env.*
+.DS_Store
+*.swp
+*.log
+Dockerfile
+.dockerignore

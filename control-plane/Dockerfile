@@ -27,8 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 # acme.sh (un solo script) para emitir/renovar certificados Let's Encrypt sin proxy adelante
 RUN curl -fsSL https://raw.githubusercontent.com/acmesh-official/acme.sh/master/acme.sh -o /usr/local/bin/acme.sh \
  && chmod +x /usr/local/bin/acme.sh
-COPY package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
+COPY package.json package-lock.json ./
+# `npm ci` A SECAS, sin el `|| npm install` que tenia antes. Ese fallback convertia un
+# lockfile desincronizado -el error que npm ci existe para gritar- en una instalacion
+# silenciosa de otras versiones: la imagen quedaba armada con lo que hubiera en el
+# registry ese dia y no con lo que dice el repo, y dos builds del mismo commit podian
+# no ser la misma imagen. Si esto falla, el arreglo es correr `npm install` y commitear
+# el lockfile, no seguir de largo. Y `package*.json` pasa a ser explicito para que un
+# `package-lock.json` ausente rompa el build en vez de caer al fallback.
+RUN npm ci --omit=dev
 COPY . .
 RUN chmod +x /app/docker-entrypoint.sh
 ENV NODE_ENV=production PORT=3000

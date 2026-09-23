@@ -189,3 +189,48 @@ jobs:
             docker/images/asterisk/pbxng-ast-agent.py \
             docker/images/coturn/pbxng-turn-agent.py
           echo "ok agentes"
+
+  # ---------------------------------------------------------------------------
+  # Versión: que VERSION, el CHANGELOG y —cuando la corrida es de un tag— el tag
+  # digan lo mismo. El repo no tenía UN SOLO tag y VERSION se editaba a mano, así
+  # que la única forma de saber qué versión corre una central era abrir el
+  # CHANGELOG y creerle. Este job es barato (segundos) y convierte «me olvidé de
+  # actualizar el CHANGELOG» en un fallo de CI en vez de en una duda tres meses
+  # después, cuando hay que decidir si una central está al día.
+  # ---------------------------------------------------------------------------
+  version:
+    name: version (VERSION == CHANGELOG == tag)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: VERSION, CHANGELOG y tag coinciden
+        run: |
+          set -eu
+          V="$(tr -d ' \r\n' < VERSION)"
+          echo "VERSION = $V"
+          case "$V" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "FAIL: VERSION no es SemVer: '$V'"; exit 1;;
+          esac
+          # La primera entrada del CHANGELOG tiene que ser esta versión: si se toca
+          # VERSION sin escribir qué cambió, no hay forma de saber qué trae.
+          PRIMERA="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | tr -d '#[] ')"
+          echo "CHANGELOG (primera entrada) = $PRIMERA"
+          if [ "$V" != "$PRIMERA" ]; then
+            echo "FAIL: VERSION dice $V y la primera entrada del CHANGELOG es $PRIMERA."
+            echo "      Agregá la sección '## [$V] - <fecha>' arriba de todo, o corregí VERSION."
+            exit 1
+          fi
+          # En una corrida de tag (release.yml), el tag manda: v1.11.2 <-> 1.11.2.
+          case "${GITHUB_REF:-}" in
+            refs/tags/*)
+              TAG="${GITHUB_REF#refs/tags/}"; TAG="${TAG#v}"
+              echo "tag = $TAG"
+              if [ "$TAG" != "$V" ]; then
+                echo "FAIL: el tag es v$TAG y VERSION dice $V. Un release publica imágenes"
+                echo "      tagueadas con VERSION: si no coinciden, el bundle y el tag mienten."
+                exit 1
+              fi;;
+          esac
+          echo "ok: $V"

@@ -1,0 +1,23 @@
+# PBX-NG · control-plane · qué NO entra al contexto de build.
+#
+# El `COPY . .` del Dockerfile se llevaba TODO el directorio, y eso tenía dos costos:
+#   · `node_modules/` del desarrollador viajaba al build y quedaba PISANDO lo que
+#     acababa de instalar `npm ci`. Es la definición de «funciona en mi máquina»: la
+#     imagen terminaba con binarios compilados para el sistema de quien la armó.
+#   · el contexto se iba a cientos de MB, y todo eso se manda al daemon en cada build.
+# Lo que sí tiene que entrar es el código, package.json, el lockfile, migrations/ y el
+# entrypoint.
+node_modules
+npm-debug.log*
+.env
+.env.*
+# Pruebas y sus ayudantes: no corren dentro de la imagen (la CI las corre antes).
+test
+coverage
+.nyc_output
+# Basura de editores y del sistema
+.DS_Store
+*.swp
+*.log
+Dockerfile
+.dockerignore

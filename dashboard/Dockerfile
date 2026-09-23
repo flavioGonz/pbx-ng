@@ -1,8 +1,10 @@
 # PBX-NG · Dashboard (Next.js 14, salida standalone)
 FROM node:20-slim AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+# Ver el comentario del Dockerfile de control-plane: `npm ci` sin fallback, para que la
+# imagen sea la del lockfile y no la del dia.
+RUN npm ci --no-audit --no-fund
 COPY . .
 ARG API_URL=http://api:3000
 ENV API_URL=$API_URL
