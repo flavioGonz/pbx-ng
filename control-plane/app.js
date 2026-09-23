@@ -646,31 +646,15 @@ function hostMetrics() {
 /* ── Wake interno: lo invoca el dialplan por CURL para despertar la PWA de un interno
  * que no tiene contacto registrado. NO lleva sesión, porque el que llama es Asterisk.
  *
- * Estaba abierta: cualquiera que llegara al puerto podía hacer sonar el push de
- * «llamada entrante» en el teléfono de cualquier interno, tantas veces como quisiera y
- * sin dejar rastro de sesión. Ahora pasa por el MISMO filtro que los otros dos caminos
- * que el dialplan usa sin sesión (`telefonia.js` y `marcacion.js`):
- *   · nada de X-Forwarded-For / X-Real-IP: si el pedido pasó por un proxy, no vino del
- *     dialplan de esta máquina, y la IP de origen ya no prueba nada;
- *   · origen loopback: Asterisk corre con `network_mode: host` y la API sólo escucha en
- *     127.0.0.1, así que el CURL del dialplan llega por loopback y nadie de la LAN puede
- *     falsificarlo;
- *   · y el token compartido (`/etc/pbxng/agent.token`), comparado en tiempo constante.
- * El token es «si viene, tiene que estar bien»: en el PRIMER arranque de una instalación
- * el dialplan puede haberse escrito antes de que la API generara el archivo, y ahí el
- * loopback es lo que sostiene la puerta (igual que en telefonia.js sin token). Desde el
- * segundo arranque el entrypoint de Asterisk ya lo hornea en el CURL. */
-function wakeDesdeLaCentral(req) {
-  if (req.headers['x-forwarded-for'] || req.headers['x-real-ip']) return false;
-  const ip = String(clientIp(req) || '').replace(/^::ffff:/, '');
-  if (!(ip === '::1' || ip === '127.0.0.1' || /^127\./.test(ip))) return false;
-  const dado = String((req.query || {}).tok || '');
-  if (!dado) return true;                       // ver comentario: sin token, manda el loopback
-  const a = Buffer.from(dado, 'utf8'), b = Buffer.from(String(AGENT_TOKEN || ''), 'utf8');
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
+ * Estaba abierta: cualquiera que llegara al puerto podía hacer sonar el push de «llamada
+ * entrante» en el teléfono de cualquier interno, tantas veces como quisiera y sin dejar
+ * rastro de sesión. Ahora pasa por el MISMO filtro que los otros tres caminos que el
+ * dialplan usa sin sesión —códigos de función, DISA y callback—, que vive en un solo
+ * archivo (`desde-la-central.js`) y explica ahí por qué «loopback» no alcanza cuando la
+ * API está detrás del bridge de Docker. */
+const filtroCentral = require('./desde-la-central')({ token: AGENT_TOKEN, clientIp });
 app.get('/api/internal/wake', (req, res) => {
-  if (!wakeDesdeLaCentral(req)) return res.status(403).type('text/plain').send('no');
+  if (!filtroCentral.exigir(req, res, 'texto')) return;
   try { notifyIncomingPush(String(req.query.ext || ''), String(req.query.from || ''), String(req.query.name || '')); } catch (_) {}
   res.json({ ok: true });
 });

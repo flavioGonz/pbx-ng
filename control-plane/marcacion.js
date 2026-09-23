@@ -60,11 +60,11 @@
 'use strict';
 
 const express = require('express');
-const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 /* Quién ocupa cada extensión del contexto compartido `internal`: la lista es única y la
  * comparten telefonia.js y este módulo (ver el encabezado de dueno-internal.js). */
 const dueno = require('./dueno-internal');
+const crearFiltroCentral = require('./desde-la-central');   // ¿el pedido lo hizo el dialplan de esta central?
 
 /**
  * deps:
@@ -120,23 +120,14 @@ module.exports = function init(deps) {
    * está en telefonia.js: el panel proxya /backend/** y con `trust proxy = 1` la IP que ve
    * la API termina siendo la del navegador de cualquiera en la LAN, que también es privada,
    * así que "red interna" NO alcanzaba como filtro. */
-  function esLoopback(ip) {
-    const s = String(ip || '').replace(/^::ffff:/i, '');
-    return s === '::1' || s === '127.0.0.1' || /^127\./.test(s);
-  }
   const TOKEN = String(deps.agentToken || '');
   const TOK_Q = TOKEN ? '&tok=' + encodeURIComponent(TOKEN) : '';
-  function tokenOk(req) {
-    const dado = Buffer.from(String((req.body || {}).tok || (req.query || {}).tok || ''), 'utf8');
-    const esp = Buffer.from(TOKEN, 'utf8');
-    return dado.length === esp.length && crypto.timingSafeEqual(dado, esp);
-  }
-  function soloDesdeLaCentral(req, res) {
-    if (req.headers['x-forwarded-for'] || req.headers['x-real-ip']) { res.status(403).type('text/plain').send('no'); return false; }
-    if (!esLoopback(clientIp(req))) { res.status(403).type('text/plain').send('no'); return false; }
-    if (TOKEN && !tokenOk(req)) { res.status(403).type('text/plain').send('no'); return false; }
-    return true;
-  }
+  /* Mismo filtro que los códigos de función y el wake, en un solo archivo
+   * (`desde-la-central.js`): acá había una copia que exigía loopback y, con la API detrás
+   * del bridge de Docker, eso rechazaba al propio dialplan. Contesta TEXTO PLANO porque
+   * el que lee es un `${CURL(...)}`, no un navegador. */
+  const filtroCentral = crearFiltroCentral({ token: TOKEN, clientIp });
+  const soloDesdeLaCentral = (req, res) => filtroCentral.exigir(req, res, 'texto');
   /* Único armador del CURL del dialplan: así el token no se olvida en ninguno. */
   const curlA = (ruta, qs) => '${CURL(' + API_BASE + ruta + ',' + qs + TOK_Q + ')}';
 

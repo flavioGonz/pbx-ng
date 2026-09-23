@@ -100,14 +100,19 @@ sed -i "s|@@API_URL@@|${API_URL:-127.0.0.1:3000}|g" /etc/asterisk/extensions.con
 # hornea. No se reintenta en caliente a proposito: extensions.conf se lee al iniciar.
 AGENT_TOKEN_FILE=/etc/pbxng/agent.token
 TOK=""
-for i in $(seq 1 10); do
+for i in $(seq 1 60); do
   [ -s "$AGENT_TOKEN_FILE" ] && { TOK="$(tr -d '\r\n' < "$AGENT_TOKEN_FILE")"; break; }
+  [ "$i" = 10 ] && echo "esperando $AGENT_TOKEN_FILE (lo escribe la API al arrancar)..."
   sleep 1
 done
 if [ -n "$TOK" ]; then
   sed -i "s|@@AGENT_TOK@@|${TOK}|g" /etc/asterisk/extensions.conf 2>/dev/null || true
 else
-  echo "aviso: no aparecio $AGENT_TOKEN_FILE; el wake del dialplan va sin token (la API lo acepta solo por loopback)"
+  # Un minuto sin el archivo es una instalacion a medias, no una carrera de arranque.
+  echo "AVISO: no aparecio $AGENT_TOKEN_FILE en 60 s. El wake del dialplan va SIN token y la"
+  echo "       API lo va a rechazar: un interno sin contacto registrado no recibe el push de"
+  echo "       llamada entrante. Se arregla solo al reiniciar este contenedor cuando la API"
+  echo "       ya haya escrito el archivo (docker compose restart asterisk)."
   sed -i "s|&tok=@@AGENT_TOK@@||g" /etc/asterisk/extensions.conf 2>/dev/null || true
 fi
 

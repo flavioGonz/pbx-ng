@@ -31,14 +31,13 @@ test('tanda 0: las guardas de wake, click-to-call y grabaciones', async (t) => {
   const admin = (await login('admin', 'admin')).token;
   const tok = fs.readFileSync(path.join(confDir, 'agent.token'), 'utf8').trim();
 
-  await t.test('C4 · wake: loopback sí, proxy no, token equivocado no', async () => {
-    // Las pruebas hablan con la API por 127.0.0.1: es el mismo camino que el CURL del
-    // dialplan, así que sin token tiene que pasar (primera instalación) y con el token
-    // correcto también.
-    assert.equal((await api('GET', '/api/internal/wake?ext=1001&from=1002')).status, 200);
+  await t.test('C4 · wake: con el token sí, sin el token no, con proxy no', async () => {
+    // Mismo criterio que los códigos de función y la DISA (ver desde-la-central.js): con
+    // token configurado, el token es obligatorio aunque el pedido venga de loopback.
     assert.equal((await api('GET', '/api/internal/wake?ext=1001&from=1002&tok=' + encodeURIComponent(tok))).status, 200);
 
-    // Un token que no es el del archivo: no alcanza con «traer algo».
+    assert.equal((await api('GET', '/api/internal/wake?ext=1001&from=1002')).status, 403,
+      'el wake entró sin token: se puede hacer sonar el teléfono de cualquiera desde el host');
     assert.equal((await api('GET', '/api/internal/wake?ext=1001&from=1002&tok=noesteotro')).status, 403,
       'un token equivocado entró igual: la comparación no está frenando');
 

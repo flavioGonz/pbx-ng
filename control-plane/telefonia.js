@@ -32,10 +32,10 @@
 'use strict';
 
 const express = require('express');
-const crypto = require('crypto');
 /* Quién ocupa cada extensión del contexto compartido `internal`: la lista es única y la
  * comparten marcacion.js y este módulo (ver el encabezado de dueno-internal.js). */
 const dueno = require('./dueno-internal');
+const crearFiltroCentral = require('./desde-la-central');   // ¿el pedido lo hizo el dialplan de esta central?
 /* Sólo por `VM_CTX`: el contexto de los buzones lo decide un lugar solo (ver vmpin.js). */
 const vmpin = require('./vmpin');
 
@@ -92,10 +92,6 @@ module.exports = function init(deps) {
    * POSTear /backend/api/internal/feature y ponerle un desvío al interno ajeno (escucha de
    * llamadas) o dejarlo en no molestar. Asterisk corre en network_mode: host y llega por
    * http://127.0.0.1:3000 (ver API_BASE), así que loopback alcanza y sobra. */
-  function esLoopback(ip) {
-    const s = String(ip || '').replace(/^::ffff:/i, '');
-    return s === '::1' || s === '127.0.0.1' || /^127\./.test(s);
-  }
 
   /* Defensa en profundidad sobre lo anterior: el mismo secreto compartido que la API ya
    * usa con los agentes (/etc/pbxng/agent.token, volumen `certs`, montado ro en Asterisk).
@@ -105,11 +101,10 @@ module.exports = function init(deps) {
    * instalación sin token (no debería: app.js lo genera al arrancar) no exige nada. */
   const TOKEN = String(deps.agentToken || '');
   const TOK_Q = TOKEN ? '&tok=' + encodeURIComponent(TOKEN) : '';
-  function tokenOk(req) {
-    const dado = Buffer.from(String((req.body || {}).tok || (req.query || {}).tok || ''), 'utf8');
-    const esp = Buffer.from(TOKEN, 'utf8');
-    return dado.length === esp.length && crypto.timingSafeEqual(dado, esp);
-  }
+  /* El filtro vive en `desde-la-central.js`, compartido con marcacion.js y app.js: acá
+   * había una copia que exigía loopback, y con la API detrás del bridge de Docker eso
+   * rechazaba al propio dialplan (docker-proxy reescribe el origen). Ver ese archivo. */
+  const filtroCentral = crearFiltroCentral({ token: TOKEN, clientIp });
   /* Único armador del CURL al que avisan los códigos: así el token no se olvida en ninguno. */
   const curlFeat = (qs) => 'FEATRES=${CURL(' + API_BASE + '/api/internal/feature,' + qs + TOK_Q + ')}';
 
@@ -788,9 +783,7 @@ module.exports = function init(deps) {
      * dialplan (que pega derecho a 127.0.0.1 sin proxy de por medio) sino de alguien que
      * pasó por el panel. Se rechaza ANTES de mirar la IP, porque con trust proxy = 1 esa
      * cabecera es justamente la que hace que req.ip sea la del navegador. */
-    if (req.headers['x-forwarded-for'] || req.headers['x-real-ip']) return res.status(403).json({ error: 'sólo desde la central' });
-    if (!esLoopback(clientIp(req))) return res.status(403).json({ error: 'sólo desde la central' });
-    if (TOKEN && !tokenOk(req)) return res.status(403).json({ error: 'sólo desde la central' });
+    if (!filtroCentral.exigir(req, res)) return;
     const b = Object.assign({}, req.body || {}, req.query || {});
     const ext = String(b.ext || '').trim();
     const accion = String(b.accion || '').trim();
