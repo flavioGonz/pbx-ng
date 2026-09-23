@@ -2,6 +2,67 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.12.0] - 2026-09-23
+### Added
+- **Tanda 0 de la auditoría de entrega**: los catorce ítems que la auditoría marcó como «ya está
+  roto y cuesta plata o privacidad». Detalle en `docs/AUDITORIA-ENTREGA.md` §5.
+  - Topes de red en todo el camino de la llamada (`ai-pipeline.js`): `crmLookup()` devolvía a los
+    90 s contra un backoffice que acepta y no contesta, con la persona escuchando silencio; ahora
+    2,5 s y la frase de degradación que el código ya tenía escrita. STT, LLM y TTS, con su propio
+    tope cada uno. Y `CURLOPT(conntimeout)/(timeout)` en los cuatro caminos del dialplan que
+    llaman a la API (códigos de función, DISA, callback y el wake de `extensions.conf`).
+  - Índices sobre `cdr`, la única tabla que crece para siempre y no tenía ninguno (migración
+    `0020`): historial 63,0 → 1,4 ms, agente 27,8 → 5,4 ms, emparejado de grabación 30,4 → 2,4 ms
+    sobre 500.000 filas.
+  - `PcapCapture` (captura de paquetes para Wireshark) vuelve a ser alcanzable, ahora desde
+    `/asterisk`: vivía dentro de un componente que quedó sin importador, mientras sus cinco
+    endpoints seguían vivos en la API.
+### Fixed
+- **`/api/internal/wake` estaba sin ninguna guarda**: cualquiera que llegara al puerto hacía sonar
+  el push de «llamada entrante» en el teléfono de cualquier interno. Ahora loopback + token
+  compartido, el mismo filtro que los otros dos caminos que el dialplan usa sin sesión.
+- **El freno del click-to-call se salteaba con un header**: leía el primer elemento de
+  `X-Forwarded-For`, que lo escribe el cliente (medido: 30 sesiones de 30, cada una con un
+  endpoint WebRTC nuevo). Ahora `req.ip` y `express-rate-limit`, que además poda sus entradas.
+- **Grabaciones, alcance limitado sin interno asignado**: `extPropia()` devuelve `''` y la
+  comparación lo daba por bueno, así que un agente sin interno escuchaba grabaciones ajenas.
+- **La marca de grabación** se escribía después del COMMIT y con el error tragado; y en el PUT,
+  un body sin el campo `record` se interpretaba como «apagar», así que guardar el nombre de un
+  interno dejaba de grabarlo en silencio.
+- **Las migraciones ya aplicadas no se pueden reescribir**: `migrate.js` calculaba un checksum
+  desde el primer día y no lo comparaba con nada; ahora corta el arranque nombrando el archivo.
+- **La imagen deja de depender de la máquina que la arma**: `npm ci` sin el `|| npm install` que
+  tapaba un lockfile desincronizado, y `.dockerignore` en `control-plane/` y `dashboard/` (el
+  `COPY . .` se llevaba el `node_modules` del desarrollador al build, pisando lo instalado).
+- **El camino `--release` y el air-gapped no arrancaban**: `install.sh --release` ahora escribe
+  `PBXNG_REGISTRY`/`PBXNG_VERSION` en el `.env` (el compose de release resuelve las imágenes por
+  esas dos variables y quedaba el `latest` del ejemplo).
+- **El chequeo de secretos se corría solo al instalar y miraba 4 de 7**: la política se va a
+  `docker/lib-secrets.sh`, la comparten `install.sh` y `deploy.sh`, y cubre los siete. Desde acá,
+  **`deploy.sh` se niega a actualizar una central con un secreto de fábrica**.
+- **Documentación que contradecía al código**: seis endpoints inexistentes en `CONTRATOS` §3, el
+  conteo de rutas (285 → 346, ahora con la definición al lado), la migración `0014` descrita de
+  dos formas opuestas en el mismo documento, el all-in-one como «opción del instalador» cuando
+  no lo es, y seis variables descritas como «el compose todavía no las reenvía» cuando las
+  reenvía las seis —siguiendo esa instrucción se rompía la paridad del compose—.
+### Removed
+- **1.067 líneas muertas del panel**: ocho componentes sin un solo importador, más las dos
+  referencias que los citaban como vivos (`CONTRATOS` §2 y el comentario de `check:deps`).
+
+## [1.11.2] - 2026-09-23
+### Fixed
+- **La sonda del TURN acusaba de caído a un coturn sano** (error 438). coturn ata el nonce a la
+  dirección y el puerto del cliente, y la sonda lo pedía con un socket efímero para usarlo desde
+  otro. Ahora una sola conexión para los cuatro mensajes y un reintento cuando el nonce rota.
+
+## [1.11.1] - 2026-09-23
+### Fixed
+- **Los cuatro nodos miden el NODO, no el hipervisor.** La tarjeta del núcleo informaba la máquina
+  de abajo (35.948 MB y 12 vCPU donde el CT tiene 8.192 MB, 36 días de uptime para un contenedor
+  reiniciado esa mañana): `os.totalmem()/os.cpus()/os.uptime()` leen `/proc`, que no está
+  namespaced. Las métricas salen del cgroup (`control-plane/cgroup.js`), con una prueba que corre
+  las dos implementaciones —node y python— sobre el mismo árbol falso y exige el mismo número.
+
 ## [1.11.0] - 2026-09-15
 ### Added
 - **El coturn propio es parte de PBX-NG y viene ENCENDIDO DE FÁBRICA, con selector de origen del
