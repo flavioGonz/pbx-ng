@@ -1,8 +1,27 @@
 # Agente IA en cola — portería remota atendida por IA
 
-> Estado: **idea ordenada, sin código**. Es el documento para decidir, no un plan aprobado.
-> Escrito el 2026-09-23 a partir de la idea del dueño. Lo que está medido dice «medido»;
-> lo demás es diseño o estimación y lo dice también.
+> Estado: **idea ordenada + cuatro decisiones tomadas** (2026-09-23). Sigue sin código.
+> Lo que está medido dice «medido»; lo demás es diseño o estimación y lo dice también.
+
+---
+
+## 0. Decisiones tomadas (2026-09-23)
+
+| # | Decisión | Estado |
+|---|---|---|
+| Proveedor | **Modelo realtime de OpenAI** (familia *GPT realtime*), audio in / audio out por un único WebSocket | **Decidido** |
+| Módulo | Es **PBX-NG**, un **módulo activable** más (como Portería), apagado de fábrica | **Decidido** |
+| Voz y registro | El *prompt* se escribe **a partir de tres llamadas reales** del centro de monitoreo, no al revés | **Decidido** |
+| Quién revisa | **Los operarios que ya están.** Ver §3.4: no es gente nueva, es la misma pantalla del centro con otro trabajo | **Decidido** |
+| Alcance del piloto | qué cliente, qué portero, qué horario | **Pendiente** |
+
+**Sobre el modelo, una advertencia operativa:** el identificador exacto del modelo realtime
+cambia seguido, así que va como **ajuste por agente** (`pbxng_ai_agents.model`), nunca
+escrito en el código. El día que el proveedor retire el que estamos usando, tiene que ser
+un cambio en el panel y no un release. Lo mismo con el proveedor: el pipeline queda detrás
+de una interfaz (`provider`) para poder comparar el camino de hoy —STT → LLM → TTS— contra
+el realtime con el mismo agente y el mismo *prompt*, que es la única forma honesta de
+medir cuál conviene.
 
 ---
 
@@ -131,10 +150,33 @@ Cada atención del agente produce **un registro de visita** con:
 - **la decisión** y su motivo (abrió / llamó al residente / escaló / rechazó);
 - **estado de revisión**: pendiente / revisado / marcado como problema.
 
-Y una **bandeja de revisión** en el panel: el supervisor ve las visitas del día, con la foto
-y la transcripción al lado de lo declarado, y marca. **Esa bandeja es el nuevo trabajo del
-centro de monitoreo.** Sin ella, esto es un juguete: la IA atiende, nadie mira, y el día que
-se equivoca no hay con qué explicar qué pasó.
+**Y la bandeja de revisión: es el escritorio de los operarios que ya tenés.**
+
+La pregunta correcta es «¿qué bandeja, si ya tengo operarios?», y la respuesta es que
+**son ellos**. Hoy un operario del centro de monitoreo hace esto: suena el portero, atiende,
+escucha, decide, y cuando la llamada termina no queda nada más que su memoria. El trabajo
+es *atender*, y no escala: dos porteros timbrando a la vez son dos llamadas perdidas o una
+persona más.
+
+Con el agente atendiendo, **el mismo operario deja de atender y pasa a mirar**. En la
+práctica su pantalla cambia así:
+
+| Hoy | Con el agente |
+|---|---|
+| Espera que suene y atiende una por una | Ve una lista de lo que pasó, con foto y transcripción al lado de lo declarado |
+| Decide en 20 segundos, con lo que escucha | Decide con la ficha del cliente, la captura y lo que el agente ya verificó |
+| Su criterio no queda escrito en ningún lado | Su marca («está bien» / «esto no cuadra») queda, y es lo que entrena las reglas |
+| Atiende **todas** | Atiende **las que el agente escaló**, que son las difíciles |
+
+O sea: **no es una tarea nueva para nadie, es la misma persona con otra pantalla**, y por eso
+la fase 2 no agrega costo de personal — al revés, es la que permite que dos operarios cubran
+lo que hoy cubren cuatro. Durante las fases 1 y 2 conviven las dos cosas: el operario sigue
+recibiendo las llamadas que el agente escala **y además** revisa lo que el agente resolvió.
+
+Un detalle que decide si esto funciona: **la revisión tiene que llevar segundos**. Si abrir
+una visita, ver la foto y marcar cuesta más que haber atendido la llamada, nadie la va a
+usar y la evidencia se convierte en un archivo muerto. La pantalla se diseña para eso:
+lista, foto grande, tres campos, dos botones.
 
 ---
 
@@ -193,16 +235,14 @@ la evidencia es lo que se le muestra al cliente y lo que cubre a la empresa.
 
 ---
 
-## 7. Lo que hay que decidir para empezar
+## 7. Lo que queda por decidir
 
-1. **Proveedor y modelo realtime**: cuál, y si se acepta que el audio de los visitantes viaje
-   a un tercero (cambia la respuesta del punto 4 de arriba).
-2. **Alcance del piloto**: ¿qué cliente, qué portero, qué horario?
-3. **Idioma y registro**: el agente habla como el centro de monitoreo de hoy — hay que
-   escuchar tres llamadas reales y escribir el *prompt* a partir de eso, no al revés.
-4. **Quién revisa la bandeja** y con qué frecuencia. Si la respuesta es «nadie», la fase 2 no
-   está lista.
-5. **Si esto es PBX-NG o un módulo aparte.** Por la regla del producto —*si sin eso algo se
-   ROMPE, va en PBX-NG; si con eso algo MEJORA, va en SBC-NG*— el agente de IA **mejora** la
-   portería: es un **módulo activable** de PBX-NG (como Portería), apagado de fábrica, que no
-   se instala donde no se usa.
+Las otras cuatro están en §0. Queda una, y es la que arranca el trabajo:
+
+**El alcance del piloto: qué cliente, qué portero y qué horario.** Lo que conviene buscar,
+por orden: un cliente que ya esté en el CRM con sus unidades cargadas (si no, el agente no
+tiene contra qué verificar nada), un portero con cámara que ande y luz de noche, y el turno
+nocturno —que es donde más duele cubrir con gente y donde un error tiene menos tránsito—.
+
+Y dos cosas para resolver con ese cliente, no acá: **el aviso al visitante** de que la
+llamada se graba y se fotografía, y **cuánto tiempo se guardan** esas capturas.
