@@ -245,7 +245,11 @@ all)
   # DB_HOST es 127.0.0.1 y no la IP LAN: Postgres solo escucha en loopback del host
   # y el unico que lo usa por fuera de la red interna es Asterisk (host network).
   put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"
-  put TURN_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
+  put TURN_HOST "$LAN"; put VOZ_HOST "$LAN"
+  # MEDIA_HOST es lo que marca ASTERISK para el AudioSocket de la IA, no lo que marca la
+  # API: Asterisk corre en la red del host y el 9092 se publica en su loopback, asi que va
+  # 127.0.0.1 y el socket de audio no queda expuesto en la LAN.
+  put MEDIA_HOST 127.0.0.1
   put_dashboard_bind "$CPROFILES"
   put COMPOSE_PROFILES "$CPROFILES"; put PBXNG_COMPOSE_FILE "$CF"
   [[ "$RELEASE" == 1 ]] && grabar_version_release
@@ -279,7 +283,8 @@ core)
   # ASTERISK_HOST lo usa la API (red bridge) para llegar a ARI/AMI/agente de Asterisk,
   # que corre en host network: tiene que ser la IP LAN del host, nunca 127.0.0.1
   # (dentro del contenedor de la API eso seria la propia API).
-  put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"; put VOZ_HOST "$LAN"; put MEDIA_HOST "$LAN"
+  put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"; put VOZ_HOST "$LAN"
+  put MEDIA_HOST 127.0.0.1   # ver arriba: lo marca Asterisk desde la red del host
   put TURN_HOST "${TURN_IP:-$LAN}"
   put_dashboard_bind "$CPROFILES"
   put COMPOSE_PROFILES "$CPROFILES"; put PBXNG_COMPOSE_FILE "$CF"

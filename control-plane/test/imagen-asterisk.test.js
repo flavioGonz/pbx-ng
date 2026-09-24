@@ -114,3 +114,27 @@ test('la astdb vive en un volumen propio en los dos compose', () => {
     assert.ok(/^\s{2}asterisk_db:\s*$/m.test(c), `${f} no declara el volumen asterisk_db`);
   }
 });
+
+/* El AudioSocket de la IA (:9092) tiene que estar PUBLICADO en los dos compose.
+ *
+ * Por qué vive acá y no en una prueba de integración: las pruebas levantan la API sobre
+ * loopback, sin Docker, así que el puerto siempre está a mano y el agujero es invisible.
+ * En producción no: Asterisk corre en la red del host y se conecta al 9092 de la API, que
+ * vive en la red bridge. Sin la publicación, `externalMedia` muere con «Connection
+ * refused», la llamada al agente se corta antes de que el modelo entre en juego, y no hay
+ * ningún error que lo diga — el panel muestra la clave y el modelo perfectos. Así estuvo
+ * el IVR con IA en TODOS los despliegues Docker hasta la 1.14.3. */
+test('el AudioSocket de la IA esta publicado en los dos compose, y en loopback', () => {
+  for (const f of ['docker-compose.yml', 'docker-compose.release.yml']) {
+    const txt = leer(f);
+    const api = txt.slice(txt.indexOf('\n  api:'), txt.indexOf('\n  dashboard:'));
+    assert.ok(/ports:/.test(api), `${f}: el servicio api no publica ningun puerto`);
+    /* Un solo bloque `ports:`. Dos claves iguales en el mismo servicio no son un detalle de
+     * estilo: el compose no parsea y NINGUN contenedor levanta. Se descubrio desplegando. */
+    assert.equal((api.match(/^\s+ports:/gm) || []).length, 1, `${f}: el servicio api tiene dos bloques ports: el compose no parsea`);
+    assert.match(api, /\$\{MEDIA_BIND:-127\.0\.0\.1\}:9092:9092/,
+      `${f}: el 9092 del AudioSocket no esta publicado (o dejo de ser en loopback por defecto)`);
+    assert.match(api, /MEDIA_HOST: \$\{MEDIA_HOST:-127\.0\.0\.1\}/,
+      `${f}: MEDIA_HOST es lo que marca ASTERISK desde la red del host; con el 9092 en loopback va 127.0.0.1`);
+  }
+});

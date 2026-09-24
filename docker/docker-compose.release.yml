@@ -202,7 +202,7 @@ services:
       NPM_HOST: ${NPM_HOST:-}
       TURN_HOST: ${TURN_HOST:-${PUBLIC_IP:-}}
       VOZ_HOST: ${VOZ_HOST:-}
-      MEDIA_HOST: ${MEDIA_HOST:-${ASTERISK_HOST:-}}
+      MEDIA_HOST: ${MEDIA_HOST:-127.0.0.1}
       AST_AGENT: ${AST_AGENT:-}
       TURN_AGENT: ${TURN_AGENT:-}
       # API de administracion de go2rtc (modulo intercom), por la red interna.
@@ -230,7 +230,18 @@ services:
     # Solo loopback: el dialplan de Asterisk (host network) llama a
     # http://127.0.0.1:3000/api/internal/wake. El panel llega por la red interna
     # (API_URL=http://api:3000). Nunca 0.0.0.0: la API no tiene TLS ni rate-limit propio.
-    ports: ["127.0.0.1:3000:3000"]
+    ports:
+      - "127.0.0.1:3000:3000"
+      # El AudioSocket de la IA. Asterisk corre en la red del host y se conecta acá para
+      # mandar y recibir el audio de la llamada; la API vive en la red bridge. Sin esta
+      # línea, `externalMedia` muere con «Connection refused» y la llamada al agente se
+      # corta ANTES de que el modelo entre en juego, sin un error que lo diga y con el
+      # panel mostrando la clave y el modelo perfectos. Así estuvo el IVR con IA en todos
+      # los despliegues Docker hasta la 1.14.3.
+      # Loopback por defecto, igual que el 3000 y por el mismo motivo: este socket no pide
+      # credenciales (la sesión se identifica con un UUID) y no tiene por qué verse en la
+      # LAN. Núcleo en otra máquina: MEDIA_BIND=0.0.0.0 y MEDIA_HOST=<IP de esta>.
+      - "${MEDIA_BIND:-127.0.0.1}:9092:9092"
     networks: [pbxng]
     # /health/ready devuelve 503 si la base no responde (a diferencia de /health,
     # que siempre da 200): asi "healthy" significa que la API puede atender de verdad.
