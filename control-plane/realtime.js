@@ -183,6 +183,11 @@ const LIVE = {
      * que es quien las ejecuta. */
     if (o.herramientas && o.herramientas.length) {
       session.delegation = { type: 'responses', responses: { tools: o.herramientas, tool_choice: 'auto', parallel_tool_calls: false } };
+    } else if (o.delegacion === 'responses') {
+      /* Sin herramientas, pero delegando igual: es el segundo escalón de la prueba de
+       * conexión. Sirve para distinguir «la cuenta no puede hablar» de «en modo cliente
+       * este modelo espera otra cosa», que desde afuera se ven idénticos. */
+      session.delegation = { type: 'responses', responses: {} };
     }
     return { type: 'session.start', session };
   },
@@ -405,33 +410,76 @@ function abrir(opts) {
  */
 async function probar(opts) {
   const o = opts || {};
+  const live = /^gpt-live/i.test(String(o.model || ''));
+  /* Escalones. En la Realtime alcanza con pedirle que hable. En Live el modelo contesta al
+   * AUDIO del visitante —es una conversación continua, no un pedido-respuesta—, así que:
+   *   1. se le manda silencio continuo, como en una llamada de verdad, y el saludo;
+   *   2. si no habla, se reintenta delegando en el backend de Responses.
+   * Los dos casos se ven idénticos desde afuera (sesión abierta, cero audio) y se arreglan
+   * en lugares distintos, así que la prueba los separa sola en vez de hacerte adivinar. */
+  const escalones = live
+    ? [{ nombre: 'modo cliente', delegacion: null }, { nombre: 'delegando en Responses', delegacion: 'responses' }]
+    : [{ nombre: 'realtime', delegacion: null }];
+
+  let ultimo = null;
+  const historia = [];
+  for (const esc of escalones) {
+    const r = await unIntento(o, esc, live);
+    historia.push({ intento: esc.nombre, ok: r.ok, error: r.error, eventos: r.eventos });
+    ultimo = r;
+    if (r.ok) break;
+  }
+  ultimo.intentos = historia;
+  if (!ultimo.ok && historia.length > 1) {
+    ultimo.error = 'El modelo abrió la sesión pero no habló en ninguno de los dos modos. '
+      + 'Probado: ' + historia.map((h) => h.intento).join(' y ') + '. ' + (ultimo.error || '');
+  }
+  return ultimo;
+}
+
+/* Un escalón: abre, saluda como corresponda, y espera audio. */
+async function unIntento(o, esc, live) {
   const t0 = Date.now();
-  const r = { ok: false, model: o.model || null, voz: o.voz || null, abrio_ms: null, primer_audio_ms: null, bytes_audio: 0, texto: '', error: null };
-  let ev = null;
+  const r = { ok: false, model: o.model || null, voz: o.voz || null, modo: esc.nombre,
+    abrio_ms: null, primer_audio_ms: null, bytes_audio: 0, texto: '', error: null };
+  let ev = null, reloj = null;
   try {
-    ev = abrir({ url: o.url, base: o.base, key: o.key, model: o.model, voz: o.voz, WebSocketImpl: o.WebSocketImpl,
+    ev = abrir({ url: o.url, base: o.base, key: o.key, model: o.model, voz: o.voz,
+      delegacion: esc.delegacion, WebSocketImpl: o.WebSocketImpl,
       instrucciones: 'Sos una prueba de conexión. Respondé con una sola frase corta en español.' });
     await ev.cuandoListo(o.topeAbrir || 10000);
     r.abrio_ms = Date.now() - t0;
 
     const t1 = Date.now();
     await new Promise((ok, fail) => {
-      const tope = setTimeout(() => fail(new Error('la sesión abrió pero el modelo no mandó audio en '
-        + Math.round((o.topeAudio || 15000) / 1000) + ' s: revisá que la voz «' + (o.voz || 'alloy') + '» exista para este modelo')), o.topeAudio || 15000);
+      const tope = setTimeout(() => fail(new Error('la sesión abrió (' + esc.nombre + ') pero el modelo no mandó audio en '
+        + Math.round((o.topeAudio || 12000) / 1000) + ' s')), o.topeAudio || 12000);
+      const terminar = (fn, arg) => { clearTimeout(tope); if (reloj) clearInterval(reloj); fn(arg); };
       ev.on('audio', (pcm) => {
         r.bytes_audio += pcm.length;
-        if (r.primer_audio_ms === null) { r.primer_audio_ms = Date.now() - t1; clearTimeout(tope); ok(); }
+        if (r.primer_audio_ms === null) { r.primer_audio_ms = Date.now() - t1; terminar(ok); }
       });
       ev.on('texto', (t) => { if (t && t.quien === 'agente' && t.texto) r.texto += t.texto; });
-      ev.once('error', (e) => { clearTimeout(tope); fail(new Error(String(e))); });
-      ev.saludar('Decí, en español: listo, la conexión funciona.');
+      ev.once('error', (e) => terminar(fail, new Error(String(e))));
+
+      /* Live espera una llamada, no una consulta: si no le entra audio, no hay turno que
+       * tomar. Se le manda silencio al ritmo del canal —20 ms cada 20 ms— igual que haría
+       * Asterisk, y recién entonces el saludo. */
+      if (live) {
+        const silencio = Buffer.alloc(160 * 2);
+        reloj = setInterval(() => { try { ev.enviarAudio(silencio); } catch (_) {} }, 20);
+        if (reloj.unref) reloj.unref();
+        setTimeout(() => ev.saludar('Decí, en español: listo, la conexión funciona.'), 400);
+      } else {
+        ev.saludar('Decí, en español: listo, la conexión funciona.');
+      }
     });
-    /* Un ratito más para juntar algo de transcripción y poder mostrar qué dijo. */
     await new Promise((ok) => setTimeout(ok, o.colaMs === undefined ? 600 : o.colaMs));
     r.ok = true;
   } catch (e) {
     r.error = String((e && e.message) || e);
   } finally {
+    if (reloj) clearInterval(reloj);
     try { if (ev) ev.cerrar(); } catch (_) {}
   }
   r.total_ms = Date.now() - t0;

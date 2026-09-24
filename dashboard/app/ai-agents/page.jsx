@@ -200,6 +200,9 @@ export default function AiAgents() {
               : <Alert variant="light" color="red" icon={<IconAlertTriangle size={18} />}>
                   <Text size="sm">{prueba.error || 'falló sin decir por qué'}</Text>
                   {prueba.endpoint ? <Text size="xs" c="dimmed" mt={4}>Endpoint: <Code>{prueba.endpoint}</Code>{prueba.api ? <> · API <Code>{prueba.api}</Code></> : null}</Text> : null}
+                  {prueba.intentos && prueba.intentos.length > 1
+                    ? <Text size="xs" c="dimmed" mt={4}>Se probaron {prueba.intentos.length} modos: {prueba.intentos.map(i => i.intento).join(' · ')}</Text>
+                    : null}
                   {prueba.eventos && Object.keys(prueba.eventos).length
                     ? <Text size="xs" c="dimmed" mt={4}>El proveedor mandó: {Object.entries(prueba.eventos).map(([k, v]) => k + (v > 1 ? ' ×' + v : '')).join(', ')}</Text>
                     : prueba.abrio_ms !== null && prueba.abrio_ms !== undefined

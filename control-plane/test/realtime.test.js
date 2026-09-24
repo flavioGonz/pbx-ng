@@ -326,3 +326,40 @@ test('Live: nada se manda antes de session.started (un saludo temprano se descar
   assert.ok(srv.tipos().includes('session.input_audio.append'), 'el audio guardado no se mandó al confirmarse la sesión');
   assert.ok(p.eventos['session.started'] >= 1, 'el diario de eventos no registró nada: es lo único que explica una sesión muda');
 });
+
+test('Live: la prueba manda silencio al ritmo del canal antes de saludar', async (t) => {
+  /* En Live el modelo contesta al audio del visitante: es una conversación continua, no un
+   * pedido-respuesta. Una prueba que sólo saluda y espera deja la sesión muda y culpa a la
+   * voz — que fue exactamente lo que pasó en producción. */
+  const srv = await servidorFalso();
+  t.after(() => srv.cerrar());
+  const hablar = setInterval(() => {
+    if (srv.tipos().includes('session.commentary.append')) {
+      clearInterval(hablar);
+      srv.mandar({ type: 'session.output_audio.delta', delta: tono(300, 40, 24000).toString('base64') });
+    }
+  }, 10);
+  t.after(() => clearInterval(hablar));
+
+  const r = await rt.probar({ url: srv.url(), model: 'gpt-live-1', voz: 'marin', topeAbrir: 5000, topeAudio: 6000, colaMs: 50 });
+  assert.equal(r.ok, true, 'la prueba de Live falló: ' + r.error);
+  assert.equal(r.api, 'live');
+  const audios = srv.recibido.filter((x) => x.type === 'session.input_audio.append').length;
+  assert.ok(audios >= 5, 'no le mandó audio continuo: con un solo frame el modelo no toma turno (mandó ' + audios + ')');
+});
+
+test('Live: si el modo cliente no habla, reintenta delegando y lo cuenta', async (t) => {
+  /* Dos causas distintas que desde afuera se ven idénticas —sesión abierta, cero audio— y
+   * se arreglan en lugares distintos. La prueba las separa sola en vez de hacer adivinar. */
+  const srv = await servidorFalso();
+  t.after(() => srv.cerrar());
+  const r = await rt.probar({ url: srv.url(), model: 'gpt-live-1', voz: 'marin', topeAbrir: 4000, topeAudio: 900 });
+  assert.equal(r.ok, false);
+  assert.equal(r.intentos.length, 2, 'no reintentó delegando: se queda sin distinguir las dos causas');
+  assert.deepEqual(r.intentos.map((x) => x.intento), ['modo cliente', 'delegando en Responses']);
+  const starts = srv.recibido.filter((x) => x.type === 'session.start');
+  assert.equal(starts.length, 2);
+  assert.equal(starts[0].session.delegation, undefined);
+  assert.equal(starts[1].session.delegation.type, 'responses');
+  assert.match(r.error, /ninguno de los dos modos/);
+});
