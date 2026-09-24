@@ -8,7 +8,7 @@ import { toast } from '../notify';
 const PROVIDERS = [
   { value: 'demo', label: 'Demo (offline · Vosk + espeak)' },
   { value: 'openai', label: 'OpenAI (Whisper + GPT + TTS)' },
-  { value: 'openai-realtime', label: 'OpenAI Realtime (voz a voz · un solo socket)' },
+  { value: 'openai-realtime', label: 'OpenAI voz a voz (GPT-Live / Realtime)' },
 ];
 const MODELS = [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini (rápido/económico)' }, { value: 'gpt-4o', label: 'gpt-4o (máxima calidad)' }];
 const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label: 'Alloy' }, { value: 'shimmer', label: 'Shimmer' }, { value: 'onyx', label: 'Onyx' }, { value: 'echo', label: 'Echo' }, { value: 'fable', label: 'Fable' }];
@@ -16,7 +16,7 @@ const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label
  * los renombra y retira cada pocos meses; si fueran una lista cerrada, el día que cambien
  * habría que actualizar la central para poder volver a atender. Estas son sugerencias, y
  * el botón «Probar conexión» es el que dice la verdad para ESTA cuenta. */
-const RT_MODELS = ['gpt-realtime-2.1-mini', 'gpt-realtime-2.1', 'gpt-realtime'];
+const RT_MODELS = ['gpt-live-1', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini'];
 const RT_VOICES = ['marin', 'cedar', 'alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
 const esRT = (p) => p === 'openai-realtime';
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
@@ -48,12 +48,13 @@ export default function AiAgents() {
    * `gpt-4o-mini` y voz `es_MX-claude-high` se guarda sin error y después no habla. */
   function cambiarProveedor(v) {
     setPrueba(null);
+    if (esRT(v) && !rtModelos) cargarModelos();
     setForm(s => ({ ...s, provider: v,
       model: esRT(v) ? (RT_MODELS.includes(s.model) ? s.model : RT_MODELS[0]) : (s.model && s.model.includes('realtime') ? 'gpt-4o-mini' : s.model),
       voice: esRT(v) ? (RT_VOICES.includes(s.voice) ? s.voice : 'marin') : s.voice }));
   }
-  function edit(a) { setForm({ ...empty, ...a }); setOpened(true); }
-  function nuevo() { setForm(empty); setOpened(true); }
+  function edit(a) { setForm({ ...empty, ...a }); setPrueba(null); setOpened(true); if (esRT(a.provider) && !rtModelos) cargarModelos(); }
+  function nuevo() { setForm(empty); setPrueba(null); setOpened(true); }
   async function save() {
     if (!form.name || !form.exten) { toast('Nombre y número de acceso son obligatorios', 'bad'); return; }
     setSaving(true);
@@ -66,6 +67,13 @@ export default function AiAgents() {
   /* «¿Estamos listos para llamar?»: abre una sesión de verdad con el modelo y cuenta qué
    * pasó. La clave nunca sale del servidor: el panel manda modelo y voz. */
   const [prueba, setPrueba] = useState(null); const [probando, setProbando] = useState(false);
+  /* Los modelos que ESTA cuenta sirve, preguntados al proveedor con la clave cargada. Una
+   * lista en el código envejece en cada release y además miente: el mismo nombre existe
+   * para una cuenta y no para otra. */
+  const [rtModelos, setRtModelos] = useState(null);
+  async function cargarModelos() {
+    try { const d = await fetch('/backend/api/ai-agents/modelos').then(r => r.json()); setRtModelos(d); } catch (_) { setRtModelos({ ok: false }); }
+  }
   async function probarRealtime() {
     setProbando(true); setPrueba(null);
     const r = await fetch('/backend/api/ai-agents/probar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: form.model, voice: form.voice }) })
@@ -155,7 +163,12 @@ export default function AiAgents() {
             <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={cambiarProveedor}
               description={esRT(form.provider) ? 'Una sola sesión: menor latencia' : undefined} />
             {esRT(form.provider)
-              ? <Autocomplete label="Modelo (realtime)" description="Familia gpt-realtime" data={RT_MODELS} value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} placeholder="gpt-realtime-2.1-mini" />
+              ? <Autocomplete label="Modelo (realtime)"
+                  description={rtModelos === null ? 'gpt-live o gpt-realtime'
+                    : rtModelos.ok ? (rtModelos.modelos.length ? 'Los ' + rtModelos.modelos.length + ' que sirve tu cuenta' : 'Tu cuenta no sirve ninguno de voz a voz')
+                    : 'No se pudo consultar tu cuenta'}
+                  data={rtModelos && rtModelos.ok && rtModelos.modelos.length ? rtModelos.modelos : RT_MODELS}
+                  value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} placeholder="gpt-realtime-2.1-mini" />
               : <Select label="Modelo (OpenAI)" data={MODELS} value={form.model} onChange={v => up('model', v)} disabled={form.provider !== 'openai'} />}
             <Group gap="xs" align="flex-end" wrap="nowrap">
               {esRT(form.provider)
@@ -172,6 +185,10 @@ export default function AiAgents() {
               </div>
               <Button size="xs" variant="light" leftSection={<IconPlugConnected size={15} />} loading={probando} onClick={probarRealtime} disabled={!form.model}>Probar conexión</Button>
             </Group>
+            {rtModelos && rtModelos.ok && rtModelos.modelos.length === 0 && !prueba &&
+              <Alert variant="light" color="orange" icon={<IconAlertTriangle size={18} />}>
+                Tu cuenta de OpenAI no lista ningún modelo de voz a voz. Suele ser el nivel de uso o la verificación de la organización: se habilitan en el panel de OpenAI, no acá.
+              </Alert>}
             {prueba && (prueba.ok
               ? <Alert variant="light" color="teal" icon={<IconCircleCheck size={18} />}>
                   <Text size="sm" fw={600}>El modelo contestó. Ya se puede marcar {form.exten || 'el interno del agente'}.</Text>

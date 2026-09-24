@@ -1259,6 +1259,30 @@ app.get('/api/ai-agents/live', (req, res) => {
   catch (e) { errorHttp(res, e); }
 });
 
+/* ── Qué modelos sirve ESTA cuenta ────────────────────────────────────────────
+ * Adivinar el identificador del modelo es la forma más tonta de perder una tarde: los
+ * nombres cambian, y el mismo nombre puede existir para una cuenta y no para otra (nivel
+ * de uso, verificación de la organización). En vez de mantener una lista en el código —que
+ * envejece en cada release— se le pregunta al proveedor con la clave que ya está cargada.
+ * El panel usa esto para las sugerencias del campo «Modelo». */
+app.get('/api/ai-agents/modelos', async (req, res) => {
+  try {
+    const key = await getProvSetting('openai_api_key', '');
+    if (!key) return res.json({ ok: false, error: 'no hay clave de OpenAI cargada', modelos: [] });
+    const base = await getProvSetting('realtime_url', '');
+    if (base) return res.json({ ok: false, error: 'el endpoint es propio (' + base + '): no se puede listar', modelos: [] });
+    const r = await fetch('https://api.openai.com/v1/models', {
+      headers: { Authorization: 'Bearer ' + key }, signal: AbortSignal.timeout(10000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return res.json({ ok: false, error: (j && j.error && j.error.message) || ('HTTP ' + r.status), modelos: [] });
+    const todos = (j.data || []).map((m) => String(m.id)).sort();
+    /* Voz a voz = los que hablan por socket. `realtime` hoy, `live` por si la familia nueva
+     * queda accesible; el resto (chat, embeddings, imágenes) no sirve para esto. */
+    const modelos = todos.filter((id) => /realtime|audio-preview|^gpt-live/.test(id));
+    res.json({ ok: true, modelos, total: todos.length });
+  } catch (e) { res.json({ ok: false, error: String(e && e.message || e), modelos: [] }); }
+});
+
 /* ── «¿Puedo llamar al agente?» ────────────────────────────────────────────────
  * Antes de esto, la única forma de saber si un agente realtime iba a funcionar era marcar
  * el interno y escuchar: si sonaba silencio, había que adivinar entre tres causas (la
@@ -1277,16 +1301,6 @@ app.post('/api/ai-agents/probar', async (req, res) => {
   const model = String(b.model || '').trim();
   const voz = String(b.voice || b.voz || '').trim() || 'alloy';
   if (!model) return res.status(400).json({ error: 'falta el identificador del modelo (es el campo «Modelo» del agente)' });
-  /* `gpt-live-1` no es un modelo de la Realtime API: es la **Live API**, otro protocolo
-   * (otro endpoint, `session.start` en vez de `session.update`, y otros nombres de
-   * evento). Conectarlo contra este puente no da un error claro, da una sesión que no
-   * habla. Se avisa acá y no se gasta una sesión en averiguarlo. */
-  if (/^gpt-live/i.test(model)) {
-    return res.json({ ok: false, paso: 'modelo',
-      error: 'El identificador «' + model + '» es de la Live API de OpenAI, que es otro protocolo '
-           + '(otro endpoint y otros eventos) y este puente todavía no lo habla. Para voz a voz usá un modelo '
-           + 'de la familia gpt-realtime (por ejemplo gpt-realtime-2.1); la voz «marin» también existe ahí.' });
-  }
   if (probaEnCurso) return res.status(409).json({ error: 'ya hay una prueba corriendo' });
   if (Date.now() - probaUltima < 5000) return res.status(429).json({ error: 'esperá unos segundos: cada prueba abre una sesión que se paga' });
   probaEnCurso = true; probaUltima = Date.now();

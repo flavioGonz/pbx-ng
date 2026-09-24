@@ -239,3 +239,69 @@ test('el handshake NO manda la cabecera de la API beta', () => {
   /* Azure autentica distinto y tampoco lleva beta. */
   assert.deepEqual(rt.PROTOCOLO.cabeceras('k', 'https://x.azure.com/openai'), { 'api-key': 'k' });
 });
+
+/* ── GPT-Live: el OTRO protocolo ──────────────────────────────────────────────
+ * `gpt-live-1` no es un modelo más: es otra API. Estas pruebas cuidan que el puente elija
+ * la correcta por el identificador del modelo y hable cada una en su idioma, porque el
+ * sintoma de equivocarse no es un error sino una llamada muda. */
+test('el puente elige la API por el nombre del modelo', () => {
+  assert.equal(rt.elegirProtocolo('gpt-live-1'), rt.LIVE);
+  assert.equal(rt.elegirProtocolo('gpt-realtime-2.1'), rt.REALTIME);
+  assert.equal(rt.elegirProtocolo(''), rt.REALTIME, 'sin modelo, la Realtime es la conservadora');
+
+  /* La Realtime lleva el modelo en la URL; Live lo lleva DENTRO del primer mensaje y la
+   * URL es fija. Mandar uno con la forma del otro no falla al conectar: no habla. */
+  assert.match(rt.REALTIME.url('gpt-realtime-2.1', ''), /\/v1\/realtime\?model=gpt-realtime-2\.1$/);
+  assert.match(rt.LIVE.url('gpt-live-1', ''), /\/v1\/live\/sessions$/);
+  assert.doesNotMatch(rt.LIVE.url('gpt-live-1', ''), /model=/, 'Live no lleva el modelo en la URL');
+
+  const cfg = rt.LIVE.configurar({ model: 'gpt-live-1', voz: 'marin', instrucciones: 'portero' });
+  assert.equal(cfg.type, 'session.start', 'Live arranca con session.start, no con session.update');
+  assert.equal(cfg.session.model, 'gpt-live-1');
+  assert.equal(cfg.session.audio.output.voice, 'marin');
+  assert.equal(cfg.session.delegation, undefined, 'sin herramientas NO se delega: omitirlo es el modo en que el modelo conversa solo');
+
+  const conTools = rt.LIVE.configurar({ model: 'gpt-live-1', herramientas: [{ type: 'function', name: 'abrir_porton' }] });
+  assert.equal(conTools.session.delegation.type, 'responses', 'con herramientas hay que delegar: si no, nadie las ejecuta');
+});
+
+test('Live: el audio va y vuelve, y la transcripción del visitante es el barge-in', async (t) => {
+  const srv = await servidorFalso();
+  t.after(() => srv.cerrar());
+  const p = rt.abrir({ url: srv.url(), model: 'gpt-live-1', voz: 'marin' });
+  t.after(() => p.cerrar());
+  await p.cuandoListo(5000);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(p.api, 'live');
+  assert.equal(srv.recibido[0].type, 'session.start');
+
+  p.enviarAudio(tono(300, 20, 8000));
+  await new Promise((r) => setTimeout(r, 50));
+  const ap = srv.recibido.find((r) => r.type === 'session.input_audio.append');
+  assert.ok(ap, 'no mandó el audio del llamante con el nombre de evento de Live');
+  assert.equal(Buffer.from(ap.audio, 'base64').length, 160 * 2 * 3, '20 ms de 8 kHz tienen que salir como 20 ms de 24 kHz');
+
+  srv.mandar({ type: 'session.output_audio.delta', delta: tono(440, 60, 24000).toString('base64') });
+  const pcm = await esperarEvento(p, 'audio');
+  assert.equal(pcm.length, 8000 * 0.06 * 2, 'el audio de Live no volvió a 8 kHz');
+
+  /* Live no manda «empezó a hablar el usuario»: su transcripción es la única señal. */
+  const corte = esperarEvento(p, 'corte');
+  srv.mandar({ type: 'session.input_transcript.delta', delta: 'perdón, una cosa' });
+  await corte;
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(!srv.tipos().includes('response.cancel'), 'Live corta solo: mandarle un cancel de la otra API es ruido');
+});
+
+test('Live: el saludo se inyecta como texto para decir, no como response.create', async (t) => {
+  const srv = await servidorFalso();
+  t.after(() => srv.cerrar());
+  const p = rt.abrir({ url: srv.url(), model: 'gpt-live-1' });
+  t.after(() => p.cerrar());
+  await p.cuandoListo(5000);
+  p.saludar('Hola, portería.');
+  await new Promise((r) => setTimeout(r, 60));
+  const c = srv.recibido.find((r) => r.type === 'session.commentary.append');
+  assert.ok(c, 'en modo cliente no hay response.create: el agente no diría nada al atender');
+  assert.match(String(c.content), /portería/);
+});

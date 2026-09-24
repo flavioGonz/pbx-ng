@@ -85,7 +85,7 @@ function creaBajador() {
 
 /* ── Protocolo del proveedor, en un solo lugar ─────────────────────────────────
  * Todo lo que puede cambiar cuando el proveedor publique una versión nueva está acá. */
-const PROTOCOLO = {
+const REALTIME = {
   /* `base` sale de un ajuste del panel (`realtime_url`), vacío por defecto. Existe por dos
    * motivos concretos: el mismo modelo se sirve desde Azure —donde están los créditos de
    * Microsoft for Startups, que es la forma realista de probar esto sin poner plata— y
@@ -150,6 +150,79 @@ const PROTOCOLO = {
   },
 };
 
+
+/* ── El OTRO protocolo: GPT-Live ───────────────────────────────────────────────
+ * `gpt-live-1` NO es un modelo más de la Realtime API: es otra API, con otro endpoint,
+ * otros nombres de evento y otra forma de arrancar la sesión. Como los dos son «un socket
+ * con el modelo», el resto del archivo —el remuestreo, la cola, las métricas— sirve igual;
+ * lo único que cambia es este objeto, que es exactamente para lo que estaba separado.
+ *
+ * Las tres diferencias que importan de verdad:
+ *
+ *  1. **El modelo va en el mensaje, no en la URL.** La Realtime lo lleva como `?model=`;
+ *     acá la URL es fija y el modelo viaja dentro de `session.start`.
+ *  2. **No hay evento de fin de respuesta ni de «empezó a hablar el usuario».** Live decide
+ *     los turnos solo, mientras escucha. Para el barge-in usamos la transcripción del
+ *     visitante como señal: si llega texto suyo, está hablando, y hay que tirar lo que
+ *     quede por reproducir. No hace falta pedirle que pare: eso lo hace él.
+ *  3. **`delegation` omitido = modo cliente**, que es lo que queremos en fase 0: el modelo
+ *     conversa solo. Las herramientas (abrir portón, verificar datos) van a necesitar
+ *     `delegation: 'responses'`, y por eso se arma acá abajo sólo si hay herramientas.
+ */
+const LIVE = {
+  url: (model, base) => (base ? String(base).replace(/\/+$/, '') : 'wss://api.openai.com/v1/live/sessions'),
+  cabeceras: (key, base) => (base && /azure/i.test(String(base)) ? { 'api-key': key } : { Authorization: 'Bearer ' + key }),
+  configurar: (o) => {
+    const session = {
+      model: o.model || 'gpt-live-1',
+      instructions: o.instrucciones || '',
+      audio: { output: { voice: o.voz || 'marin' } },
+    };
+    /* Sin herramientas no se manda `delegation`: omitirlo es el modo cliente, y el modelo
+     * conversa por su cuenta. Con herramientas hay que delegar en el backend de Responses,
+     * que es quien las ejecuta. */
+    if (o.herramientas && o.herramientas.length) {
+      session.delegation = { type: 'responses', responses: { tools: o.herramientas, tool_choice: 'auto', parallel_tool_calls: false } };
+    }
+    return { type: 'session.start', session };
+  },
+  audioEntra: (b64) => ({ type: 'session.input_audio.append', audio: b64 }),
+  /* Live corta solo cuando el visitante habla: no hay nada que mandarle. */
+  cancelar: () => null,
+  /* No hay `response.create` en modo cliente. Lo que hace hablar primero al agente es
+   * inyectarle texto para decir. */
+  saludar: (texto) => ({ type: 'session.commentary.append', content: texto, delegation_id: null }),
+  respuestaHerramienta: (callId, salida) => ({
+    type: 'response.item.create',
+    item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(salida) },
+  }),
+  pedirRespuesta: () => ({ type: 'response.create' }),
+  leer(m) {
+    const t = String(m.type || '');
+    if (t === 'session.output_audio.delta') return { clase: 'audio', b64: m.delta };
+    if (t === 'session.output_transcript.delta') return { clase: 'texto_bot', texto: m.delta };
+    /* Texto del visitante = el visitante está hablando. Es la única señal de barge-in que
+     * da esta API, así que hace las dos cosas: caption y corte. */
+    if (t === 'session.input_transcript.delta') return { clase: 'texto_usuario', texto: m.delta, corta: true };
+    if (t === 'session.started') return { clase: 'otro', tipo: t };
+    if (t === 'session.closed') return { clase: 'fin_respuesta' };
+    if (t === 'response.event' && m.event) return LIVE.leer(m.event);
+    if (t === 'response.output_item.done' && m.item && m.item.type === 'function_call') {
+      return { clase: 'herramienta', call_id: m.item.call_id, nombre: m.item.name, args: m.item.arguments };
+    }
+    if (t === 'error') return { clase: 'error', detalle: (m.error && m.error.message) || 'error del proveedor' };
+    return { clase: 'otro', tipo: t };
+  },
+};
+
+/* Qué API habla cada modelo. Se decide por el identificador porque es el único dato que
+ * hay antes de conectar, y porque es lo que el usuario escribe en el panel. */
+function elegirProtocolo(model) {
+  return /^gpt-live/i.test(String(model || '')) ? LIVE : REALTIME;
+}
+/* Compatibilidad: el resto del código (y las pruebas) piden `PROTOCOLO` por la Realtime. */
+const PROTOCOLO = REALTIME;
+
 /* ── Por qué NO abrió ──────────────────────────────────────────────────────────
  * Un `ws` que no logra el 101 emite `Unexpected server response: 401` y nada más. Ese
  * texto es inútil para quien mira el panel: las dos causas más frecuentes —la clave no
@@ -193,8 +266,10 @@ function abrir(opts) {
   const ev = new EventEmitter();
   const bajar = creaBajador();
   const WS = o.WebSocketImpl || require('ws');
-  const url = o.url || PROTOCOLO.url(o.model || 'gpt-realtime-2.1-mini', o.base);
-  const ws = new WS(url, o.subprotocolos || undefined, { headers: o.key ? PROTOCOLO.cabeceras(o.key, o.base) : undefined });
+  const P = o.protocolo || elegirProtocolo(o.model);
+  ev.api = P === LIVE ? 'live' : 'realtime';
+  const url = o.url || P.url(o.model || 'gpt-realtime-2.1-mini', o.base);
+  const ws = new WS(url, o.subprotocolos || undefined, { headers: o.key ? P.cabeceras(o.key, o.base) : undefined });
 
   /* Métricas: el número que decide si esto es viable no es el costo, es cuánto tarda en
    * empezar a hablar. Se mide desde que el usuario deja de hablar hasta el primer byte de
@@ -207,7 +282,7 @@ function abrir(opts) {
    * para siempre. Con la bandera y `cuandoListo()` no hay carrera posible. */
   ev.listo = false;
   ws.on('open', () => {
-    ws.send(JSON.stringify(PROTOCOLO.configurar(o)));
+    ws.send(JSON.stringify(P.configurar(o)));
     ev.listo = true;
     ev.emit('listo');
   });
@@ -221,7 +296,7 @@ function abrir(opts) {
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(String(data)); } catch (_) { return; }
-    const r = PROTOCOLO.leer(msg);
+    const r = P.leer(msg);
     switch (r.clase) {
       case 'audio': {
         if (esperandoDesde) {
@@ -235,12 +310,17 @@ function abrir(opts) {
         break;
       }
       case 'texto_bot': if (r.texto) ev.emit('texto', { quien: 'agente', texto: r.texto }); break;
-      case 'texto_usuario': if (r.texto) ev.emit('texto', { quien: 'visitante', texto: r.texto }); break;
+      case 'texto_usuario':
+        if (r.texto) ev.emit('texto', { quien: 'visitante', texto: r.texto });
+        /* En Live no hay evento de «empezó a hablar»: su transcripción ES la señal. Se
+         * tira lo que quede por reproducir; pedirle que pare no hace falta, corta solo. */
+        if (r.corta) { ev.emit('corte'); esperandoDesde = Date.now(); }
+        break;
       case 'habla_usuario':
         /* El usuario arrancó a hablar: se avisa para tirar la cola de reproducción y se le
          * pide al modelo que deje de generar. Las dos cosas, siempre. */
         ev.emit('corte');
-        try { ws.send(JSON.stringify(PROTOCOLO.cancelar())); } catch (_) {}
+        try { const c = P.cancelar(); if (c) ws.send(JSON.stringify(c)); } catch (_) {}
         esperandoDesde = Date.now();
         break;
       case 'fin_respuesta': ev.emit('fin'); break;
@@ -267,9 +347,9 @@ function abrir(opts) {
 
   const enviar = (obj) => { try { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch (_) {} };
 
-  ev.enviarAudio = (pcm8) => { if (pcm8 && pcm8.length) enviar(PROTOCOLO.audioEntra(subir(pcm8).toString('base64'))); };
-  ev.saludar = (texto) => { esperandoDesde = Date.now(); enviar(PROTOCOLO.saludar(texto)); };
-  ev.responderHerramienta = (callId, salida) => { enviar(PROTOCOLO.respuestaHerramienta(callId, salida)); enviar(PROTOCOLO.pedirRespuesta()); };
+  ev.enviarAudio = (pcm8) => { if (pcm8 && pcm8.length) enviar(P.audioEntra(subir(pcm8).toString('base64'))); };
+  ev.saludar = (texto) => { esperandoDesde = Date.now(); enviar(P.saludar(texto)); };
+  ev.responderHerramienta = (callId, salida) => { enviar(P.respuestaHerramienta(callId, salida)); enviar(P.pedirRespuesta()); };
   ev.metricas = () => {
     const a = m.primer_audio_ms;
     const orden = [...a].sort((x, y) => x - y);
@@ -334,4 +414,4 @@ async function probar(opts) {
   return r;
 }
 
-module.exports = { abrir, probar, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };
+module.exports = { abrir, probar, elegirProtocolo, REALTIME, LIVE, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };
