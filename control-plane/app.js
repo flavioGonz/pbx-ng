@@ -1250,6 +1250,14 @@ app.post('/api/net/mode/revert', async (req, res) => {
     res.json({ ok: !!(out && out.ok), modo: anterior.modo });
   } catch (e) { errorHttp(res, e); }
 });
+/* Qué están haciendo las sesiones de IA AHORA, con su latencia. Es el número que decide
+ * si un agente de voz es usable: no el uso de CPU, sino cuánto silencio escucha la
+ * persona antes de que el agente conteste. Sólo admin (cae en el default del RBAC). */
+app.get('/api/ai-agents/live', (req, res) => {
+  try { res.json({ sesiones: aiPipeline.metricas(), ts: new Date().toISOString() }); }
+  catch (e) { errorHttp(res, e); }
+});
+
 const CLI_ALLOW = /^(pjsip (show|list)|core show|dialplan show|queue show|confbridge (list|show)|module show|database (show|get)|rtp show|http show|manager show|stir_shaken show|version|uptime)\b/i;
 app.post('/api/asterisk/cli', async (req, res) => {
   const cmd = String((req.body && req.body.cmd) || '').trim();

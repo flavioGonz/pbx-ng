@@ -9,6 +9,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const log = require('./log')('AI');
+const realtime = require('./realtime');   // puente al modelo de voz realtime (audio in / audio out)
 
 const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
 const VOSK_MODEL = '/opt/vosk-model-es';
@@ -280,6 +281,8 @@ async function doTransfer(session, dest, label) {
   sessions.delete(session.uuid); pendingByUuid.delete(session.uuid);
 }
 function cleanupMedia(session) {
+  try { if (session.rtReloj) clearInterval(session.rtReloj); } catch (_) {}
+  try { if (session.rt) session.rt.cerrar(); } catch (_) {}
   try { if (session.sttProc) session.sttProc.kill('SIGKILL'); } catch (_) {}
   try { if (session.em) ARI.channels.hangup({ channelId: session.em.id }).catch(() => {}); } catch (_) {}
   try { if (session.bridge) session.bridge.destroy().catch(() => {}); } catch (_) {}
@@ -319,9 +322,13 @@ function startServer() {
           if (!session) { try { socket.end(); } catch (_) {} return; }
           pendingByUuid.delete(uuid);
           session.socket = socket; sessions.set(uuid, session);
-          attachStt(session);
           session.log('AudioSocket conectado');
-          setTimeout(() => { if (!session.closed) speak(session, session.greetingText); }, 250);
+          if (session.modo === 'realtime') {
+            arrancarRealtime(session);
+          } else {
+            attachStt(session);
+            setTimeout(() => { if (!session.closed) speak(session, session.greetingText); }, 250);
+          }
         } else if ((type === 0x10 || type === 0x12) && session) {   // audio entrante (caller, slin16=0x12)
           handleInAudio(session, payload);
         } else if (type === 0x00) {              // terminar
@@ -345,7 +352,75 @@ function close() {
   return new Promise((ok) => { const srv = SRV; SRV = null; if (!srv) return ok(); srv.close(() => ok()); });
 }
 
+/* ============================================================
+ *  Modo REALTIME (un socket con el modelo, sin STT/LLM/TTS separados)
+ * ============================================================
+ *  El pipeline de tres pasos sigue intacto y es el default. Esto es el otro camino,
+ *  detrás de la misma interfaz: `pbxng_ai_agents.provider = 'openai-realtime'`.
+ *
+ *  Lo único que este archivo agrega al puente (`realtime.js`) es EL RITMO. El modelo
+ *  manda audio a ráfagas y el canal consume 20 ms cada 20 ms: si se escribe todo lo que
+ *  llega, se desborda y se escucha picado; si se espera a tenerlo entero, se pierde la
+ *  latencia que se vino a ganar. Así que llega a una cola y un reloj la vacía a ritmo de
+ *  canal. Es el mismo problema que ya resuelve `speak()` para el TTS, con una diferencia
+ *  importante: acá el audio sigue llegando mientras se reproduce.
+ */
+function arrancarRealtime(session) {
+  const puente = realtime.abrir({
+    key: session.keys.openai,
+    model: session.agent.model || 'gpt-realtime',
+    voz: session.agent.voice || 'alloy',
+    instrucciones: session.history[0].content,
+  });
+  session.rt = puente;
+  session.rtCola = [];
+
+  /* El reloj del canal: 20 ms. Sale UN frame por vuelta, ni más ni menos, y si no hay
+   * nada en la cola no se escribe silencio —el canal ya reproduce silencio solo—. */
+  session.rtReloj = setInterval(() => {
+    if (session.closed || !session.socket) return;
+    const f = session.rtCola.shift();
+    if (!f) { session.speaking = false; return; }
+    session.speaking = true;
+    const frame = Buffer.alloc(3 + f.length);
+    frame[0] = 0x10; frame.writeUInt16BE(f.length, 1); f.copy(frame, 3);
+    try { session.socket.write(frame); } catch (_) {}
+  }, 20);
+
+  puente.on('audio', (pcm8) => {
+    /* Se corta en frames de 20 ms exactos: el canal los quiere así, y partir a mano evita
+     * que un delta grande entre de una y se escuche adelantado. */
+    let off = 0;
+    while (off < pcm8.length) { session.rtCola.push(pcm8.slice(off, off + FRAME_BYTES)); off += FRAME_BYTES; }
+    /* Techo de cola: 5 s de audio. Si el modelo se desbocó o el canal se trabó, mejor
+     * perder el final de una frase que acumular minutos de audio que ya no viene al caso. */
+    if (session.rtCola.length > 250) session.rtCola.splice(0, session.rtCola.length - 250);
+  });
+  /* Barge-in: lo que queda por reproducir se TIRA. El puente ya le pidió al modelo que
+   * pare; sin esto el visitante seguiría escuchando la frase vieja unos segundos. */
+  puente.on('corte', () => { session.rtCola.length = 0; session.speaking = false; session.log('barge-in (realtime)'); });
+  puente.on('texto', (t) => { session.transcripcion = session.transcripcion || []; session.transcripcion.push(t); });
+  puente.on('error', (e) => session.log('realtime: ' + e));
+  puente.on('cerrado', () => session.log('realtime: sesión cerrada por el proveedor'));
+
+  puente.cuandoListo(10000)
+    .then(() => { if (!session.closed) puente.saludar(session.greetingText); })
+    .catch((e) => {
+      /* Si el modelo no abre, la llamada NO se queda muda: se dice la frase de siempre con
+       * el camino de toda la vida y se corta. Un agente que atiende y no habla es peor que
+       * uno que no atiende. */
+      session.log('realtime no abrió (' + e.message + '): se degrada a TTS local');
+      session.rtCaido = true;
+      speak(session, 'Disculpá, en este momento no puedo atenderte. Te paso con una persona.')
+        .then(() => doTransfer(session, session.agent.default_exten || '', 'Operador'))
+        .catch(() => {});
+    });
+}
+
 function handleInAudio(session, pcm) {
+  /* En realtime el audio va derecho al modelo: la detección de fin de frase y el
+   * barge-in los hace él, así que ni Vosk ni el VAD de acá tienen nada que decidir. */
+  if (session.rt && !session.rtCaido) { session.rt.enviarAudio(pcm); return; }
   const energy = rms(pcm);
   // barge-in: si el bot habla y el usuario sostiene voz, cortar TTS
   if (session.speaking) {
@@ -409,8 +484,12 @@ async function startAiSession(channel, agent) {
   const vozUrl = (await getSetting('voz_url')) || (process.env.VOZ_HOST ? 'http://' + process.env.VOZ_HOST + ':8080' : 'http://127.0.0.1:8080');
   const vozSpeed = (await getSetting('voz_length_scale')) || '1.0';
   const useOpenAI = (agent.provider === 'openai') && !!keys.openai;
+  /* Tres caminos, y el agente elige: `realtime` (un socket con el modelo), `openai` (STT →
+   * LLM → TTS) y el demo local. Sin clave, `realtime` no se intenta: la llamada iría a un
+   * socket que va a fallar y el visitante escucharía silencio. */
+  const modo = (agent.provider === 'openai-realtime' && keys.openai) ? 'realtime' : (useOpenAI ? 'openai' : 'demo');
   const session = {
-    uuid, channel, agent, keys, useOpenAI,
+    uuid, channel, agent, keys, useOpenAI, modo,
     callerId: (channel.caller && channel.caller.number) || '', vozUrl, vozSpeed,
     history: [{ role: 'system', content: (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.') }],
     greetingText: agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),
@@ -427,7 +506,7 @@ async function startAiSession(channel, agent) {
     session.em = em;
     await bridge.addChannel({ channel: channel.id });
     await bridge.addChannel({ channel: em.id });
-    session.log('sesión iniciada (provider=' + (useOpenAI ? 'openai' : (vozUrl ? 'neural' : 'demo')) + ', agente=' + agent.name + ')');
+    session.log('sesión iniciada (modo=' + modo + ', agente=' + agent.name + ')');
     // watchdog: si el caller cuelga
     session.endpointTimer = setInterval(() => checkEndpoint(session), 250);
     channel.once('StasisEnd', () => endSession(session, 'caller-hangup'));
@@ -437,7 +516,18 @@ async function startAiSession(channel, agent) {
   }
 }
 
-module.exports = { init, startAiSession, close };
+/* Métricas de las sesiones de IA en curso. Lo que importa medir de un agente de voz no es
+ * el uso de CPU: es cuánto silencio escucha la persona antes de que el agente conteste. */
+function metricas() {
+  const out = [];
+  for (const s of sessions.values()) {
+    out.push({ sesion: s.uuid.slice(0, 8), agente: (s.agent && s.agent.name) || '', modo: s.modo || 'demo',
+      llamante: s.callerId || '', latencia: s.rt ? s.rt.metricas() : null, en_cola: s.rtCola ? s.rtCola.length : 0 });
+  }
+  return out;
+}
+
+module.exports = { init, startAiSession, close, metricas };
 /* Se exportan SOLO para la prueba del tope (test/ia-topes.test.js): el camino de la
  * llamada no tolera un `fetch` sin corte, y esa prueba es la que lo deja clavado. */
 module.exports._crmLookup = crmLookup;

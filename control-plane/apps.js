@@ -327,9 +327,26 @@ module.exports = function init(deps) {
     try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
+  /* Proveedores que el pipeline entiende. La validación existe por un motivo concreto:
+   * `provider` es una columna de texto libre, así que un `openai-realtme` mal tipeado se
+   * guardaba sin chistar y la llamada caía al modo demo —el de reglas, sin IA— sin un
+   * solo error. El agente «no funcionaba» y no había nada que mirar. */
+  const PROVEEDORES = {
+    'openai-realtime': 'un solo socket con el modelo (audio entra / audio sale): la opción de menor latencia',
+    openai: 'STT → LLM → TTS en tres pasos (Whisper + chat + TTS)',
+    demo: 'sin IA: Vosk local + reglas + espeak, para probar sin clave ni internet',
+  };
+  const proveedorOk = (p, res) => {
+    if (Object.prototype.hasOwnProperty.call(PROVEEDORES, p)) return true;
+    res.status(400).json({ error: 'proveedor desconocido: ' + p, proveedores: PROVEEDORES });
+    return false;
+  };
+  app.get('/api/ai-agents/proveedores', (req, res) => res.json(PROVEEDORES));
+
   app.post('/api/ai-agents', async (req, res) => {
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
+    if (!proveedorOk(provider, res)) return;
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
@@ -342,6 +359,7 @@ module.exports = function init(deps) {
   app.put('/api/ai-agents/:id', async (req, res) => {
     const { id } = req.params;
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
+    if (!proveedorOk(provider, res)) return;
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
