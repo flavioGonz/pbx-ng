@@ -95,8 +95,14 @@ test('el puente configura la sesión, traduce el audio y mide la latencia', asyn
   await new Promise((r) => setTimeout(r, 50));
   assert.ok(srv.tipos().includes('session.update'), 'no mandó la configuración de sesión al abrir');
   const cfg = srv.recibido.find((r) => r.type === 'session.update');
-  assert.equal(cfg.session.voice, 'alloy');
-  assert.equal(cfg.session.input_audio_format, 'pcm16');
+  /* Forma GA (`type: 'realtime'`, todo el audio bajo `audio.*`). La forma beta no falla al
+   * conectar: abre la sesión e IGNORA la configuración, así que el agente habla con otra
+   * voz o no habla, y eso recién se descubre en la llamada. */
+  assert.equal(cfg.session.type, 'realtime');
+  assert.equal(cfg.session.audio.output.voice, 'alloy');
+  assert.equal(cfg.session.audio.input.format.type, 'audio/pcm');
+  assert.equal(cfg.session.audio.input.format.rate, 24000);
+  assert.equal(cfg.session.audio.input.turn_detection.type, 'server_vad');
   assert.match(String(cfg.session.instructions), /portero/);
 
   // El audio del canal (8k) sale al modelo en 24k y en base64.
@@ -221,4 +227,15 @@ test('explicar(): una clave rechazada no se confunde con un modelo inexistente',
   assert.match(rt.explicar(404, '', 'm'), /no existe/i);
   assert.match(rt.explicar(429, '', 'm'), /cupo|saldo/i);
   assert.match(rt.explicar(503, '', 'm'), /proveedor/i);
+});
+
+test('el handshake NO manda la cabecera de la API beta', () => {
+  /* `OpenAI-Beta: realtime=v1` es exactamente lo que hacía que OpenAI contestara «The
+   * Realtime Beta API is no longer supported». Es una línea de código y deja la central
+   * sin agente de voz, así que queda clavada acá. */
+  const h = rt.PROTOCOLO.cabeceras('sk-x', '');
+  assert.equal(h.Authorization, 'Bearer sk-x');
+  assert.ok(!Object.keys(h).some((k) => /beta/i.test(k)), 'volvió la cabecera de la API beta');
+  /* Azure autentica distinto y tampoco lleva beta. */
+  assert.deepEqual(rt.PROTOCOLO.cabeceras('k', 'https://x.azure.com/openai'), { 'api-key': 'k' });
 });

@@ -16,7 +16,7 @@ const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label
  * los renombra y retira cada pocos meses; si fueran una lista cerrada, el día que cambien
  * habría que actualizar la central para poder volver a atender. Estas son sugerencias, y
  * el botón «Probar conexión» es el que dice la verdad para ESTA cuenta. */
-const RT_MODELS = ['gpt-realtime-2.1-mini', 'gpt-realtime-2.1', 'gpt-realtime', 'gpt-4o-realtime-preview'];
+const RT_MODELS = ['gpt-realtime-2.1-mini', 'gpt-realtime-2.1', 'gpt-realtime'];
 const RT_VOICES = ['marin', 'cedar', 'alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
 const esRT = (p) => p === 'openai-realtime';
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
@@ -155,7 +155,7 @@ export default function AiAgents() {
             <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={cambiarProveedor}
               description={esRT(form.provider) ? 'Una sola sesión: menor latencia' : undefined} />
             {esRT(form.provider)
-              ? <Autocomplete label="Modelo (realtime)" description="Tal como lo sirve tu cuenta" data={RT_MODELS} value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} placeholder="gpt-realtime-2.1-mini" />
+              ? <Autocomplete label="Modelo (realtime)" description="Familia gpt-realtime" data={RT_MODELS} value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} placeholder="gpt-realtime-2.1-mini" />
               : <Select label="Modelo (OpenAI)" data={MODELS} value={form.model} onChange={v => up('model', v)} disabled={form.provider !== 'openai'} />}
             <Group gap="xs" align="flex-end" wrap="nowrap">
               {esRT(form.provider)

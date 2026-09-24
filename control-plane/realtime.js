@@ -97,17 +97,33 @@ const PROTOCOLO = {
   cabeceras: (key, base) => (base && /azure/i.test(String(base))
     /* Azure autentica con `api-key`, no con Bearer. Es la única diferencia de handshake. */
     ? { 'api-key': key }
-    : { Authorization: 'Bearer ' + key, 'OpenAI-Beta': 'realtime=v1' }),
+    /* SIN `OpenAI-Beta: realtime=v1`: esa cabecera es la que enrutaba a la API beta, que
+     * OpenAI retiró. El handshake contestaba «The Realtime Beta API is no longer
+     * supported. Please use /v1/realtime for the GA API» y la sesión nunca abría. La URL
+     * ya era la correcta; lo que sobraba era la cabecera. */
+    : { Authorization: 'Bearer ' + key }),
   /* Configuración de la sesión: voz, instrucciones, formato de audio y herramientas. */
   configurar: (o) => ({
     type: 'session.update',
     session: {
-      modalities: ['audio', 'text'],
-      voice: o.voz || 'alloy',
+      /* Forma GA. La beta ponía `voice`, `input_audio_format: 'pcm16'` y `turn_detection`
+       * sueltos en la raíz de `session`; en la GA todo eso vive bajo `audio.input` y
+       * `audio.output`, el formato es un objeto con su frecuencia, y `type: 'realtime'` es
+       * obligatorio. Mandar la forma vieja contra el endpoint nuevo NO falla al conectar:
+       * abre la sesión, ignora la configuración, y el agente habla con otra voz o no
+       * habla — el tipo de error que no se ve hasta la llamada. */
+      type: 'realtime',
       instructions: o.instrucciones || '',
-      input_audio_format: 'pcm16',
-      output_audio_format: 'pcm16',
-      turn_detection: { type: 'server_vad', silence_duration_ms: 600 },
+      audio: {
+        input: {
+          format: { type: 'audio/pcm', rate: RATE_MODELO },
+          turn_detection: { type: 'server_vad', silence_duration_ms: 600 },
+        },
+        output: {
+          format: { type: 'audio/pcm', rate: RATE_MODELO },
+          voice: o.voz || 'alloy',
+        },
+      },
       tools: o.herramientas || [],
     },
   }),

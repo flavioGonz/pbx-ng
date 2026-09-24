@@ -1277,6 +1277,16 @@ app.post('/api/ai-agents/probar', async (req, res) => {
   const model = String(b.model || '').trim();
   const voz = String(b.voice || b.voz || '').trim() || 'alloy';
   if (!model) return res.status(400).json({ error: 'falta el identificador del modelo (es el campo «Modelo» del agente)' });
+  /* `gpt-live-1` no es un modelo de la Realtime API: es la **Live API**, otro protocolo
+   * (otro endpoint, `session.start` en vez de `session.update`, y otros nombres de
+   * evento). Conectarlo contra este puente no da un error claro, da una sesión que no
+   * habla. Se avisa acá y no se gasta una sesión en averiguarlo. */
+  if (/^gpt-live/i.test(model)) {
+    return res.json({ ok: false, paso: 'modelo',
+      error: 'El identificador «' + model + '» es de la Live API de OpenAI, que es otro protocolo '
+           + '(otro endpoint y otros eventos) y este puente todavía no lo habla. Para voz a voz usá un modelo '
+           + 'de la familia gpt-realtime (por ejemplo gpt-realtime-2.1); la voz «marin» también existe ahí.' });
+  }
   if (probaEnCurso) return res.status(409).json({ error: 'ya hay una prueba corriendo' });
   if (Date.now() - probaUltima < 5000) return res.status(429).json({ error: 'esperá unos segundos: cada prueba abre una sesión que se paga' });
   probaEnCurso = true; probaUltima = Date.now();
