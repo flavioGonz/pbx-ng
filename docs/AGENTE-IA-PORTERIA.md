@@ -235,6 +235,49 @@ la evidencia es lo que se le muestra al cliente y lo que cubre a la empresa.
 
 ---
 
+## 6.1 Fase 0 — qué está hecho y cómo se corre (2026-09-24)
+
+**Hecho y desplegado en pbx01 (1.13.0+):** el puente de voz, que es la pieza que decide si
+esto es viable. `control-plane/realtime.js` habla con el modelo por un solo WebSocket,
+traduce el audio en los dos sentidos (8 kHz de la telefonía ↔ 24 kHz del modelo), lo
+entrega al canal al ritmo de 20 ms que Asterisk espera, maneja el barge-in —tirar lo que
+queda por reproducir **y** pedirle al modelo que pare— y **cronometra cada turno**.
+
+Todo lo que el proveedor puede cambiar (nombres de eventos, URL, cabeceras) está en un solo
+objeto del archivo. El identificador del modelo NO está en el código: es `model` del agente.
+
+**Lo que falta para correrlo de verdad son dos cosas, y ninguna es código:**
+
+1. **Cargar la clave de OpenAI en el panel** (Configuración → IA / Voz). Hoy pbx01 no tiene
+   ninguna, y sin clave el modo realtime **ni se intenta**: la llamada iría a un socket que
+   va a fallar y el visitante escucharía silencio.
+2. **Un interno de prueba**, con un agente cuyo `provider` sea `openai-realtime`.
+
+**Cómo se corre la fase 0, en orden:**
+
+```
+1. Panel → Voz → nuevo agente:
+     proveedor = openai-realtime
+     modelo    = <el id del modelo realtime vigente>
+     voz       = alguna de las del proveedor
+     prompt    = escrito a partir de tres llamadas reales del centro (§0)
+     interno   = uno de prueba, que no esté en ninguna cola
+2. Marcar ese interno desde un softphone.
+3. Mientras habla, mirar GET /api/ai-agents/live:
+     { sesiones: [ { modo: "realtime", latencia: { turnos, ultimo_ms, mediana_ms, peor_ms } } ] }
+```
+
+**El número que decide.** Si la **mediana** pasa de ~1 s, la conversación se siente rota y
+la gente cuelga: ahí la respuesta no es cambiar el prompt, es revisar el camino (red de la
+central al proveedor, tamaño del colchón, o directamente otro proveedor). Con la mediana
+por debajo de eso, se pasa a la fase 1. Veinte llamadas grabadas y escuchadas a mano, como
+dice la tabla de fases, y recién después se habla de colas y herramientas.
+
+**Lo que este puente NO hace todavía, a propósito:** no entra a ninguna cola, no tiene
+herramientas, no toca el CRM y no abre nada. Eso es fase 1 en adelante.
+
+---
+
 ## 7. Lo que queda por decidir
 
 Las otras cuatro están en §0. Queda una, y es la que arranca el trabajo:
