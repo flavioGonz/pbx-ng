@@ -86,8 +86,18 @@ function creaBajador() {
 /* ── Protocolo del proveedor, en un solo lugar ─────────────────────────────────
  * Todo lo que puede cambiar cuando el proveedor publique una versión nueva está acá. */
 const PROTOCOLO = {
-  url: (model) => 'wss://api.openai.com/v1/realtime?model=' + encodeURIComponent(model),
-  cabeceras: (key) => ({ Authorization: 'Bearer ' + key, 'OpenAI-Beta': 'realtime=v1' }),
+  /* `base` sale de un ajuste del panel (`realtime_url`), vacío por defecto. Existe por dos
+   * motivos concretos: el mismo modelo se sirve desde Azure —donde están los créditos de
+   * Microsoft for Startups, que es la forma realista de probar esto sin poner plata— y
+   * porque una central on-prem puede tener que salir por un proxy propio. Cambiar de
+   * endpoint NO puede ser un release. */
+  url: (model, base) => (base
+    ? String(base).replace(/\/+$/, '') + (String(base).includes('?') ? '&' : '?') + 'model=' + encodeURIComponent(model)
+    : 'wss://api.openai.com/v1/realtime?model=' + encodeURIComponent(model)),
+  cabeceras: (key, base) => (base && /azure/i.test(String(base))
+    /* Azure autentica con `api-key`, no con Bearer. Es la única diferencia de handshake. */
+    ? { 'api-key': key }
+    : { Authorization: 'Bearer ' + key, 'OpenAI-Beta': 'realtime=v1' }),
   /* Configuración de la sesión: voz, instrucciones, formato de audio y herramientas. */
   configurar: (o) => ({
     type: 'session.update',
@@ -140,8 +150,8 @@ function abrir(opts) {
   const ev = new EventEmitter();
   const bajar = creaBajador();
   const WS = o.WebSocketImpl || require('ws');
-  const url = o.url || PROTOCOLO.url(o.model || 'gpt-realtime');
-  const ws = new WS(url, o.subprotocolos || undefined, { headers: o.key ? PROTOCOLO.cabeceras(o.key) : undefined });
+  const url = o.url || PROTOCOLO.url(o.model || 'gpt-realtime-2.1-mini', o.base);
+  const ws = new WS(url, o.subprotocolos || undefined, { headers: o.key ? PROTOCOLO.cabeceras(o.key, o.base) : undefined });
 
   /* Métricas: el número que decide si esto es viable no es el costo, es cuánto tarda en
    * empezar a hablar. Se mide desde que el usuario deja de hablar hasta el primer byte de

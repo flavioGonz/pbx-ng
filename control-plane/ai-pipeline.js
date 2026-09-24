@@ -368,7 +368,8 @@ function close() {
 function arrancarRealtime(session) {
   const puente = realtime.abrir({
     key: session.keys.openai,
-    model: session.agent.model || 'gpt-realtime',
+    base: session.realtimeBase || '',
+    model: session.agent.model || 'gpt-realtime-2.1-mini',
     voz: session.agent.voice || 'alloy',
     instrucciones: session.history[0].content,
   });
@@ -481,6 +482,8 @@ async function startAiSession(channel, agent) {
   if (!ARI) { try { await channel.hangup(); } catch (_) {} return; }
   const uuid = crypto.randomUUID();
   const keys = { openai: await getSetting('openai_api_key') };
+  /* Endpoint alternativo del modelo realtime (Azure, un proxy propio). Vacío = OpenAI. */
+  const realtimeBase = await getSetting('realtime_url');
   const vozUrl = (await getSetting('voz_url')) || (process.env.VOZ_HOST ? 'http://' + process.env.VOZ_HOST + ':8080' : 'http://127.0.0.1:8080');
   const vozSpeed = (await getSetting('voz_length_scale')) || '1.0';
   const useOpenAI = (agent.provider === 'openai') && !!keys.openai;
@@ -489,7 +492,7 @@ async function startAiSession(channel, agent) {
    * socket que va a fallar y el visitante escucharía silencio. */
   const modo = (agent.provider === 'openai-realtime' && keys.openai) ? 'realtime' : (useOpenAI ? 'openai' : 'demo');
   const session = {
-    uuid, channel, agent, keys, useOpenAI, modo,
+    uuid, channel, agent, keys, useOpenAI, modo, realtimeBase,
     callerId: (channel.caller && channel.caller.number) || '', vozUrl, vozSpeed,
     history: [{ role: 'system', content: (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.') }],
     greetingText: agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),

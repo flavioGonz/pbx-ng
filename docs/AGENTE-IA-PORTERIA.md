@@ -267,6 +267,46 @@ objeto del archivo. El identificador del modelo NO está en el código: es `mode
      { sesiones: [ { modo: "realtime", latencia: { turnos, ultimo_ms, mediana_ms, peor_ms } } ] }
 ```
 
+### ¿Se puede probar gratis?
+
+**No hay plan gratuito para el modelo realtime.** Se paga por token de audio, en los dos
+sentidos. Precios publicados al 2026-09-24:
+
+| Modelo | Audio entra | Audio sale |
+|---|---|---|
+| `gpt-realtime-2.1` | US$ 32 / 1M tokens | US$ 64 / 1M tokens |
+| `gpt-realtime-2.1-mini` | US$ 10 / 1M tokens | US$ 20 / 1M tokens |
+
+**Lo que cuesta la fase 0, estimado** (el audio se cuenta a ~10 tokens por segundo, así que
+un minuto de conversación con las dos partes hablando la mitad del tiempo son ~600 tokens
+de entrada y ~600 de salida):
+
+- con el **mini**: ~US$ 0,02 por minuto → **20 llamadas de un minuto ≈ US$ 0,40**
+- con el grande: ~US$ 0,06 por minuto → 20 llamadas ≈ US$ 1,20
+
+O sea: **la fase 0 entera entra en el depósito mínimo de la API (US$ 5) y sobra.** Es una
+estimación a partir del precio por token; el número real lo va a decir el tablero de la
+cuenta después de las primeras llamadas, y conviene mirarlo ahí antes de hablar de colas.
+
+**Tres caminos que NO cuestan nada, y qué prueba cada uno:**
+
+1. **El modo demo que ya existe** (`provider = demo`): Vosk + reglas + espeak, todo local,
+   sin internet y sin clave. **Prueba toda la cañería** —dialplan, AudioSocket, timbrado,
+   transferencia, la cola cuando llegue— y **no prueba nada de la conversación**. Sirve
+   para dejar el camino armado antes de gastar el primer centavo.
+2. **Créditos de Microsoft for Startups**: US$ 1.000 por 90 días (y US$ 4.000 más sin
+   inversores, verificación mediante) usables en **Azure**, que sirve los mismos modelos.
+   Por eso el endpoint es un ajuste (`realtime_url` en la configuración) y el handshake de
+   Azure —que autentica con `api-key` y no con Bearer— ya está contemplado: **cambiar de
+   proveedor no puede ser un release**.
+3. **Tokens por compartir tráfico**: OpenAI da tokens diarios gratis a quien comparte su
+   tráfico de API, pero **requiere saldo positivo** y no está claro que cubra realtime. No
+   es un camino para empezar.
+
+**Recomendación:** poner US$ 5 y correr la fase 0 con el **mini**. Si el mini responde
+rápido y se entiende, el grande sólo va a estar mejor; y si el mini no alcanza para una
+conversación de portería, eso también es información barata.
+
 **El número que decide.** Si la **mediana** pasa de ~1 s, la conversación se siente rota y
 la gente cuelga: ahí la respuesta no es cambiar el prompt, es revisar el camino (red de la
 central al proveedor, tamaño del colchón, o directamente otro proveedor). Con la mediana
