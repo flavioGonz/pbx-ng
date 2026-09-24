@@ -134,6 +134,33 @@ const PROTOCOLO = {
   },
 };
 
+/* ── Por qué NO abrió ──────────────────────────────────────────────────────────
+ * Un `ws` que no logra el 101 emite `Unexpected server response: 401` y nada más. Ese
+ * texto es inútil para quien mira el panel: las dos causas más frecuentes —la clave no
+ * sirve y el identificador del modelo no existe para esa cuenta— se arreglan en lugares
+ * distintos, y el cuerpo de la respuesta HTTP, que sí lo dice, se descartaba. Acá se lee
+ * ese cuerpo y se traduce el status a la acción concreta que hay que hacer.
+ *
+ * Importa especialmente para el identificador del modelo: cada vez que el proveedor
+ * renombra o retira uno, el síntoma es este 404 y no un error de audio. */
+function explicar(status, cuerpo, model) {
+  const detalle = String(cuerpo || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const m = model ? ' «' + model + '»' : '';
+  if (status === 401 || status === 403) {
+    return 'HTTP ' + status + ': el proveedor rechazó la clave. Revisá la clave de OpenAI en el panel '
+      + '(Agentes IA → Proveedor de IA); si la rotaste, hay que volver a cargarla.'
+      + (detalle ? ' — ' + detalle : '');
+  }
+  if (status === 404 || status === 400) {
+    return 'HTTP ' + status + ': el modelo' + m + ' no existe para esta cuenta, o el nombre cambió. '
+      + 'El identificador del modelo es un campo del agente: corregilo ahí, no hace falta actualizar la central.'
+      + (detalle ? ' — ' + detalle : '');
+  }
+  if (status === 429) return 'HTTP 429: la cuenta no tiene cupo o saldo para sesiones realtime.' + (detalle ? ' — ' + detalle : '');
+  if (status >= 500) return 'HTTP ' + status + ': el proveedor está con problemas; no es la configuración.' + (detalle ? ' — ' + detalle : '');
+  return 'HTTP ' + status + (detalle ? ': ' + detalle : '');
+}
+
 /**
  * Abre el puente. Devuelve un EventEmitter con:
  *   'audio'   (pcm8)   audio del modelo, YA a 8 kHz, listo para el canal
@@ -207,7 +234,19 @@ function abrir(opts) {
     }
   });
 
-  ws.on('error', (e) => ev.emit('error', String((e && e.message) || e)));
+  /* Handshake fallido: `ws` avisa por acá ANTES de emitir 'error', y es la única
+   * oportunidad de leer el cuerpo de la respuesta, que es donde el proveedor dice qué
+   * está mal. Sin esto, un modelo mal escrito y una clave vencida se ven igual. */
+  ws.on('unexpected-response', (_req, resp) => {
+    let cuerpo = '';
+    resp.on('data', (c) => { if (cuerpo.length < 1000) cuerpo += String(c); });
+    const avisar = () => { ev.handshake = { status: resp.statusCode }; ev.emit('error', explicar(resp.statusCode, cuerpo, o.model)); };
+    resp.on('end', avisar);
+    resp.on('error', avisar);
+    /* Si el proveedor deja la respuesta abierta, igual hay que contestar. */
+    setTimeout(() => { if (!ev.handshake) avisar(); }, 2000).unref?.();
+  });
+  ws.on('error', (e) => { if (!ev.handshake) ev.emit('error', String((e && e.message) || e)); });
   ws.on('close', () => ev.emit('cerrado'));
 
   const enviar = (obj) => { try { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch (_) {} };
@@ -230,4 +269,53 @@ function abrir(opts) {
   return ev;
 }
 
-module.exports = { abrir, subir, creaBajador, PROTOCOLO, RATE_TEL, RATE_MODELO };
+
+/* ── Prueba de conexión de punta a punta ───────────────────────────────────────
+ * Lo que responde esta función es la única pregunta que importa antes de la primera
+ * llamada de verdad: **con esta clave, este identificador de modelo y esta voz, el
+ * proveedor abre la sesión y devuelve audio.** Tres cosas que hoy sólo se descubrían
+ * marcando el interno y escuchando silencio.
+ *
+ * Se pide que HABLE, no sólo que abra el socket: un modelo puede aceptar la conexión y
+ * rechazar la voz, y eso, en una llamada, es un agente que atiende y no dice nada. El
+ * costo es de un par de segundos de sesión.
+ *
+ * La clave NO se guarda ni se escribe en el log: entra por parámetro desde el ajuste del
+ * panel y se va con la función.
+ */
+async function probar(opts) {
+  const o = opts || {};
+  const t0 = Date.now();
+  const r = { ok: false, model: o.model || null, voz: o.voz || null, abrio_ms: null, primer_audio_ms: null, bytes_audio: 0, texto: '', error: null };
+  let ev = null;
+  try {
+    ev = abrir({ url: o.url, base: o.base, key: o.key, model: o.model, voz: o.voz, WebSocketImpl: o.WebSocketImpl,
+      instrucciones: 'Sos una prueba de conexión. Respondé con una sola frase corta en español.' });
+    await ev.cuandoListo(o.topeAbrir || 10000);
+    r.abrio_ms = Date.now() - t0;
+
+    const t1 = Date.now();
+    await new Promise((ok, fail) => {
+      const tope = setTimeout(() => fail(new Error('la sesión abrió pero el modelo no mandó audio en '
+        + Math.round((o.topeAudio || 15000) / 1000) + ' s: revisá que la voz «' + (o.voz || 'alloy') + '» exista para este modelo')), o.topeAudio || 15000);
+      ev.on('audio', (pcm) => {
+        r.bytes_audio += pcm.length;
+        if (r.primer_audio_ms === null) { r.primer_audio_ms = Date.now() - t1; clearTimeout(tope); ok(); }
+      });
+      ev.on('texto', (t) => { if (t && t.quien === 'agente' && t.texto) r.texto += t.texto; });
+      ev.once('error', (e) => { clearTimeout(tope); fail(new Error(String(e))); });
+      ev.saludar('Decí, en español: listo, la conexión funciona.');
+    });
+    /* Un ratito más para juntar algo de transcripción y poder mostrar qué dijo. */
+    await new Promise((ok) => setTimeout(ok, o.colaMs === undefined ? 600 : o.colaMs));
+    r.ok = true;
+  } catch (e) {
+    r.error = String((e && e.message) || e);
+  } finally {
+    try { if (ev) ev.cerrar(); } catch (_) {}
+  }
+  r.total_ms = Date.now() - t0;
+  return r;
+}
+
+module.exports = { abrir, probar, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };

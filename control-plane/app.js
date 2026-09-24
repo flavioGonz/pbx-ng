@@ -13,6 +13,7 @@ const { Server } = require('socket.io');
 const { Pool } = require('pg');
 const AriClient = require('ari-client');
 const aiPipeline = require('./ai-pipeline');
+const realtime = require('./realtime');   // probar la conexión con el modelo desde el panel
 const AsteriskManager = require('asterisk-manager');
 const jwt = require('jsonwebtoken');   // sólo para el handshake del socket; las sesiones HTTP las firma/verifica auth.js
 const helmet = require('helmet');
@@ -1256,6 +1257,41 @@ app.post('/api/net/mode/revert', async (req, res) => {
 app.get('/api/ai-agents/live', (req, res) => {
   try { res.json({ sesiones: aiPipeline.metricas(), ts: new Date().toISOString() }); }
   catch (e) { errorHttp(res, e); }
+});
+
+/* ── «¿Puedo llamar al agente?» ────────────────────────────────────────────────
+ * Antes de esto, la única forma de saber si un agente realtime iba a funcionar era marcar
+ * el interno y escuchar: si sonaba silencio, había que adivinar entre tres causas (la
+ * clave, el identificador del modelo, la voz) sin un solo error a la vista, porque el
+ * pipeline degrada a propósito en vez de cortar la llamada.
+ *
+ * Esta ruta abre una sesión de verdad con el proveedor, le pide que hable y cuenta qué
+ * pasó. La clave sale del ajuste `openai_api_key` y NO vuelve en la respuesta ni se
+ * escribe en el log: el panel manda modelo y voz, nunca la clave.
+ *
+ * Cuesta plata (un par de segundos de sesión), así que hay un candado: una prueba a la vez
+ * y no más de una cada 5 s, para que un doble clic no abra dos sesiones. */
+let probaEnCurso = false, probaUltima = 0;
+app.post('/api/ai-agents/probar', async (req, res) => {
+  const b = req.body || {};
+  const model = String(b.model || '').trim();
+  const voz = String(b.voice || b.voz || '').trim() || 'alloy';
+  if (!model) return res.status(400).json({ error: 'falta el identificador del modelo (es el campo «Modelo» del agente)' });
+  if (probaEnCurso) return res.status(409).json({ error: 'ya hay una prueba corriendo' });
+  if (Date.now() - probaUltima < 5000) return res.status(429).json({ error: 'esperá unos segundos: cada prueba abre una sesión que se paga' });
+  probaEnCurso = true; probaUltima = Date.now();
+  try {
+    const key = await getProvSetting('openai_api_key', '');
+    if (!key) {
+      return res.json({ ok: false, paso: 'clave',
+        error: 'No hay clave de OpenAI cargada en la central. Cargala arriba, en «Proveedor de IA» → OpenAI API Key. '
+             + 'Sin clave, el agente NO intenta el modo realtime: atiende en modo demo.' });
+    }
+    const base = await getProvSetting('realtime_url', '');
+    const r = await realtime.probar({ key, base, model, voz });
+    res.json(Object.assign({ paso: r.ok ? 'listo' : 'sesion', endpoint: base || 'api.openai.com (por defecto)' }, r));
+  } catch (e) { errorHttp(res, e); }
+  finally { probaEnCurso = false; }
 });
 
 const CLI_ALLOW = /^(pjsip (show|list)|core show|dialplan show|queue show|confbridge (list|show)|module show|database (show|get)|rtp show|http show|manager show|stir_shaken show|version|uptime)\b/i;

@@ -164,3 +164,61 @@ test('un error del proveedor se avisa, no se traga', async (t) => {
   const msg = await esperarEvento(p, 'error');
   assert.match(String(msg), /cuota agotada/);
 });
+
+/* ── «¿Estamos listos para llamar?» ───────────────────────────────────────────
+ * Estas dos pruebas cuidan la ruta del panel (`POST /api/ai-agents/probar`). Lo que se
+ * está protegiendo no es el código: es el DIAGNÓSTICO. Sin esto, los tres motivos por los
+ * que un agente atiende y no habla —la clave, el identificador del modelo y la voz— se
+ * veían todos igual: silencio en la llamada y ningún error, porque el pipeline degrada a
+ * propósito en vez de cortar. */
+test('probar(): si el modelo habla, dice cuánto tardó en hablar', async (t) => {
+  const srv = await servidorFalso();
+  t.after(() => srv.cerrar());
+  /* El servidor falso contesta con audio en cuanto le piden una respuesta. */
+  const wsAlta = new Promise((ok) => {
+    const i = setInterval(() => {
+      if (srv.recibido.some((r) => r.type === 'response.create')) {
+        clearInterval(i);
+        srv.mandar({ type: 'response.audio_transcript.delta', delta: 'listo' });
+        srv.mandar({ type: 'response.audio.delta', delta: tono(300, 60, 24000).toString('base64') });
+        ok();
+      }
+    }, 10);
+    t.after(() => clearInterval(i));
+  });
+
+  const r = await rt.probar({ url: srv.url(), model: 'x', voz: 'marin', topeAudio: 5000, colaMs: 100 });
+  await wsAlta;
+  assert.equal(r.ok, true, 'la prueba falló: ' + r.error);
+  assert.ok(r.abrio_ms !== null && r.abrio_ms < 5000);
+  assert.ok(r.primer_audio_ms !== null, 'no midió cuánto tarda en empezar a hablar: es el silencio que escucha el visitante');
+  assert.ok(r.bytes_audio > 0);
+  assert.match(r.texto, /listo/);
+});
+
+test('probar(): si el modelo no existe, lo dice y dice dónde se arregla', async (t) => {
+  /* Un `ws` contra un endpoint que no da el 101 emite «Unexpected server response: 404» y
+   * nada más — inútil para quien mira el panel. Acá se comprueba que se lee el CUERPO de
+   * la respuesta, que es donde el proveedor explica qué está mal. */
+  const http = require('node:http');
+  const srv = http.createServer((req, res) => {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: 'The model `gpt-live-1` does not exist' } }));
+  });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  t.after(() => new Promise((ok) => srv.close(ok)));
+
+  const r = await rt.probar({ url: 'ws://127.0.0.1:' + srv.address().port, model: 'gpt-live-1', voz: 'marin', topeAbrir: 4000 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /404/);
+  assert.match(r.error, /gpt-live-1/, 'no nombró el modelo: el que lee el panel no sabe qué corregir');
+  assert.match(r.error, /campo|agente/i, 'no dice dónde se arregla');
+});
+
+test('explicar(): una clave rechazada no se confunde con un modelo inexistente', () => {
+  assert.match(rt.explicar(401, '', 'm'), /clave/i);
+  assert.doesNotMatch(rt.explicar(401, '', 'm'), /no existe/i);
+  assert.match(rt.explicar(404, '', 'm'), /no existe/i);
+  assert.match(rt.explicar(429, '', 'm'), /cupo|saldo/i);
+  assert.match(rt.explicar(503, '', 'm'), /proveedor/i);
+});

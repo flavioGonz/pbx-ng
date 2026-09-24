@@ -1,13 +1,24 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
-import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, PasswordInput, Alert, Tooltip, Progress, Slider } from '@mantine/core';
-import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh, IconPlayerPlay, IconCircleCheck } from '@tabler/icons-react';
+import { Stack, Card, Group, Autocomplete, Code, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, PasswordInput, Alert, Tooltip, Progress, Slider } from '@mantine/core';
+import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
 
-const PROVIDERS = [{ value: 'demo', label: 'Demo (offline · Vosk + espeak)' }, { value: 'openai', label: 'OpenAI (Whisper + GPT + TTS)' }];
+const PROVIDERS = [
+  { value: 'demo', label: 'Demo (offline · Vosk + espeak)' },
+  { value: 'openai', label: 'OpenAI (Whisper + GPT + TTS)' },
+  { value: 'openai-realtime', label: 'OpenAI Realtime (voz a voz · un solo socket)' },
+];
 const MODELS = [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini (rápido/económico)' }, { value: 'gpt-4o', label: 'gpt-4o (máxima calidad)' }];
 const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label: 'Alloy' }, { value: 'shimmer', label: 'Shimmer' }, { value: 'onyx', label: 'Onyx' }, { value: 'echo', label: 'Echo' }, { value: 'fable', label: 'Fable' }];
+/* Realtime: el identificador del modelo y la voz son texto LIBRE a propósito. El proveedor
+ * los renombra y retira cada pocos meses; si fueran una lista cerrada, el día que cambien
+ * habría que actualizar la central para poder volver a atender. Estas son sugerencias, y
+ * el botón «Probar conexión» es el que dice la verdad para ESTA cuenta. */
+const RT_MODELS = ['gpt-realtime-2.1-mini', 'gpt-realtime-2.1', 'gpt-realtime', 'gpt-4o-realtime-preview'];
+const RT_VOICES = ['marin', 'cedar', 'alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
+const esRT = (p) => p === 'openai-realtime';
 const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
 const empty = { name: '', exten: '', provider: 'demo', model: 'gpt-4o-mini', voice: 'es_MX-claude-high', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true };
 
@@ -33,6 +44,14 @@ export default function AiAgents() {
   // Agentes y motor de voz: configuración + un health que no cambia cada 8 s.
   useEffect(() => { load(); loadKey(); loadVoz(); loadVozList(); const t = setInterval(() => { if (!document.hidden) { load(); loadVoz(); } }, 30000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
+  /* Cambiar el proveedor tiene que dejar modelo y voz COHERENTES: un agente realtime con
+   * `gpt-4o-mini` y voz `es_MX-claude-high` se guarda sin error y después no habla. */
+  function cambiarProveedor(v) {
+    setPrueba(null);
+    setForm(s => ({ ...s, provider: v,
+      model: esRT(v) ? (RT_MODELS.includes(s.model) ? s.model : RT_MODELS[0]) : (s.model && s.model.includes('realtime') ? 'gpt-4o-mini' : s.model),
+      voice: esRT(v) ? (RT_VOICES.includes(s.voice) ? s.voice : 'marin') : s.voice }));
+  }
   function edit(a) { setForm({ ...empty, ...a }); setOpened(true); }
   function nuevo() { setForm(empty); setOpened(true); }
   async function save() {
@@ -44,6 +63,16 @@ export default function AiAgents() {
     if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(form.id ? 'Agente actualizado' : 'Agente creado (acceso ' + form.exten + ')', 'ok'); setOpened(false); load(); }
   }
   async function del(a) { if (!confirm('¿Eliminar el agente ' + a.name + '?')) return; await fetch('/backend/api/ai-agents/' + a.id, { method: 'DELETE' }); toast('Agente eliminado', 'info'); load(); }
+  /* «¿Estamos listos para llamar?»: abre una sesión de verdad con el modelo y cuenta qué
+   * pasó. La clave nunca sale del servidor: el panel manda modelo y voz. */
+  const [prueba, setPrueba] = useState(null); const [probando, setProbando] = useState(false);
+  async function probarRealtime() {
+    setProbando(true); setPrueba(null);
+    const r = await fetch('/backend/api/ai-agents/probar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: form.model, voice: form.voice }) })
+      .then(x => x.json()).catch(() => ({ ok: false, error: 'no se pudo contactar la central' }));
+    setProbando(false); setPrueba(r);
+    toast(r.ok ? 'El modelo contestó: ya se puede llamar al agente' : 'La prueba falló', r.ok ? 'ok' : 'bad');
+  }
   async function saveKey() {
     setKeySaving(true);
     const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openai_api_key: keyVal }) }).then(x => x.json()).catch(() => ({ error: 1 }));
@@ -59,7 +88,7 @@ export default function AiAgents() {
         <Group gap="sm" mb="sm"><ThemeIcon variant="light" color="violet"><IconKey size={18} /></ThemeIcon><Text fw={600}>Proveedor de IA</Text>
           <Badge variant="light" color={keySet ? 'teal' : 'gray'}>{keySet ? 'OpenAI configurado' : 'Modo demo (offline)'}</Badge></Group>
         <Alert variant="light" color="blue" icon={<IconInfoCircle size={18} />} mb="md">
-          Sin clave, los agentes funcionan en <b>modo demo</b> 100% offline (Vosk para entender, voz sintética local). Cargá tu clave de OpenAI para STT/LLM/TTS de máxima calidad y elegí proveedor «OpenAI» en cada agente.
+          Sin clave, los agentes funcionan en <b>modo demo</b> 100% offline (Vosk para entender, voz sintética local). Cargá tu clave de OpenAI para STT/LLM/TTS de máxima calidad y elegí proveedor «OpenAI» en cada agente. El proveedor <b>OpenAI Realtime</b> (voz a voz, el que usan los agentes de portería en las colas) también necesita esta clave: sin ella no se intenta siquiera, y la llamada cae en modo demo.
         </Alert>
         <Group align="flex-end" gap="sm">
           <PasswordInput label="OpenAI API Key" placeholder={keySet ? '•••••••••• (guardada)' : 'sk-...'} value={keyVal} onChange={e => setKeyVal(e.currentTarget.value)} style={{ flex: 1, maxWidth: 460 }} leftSection={<IconKey size={15} />} />
@@ -105,7 +134,7 @@ export default function AiAgents() {
                 <Table.Tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => edit(a)}>
                   <Table.Td fw={600}>{a.name}</Table.Td>
                   <Table.Td ff="monospace">{a.exten}</Table.Td>
-                  <Table.Td><Badge variant="light" color={a.provider === 'openai' ? 'teal' : 'grape'}>{a.provider === 'openai' ? 'OpenAI · ' + a.model : 'Demo'}</Badge></Table.Td>
+                  <Table.Td><Badge variant="light" color={esRT(a.provider) ? 'violet' : a.provider === 'openai' ? 'teal' : 'grape'}>{esRT(a.provider) ? 'Realtime · ' + a.model : a.provider === 'openai' ? 'OpenAI · ' + a.model : 'Demo'}</Badge></Table.Td>
                   <Table.Td><Text size="sm" c="dimmed">{a.voice}</Text></Table.Td>
                   <Table.Td><Badge variant="dot" color={a.enabled ? 'teal' : 'gray'}>{a.enabled ? 'Activo' : 'Inactivo'}</Badge></Table.Td>
                   <Table.Td ta="right" onClick={e => e.stopPropagation()}><Group gap={4} justify="flex-end"><ActionIcon variant="subtle" onClick={() => edit(a)}><IconEdit size={17} /></ActionIcon><ActionIcon variant="subtle" color="red" onClick={() => del(a)}><IconTrash size={17} /></ActionIcon></Group></Table.Td>
@@ -123,13 +152,38 @@ export default function AiAgents() {
             <TextInput label="Número de acceso" description="Extensión que dispara el bot. Ej: 7700" value={form.exten} onChange={e => up('exten', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
           </SimpleGrid>
           <SimpleGrid cols={3}>
-            <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={v => up('provider', v)} />
-            <Select label="Modelo (OpenAI)" data={MODELS} value={form.model} onChange={v => up('model', v)} disabled={form.provider !== 'openai'} />
+            <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={cambiarProveedor}
+              description={esRT(form.provider) ? 'Una sola sesión: menor latencia' : undefined} />
+            {esRT(form.provider)
+              ? <Autocomplete label="Modelo (realtime)" description="Tal como lo sirve tu cuenta" data={RT_MODELS} value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} placeholder="gpt-realtime-2.1-mini" />
+              : <Select label="Modelo (OpenAI)" data={MODELS} value={form.model} onChange={v => up('model', v)} disabled={form.provider !== 'openai'} />}
             <Group gap="xs" align="flex-end" wrap="nowrap">
-              <Select label="Voz" description={form.provider === 'openai' ? 'Voces de OpenAI' : 'Voces instaladas (gestionalas en Voz IA)'} data={form.provider === 'openai' ? OPENAI_VOICES : [{ group: 'Local · Piper (offline)', items: vozList.map(k => ({ value: k, label: k })) }, { group: 'Latinoamérica · Edge (online)', items: edgeList.map(v => ({ value: v.key, label: v.label })) }]} value={form.voice} onChange={v => up('voice', v)} style={{ flex: 1 }} searchable />
-              {form.provider !== 'openai' && <Tooltip label="Escuchar voz"><ActionIcon variant="light" size={36} onClick={() => preview(form.voice)} disabled={!form.voice}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>}
+              {esRT(form.provider)
+                ? <Autocomplete label="Voz" description="Voces realtime" data={RT_VOICES} value={form.voice || ''} onChange={v => { up('voice', v); setPrueba(null); }} placeholder="marin" style={{ flex: 1 }} />
+                : <Select label="Voz" description={form.provider === 'openai' ? 'Voces de OpenAI' : 'Voces instaladas (gestionalas en Voz IA)'} data={form.provider === 'openai' ? OPENAI_VOICES : [{ group: 'Local · Piper (offline)', items: vozList.map(k => ({ value: k, label: k })) }, { group: 'Latinoamérica · Edge (online)', items: edgeList.map(v => ({ value: v.key, label: v.label })) }]} value={form.voice} onChange={v => up('voice', v)} style={{ flex: 1 }} searchable />}
+              {form.provider === 'demo' && <Tooltip label="Escuchar voz"><ActionIcon variant="light" size={36} onClick={() => preview(form.voice)} disabled={!form.voice}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>}
             </Group>
           </SimpleGrid>
+          {esRT(form.provider) && <Card withBorder radius="md" padding="sm" bg="var(--mantine-color-default-hover)">
+            <Group justify="space-between" wrap="nowrap" mb={prueba ? 'sm' : 0}>
+              <div>
+                <Text size="sm" fw={600}>¿Se puede llamar a este agente?</Text>
+                <Text size="xs" c="dimmed">Abre una sesión real con el modelo y le pide que hable. Comprueba las tres cosas que hacen que un agente atienda y no diga nada: la clave, el identificador del modelo y la voz.</Text>
+              </div>
+              <Button size="xs" variant="light" leftSection={<IconPlugConnected size={15} />} loading={probando} onClick={probarRealtime} disabled={!form.model}>Probar conexión</Button>
+            </Group>
+            {prueba && (prueba.ok
+              ? <Alert variant="light" color="teal" icon={<IconCircleCheck size={18} />}>
+                  <Text size="sm" fw={600}>El modelo contestó. Ya se puede marcar {form.exten || 'el interno del agente'}.</Text>
+                  <Text size="xs" c="dimmed">Sesión abierta en {prueba.abrio_ms} ms · primer audio en {prueba.primer_audio_ms} ms · {prueba.bytes_audio} bytes.
+                    {' '}Ese «primer audio» es el silencio que va a escuchar el visitante antes de que el agente hable.</Text>
+                  {prueba.texto ? <Text size="xs" mt={4}>Dijo: «{prueba.texto.trim()}»</Text> : null}
+                </Alert>
+              : <Alert variant="light" color="red" icon={<IconAlertTriangle size={18} />}>
+                  <Text size="sm">{prueba.error || 'falló sin decir por qué'}</Text>
+                  {prueba.endpoint ? <Text size="xs" c="dimmed" mt={4}>Endpoint: <Code>{prueba.endpoint}</Code></Text> : null}
+                </Alert>)}
+          </Card>}
           <Textarea label="Saludo inicial" description="Lo que dice el bot al atender. Si lo dejás vacío, usa uno por defecto." value={form.greeting_text} onChange={e => up('greeting_text', e.currentTarget.value)} autosize minRows={2} placeholder="Hola, gracias por llamar a IES. ¿En qué puedo ayudarte?" />
           <Textarea label="Instrucciones (system prompt)" description="Personalidad y reglas del agente. Ej: Sos el asistente de IES, amable y conciso; ofrecé ventas o soporte." value={form.system_prompt} onChange={e => up('system_prompt', e.currentTarget.value)} autosize minRows={3} />
           <Divider label="Transferencias (function-calling)" labelPosition="center" />
