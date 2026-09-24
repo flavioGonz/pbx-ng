@@ -305,3 +305,24 @@ test('Live: el saludo se inyecta como texto para decir, no como response.create'
   assert.ok(c, 'en modo cliente no hay response.create: el agente no diría nada al atender');
   assert.match(String(c.content), /portería/);
 });
+
+test('Live: nada se manda antes de session.started (un saludo temprano se descarta en silencio)', async (t) => {
+  const srv = await servidorFalso();
+  t.after(() => srv.cerrar());
+  const p = rt.abrir({ url: srv.url(), model: 'gpt-live-1', topeArranque: 60000 });
+  t.after(() => p.cerrar());
+
+  await new Promise((r) => setTimeout(r, 120));
+  p.saludar('Hola, portería.');          // llega ANTES de que el proveedor confirme la sesión
+  p.enviarAudio(tono(300, 20, 8000));
+  await new Promise((r) => setTimeout(r, 120));
+  assert.deepEqual(srv.tipos(), ['session.start'],
+    'se mandó algo antes de session.started: el proveedor lo descarta y el agente atiende sin hablar');
+
+  srv.mandar({ type: 'session.started', session: { id: 'sess_1' } });
+  await p.cuandoListo(3000);
+  await new Promise((r) => setTimeout(r, 120));
+  assert.ok(srv.tipos().includes('session.commentary.append'), 'el saludo guardado no se mandó al confirmarse la sesión');
+  assert.ok(srv.tipos().includes('session.input_audio.append'), 'el audio guardado no se mandó al confirmarse la sesión');
+  assert.ok(p.eventos['session.started'] >= 1, 'el diario de eventos no registró nada: es lo único que explica una sesión muda');
+});

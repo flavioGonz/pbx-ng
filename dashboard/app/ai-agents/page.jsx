@@ -195,10 +195,16 @@ export default function AiAgents() {
                   <Text size="xs" c="dimmed">Sesión abierta en {prueba.abrio_ms} ms · primer audio en {prueba.primer_audio_ms} ms · {prueba.bytes_audio} bytes.
                     {' '}Ese «primer audio» es el silencio que va a escuchar el visitante antes de que el agente hable.</Text>
                   {prueba.texto ? <Text size="xs" mt={4}>Dijo: «{prueba.texto.trim()}»</Text> : null}
+                  {prueba.api ? <Text size="xs" c="dimmed" mt={2}>API <Code>{prueba.api}</Code></Text> : null}
                 </Alert>
               : <Alert variant="light" color="red" icon={<IconAlertTriangle size={18} />}>
                   <Text size="sm">{prueba.error || 'falló sin decir por qué'}</Text>
-                  {prueba.endpoint ? <Text size="xs" c="dimmed" mt={4}>Endpoint: <Code>{prueba.endpoint}</Code></Text> : null}
+                  {prueba.endpoint ? <Text size="xs" c="dimmed" mt={4}>Endpoint: <Code>{prueba.endpoint}</Code>{prueba.api ? <> · API <Code>{prueba.api}</Code></> : null}</Text> : null}
+                  {prueba.eventos && Object.keys(prueba.eventos).length
+                    ? <Text size="xs" c="dimmed" mt={4}>El proveedor mandó: {Object.entries(prueba.eventos).map(([k, v]) => k + (v > 1 ? ' ×' + v : '')).join(', ')}</Text>
+                    : prueba.abrio_ms !== null && prueba.abrio_ms !== undefined
+                      ? <Text size="xs" c="dimmed" mt={4}>El proveedor no mandó ningún evento: la sesión abrió pero no llegó a configurarse.</Text>
+                      : null}
                 </Alert>)}
           </Card>}
           <Textarea label="Saludo inicial" description="Lo que dice el bot al atender. Si lo dejás vacío, usa uno por defecto." value={form.greeting_text} onChange={e => up('greeting_text', e.currentTarget.value)} autosize minRows={2} placeholder="Hola, gracias por llamar a IES. ¿En qué puedo ayudarte?" />

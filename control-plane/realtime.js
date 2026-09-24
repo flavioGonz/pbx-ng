@@ -204,7 +204,7 @@ const LIVE = {
     /* Texto del visitante = el visitante está hablando. Es la única señal de barge-in que
      * da esta API, así que hace las dos cosas: caption y corte. */
     if (t === 'session.input_transcript.delta') return { clase: 'texto_usuario', texto: m.delta, corta: true };
-    if (t === 'session.started') return { clase: 'otro', tipo: t };
+    if (t === 'session.started') return { clase: 'arranco', tipo: t };
     if (t === 'session.closed') return { clase: 'fin_respuesta' };
     if (t === 'response.event' && m.event) return LIVE.leer(m.event);
     if (t === 'response.output_item.done' && m.item && m.item.type === 'function_call') {
@@ -281,10 +281,28 @@ function abrir(opts) {
    * llamó a `abrir()` alcance a suscribirse, y entonces el que espera el evento espera
    * para siempre. Con la bandera y `cuandoListo()` no hay carrera posible. */
   ev.listo = false;
+  /* Diario de lo que mandó el proveedor. No es para depurar de a ratos: cuando una sesión
+   * abre y NO habla —el peor síntoma, porque no hay error en ningún lado— lo único que
+   * contesta la pregunta es qué eventos llegaron. La prueba del panel lo muestra. */
+  ev.eventos = {};
+  const anotar = (t) => { ev.eventos[t] = (ev.eventos[t] || 0) + 1; };
+
+  /* Lo que se manda ANTES de que la sesión esté configurada se guarda. En la Realtime el
+   * socket abierto ya alcanza; en Live hay que esperar `session.started`, y un saludo
+   * mandado un milisegundo antes se descarta en silencio: el agente atiende y no habla. */
+  const pendientes = [];
+  const marcarListo = () => {
+    if (ev.listo) return;
+    ev.listo = true;
+    while (pendientes.length) { try { ws.send(JSON.stringify(pendientes.shift())); } catch (_) {} }
+    ev.emit('listo');
+  };
   ws.on('open', () => {
     ws.send(JSON.stringify(P.configurar(o)));
-    ev.listo = true;
-    ev.emit('listo');
+    if (P !== LIVE) return marcarListo();
+    /* Red de seguridad: si el proveedor no manda `session.started` (o le cambia el nombre),
+     * igual se sigue — mejor intentar hablar que quedarse esperando para siempre. */
+    setTimeout(marcarListo, o.topeArranque || 3000).unref?.();
   });
   ev.cuandoListo = (ms) => new Promise((ok, fail) => {
     if (ev.listo) return ok();
@@ -296,8 +314,10 @@ function abrir(opts) {
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(String(data)); } catch (_) { return; }
+    anotar(String(msg.type || '?'));
     const r = P.leer(msg);
     switch (r.clase) {
+      case 'arranco': marcarListo(); break;
       case 'audio': {
         if (esperandoDesde) {
           const ms = Date.now() - esperandoDesde;
@@ -345,7 +365,11 @@ function abrir(opts) {
   ws.on('error', (e) => { if (!ev.handshake) ev.emit('error', String((e && e.message) || e)); });
   ws.on('close', () => ev.emit('cerrado'));
 
-  const enviar = (obj) => { try { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch (_) {} };
+  const enviar = (obj) => {
+    if (!obj) return;
+    if (!ev.listo) { pendientes.push(obj); return; }
+    try { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch (_) {}
+  };
 
   ev.enviarAudio = (pcm8) => { if (pcm8 && pcm8.length) enviar(P.audioEntra(subir(pcm8).toString('base64'))); };
   ev.saludar = (texto) => { esperandoDesde = Date.now(); enviar(P.saludar(texto)); };
@@ -411,6 +435,8 @@ async function probar(opts) {
     try { if (ev) ev.cerrar(); } catch (_) {}
   }
   r.total_ms = Date.now() - t0;
+  r.api = ev && ev.api;
+  r.eventos = (ev && ev.eventos) || {};
   return r;
 }
 
