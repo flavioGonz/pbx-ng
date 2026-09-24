@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { Modal, Tabs, Stack, Group, TextInput, NumberInput, Select, Switch, Textarea, Button, Text, Divider, Loader, ActionIcon, Tooltip } from '@mantine/core';
-import { IconDeviceFloppy, IconPlayerPlay, IconSparkles, IconVolume } from '@tabler/icons-react';
+import { IconDeviceFloppy, IconPlayerPlay, IconSparkles, IconVolume, IconRobot, IconAlertTriangle } from '@tabler/icons-react';
 import { toast } from './notify';
 import { api, apiPost, apiPut } from './api';
 
@@ -13,11 +13,21 @@ const LEAVE = [['no', 'Quedarse en la cola'], ['yes', 'Sacar la llamada si no qu
 const HOLD = [['no', 'No anunciar'], ['once', 'Una sola vez'], ['yes', 'En cada anuncio']];
 const DEST = [['hangup', 'Colgar'], ['ext', 'Extensión'], ['voicemail', 'Buzón de voz'], ['queue', 'Otra cola'], ['ivr', 'IVR / número extensión']];
 
+/* Los tres modos, con la explicación al lado: quien abre esta pantalla por primera vez
+ * tiene que poder elegir sin leer un manual, y «desborde» es el que hay que recomendar
+ * para empezar —los humanos siguen atendiendo y la IA toma lo que se caería—. */
+const IA_MODOS = [
+  ['apagado', 'Apagado — la cola funciona como siempre'],
+  ['desborde', 'Desborde — atiende sólo si ningún humano puede (recomendado para empezar)'],
+  ['primero', 'Primero — atiende la IA y escala cuando hace falta'],
+];
+
 export default function QueueEditor({ queue, opened, onClose, onSaved, voices = [] }) {
   const creating = !queue;
   const [f, setF] = useState({});
   const [busy, setBusy] = useState(false);
   const [play, setPlay] = useState('');
+  const [agentes, setAgentes] = useState(null);       // null = todavía no se cargaron
   const audioRef = useRef(null);
   const up = (k, v) => setF(s => ({ ...s, [k]: v }));
 
@@ -30,6 +40,15 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
       announce_frequency: 0, periodic_announce_frequency: 60, max_wait: 0, timeout_dest: 'hangup', record: false,
     });
   }, [opened, queue]);
+
+  /* Los agentes se piden al abrir: si no hay ninguno, la solapa lo dice y manda a /voz
+   * en vez de mostrar un desplegable vacío que no explica nada. */
+  useEffect(() => {
+    if (!opened) return;
+    let vivo = true;
+    api('/ai-agents').then((d) => { if (vivo) setAgentes(Array.isArray(d) ? d : []); }).catch(() => { if (vivo) setAgentes([]); });
+    return () => { vivo = false; };
+  }, [opened]);
 
   async function preview(text) {
     if (!text || !text.trim()) return;
@@ -69,6 +88,7 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
           <Tabs.Tab value="basico">Básico</Tabs.Tab>
           <Tabs.Tab value="anuncios" leftSection={<IconSparkles size={14} />}>Anuncios</Tabs.Tab>
           <Tabs.Tab value="avanzado">Avanzado</Tabs.Tab>
+          <Tabs.Tab value="ia" leftSection={<IconRobot size={14} />}>Agente IA</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="basico">
@@ -153,6 +173,50 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
             <Group grow>
               {sel('Informar al agente el tiempo que esperó el cliente', 'reportholdtime', YN)}
             </Group>
+          </Stack>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="ia">
+          <Stack gap="sm">
+            {agentes === null ? <Group gap="xs"><Loader size="xs" /><Text size="sm" c="dimmed">Buscando agentes…</Text></Group>
+              : agentes.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  Todavía no hay ningún agente de IA. Se crean en <b>Voz</b>, con su voz, su prompt y su proveedor;
+                  después volvé acá para ponerlo a atender esta cola.
+                </Text>
+              ) : (
+                <>
+                  <Group grow align="flex-start">
+                    <Select label="Agente" description="Cuál de los agentes de Voz atiende esta cola"
+                      value={f.ia_agente_id ? String(f.ia_agente_id) : ''} onChange={(v) => up('ia_agente_id', v ? Number(v) : null)}
+                      data={agentes.map((a) => ({ value: String(a.id), label: a.name + ' (' + a.exten + ')' + (a.enabled ? '' : ' · deshabilitado') }))}
+                      placeholder="Ninguno" clearable />
+                    <Select label="Modo" description="Cuándo atiende" value={f.ia_modo || 'apagado'}
+                      onChange={(v) => up('ia_modo', v)} allowDeselect={false}
+                      data={IA_MODOS.map(([v, l]) => ({ value: v, label: l }))} />
+                  </Group>
+                  <Group grow align="flex-start">
+                    <NumberInput label="Llamadas simultáneas" min={1} max={10}
+                      description="Cuántas puede atender a la vez. Es también el tope de gasto: cada sesión se paga por minuto."
+                      value={Number(f.ia_simultaneas ?? 1)} onChange={(v) => up('ia_simultaneas', Math.max(1, Math.min(10, Number(v) || 1)))} />
+                    <TextInput label="Escalar a" description="Interno o cola para cuando pide una persona, el agente duda, o el modelo no contesta. Vacío = a los humanos de esta cola."
+                      value={f.ia_escalar_a || ''} onChange={(e) => up('ia_escalar_a', e.target.value)} />
+                  </Group>
+
+                  {/* Lo que esta pantalla TIENE que decir, porque decide cómo se usa: */}
+                  <Divider my="xs" />
+                  <Group gap={8} align="flex-start" wrap="nowrap">
+                    <IconAlertTriangle size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+                    <Text size="xs" c="dimmed">
+                      El agente entra a la cola como <b>un miembro más</b>: se le aplican la estrategia, el timbrado y la
+                      capacidad igual que a una persona. En <b>desborde</b> queda con menor prioridad que los humanos, así
+                      que sólo se lo timbra cuando ninguno puede atender. Si el agente está deshabilitado en Voz, o el
+                      modelo no responde, la cola sigue funcionando con las personas.
+                      {' '}Hoy el agente <b>conversa y transfiere</b>: todavía no verifica datos ni abre puertas.
+                    </Text>
+                  </Group>
+                </>
+              )}
           </Stack>
         </Tabs.Panel>
       </Tabs>

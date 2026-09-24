@@ -323,6 +323,64 @@ module.exports = function init(deps) {
     return [['ivr', exten, 1, 'NoOp', 'AI IVR agente ' + id], ['ivr', exten, 2, 'Answer', ''], ['ivr', exten, 3, 'Stasis', 'pbxng,ai,' + id], ['ivr', exten, 4, 'Hangup', '']];
   }
 
+  /* ── El agente de IA como MIEMBRO de una cola ────────────────────────────────
+   * Lo que hace que esto sea «un agente más» y no «un destino al que la cola rebota»:
+   * entra a `queue_members`, así que la cola le aplica su estrategia, su timbrado y su
+   * capacidad igual que a una persona.
+   *
+   * Dos cosas que no son obvias y son el motivo de que esta función exista:
+   *
+   *  1. **N simultáneas = N miembros.** Asterisk marca a un miembro como ocupado mientras
+   *     está en una llamada, así que un solo miembro atiende de a una. Para que el agente
+   *     tome tres llamadas a la vez hacen falta tres interfaces DISTINTAS, y por eso se
+   *     generan extensiones `ia<cola>_1..N` en el contexto `ivr`, todas apuntando al mismo
+   *     `Stasis(pbxng,ai,<id>)`. Y no es capacidad por gusto: cada sesión realtime se paga
+   *     por minuto, así que este número es sobre todo un TOPE DE GASTO.
+   *  2. **`desborde` se hace con la penalidad**, que es el mecanismo que la cola ya tiene:
+   *     los humanos quedan en penalidad 0 y la IA en 1, así que sólo se la timbra cuando
+   *     ningún humano puede atender. Es el modo con el que esto se despliega la primera
+   *     vez en un cliente real.
+   *
+   * Es idempotente y reconcilia: borra los miembros de IA que sobran y las extensiones que
+   * ya no corresponden. Apagar el agente en una cola tiene que dejarla exactamente como
+   * estaba. */
+  const IA_MODOS = ['apagado', 'primero', 'desborde'];
+  const iaExten = (cola, i) => 'ia' + String(cola).replace(/[^a-zA-Z0-9]/g, '') + '_' + i;
+
+  async function iaMiembros(c, q) {
+    const cola = q.name;
+    const modo = IA_MODOS.includes(q.ia_modo) ? q.ia_modo : 'apagado';
+    const n = Math.max(1, Math.min(10, Number(q.ia_simultaneas) || 1));
+    /* Sin agente, o apagado, o el agente está deshabilitado: se limpia todo y listo. */
+    let agente = null;
+    if (modo !== 'apagado' && q.ia_agente_id) {
+      const { rows } = await c.query('SELECT id, name, exten, enabled FROM pbxng_ai_agents WHERE id=$1', [q.ia_agente_id]);
+      agente = rows[0] && rows[0].enabled ? rows[0] : null;
+    }
+    const activos = agente ? n : 0;
+
+    // 1) Extensiones Local de esta cola: se dejan exactamente las que hacen falta.
+    await c.query("DELETE FROM extensions WHERE context='ivr' AND exten LIKE $1", [iaExten(cola, '') + '%']);
+    for (let i = 1; i <= activos; i++) {
+      for (const r of aiAgentDialplan(iaExten(cola, i), agente.id)) {
+        await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
+      }
+    }
+
+    // 2) Miembros: se borran los de IA de esta cola y se reponen los que correspondan.
+    await c.query("DELETE FROM queue_members WHERE queue_name=$1 AND interface LIKE 'Local/ia%'", [cola]);
+    const penalidad = modo === 'desborde' ? 1 : 0;
+    for (let i = 1; i <= activos; i++) {
+      const iface = 'Local/' + iaExten(cola, i) + '@ivr';
+      await c.query(
+        'INSERT INTO queue_members (queue_name,interface,membername,state_interface,penalty,paused,uniqueid)'
+        + ' VALUES ($1,$2,$3,$2,$4,0,(SELECT COALESCE(MAX(uniqueid),0)+1 FROM queue_members))'
+        + ' ON CONFLICT (queue_name,interface) DO UPDATE SET penalty=EXCLUDED.penalty, membername=EXCLUDED.membername',
+        [cola, iface, 'IA ' + (agente.name || agente.id) + (activos > 1 ? ' #' + i : ''), penalidad]);
+    }
+    return { modo, agente: agente ? agente.id : null, miembros: activos, penalidad };
+  }
+
   app.get('/api/ai-agents', async (req, res) => {
     try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
@@ -542,9 +600,21 @@ module.exports = function init(deps) {
       }
       await c.query('UPDATE queues SET periodic_announce=$2, periodic_announce_frequency=$3 WHERE name=$1',
         [name, pRef || null, pRef ? Number(b.periodic_announce_frequency || 60) : 0]);
+      /* Agente de IA de la cola. `undefined` = el cuerpo no lo trae (una pantalla vieja,
+       * o el guardado de otra solapa) y entonces NO se toca: si no, guardar el nombre de
+       * la cola desde la solapa Básico apagaría el agente sin que nadie lo pida. */
+      if (b.ia_modo !== undefined || b.ia_agente_id !== undefined || b.ia_simultaneas !== undefined || b.ia_escalar_a !== undefined) {
+        const modo = IA_MODOS.includes(b.ia_modo) ? b.ia_modo : null;
+        await c.query(
+          'UPDATE pbxng_queues SET ia_modo=COALESCE($2,ia_modo), ia_agente_id=$3, ia_simultaneas=COALESCE($4,ia_simultaneas), ia_escalar_a=COALESCE($5,ia_escalar_a) WHERE name=$1',
+          [name, modo, b.ia_agente_id === undefined ? null : (b.ia_agente_id || null),
+            b.ia_simultaneas === undefined ? null : Math.max(1, Math.min(10, Number(b.ia_simultaneas) || 1)),
+            b.ia_escalar_a === undefined ? null : String(b.ia_escalar_a || '')]);
+      }
       // dialplan del numero de acceso
       const { rows: qr } = await c.query('SELECT * FROM pbxng_queues WHERE name=$1', [name]);
       await queueDialplan(c, qr[0]);
+      await iaMiembros(c, qr[0]);
       await c.query('COMMIT');
     } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; }
     finally { c.release(); }
