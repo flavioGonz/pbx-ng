@@ -53,8 +53,10 @@ export default function IaVoz() {
         </Tabs.List>
       </Tabs>
 
+      {/* «Nube» es una pantalla propia (proveedor + modelos + voces de Microsoft, todo
+          junto y compacto); el resto sigue siendo la consola de voz por sección. */}
       {tab === 'agents' ? <AiAgents />
-        : tab === 'nube' ? <Stack gap="lg"><ProveedoresNube /><VozConsole section="nube" /></Stack>
+        : tab === 'nube' ? <ProveedoresNube />
           : <VozConsole section={tab} />}
     </Stack>
   );

@@ -21,10 +21,42 @@ PIPER = os.environ.get("PIPER_BIN") or (
     "/opt/piper/piper/piper" if os.path.exists("/opt/piper/piper/piper") else (_sh.which("piper") or "piper"))
 # Los modelos van al volumen persistente: si se recrea el contenedor, no hay que bajarlos de nuevo.
 VOICES = os.environ.get("VOICES_DIR", "/opt/voz/models")
+# Ajustes que el panel cambia en caliente (modelo Whisper y voz por defecto). Hay DOS
+# ubicaciones a propósito:
+#   · /etc/voz.env          el despliegue con systemd, donde la unidad lo lee como
+#                           EnvironmentFile;
+#   · <volumen>/voz.env     el despliegue en Docker, donde /etc NO sobrevive a recrear el
+#                           contenedor. El volumen de modelos sí, así que el ajuste vive
+#                           ahí y se relee al arrancar.
+# Antes se escribía sólo el primero y NADIE lo leía en Docker: «Aplicar y reiniciar»
+# devolvía ok y la configuración volvía sola a la de antes.
 ENVFILE = "/etc/voz.env"
 HF = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
-DEFAULT_VOICE = os.environ.get("VOZ_VOICE", "es_MX-claude-high")
-WMODEL_NAME = os.environ.get("VOZ_WHISPER", "small")
+ENVFILE_VOL = os.path.join(VOICES, "voz.env")
+
+def _leer_env_guardado():
+    """Los dos archivos, el del volumen manda (es el que sobrevive en Docker)."""
+    vals = {}
+    for ruta in (ENVFILE, ENVFILE_VOL):
+        try:
+            with open(ruta) as f:
+                for linea in f:
+                    if "=" in linea and not linea.strip().startswith("#"):
+                        k, v = linea.split("=", 1)
+                        vals[k.strip()] = v.strip()
+        except Exception:
+            pass
+    return vals
+
+_GUARDADO = _leer_env_guardado()
+DEFAULT_VOICE = _GUARDADO.get("VOZ_VOICE") or os.environ.get("VOZ_VOICE", "es_MX-claude-high")
+WMODEL_NAME = _GUARDADO.get("VOZ_WHISPER") or os.environ.get("VOZ_WHISPER", "small")
+
+# Log a archivo. En Docker no hay journalctl —ni systemd— y la salida del proceso se la
+# queda el motor de contenedores, donde este servicio no puede leerla: el panel mostraba
+# «No such file or directory: journalctl» y nada más. Con esto, los logs salen del mismo
+# lugar en los dos despliegues.
+LOGFILE = os.environ.get("VOZ_LOG", "/tmp/voz.log")
 
 # catalogo curado de voces en espanol (Piper)
 CATALOG = [
@@ -81,6 +113,52 @@ async def edge_synth(text, voice, out_rate, fmt):
         except Exception: pass
 
 app = FastAPI(title="PBX-NG Voz")
+
+import logging                                    # noqa: E402
+from logging.handlers import RotatingFileHandler  # noqa: E402
+
+def _armar_log():
+    """Un archivo rotado de 1 MB. No reemplaza la salida estándar: la duplica, para que
+    `docker logs` siga sirviendo y el panel tenga de dónde leer."""
+    try:
+        h = RotatingFileHandler(LOGFILE, maxBytes=1_000_000, backupCount=1)
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%dT%H:%M:%S"))
+        raiz = logging.getLogger()
+        if not any(isinstance(x, RotatingFileHandler) for x in raiz.handlers):
+            raiz.addHandler(h)
+        raiz.setLevel(logging.INFO)
+        for nombre in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+            lg = logging.getLogger(nombre)
+            if not any(isinstance(x, RotatingFileHandler) for x in lg.handlers):
+                lg.addHandler(h)
+    except Exception as e:
+        print("[voz] no se pudo abrir el log:", e, flush=True)
+
+_armar_log()
+
+@app.on_event("startup")
+def _log_al_arrancar():
+    # uvicorn arma SUS loggers después de importar el módulo, así que se vuelve a colgar
+    # el handler acá: si no, el archivo queda vacío y parece que el log no funciona.
+    _armar_log()
+    logging.getLogger("voz").info("servicio arriba · whisper=%s · voz=%s", WMODEL_NAME, DEFAULT_VOICE)
+
+def _reiniciar_servicio():
+    """Reiniciar significa dos cosas distintas según dónde corre esto.
+
+    Con systemd: `systemctl restart voz`. En Docker no hay systemd —y tampoco hace falta—:
+    salir del proceso alcanza, porque el contenedor tiene `restart: unless-stopped` y el
+    motor lo vuelve a levantar. Antes se llamaba a systemctl siempre; en Docker eso era un
+    ok que no reiniciaba nada."""
+    import threading
+    if _sh.which("systemctl") and os.path.exists("/run/systemd/system"):
+        subprocess.Popen(["bash", "-c", "sleep 1 && systemctl restart voz"])
+        return "systemd"
+    def _chau():
+        time.sleep(1.0)      # que la respuesta HTTP salga antes de cortarse
+        os._exit(0)
+    threading.Thread(target=_chau, daemon=True).start()
+    return "contenedor"
 STATS = {"tts": 0, "stt": 0, "tts_ms": 0.0, "stt_ms": 0.0, "started": time.time()}
 print("[voz] cargando whisper", WMODEL_NAME, "...", flush=True)
 WMODEL = WhisperModel(WMODEL_NAME, device="cpu", compute_type="int8")
@@ -242,27 +320,48 @@ async def adm_set_config(req: Request):
     b = await req.json()
     wm = b.get("whisper") or WMODEL_NAME
     dv = b.get("default_voice") or DEFAULT_VOICE
-    try:
-        with open(ENVFILE, "w") as f:
-            f.write(f"VOZ_WHISPER={wm}\nVOZ_VOICE={dv}\n")
-        subprocess.Popen(["bash", "-c", "sleep 1 && systemctl restart voz"])
-        return {"ok": True, "restarting": True}
-    except Exception as e:
-        return {"error": str(e)}
+    escritos = []
+    for ruta in (ENVFILE_VOL, ENVFILE):
+        try:
+            os.makedirs(os.path.dirname(ruta), exist_ok=True)
+            with open(ruta, "w") as f:
+                f.write(f"VOZ_WHISPER={wm}\nVOZ_VOICE={dv}\n")
+            escritos.append(ruta)
+        except Exception:
+            pass          # /etc puede ser de sólo lectura; con el del volumen alcanza
+    if not escritos:
+        return {"error": "no se pudo guardar la configuración en ningún lado"}
+    modo = _reiniciar_servicio()
+    return {"ok": True, "restarting": True, "modo": modo, "guardado_en": escritos}
 
 @app.get("/admin/logs")
 def adm_logs():
+    """El archivo primero, journalctl después. El orden importa: en Docker journalctl no
+    existe y el panel mostraba su error de import en vez de los logs."""
     try:
-        out = subprocess.run(["journalctl", "-u", "voz", "-n", "120", "--no-pager", "-o", "short-iso"],
-                             capture_output=True, text=True, timeout=8).stdout
-        return {"logs": out[-8000:]}
-    except Exception as e:
-        return {"logs": "error: " + str(e)}
+        if os.path.exists(LOGFILE):
+            with open(LOGFILE, errors="replace") as f:
+                out = f.read()[-8000:]
+            if out.strip():
+                return {"logs": out, "fuente": LOGFILE}
+    except Exception:
+        pass
+    if _sh.which("journalctl"):
+        try:
+            out = subprocess.run(["journalctl", "-u", "voz", "-n", "120", "--no-pager", "-o", "short-iso"],
+                                 capture_output=True, text=True, timeout=8).stdout
+            if out.strip():
+                return {"logs": out[-8000:], "fuente": "journalctl"}
+        except Exception:
+            pass
+    return {"logs": "Todavía no hay líneas en " + LOGFILE + ".\n"
+                    "El archivo se escribe desde que arranca el servicio: si acaba de "
+                    "actualizarse, reiniciálo desde «Motor local» y volvé a cargar.",
+            "fuente": "vacío"}
 
 @app.post("/admin/restart")
 def adm_restart():
     try:
-        subprocess.Popen(["bash", "-c", "sleep 1 && systemctl restart voz"])
-        return {"ok": True, "restarting": True}
+        return {"ok": True, "restarting": True, "modo": _reiniciar_servicio()}
     except Exception as e:
         return {"error": str(e)}
