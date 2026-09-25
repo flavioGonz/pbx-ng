@@ -14,7 +14,7 @@
  * ==========================================================================*/
 import { useEffect, useState, useRef } from 'react';
 import { Stack, Card, Group, Divider, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box, NumberInput, Collapse } from '@mantine/core';
-import { IconTool, IconDoorEnter, IconShieldLock, IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
+import { IconBuildingStore, IconTool, IconDoorEnter, IconShieldLock, IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
 import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
 import { toast } from '../notify';
 
@@ -448,6 +448,41 @@ export default function AiAgents() {
                   </Collapse>
                 </Card>
               )}
+
+              <Card withBorder radius="md" padding="md">
+                <Group gap="sm" mb={4} wrap="nowrap">
+                  <ThemeIcon variant="light" size={32} radius="md" color="indigo"><IconBuildingStore size={18} /></ThemeIcon>
+                  <Text fw={700} fz="sm">Caja del backoffice</Text>
+                </Group>
+                <Text size="xs" c="dimmed" mb="sm" ml={44}>
+                  Lo que el agente sabe de verdad —quién vive en la 402, si hay una visita agendada— vive en el sistema de gestión
+                  del cliente. En vez de que la central aprenda cada backoffice, el backoffice <b>publica</b> sus herramientas y
+                  la central se las ofrece al modelo. La central sigue decidiendo: pone el tope de tiempo, limpia la respuesta y
+                  audita cada consulta.
+                </Text>
+                <Switch label={herr('remoto').on ? 'El agente usa también las herramientas del backoffice' : 'Apagado'}
+                  checked={!!herr('remoto').on} onChange={e => upHerr('remoto', 'on', e.currentTarget.checked)} />
+                <Collapse in={!!herr('remoto').on}>
+                  <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt="md">
+                    <TextInput label="URL del backoffice" placeholder="https://gestion.cliente/api/ia"
+                      description="Se le piden dos rutas: /herramientas y /ejecutar"
+                      value={herr('remoto').url || ''} onChange={e => upHerr('remoto', 'url', e.currentTarget.value)} />
+                    <TextInput label="Secreto compartido" placeholder="para firmar cada llamada"
+                      description="Va en X-PBXNG-Firma (HMAC-SHA256 del cuerpo)"
+                      value={herr('remoto').token || ''} onChange={e => upHerr('remoto', 'token', e.currentTarget.value)} />
+                  </SimpleGrid>
+                  <NumberInput mt="md" w={220} label="Tope de respuesta" suffix=" ms" min={500} max={10000} step={500}
+                    description="Pasado esto, el agente sigue sin ese dato"
+                    value={herr('remoto').tope_ms ?? 3000} onChange={v => upHerr('remoto', 'tope_ms', v)} />
+                  <Alert variant="light" color="gray" mt="md" p="xs" icon={<IconShieldLock size={15} />}>
+                    <Text size="xs">
+                      Lo que publique el backoffice se declara con prefijo <Code fz={10}>bo_</Code> y nunca puede pisar una
+                      herramienta de la central: si publica una llamada «abrir_porton», se descarta. Accionar sobre la llamada o
+                      sobre la puerta es de la central, donde están los candados.
+                    </Text>
+                  </Alert>
+                </Collapse>
+              </Card>
 
               <Text size="xs" c="dimmed">
                 Encender cualquier herramienta hace que el modelo <b>delegue el razonamiento</b> en el backend del proveedor:

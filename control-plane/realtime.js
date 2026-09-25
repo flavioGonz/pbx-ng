@@ -385,6 +385,15 @@ function abrir(opts) {
     try { ws.send(JSON.stringify(obj)); } catch (e) { ev.emit('error', String((e && e.message) || e)); }
   };
 
+  /* Sumar herramientas a una sesión YA ABIERTA. Existe porque el catálogo del backoffice
+   * del cliente se pide en caliente: esperar a que un sistema de gestión lento conteste
+   * para recién ahí abrir la sesión retrasaría el saludo, y el visitante está parado en la
+   * puerta. Se abre con lo de la central y lo de afuera se suma cuando llega. */
+  ev.agregarHerramientas = (lista) => {
+    if (!Array.isArray(lista) || !lista.length) return;
+    o.herramientas = (o.herramientas || []).concat(lista);
+    enviar(P.configurar(o));
+  };
   ev.enviarAudio = (pcm8) => { if (pcm8 && pcm8.length) enviar(P.audioEntra(subir(pcm8).toString('base64'))); };
   ev.saludar = (texto) => { esperandoDesde = Date.now(); enviar(P.saludar(texto)); };
   ev.responderHerramienta = (callId, salida) => { enviar(P.respuestaHerramienta(callId, salida)); enviar(P.pedirRespuesta()); };

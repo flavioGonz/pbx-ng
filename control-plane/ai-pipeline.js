@@ -13,6 +13,7 @@ const realtime = require('./realtime');   // puente al modelo de voz realtime (a
 const momento = require('./momento');     // la hora del cliente: el modelo no tiene reloj
 const inactividad = require('./inactividad');   // qué hacer cuando el visitante deja de hablar
 const herramientas = require('./herramientas'); // lo que el agente puede PEDIR (la central decide)
+const remotas = require('./herramientas-remotas');   // la caja que pone el backoffice del cliente
 
 const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
 const VOSK_MODEL = '/opt/vosk-model-es';
@@ -551,6 +552,9 @@ function arrancarRealtime(session) {
   const declaradas = herramientas.declarar(cfgHerr);
   if (declaradas.length) session.log('herramientas: ' + declaradas.map((d) => d.name).join(', '));
 
+  /* La caja del backoffice se pide DESPUÉS de abrir: el catálogo remoto se suma en caliente
+   * a la sesión. Se hace así y no antes para que un sistema de gestión lento no demore el
+   * saludo — el portero atiende igual, con menos herramientas. */
   const puente = realtime.abrir({
     key: session.keys.openai,
     base: session.realtimeBase || '',
@@ -568,7 +572,21 @@ function arrancarRealtime(session) {
     try { args = JSON.parse(h.args || '{}'); } catch (_) { args = {}; }
     session.log('el agente pidió: ' + h.nombre + ' ' + JSON.stringify(args).slice(0, 200));
     let res;
-    try { res = await herramientas.ejecutar(h.nombre, args, ctxHerramientas(session, cfgHerr)); }
+    try {
+      res = remotas.esRemota(h.nombre)
+        /* Una herramienta del backoffice: la ejecuta ÉL. La central sigue poniendo el tope
+         * de tiempo, el saneo de la respuesta y la auditoría — delegar la caja no es
+         * delegar el control. */
+        ? await (async () => {
+          const rr = await remotas.ejecutarRemota(h.nombre, args, cfgHerr.remoto || {}, {
+            llamante: session.callerId || '', sesion: session.uuid, agente: (session.agent && session.agent.name) || '',
+            log: (m) => session.log(m),
+          });
+          auditarAccion(session, { herramienta: h.nombre, resultado: rr.ok ? 'consulta al backoffice' : 'backoffice sin respuesta', razon: rr.motivo || '', args });
+          return rr;
+        })()
+        : await herramientas.ejecutar(h.nombre, args, ctxHerramientas(session, cfgHerr));
+    }
     catch (e) { res = { ok: false, motivo: 'no se pudo completar esa acción' }; session.log('herramienta ' + h.nombre + ': ' + e.message); }
     try { puente.responderHerramienta(h.call_id, res); } catch (_) {}
   });
@@ -687,6 +705,16 @@ function arrancarRealtime(session) {
       if (session.closed) return;
       session.log('sesión del modelo lista (' + puente.api + ')');
       saludarCuandoEscuche(0);
+      /* Y en paralelo, la caja del backoffice. Si contesta, se le suman al modelo; si no
+       * contesta, la llamada sigue igual con las herramientas de la central. */
+      if (cfgHerr.remoto && cfgHerr.remoto.on) {
+        remotas.traerCatalogo(cfgHerr.remoto, herramientas.CATALOGO, { log: (m) => session.log(m) })
+          .then((lista) => {
+            if (session.closed || !lista.length) return;
+            puente.agregarHerramientas(lista);
+          })
+          .catch(() => {});
+      }
     })
     .catch((e) => {
       /* Si el modelo no abre, la llamada NO se queda muda: se dice la frase de siempre con

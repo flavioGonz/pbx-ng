@@ -393,6 +393,18 @@ module.exports = function init(deps) {
     const dentro = b.herramientas && typeof b.herramientas === 'object' ? b.herramientas : {};
     const out = {};
     for (const k of Object.keys(catalogo)) if (dentro[k]) out[k] = dentro[k];
+    /* `remoto` no es una herramienta: es el proveedor de la caja del backoffice. Va aparte
+     * de la lista blanca del catálogo, con sus propios campos y nada más — que nadie meta
+     * configuración arbitraria en el JSON del agente. */
+    if (dentro.remoto && typeof dentro.remoto === 'object') {
+      const rm = dentro.remoto;
+      out.remoto = {
+        on: !!rm.on,
+        url: String(rm.url || '').slice(0, 500),
+        token: String(rm.token || '').slice(0, 200),
+        tope_ms: Math.max(500, Math.min(10000, Math.round(Number(rm.tope_ms) || 3000))),
+      };
+    }
     return out;
   };
   const camposInact = (b) => ({
