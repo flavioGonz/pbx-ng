@@ -523,16 +523,42 @@ function arrancarRealtime(session) {
   puente.on('audio', () => {
     if (!session.rtPrimerAudio) { session.rtPrimerAudio = Date.now(); session.log('primer audio del modelo'); }
   });
+  /* EL SALUDO VA DESPUÉS DE QUE EMPIEZA A ENTRAR AUDIO, y esto costó una tarde entenderlo.
+   * GPT-Live es una conversación continua: toma turno cuando ESCUCHA. Si se le manda el
+   * saludo con el canal todavía sin audio, lo acepta y no emite nada — la sesión queda
+   * abierta y el visitante escucha silencio, sin un solo error en ningún lado. Es
+   * exactamente lo que le pasaba a la prueba de conexión hasta que empezó a mandar
+   * silencio al ritmo del canal antes de saludar.
+   *
+   * Así que se espera al primer frame del llamante (Asterisk los manda de entrada, aunque
+   * nadie hable), un respiro más, y recién ahí el saludo. Si el audio no aparece en 3 s se
+   * saluda igual: mejor intentarlo que quedarse mudo esperando. */
+  function saludarCuandoEscuche(intento) {
+    if (session.closed) return;
+    const listo = !!session.rtAudioEntra;
+    if (!listo && (intento || 0) < 30) { setTimeout(() => saludarCuandoEscuche((intento || 0) + 1), 100); return; }
+    setTimeout(() => {
+      if (session.closed) return;
+      session.log('saludo' + (listo ? '' : ' (sin audio del llamante todavía)'));
+      puente.saludar(session.greetingText);
+      /* Reintento único: si a los 4 s no dijo una palabra, se lo pide otra vez. Un agente
+       * que atiende mudo es peor que uno que saluda dos veces. */
+      setTimeout(() => {
+        if (session.closed || session.rtPrimerAudio) return;
+        session.log('el modelo no habló: se reintenta el saludo');
+        puente.saludar(session.greetingText);
+      }, 4000);
+      setTimeout(() => {
+        if (!session.closed && !session.rtPrimerAudio) session.log('el modelo sigue sin mandar audio: el visitante está escuchando silencio');
+      }, 9000);
+    }, listo ? 400 : 0);
+  }
+
   puente.cuandoListo(10000)
     .then(() => {
       if (session.closed) return;
-      session.log('sesión del modelo lista (' + puente.api + '): mandando el saludo');
-      puente.saludar(session.greetingText);
-      /* Si en 8 s no llegó un solo byte de audio, el visitante está escuchando silencio.
-       * Se dice y se sigue: al menos queda en el log cuál de las tres cosas falló. */
-      setTimeout(() => {
-        if (!session.closed && !session.rtPrimerAudio) session.log('el modelo no mandó audio tras el saludo: el visitante está escuchando silencio');
-      }, 8000);
+      session.log('sesión del modelo lista (' + puente.api + ')');
+      saludarCuandoEscuche(0);
     })
     .catch((e) => {
       /* Si el modelo no abre, la llamada NO se queda muda: se dice la frase de siempre con
@@ -549,7 +575,13 @@ function arrancarRealtime(session) {
 function handleInAudio(session, pcm) {
   /* En realtime el audio va derecho al modelo: la detección de fin de frase y el
    * barge-in los hace él, así que ni Vosk ni el VAD de acá tienen nada que decidir. */
-  if (session.rt && !session.rtCaido) { session.rt.enviarAudio(pcm); return; }
+  if (session.rt && !session.rtCaido) {
+    /* Primer frame del llamante: recién con el audio ENTRANDO el modelo toma turno (ver
+     * el saludo, más abajo). Se anota para no tener que adivinarlo. */
+    if (!session.rtAudioEntra) { session.rtAudioEntra = Date.now(); session.log('entra audio del llamante'); }
+    session.rt.enviarAudio(pcm);
+    return;
+  }
   const energy = rms(pcm);
   // barge-in: si el bot habla y el usuario sostiene voz, cortar TTS
   if (session.speaking) {
