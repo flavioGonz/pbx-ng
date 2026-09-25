@@ -229,50 +229,69 @@ export default function VozConsole({ section = null }) {
     );
   };
 
+  /* ── piezas ────────────────────────────────────────────────────────────────
+   * Cada tarjeta se define suelta porque la misma pieza aparece en dos lugares según
+   * DÓNDE CORRE: las voces Piper y el catálogo son del contenedor propio («Motor local»);
+   * las Edge son de Microsoft y salen a internet («Nube»). Esa división es el motivo de
+   * esta pantalla: contesta de un vistazo qué sigue andando con el enlace caído. */
+  const estudio = (
+    <Card withBorder radius="lg" padding="lg" style={{ background: 'linear-gradient(180deg, rgba(16,163,74,.05), transparent)' }}>
+      <Group gap="lg" align="flex-start" wrap="nowrap">
+        <TalkingAvatar speaking={speaking} gender={playing?.gender || 'f'} size={150} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Text fw={800} fz="lg" lh={1.1}>Estudio de voz</Text>
+          <Text fz="sm" c="dimmed" mb="sm">Elegí una voz y escuchala. El avatar pronuncia el texto de prueba.</Text>
+          {playing ? <Badge size="lg" variant="light" color="teal" mb="sm">{speaking ? '🔊 Hablando · ' : ''}{playing.label}</Badge> : <Badge size="lg" variant="light" color="gray" mb="sm">Sin reproducir</Badge>}
+          <TextInput label="Texto de prueba" value={testText} onChange={e => setTestText(e.currentTarget.value)} mb="sm" />
+          <Group gap="sm">
+            <Button leftSection={<IconPlayerPlay size={16} />} loading={busy === 'test' && !speaking} onClick={() => play(testVoice || 'es-UY-ValentinaNeural', testVoice, edgeMeta({ key: testVoice, label: '' }).gender)}>Reproducir</Button>
+            {speaking && <Button variant="light" color="red" leftSection={<IconPlayerStop size={16} />} onClick={stop}>Detener</Button>}
+          </Group>
+        </div>
+      </Group>
+      <audio ref={audioRef} onPlay={() => setSpeaking(true)} onEnded={() => { setSpeaking(false); setPlaying(null); }} onPause={() => setSpeaking(false)} style={{ display: 'none' }} />
+    </Card>
+  );
+  const cardUY = (
+    <Card withBorder radius="lg" padding="lg" style={{ borderColor: 'var(--mantine-color-teal-3)' }}>
+      <Group gap="sm" mb="sm"><Text fz={22}>🇺🇾</Text><div><Text fw={700}>Voces uruguayas</Text><Text fz="xs" c="dimmed">Neuronales Edge · acento local</Text></div><Badge variant="light" color="teal" ml="auto">{uy.length}</Badge></Group>
+      <Stack gap={8}>{uy.length ? uy.map(v => <VoiceCard key={v.key} vkey={v.key} flag={v.flag} title={v.name} subtitle={v.country + ' · ' + (v.gender === 'f' ? 'femenina' : 'masculina')} gender={v.gender} />) : <Text fz="sm" c="dimmed">No hay voces uruguayas en el catálogo del servicio.</Text>}</Stack>
+    </Card>
+  );
+  const cardInstaladas = (
+    <Card withBorder radius="lg" padding="lg">
+      <Group gap="sm" mb="sm"><ThemeIcon variant="light" color="grape"><IconMicrophone2 size={16} /></ThemeIcon><Text fw={700}>Instaladas (Piper · offline)</Text><Badge variant="light" color="grape" ml="auto">{inst.length}</Badge></Group>
+      <Stack gap={8}>{inst.length ? inst.map(v => <VoiceCard key={v.key} vkey={v.key} flag="💾" title={v.key} subtitle="Piper local" gender="f" sizeMb={v.size_mb} onRemove={() => ask({ title: 'Eliminar voz', message: 'Se eliminará la voz «' + v.key + '» del servicio. ¿Continuar?', confirmLabel: 'Eliminar', color: 'red', icon: <IconTrash size={22} />, onConfirm: () => removeVoice(v.key) })} />) : <Text fz="sm" c="dimmed">Ninguna voz Piper instalada.</Text>}</Stack>
+    </Card>
+  );
+  const cardEdgeLatam = (
+    <Card withBorder radius="lg" padding="lg">
+      <Group gap="sm" mb="sm"><Text fz={20}>🌎</Text><Text fw={700}>Otras de Latinoamérica · Edge (online)</Text><Badge variant="light" color="blue" ml="auto">{otherEdge.length}</Badge></Group>
+      <Text size="xs" c="dimmed" mb="sm">Voces neuronales de Microsoft (gratis, requieren internet). Clic para escuchar; la estrella la fija por defecto.</Text>
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing={8}>{otherEdge.map(v => <VoiceCard key={v.key} vkey={v.key} flag={v.flag} title={v.name} subtitle={v.country + ' · ' + (v.gender === 'f' ? 'femenina' : 'masculina')} gender={v.gender} />)}</SimpleGrid>
+    </Card>
+  );
+  const cardCatalogo = (
+    <Card withBorder radius="lg" padding="lg">
+      <Text fw={700} mb="sm">Catálogo Piper (descargar para uso offline)</Text>
+      <Text size="xs" c="dimmed" mb="sm">Una vez descargada, la voz vive en el contenedor: no sale a internet y no se paga.</Text>
+      <Table><Table.Tbody>{cat.map(c => (
+        <Table.Tr key={c.key}><Table.Td><Text fw={600} fz="sm">{c.label}</Text><Text fz="xs" c="dimmed" ff="monospace">{c.key}</Text></Table.Td>
+          <Table.Td ta="right">{c.installed ? <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>Instalada</Badge> :
+            <Button size="compact-sm" variant="light" leftSection={<IconDownload size={14} />} loading={busy === 'inst' + c.key} onClick={() => ask({ title: 'Instalar voz', message: 'Se descargará e instalará la voz «' + c.label + '» en el contenedor (puede tardar). ¿Continuar?', confirmLabel: 'Instalar', color: 'blue', icon: <IconDownload size={22} />, onConfirm: () => install(c.key) })}>Instalar</Button>}</Table.Td></Table.Tr>))}
+      </Table.Tbody></Table>
+    </Card>
+  );
+
   /* ── secciones ──────────────────────────────────────────────────────────── */
   const panelVoices = (
     <Stack gap="lg">
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-        <Card withBorder radius="lg" padding="lg" style={{ background: 'linear-gradient(180deg, rgba(16,163,74,.05), transparent)' }}>
-          <Group gap="lg" align="flex-start" wrap="nowrap">
-            <TalkingAvatar speaking={speaking} gender={playing?.gender || 'f'} size={150} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Text fw={800} fz="lg" lh={1.1}>Estudio de voz</Text>
-              <Text fz="sm" c="dimmed" mb="sm">Elegí una voz de la derecha y escuchala. El avatar pronuncia el texto de prueba.</Text>
-              {playing ? <Badge size="lg" variant="light" color="teal" mb="sm">{speaking ? '🔊 Hablando · ' : ''}{playing.label}</Badge> : <Badge size="lg" variant="light" color="gray" mb="sm">Sin reproducir</Badge>}
-              <TextInput label="Texto de prueba" value={testText} onChange={e => setTestText(e.currentTarget.value)} mb="sm" />
-              <Group gap="sm">
-                <Button leftSection={<IconPlayerPlay size={16} />} loading={busy === 'test' && !speaking} onClick={() => play(testVoice || 'es-UY-ValentinaNeural', testVoice, edgeMeta({ key: testVoice, label: '' }).gender)}>Reproducir</Button>
-                {speaking && <Button variant="light" color="red" leftSection={<IconPlayerStop size={16} />} onClick={stop}>Detener</Button>}
-              </Group>
-            </div>
-          </Group>
-          <audio ref={audioRef} onPlay={() => setSpeaking(true)} onEnded={() => { setSpeaking(false); setPlaying(null); }} onPause={() => setSpeaking(false)} style={{ display: 'none' }} />
-        </Card>
-        <Stack gap="md">
-          <Card withBorder radius="lg" padding="lg" style={{ borderColor: 'var(--mantine-color-teal-3)' }}>
-            <Group gap="sm" mb="sm"><Text fz={22}>🇺🇾</Text><div><Text fw={700}>Voces uruguayas</Text><Text fz="xs" c="dimmed">Neuronales Edge · acento local</Text></div><Badge variant="light" color="teal" ml="auto">{uy.length}</Badge></Group>
-            <Stack gap={8}>{uy.length ? uy.map(v => <VoiceCard key={v.key} vkey={v.key} flag={v.flag} title={v.name} subtitle={v.country + ' · ' + (v.gender === 'f' ? 'femenina' : 'masculina')} gender={v.gender} />) : <Text fz="sm" c="dimmed">No hay voces uruguayas en el catálogo del servicio.</Text>}</Stack>
-          </Card>
-          <Card withBorder radius="lg" padding="lg">
-            <Group gap="sm" mb="sm"><ThemeIcon variant="light" color="grape"><IconMicrophone2 size={16} /></ThemeIcon><Text fw={700}>Instaladas (Piper · offline)</Text><Badge variant="light" color="grape" ml="auto">{inst.length}</Badge></Group>
-            <Stack gap={8}>{inst.length ? inst.map(v => <VoiceCard key={v.key} vkey={v.key} flag="💾" title={v.key} subtitle="Piper local" gender="f" sizeMb={v.size_mb} onRemove={() => ask({ title: 'Eliminar voz', message: 'Se eliminará la voz «' + v.key + '» del servicio. ¿Continuar?', confirmLabel: 'Eliminar', color: 'red', icon: <IconTrash size={22} />, onConfirm: () => removeVoice(v.key) })} />) : <Text fz="sm" c="dimmed">Ninguna voz Piper instalada.</Text>}</Stack>
-          </Card>
-        </Stack>
+        {estudio}
+        <Stack gap="md">{cardUY}{cardInstaladas}</Stack>
       </SimpleGrid>
-      <Card withBorder radius="lg" padding="lg">
-        <Group gap="sm" mb="sm"><Text fz={20}>🌎</Text><Text fw={700}>Otras de Latinoamérica · Edge (online)</Text><Badge variant="light" color="blue" ml="auto">{otherEdge.length}</Badge></Group>
-        <Text size="xs" c="dimmed" mb="sm">Voces neuronales de Microsoft (gratis, requieren internet). Clic para escuchar; la estrella la fija por defecto.</Text>
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing={8}>{otherEdge.map(v => <VoiceCard key={v.key} vkey={v.key} flag={v.flag} title={v.name} subtitle={v.country + ' · ' + (v.gender === 'f' ? 'femenina' : 'masculina')} gender={v.gender} />)}</SimpleGrid>
-      </Card>
-      <Card withBorder radius="lg" padding="lg">
-        <Text fw={700} mb="sm">Catálogo Piper (descargar para uso offline)</Text>
-        <Table><Table.Tbody>{cat.map(c => (
-          <Table.Tr key={c.key}><Table.Td><Text fw={600} fz="sm">{c.label}</Text><Text fz="xs" c="dimmed" ff="monospace">{c.key}</Text></Table.Td>
-            <Table.Td ta="right">{c.installed ? <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>Instalada</Badge> :
-              <Button size="compact-sm" variant="light" leftSection={<IconDownload size={14} />} loading={busy === 'inst' + c.key} onClick={() => ask({ title: 'Instalar voz', message: 'Se descargará e instalará la voz «' + c.label + '» en el contenedor (puede tardar). ¿Continuar?', confirmLabel: 'Instalar', color: 'blue', icon: <IconDownload size={22} />, onConfirm: () => install(c.key) })}>Instalar</Button>}</Table.Td></Table.Tr>))}
-        </Table.Tbody></Table>
-      </Card>
+      {cardEdgeLatam}
+      {cardCatalogo}
     </Stack>
   );
 
@@ -321,6 +340,37 @@ export default function VozConsole({ section = null }) {
             <Button color="red" variant="light" leftSection={<IconReload size={16} />} loading={busy === 'restart'} onClick={() => ask({ title: 'Reiniciar servicio de voz', message: 'Se reiniciará el microservicio de voz (TTS/STT). Las llamadas con IA en curso pueden cortarse. ¿Continuar?', confirmLabel: 'Reiniciar', color: 'red', icon: <IconReload size={22} />, onConfirm: () => restart() })}>Reiniciar servicio</Button></Group>
         </Card>
       </div>
+    </Stack>
+  );
+
+  /* ── Motor local: el contenedor pbxng-voz ───────────────────────────────────
+   * Whisper para entender y Piper para hablar, en el mismo fierro que la central. No se
+   * paga por minuto, el audio no sale del edificio y sigue andando con el enlace caído.
+   * Es la respuesta a «si se corta internet, ¿el portero sigue atendiendo?». */
+  const panelLocal = (
+    <Stack gap="lg">
+      <Alert variant="light" color="teal" icon={<IconServer2 size={18} />}>
+        Todo lo de esta pestaña corre <b>en tu servidor</b>, en el contenedor <b>pbxng-voz</b>: no sale a internet, no se paga por minuto
+        y sigue funcionando con el enlace caído. Los modelos de la nube viven en <b>Nube</b>.
+      </Alert>
+      {panelEngine}
+      <Divider label="Voces propias" labelPosition="center" />
+      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+        {estudio}
+        {cardInstaladas}
+      </SimpleGrid>
+      {cardCatalogo}
+    </Stack>
+  );
+
+  /* ── Nube: las voces que sintetiza Microsoft ────────────────────────────────
+   * Edge pasa por el contenedor, pero el audio lo genera Microsoft: sin internet no hay
+   * voz. Por eso vive acá y no en «Motor local», aunque se configure en el mismo lugar. */
+  const panelNubeVoces = (
+    <Stack gap="lg">
+      {estudio}
+      {cardUY}
+      {cardEdgeLatam}
     </Stack>
   );
 
@@ -397,7 +447,12 @@ export default function VozConsole({ section = null }) {
 
   // Modo embebido en /ia-voz: una sola sección, sin header ni tabs propias.
   if (section) {
-    const map = { voices: panelVoices, engine: panelEngine, sys: panelSys, logs: panelLogs };
+    const map = {
+      local: panelLocal, nube: panelNubeVoces,
+      /* Nombres viejos: la pantalla se reorganizó por DÓNDE CORRE cada cosa, pero un
+       * enlace guardado o una pestaña abierta no tienen por qué romperse. */
+      voices: panelVoices, engine: panelEngine, sys: panelSys, logs: panelLogs,
+    };
     return <Stack gap={0}>{statusChip}{map[section] || panelVoices}{confirmModal}</Stack>;
   }
 

@@ -1,230 +1,367 @@
 'use client';
+/* ============================================================================
+ *  IA & Voz › Agentes. La tabla es lo PRIMERO que se ve, a propósito: quien entra acá
+ *  viene a contestar «¿qué agentes hay y cuál está atendiendo?», no a configurar el
+ *  motor. La clave del proveedor se mudó a la pestaña «Nube» y el estado del contenedor
+ *  de voz a «Motor local»: acá no se mezcla la infraestructura con los agentes.
+ *
+ *  El alta y la edición son un Drawer de tres pasos, no un modal:
+ *    · Identidad     quién es y en qué interno atiende
+ *    · Cerebro       con qué piensa y habla — y el botón que dice si eso funciona
+ *    · Derivaciones  a dónde manda la llamada cuando no puede seguir
+ *  Ese orden es el orden en que se rompe: casi todos los problemas viven en «Cerebro»,
+ *  y por eso la prueba de conexión está ahí y no escondida al final de un formulario.
+ * ==========================================================================*/
 import { useEffect, useState, useRef } from 'react';
-import { Stack, Card, Group, Autocomplete, Code, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, PasswordInput, Alert, Tooltip, Progress, Slider } from '@mantine/core';
-import { IconRobot, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconKey, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconMicrophone2, IconBrain, IconServer2, IconRefresh, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle } from '@tabler/icons-react';
-import PageHeader from '../PageHeader';
+import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box } from '@mantine/core';
+import { IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
+import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
 import { toast } from '../notify';
 
+/* Los proveedores, con la única diferencia que le importa a quien elige: dónde corre. */
 const PROVIDERS = [
-  { value: 'demo', label: 'Demo (offline · Vosk + espeak)' },
-  { value: 'openai', label: 'OpenAI (Whisper + GPT + TTS)' },
-  { value: 'openai-realtime', label: 'OpenAI voz a voz (GPT-Live / Realtime)' },
+  { value: 'openai-realtime', label: 'OpenAI voz a voz (GPT-Live / Realtime)', donde: 'nube', pie: 'Una sola sesión con el modelo: la menor latencia' },
+  { value: 'openai', label: 'OpenAI en tres pasos (Whisper → GPT → TTS)', donde: 'nube', pie: 'Más lento, pero permite elegir cada pieza' },
+  { value: 'demo', label: 'Demo (offline · Vosk + voz local)', donde: 'local', pie: 'Sin clave ni internet, y sin costo. Para probar el recorrido' },
 ];
 const MODELS = [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini (rápido/económico)' }, { value: 'gpt-4o', label: 'gpt-4o (máxima calidad)' }];
 const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label: 'Alloy' }, { value: 'shimmer', label: 'Shimmer' }, { value: 'onyx', label: 'Onyx' }, { value: 'echo', label: 'Echo' }, { value: 'fable', label: 'Fable' }];
-/* Realtime: el identificador del modelo y la voz son texto LIBRE a propósito. El proveedor
- * los renombra y retira cada pocos meses; si fueran una lista cerrada, el día que cambien
- * habría que actualizar la central para poder volver a atender. Estas son sugerencias, y
- * el botón «Probar conexión» es el que dice la verdad para ESTA cuenta. */
+/* Realtime: modelo y voz son texto LIBRE a propósito. El proveedor los renombra y retira
+ * cada pocos meses; una lista cerrada obligaría a actualizar la central para volver a
+ * atender. Estas son sugerencias — la lista de verdad la trae «Nube». */
 const RT_MODELS = ['gpt-live-1', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini'];
 const RT_VOICES = ['marin', 'cedar', 'alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
 const esRT = (p) => p === 'openai-realtime';
-const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Table.Th>;
-const empty = { name: '', exten: '', provider: 'demo', model: 'gpt-4o-mini', voice: 'es_MX-claude-high', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true };
+const enLaNube = (p) => p === 'openai-realtime' || p === 'openai';
+const provMeta = (p) => PROVIDERS.find(x => x.value === p) || PROVIDERS[2];
+
+const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true };
+
+/* Encabezado de un bloque del drawer: icono + qué se decide acá. */
+const Bloque = ({ icon, titulo, ayuda, children }) => (
+  <Card withBorder radius="md" padding="md">
+    <Group gap="sm" mb={ayuda ? 4 : 'sm'} wrap="nowrap">
+      <ThemeIcon variant="light" size={32} radius="md" color="pink">{icon}</ThemeIcon>
+      <Text fw={700} fz="sm">{titulo}</Text>
+    </Group>
+    {ayuda ? <Text size="xs" c="dimmed" mb="sm" ml={44}>{ayuda}</Text> : null}
+    {children}
+  </Card>
+);
 
 export default function AiAgents() {
-  const [list, setList] = useState([]); const [opened, setOpened] = useState(false); const [form, setForm] = useState(empty); const [saving, setSaving] = useState(false);
-  const [keySet, setKeySet] = useState(false); const [keyVal, setKeyVal] = useState(''); const [keySaving, setKeySaving] = useState(false);
-  const [voz, setVoz] = useState(null); const [vozUrl, setVozUrl] = useState(''); const [vozSpeed, setVozSpeed] = useState('1.0'); const [vozSaving, setVozSaving] = useState(false);
-  const [vozList, setVozList] = useState([]); const [edgeList, setEdgeList] = useState([]); const previewRef = useRef(null);
+  const [list, setList] = useState(null);
+  const [opened, setOpened] = useState(false);
+  const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
+  const [paso, setPaso] = useState('identidad');
+  const [filtro, setFiltro] = useState('');
+  const [vozList, setVozList] = useState([]); const [edgeList, setEdgeList] = useState([]);
+  const [prueba, setPrueba] = useState(null); const [probando, setProbando] = useState(false);
+  const [rtModelos, setRtModelos] = useState(null);
+  const previewRef = useRef(null);
+
+  async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) { setList([]); } }
   async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (_) {} }
-  async function preview(voice) { try { const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }) }); if (!r.ok) { toast('No se pudo generar el audio', 'bad'); return; } const b = await r.blob(); if (previewRef.current) { previewRef.current.src = URL.createObjectURL(b); previewRef.current.play().catch(() => {}); } } catch (_) {} }
-  const [vozAuto, setVozAuto] = useState(false);
-  async function loadVoz() {
-    try {
-      const d = await fetch('/backend/api/voz').then(r => r.json());
-      setVoz(d);
-      // Si no hay URL guardada a mano, mostramos la que esta usando la central (viene de VOZ_HOST).
-      setVozUrl(u => { if (u) return u; if (d && d.url) { setVozAuto(true); return d.url; } return u; });
-    } catch (_) { setVoz({ ok: false }); }
+  async function cargarModelos() {
+    try { setRtModelos(await fetch('/backend/api/ai-agents/modelos').then(r => r.json())); } catch (_) { setRtModelos({ ok: false }); }
   }
-  async function saveVoz() { setVozSaving(true); const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voz_url: vozUrl, voz_length_scale: vozSpeed }) }).then(x => x.json()).catch(() => ({ error: 1 })); setVozSaving(false); toast(r.error ? 'Error' : 'Servicio de voz guardado', r.error ? 'bad' : 'ok'); loadVoz(); }
-  async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) {} }
-  async function loadKey() { try { const s = await fetch('/backend/api/settings').then(r => r.json()); setKeySet(s.openai_api_key === '__SET__'); if (s.voz_url) setVozUrl(s.voz_url); if (s.voz_length_scale) setVozSpeed(s.voz_length_scale); } catch (_) {} }
-  // Agentes y motor de voz: configuración + un health que no cambia cada 8 s.
-  useEffect(() => { load(); loadKey(); loadVoz(); loadVozList(); const t = setInterval(() => { if (!document.hidden) { load(); loadVoz(); } }, 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); loadVozList(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
+
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
-  /* Cambiar el proveedor tiene que dejar modelo y voz COHERENTES: un agente realtime con
-   * `gpt-4o-mini` y voz `es_MX-claude-high` se guarda sin error y después no habla. */
+  /* Cambiar de proveedor tiene que dejar modelo y voz COHERENTES: un agente de voz a voz
+   * con `gpt-4o-mini` y una voz de Piper se guardaba sin error y después no hablaba. */
   function cambiarProveedor(v) {
     setPrueba(null);
     if (esRT(v) && !rtModelos) cargarModelos();
-    setForm(s => ({ ...s, provider: v,
-      model: esRT(v) ? (RT_MODELS.includes(s.model) ? s.model : RT_MODELS[0]) : (s.model && s.model.includes('realtime') ? 'gpt-4o-mini' : s.model),
-      voice: esRT(v) ? (RT_VOICES.includes(s.voice) ? s.voice : 'marin') : s.voice }));
+    setForm(s => ({
+      ...s, provider: v,
+      model: esRT(v) ? (RT_MODELS.includes(s.model) ? s.model : RT_MODELS[0]) : (s.model && /realtime|live/.test(s.model) ? 'gpt-4o-mini' : s.model),
+      voice: esRT(v) ? (RT_VOICES.includes(s.voice) ? s.voice : 'marin') : s.voice,
+    }));
   }
-  function edit(a) { setForm({ ...empty, ...a }); setPrueba(null); setOpened(true); if (esRT(a.provider) && !rtModelos) cargarModelos(); }
-  function nuevo() { setForm(empty); setPrueba(null); setOpened(true); }
+  function abrir(a) {
+    setForm(a ? { ...empty, ...a } : empty);
+    setPrueba(null); setPaso('identidad'); setOpened(true);
+    if (esRT((a || empty).provider) && !rtModelos) cargarModelos();
+  }
   async function save() {
-    if (!form.name || !form.exten) { toast('Nombre y número de acceso son obligatorios', 'bad'); return; }
+    if (!form.name || !form.exten) { toast('El nombre y el número de acceso son obligatorios', 'bad'); setPaso('identidad'); return; }
     setSaving(true);
     const url = form.id ? '/backend/api/ai-agents/' + form.id : '/backend/api/ai-agents';
     const r = await fetch(url, { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }).then(x => x.json()).catch(() => ({ error: 'red' }));
     setSaving(false);
-    if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(form.id ? 'Agente actualizado' : 'Agente creado (acceso ' + form.exten + ')', 'ok'); setOpened(false); load(); }
+    if (r.error) toast('Error: ' + r.error, 'bad');
+    else { toast(form.id ? 'Agente actualizado' : 'Agente creado · marcá ' + form.exten, 'ok'); setOpened(false); load(); }
   }
-  async function del(a) { if (!confirm('¿Eliminar el agente ' + a.name + '?')) return; await fetch('/backend/api/ai-agents/' + a.id, { method: 'DELETE' }); toast('Agente eliminado', 'info'); load(); }
-  /* «¿Estamos listos para llamar?»: abre una sesión de verdad con el modelo y cuenta qué
-   * pasó. La clave nunca sale del servidor: el panel manda modelo y voz. */
-  const [prueba, setPrueba] = useState(null); const [probando, setProbando] = useState(false);
-  /* Los modelos que ESTA cuenta sirve, preguntados al proveedor con la clave cargada. Una
-   * lista en el código envejece en cada release y además miente: el mismo nombre existe
-   * para una cuenta y no para otra. */
-  const [rtModelos, setRtModelos] = useState(null);
-  async function cargarModelos() {
-    try { const d = await fetch('/backend/api/ai-agents/modelos').then(r => r.json()); setRtModelos(d); } catch (_) { setRtModelos({ ok: false }); }
+  async function del(a) {
+    if (!confirm('¿Eliminar el agente ' + a.name + '?')) return;
+    await fetch('/backend/api/ai-agents/' + a.id, { method: 'DELETE' });
+    toast('Agente eliminado', 'info'); load();
   }
-  async function probarRealtime() {
+  async function probarConexion() {
     setProbando(true); setPrueba(null);
     const r = await fetch('/backend/api/ai-agents/probar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: form.model, voice: form.voice }) })
       .then(x => x.json()).catch(() => ({ ok: false, error: 'no se pudo contactar la central' }));
     setProbando(false); setPrueba(r);
-    toast(r.ok ? 'El modelo contestó: ya se puede llamar al agente' : 'La prueba falló', r.ok ? 'ok' : 'bad');
+    toast(r.ok ? 'El modelo contestó: ya se puede marcar ' + (form.exten || 'el interno') : 'La prueba falló', r.ok ? 'ok' : 'bad');
   }
-  async function saveKey() {
-    setKeySaving(true);
-    const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openai_api_key: keyVal }) }).then(x => x.json()).catch(() => ({ error: 1 }));
-    setKeySaving(false); if (r.error) toast('Error al guardar la clave', 'bad'); else { toast('Clave guardada', 'ok'); setKeyVal(''); loadKey(); }
+  async function preview(voice) {
+    try {
+      const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }) });
+      if (!r.ok) { toast('No se pudo generar el audio', 'bad'); return; }
+      const b = await r.blob();
+      if (previewRef.current) { previewRef.current.src = URL.createObjectURL(b); previewRef.current.play().catch(() => {}); }
+    } catch (_) {}
   }
+
+  const filtrados = (list || []).filter(a => !filtro
+    || a.name.toLowerCase().includes(filtro.toLowerCase())
+    || String(a.exten).includes(filtro)
+    || String(a.model || '').toLowerCase().includes(filtro.toLowerCase()));
+  const activos = (list || []).filter(a => a.enabled !== false).length;
+  const enNube = (list || []).filter(a => enLaNube(a.provider)).length;
 
   return (
     <Stack gap="lg">
-      <PageHeader icon={<IconRobot size={24} />} title="Agentes IA" subtitle="IVR conversacional · voz a voz (STT → LLM → TTS)" color="pink"
-        right={<Button leftSection={<IconPlus size={16} />} onClick={nuevo}>Nuevo agente</Button>} />
-
-      <Card withBorder radius="lg" padding="lg">
-        <Group gap="sm" mb="sm"><ThemeIcon variant="light" color="violet"><IconKey size={18} /></ThemeIcon><Text fw={600}>Proveedor de IA</Text>
-          <Badge variant="light" color={keySet ? 'teal' : 'gray'}>{keySet ? 'OpenAI configurado' : 'Modo demo (offline)'}</Badge></Group>
-        <Alert variant="light" color="blue" icon={<IconInfoCircle size={18} />} mb="md">
-          Sin clave, los agentes funcionan en <b>modo demo</b> 100% offline (Vosk para entender, voz sintética local). Cargá tu clave de OpenAI para STT/LLM/TTS de máxima calidad y elegí proveedor «OpenAI» en cada agente. El proveedor <b>OpenAI Realtime</b> (voz a voz, el que usan los agentes de portería en las colas) también necesita esta clave: sin ella no se intenta siquiera, y la llamada cae en modo demo.
-        </Alert>
-        <Group align="flex-end" gap="sm">
-          <PasswordInput label="OpenAI API Key" placeholder={keySet ? '•••••••••• (guardada)' : 'sk-...'} value={keyVal} onChange={e => setKeyVal(e.currentTarget.value)} style={{ flex: 1, maxWidth: 460 }} leftSection={<IconKey size={15} />} />
-          <Button leftSection={<IconDeviceFloppy size={16} />} loading={keySaving} disabled={!keyVal} onClick={saveKey}>Guardar clave</Button>
+      {/* ── La tabla, primero ─────────────────────────────────────────────── */}
+      <Card withBorder radius="lg" padding={0} style={{ overflow: 'hidden' }}>
+        <Group justify="space-between" wrap="nowrap" p="md" pb="sm">
+          <Group gap="sm" wrap="nowrap">
+            <ThemeIcon variant="light" color="pink" size={42} radius="md"><IcoAgente size={24} activo={activos > 0} /></ThemeIcon>
+            <div>
+              <Text fw={800} fz="lg" lh={1.15}>Agentes IA</Text>
+              <Text size="xs" c="dimmed">
+                {list === null ? 'Cargando…' : `${list.length} ${list.length === 1 ? 'agente' : 'agentes'} · ${activos} activo${activos === 1 ? '' : 's'} · ${enNube} en la nube`}
+              </Text>
+            </div>
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            {(list || []).length > 4 && <TextInput placeholder="Buscar…" value={filtro} onChange={e => setFiltro(e.currentTarget.value)} leftSection={<IconSearch size={14} />} w={200} size="sm" />}
+            <Button leftSection={<IconPlus size={16} />} onClick={() => abrir(null)}>Nuevo agente</Button>
+          </Group>
         </Group>
+
+        {list === null ? <Text c="dimmed" ta="center" py="xl" size="sm">Cargando agentes…</Text>
+          : !list.length ? (
+            <Stack align="center" gap={6} py={48} px="md">
+              <ThemeIcon variant="light" color="gray" size={56} radius="xl"><IconRobotOff size={28} /></ThemeIcon>
+              <Text fw={600}>Todavía no hay agentes</Text>
+              <Text size="sm" c="dimmed" ta="center" maw={420}>Un agente es un interno que atiende y conversa. Creá uno, probá la conexión y marcalo desde cualquier teléfono.</Text>
+              <Button mt="sm" leftSection={<IconPlus size={16} />} onClick={() => abrir(null)}>Crear el primero</Button>
+            </Stack>
+          ) : (
+            <Table.ScrollContainer minWidth={720}>
+              <Table striped highlightOnHover verticalSpacing="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Agente</Table.Th>
+                    <Table.Th>Acceso</Table.Th>
+                    <Table.Th>Dónde corre</Table.Th>
+                    <Table.Th>Modelo / voz</Table.Th>
+                    <Table.Th>Estado</Table.Th>
+                    <Table.Th />
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>{filtrados.map(a => {
+                  const nube = enLaNube(a.provider);
+                  const vivo = a.enabled !== false;
+                  return (
+                    <Table.Tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => abrir(a)}>
+                      <Table.Td>
+                        <Group gap={10} wrap="nowrap">
+                          <ThemeIcon variant="light" size={34} radius="md" color={vivo ? 'pink' : 'gray'}><IcoAgente size={19} activo={vivo} /></ThemeIcon>
+                          <Text fw={600} fz="sm">{a.name}</Text>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td><Code fz="sm">{a.exten}</Code></Table.Td>
+                      <Table.Td>
+                        <Badge variant="light" color={nube ? 'violet' : 'teal'}
+                          leftSection={nube ? <IcoNube size={12} activo={vivo} /> : <IcoOnda size={12} activo={vivo} />}>
+                          {nube ? 'Nube' : 'Local'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text fz="sm" lh={1.2}>{nube ? a.model : 'Vosk + reglas'}</Text>
+                        <Text fz={11} c="dimmed" truncate maw={180}>{a.voice}</Text>
+                      </Table.Td>
+                      <Table.Td><Badge variant="dot" color={vivo ? 'teal' : 'gray'}>{vivo ? 'Atiende' : 'Apagado'}</Badge></Table.Td>
+                      <Table.Td ta="right" onClick={e => e.stopPropagation()}>
+                        <Group gap={4} justify="flex-end" wrap="nowrap">
+                          <Tooltip label="Editar"><ActionIcon variant="subtle" onClick={() => abrir(a)}><IconEdit size={17} /></ActionIcon></Tooltip>
+                          <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(a)}><IconTrash size={17} /></ActionIcon></Tooltip>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}</Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          )}
       </Card>
 
-      <Card withBorder radius="lg" padding="lg">
-        <Group justify="space-between" mb="sm">
-          <Group gap="sm"><ThemeIcon variant="light" color="teal"><IconServer2 size={18} /></ThemeIcon><Text fw={600}>Servicio de Voz IA · Piper + Whisper</Text>
-            <Badge variant="light" color={voz?.ok ? 'teal' : 'red'}>{voz?.ok ? 'En línea · ' + voz.latency_ms + 'ms' : 'Sin conexión'}</Badge></Group>
-          <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />} onClick={loadVoz}>Refrescar</Button>
-        </Group>
-        {voz?.ok ? <>
-          <SimpleGrid cols={{ base: 2, sm: 4 }} mb="md">
-            <div><Text size="xs" c="dimmed">Whisper (STT)</Text><Text fw={700}>{voz.whisper}</Text></div>
-            <div><Text size="xs" c="dimmed">Voz (TTS)</Text><Text fw={700} truncate>{voz.default_voice}</Text></div>
-            <div><Text size="xs" c="dimmed">CPU ({voz.metrics?.ncpu} nucleos)</Text><Group gap={6} wrap="nowrap"><Progress value={voz.metrics?.cpu_pct || 0} color={(voz.metrics?.cpu_pct || 0) > 80 ? 'red' : 'teal'} style={{ flex: 1 }} /><Text size="xs" w={36}>{voz.metrics?.cpu_pct}%</Text></Group></div>
-            <div><Text size="xs" c="dimmed">Memoria</Text><Group gap={6} wrap="nowrap"><Progress value={voz.metrics?.mem_pct || 0} color="blue" style={{ flex: 1 }} /><Text size="xs" w={70}>{voz.metrics?.mem_used_mb}/{voz.metrics?.mem_total_mb}MB</Text></Group></div>
-          </SimpleGrid>
-          <Group gap="xs"><Text size="xs" c="dimmed">Voces instaladas:</Text>{(voz.voices || []).map(v => <Badge key={v} variant="light" radius="sm">{v}</Badge>)}</Group>
-        </> : <Alert variant="light" color="red">No se pudo contactar el servicio de voz en {vozUrl}.{voz?.error ? ' (' + voz.error + ')' : ''}</Alert>}
-        <Divider my="sm" label="Parametros" labelPosition="center" />
-        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
-          <TextInput label="URL del servicio (contenedor pbxng-voz)"
-            description={vozAuto ? 'Detectada automáticamente desde la configuración del despliegue. Guardala si querés fijarla.' : 'Dirección del motor de voz (TTS y transcripción)'}
-            placeholder="http://ip-del-motor-de-voz:8080"
-            value={vozUrl} onChange={e => { setVozAuto(false); setVozUrl(e.currentTarget.value); }}
-            leftSection={<IconServer2 size={15} />}
-            rightSection={voz && voz.ok ? <Tooltip label="El servicio responde"><IconCircleCheck size={16} color="var(--mantine-color-teal-6)" /></Tooltip> : null} />
-          <div><Text size="sm" fw={500}>Velocidad de habla</Text><Text size="xs" c="dimmed" mb={10}>Menor = mas rapido · 1.0 = normal</Text>
-            <Slider min={0.7} max={1.4} step={0.05} value={parseFloat(vozSpeed) || 1.0} onChange={v => setVozSpeed(String(v))} marks={[{ value: 0.8, label: 'rapido' }, { value: 1.0, label: 'normal' }, { value: 1.3, label: 'lento' }]} /></div>
-        </SimpleGrid>
-        <Group justify="flex-end" mt="xl"><Button leftSection={<IconDeviceFloppy size={16} />} loading={vozSaving} onClick={saveVoz}>Guardar configuracion de voz</Button></Group>
-      </Card>
+      {(list || []).length ? (
+        <Text size="xs" c="dimmed">
+          Un agente atiende marcando su número de acceso. Para que atienda una <b>cola</b> —y reemplace a un operario— se enciende en
+          la solapa «Agente IA» del editor de colas.
+        </Text>
+      ) : null}
 
-      <Card withBorder radius="lg" padding="lg">
-        {list.length === 0 ? <Text c="dimmed" ta="center" py="xl">Sin agentes. Creá uno con «Nuevo agente».</Text> :
-          <Table.ScrollContainer minWidth={640}>
-            <Table striped highlightOnHover verticalSpacing="sm">
-              <Table.Thead><Table.Tr><Th icon={<IconRobot size={13} />}>Agente</Th><Th icon={<IconHash size={13} />}>Acceso</Th><Th icon={<IconBrain size={13} />}>Proveedor</Th><Th icon={<IconMicrophone2 size={13} />}>Voz</Th><Th icon={<IconBolt size={13} />}>Estado</Th><Table.Th /></Table.Tr></Table.Thead>
-              <Table.Tbody>{list.map(a => (
-                <Table.Tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => edit(a)}>
-                  <Table.Td fw={600}>{a.name}</Table.Td>
-                  <Table.Td ff="monospace">{a.exten}</Table.Td>
-                  <Table.Td><Badge variant="light" color={esRT(a.provider) ? 'violet' : a.provider === 'openai' ? 'teal' : 'grape'}>{esRT(a.provider) ? 'Realtime · ' + a.model : a.provider === 'openai' ? 'OpenAI · ' + a.model : 'Demo'}</Badge></Table.Td>
-                  <Table.Td><Text size="sm" c="dimmed">{a.voice}</Text></Table.Td>
-                  <Table.Td><Badge variant="dot" color={a.enabled ? 'teal' : 'gray'}>{a.enabled ? 'Activo' : 'Inactivo'}</Badge></Table.Td>
-                  <Table.Td ta="right" onClick={e => e.stopPropagation()}><Group gap={4} justify="flex-end"><ActionIcon variant="subtle" onClick={() => edit(a)}><IconEdit size={17} /></ActionIcon><ActionIcon variant="subtle" color="red" onClick={() => del(a)}><IconTrash size={17} /></ActionIcon></Group></Table.Td>
-                </Table.Tr>
-              ))}</Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>}
-      </Card>
-
-      <Modal opened={opened} onClose={() => setOpened(false)} size="lg" radius="lg" centered
-        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color="pink"><IconRobot size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>{form.id ? 'Editar agente' : 'Nuevo agente IA'}</Text><Text size="xs" c="dimmed">IVR conversacional</Text></div></Group>}>
-        <Stack gap="md">
-          <SimpleGrid cols={2}>
-            <TextInput label="Nombre" description="Identifica al agente. Ej: Recepción" value={form.name} onChange={e => up('name', e.currentTarget.value)} required />
-            <TextInput label="Número de acceso" description="Extensión que dispara el bot. Ej: 7700" value={form.exten} onChange={e => up('exten', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
-          </SimpleGrid>
-          <SimpleGrid cols={3}>
-            <Select label="Proveedor" data={PROVIDERS} value={form.provider} onChange={cambiarProveedor}
-              description={esRT(form.provider) ? 'Una sola sesión: menor latencia' : undefined} />
-            {esRT(form.provider)
-              ? <Autocomplete label="Modelo (realtime)"
-                  description={rtModelos === null ? 'gpt-live o gpt-realtime'
-                    : rtModelos.ok ? (rtModelos.modelos.length ? 'Los ' + rtModelos.modelos.length + ' que sirve tu cuenta' : 'Tu cuenta no sirve ninguno de voz a voz')
-                    : 'No se pudo consultar tu cuenta'}
-                  data={rtModelos && rtModelos.ok && rtModelos.modelos.length ? rtModelos.modelos : RT_MODELS}
-                  value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} placeholder="gpt-realtime-2.1-mini" />
-              : <Select label="Modelo (OpenAI)" data={MODELS} value={form.model} onChange={v => up('model', v)} disabled={form.provider !== 'openai'} />}
-            <Group gap="xs" align="flex-end" wrap="nowrap">
-              {esRT(form.provider)
-                ? <Autocomplete label="Voz" description="Voces realtime" data={RT_VOICES} value={form.voice || ''} onChange={v => { up('voice', v); setPrueba(null); }} placeholder="marin" style={{ flex: 1 }} />
-                : <Select label="Voz" description={form.provider === 'openai' ? 'Voces de OpenAI' : 'Voces instaladas (gestionalas en Voz IA)'} data={form.provider === 'openai' ? OPENAI_VOICES : [{ group: 'Local · Piper (offline)', items: vozList.map(k => ({ value: k, label: k })) }, { group: 'Latinoamérica · Edge (online)', items: edgeList.map(v => ({ value: v.key, label: v.label })) }]} value={form.voice} onChange={v => up('voice', v)} style={{ flex: 1 }} searchable />}
-              {form.provider === 'demo' && <Tooltip label="Escuchar voz"><ActionIcon variant="light" size={36} onClick={() => preview(form.voice)} disabled={!form.voice}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>}
-            </Group>
-          </SimpleGrid>
-          {esRT(form.provider) && <Card withBorder radius="md" padding="sm" bg="var(--mantine-color-default-hover)">
-            <Group justify="space-between" wrap="nowrap" mb={prueba ? 'sm' : 0}>
+      {/* ── Alta / edición ────────────────────────────────────────────────── */}
+      <Drawer opened={opened} onClose={() => setOpened(false)} position="right" size={620} padding={0}
+        overlayProps={{ blur: 2, backgroundOpacity: 0.45 }} withCloseButton={false}
+        styles={{ body: { height: '100%', display: 'flex', flexDirection: 'column' } }}>
+        <Box p="md" pb={0} style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+          <Group justify="space-between" wrap="nowrap" mb="sm">
+            <Group gap="sm" wrap="nowrap">
+              <ThemeIcon size={46} radius="md" variant="light" color="pink"><IcoAgente size={26} activo={form.enabled !== false} /></ThemeIcon>
               <div>
-                <Text size="sm" fw={600}>¿Se puede llamar a este agente?</Text>
-                <Text size="xs" c="dimmed">Abre una sesión real con el modelo y le pide que hable. Comprueba las tres cosas que hacen que un agente atienda y no diga nada: la clave, el identificador del modelo y la voz.</Text>
+                <Text fw={800} fz="lg" lh={1.1}>{form.id ? form.name || 'Editar agente' : 'Nuevo agente'}</Text>
+                <Text size="xs" c="dimmed">{form.exten ? 'Atiende marcando ' + form.exten : 'Un interno que atiende y conversa'}</Text>
               </div>
-              <Button size="xs" variant="light" leftSection={<IconPlugConnected size={15} />} loading={probando} onClick={probarRealtime} disabled={!form.model}>Probar conexión</Button>
             </Group>
-            {rtModelos && rtModelos.ok && rtModelos.modelos.length === 0 && !prueba &&
-              <Alert variant="light" color="orange" icon={<IconAlertTriangle size={18} />}>
-                Tu cuenta de OpenAI no lista ningún modelo de voz a voz. Suele ser el nivel de uso o la verificación de la organización: se habilitan en el panel de OpenAI, no acá.
-              </Alert>}
-            {prueba && (prueba.ok
-              ? <Alert variant="light" color="teal" icon={<IconCircleCheck size={18} />}>
-                  <Text size="sm" fw={600}>El modelo contestó. Ya se puede marcar {form.exten || 'el interno del agente'}.</Text>
-                  <Text size="xs" c="dimmed">Sesión abierta en {prueba.abrio_ms} ms · primer audio en {prueba.primer_audio_ms} ms · {prueba.bytes_audio} bytes.
-                    {' '}Ese «primer audio» es el silencio que va a escuchar el visitante antes de que el agente hable.</Text>
-                  {prueba.texto ? <Text size="xs" mt={4}>Dijo: «{prueba.texto.trim()}»</Text> : null}
-                  {prueba.api ? <Text size="xs" c="dimmed" mt={2}>API <Code>{prueba.api}</Code></Text> : null}
-                </Alert>
-              : <Alert variant="light" color="red" icon={<IconAlertTriangle size={18} />}>
-                  <Text size="sm">{prueba.error || 'falló sin decir por qué'}</Text>
-                  {prueba.endpoint ? <Text size="xs" c="dimmed" mt={4}>Endpoint: <Code>{prueba.endpoint}</Code>{prueba.api ? <> · API <Code>{prueba.api}</Code></> : null}</Text> : null}
-                  {prueba.intentos && prueba.intentos.length > 1
-                    ? <Text size="xs" c="dimmed" mt={4}>Se probaron {prueba.intentos.length} modos: {prueba.intentos.map(i => i.intento).join(' · ')}</Text>
-                    : null}
-                  {prueba.eventos && Object.keys(prueba.eventos).length
-                    ? <Text size="xs" c="dimmed" mt={4}>El proveedor mandó: {Object.entries(prueba.eventos).map(([k, v]) => k + (v > 1 ? ' ×' + v : '')).join(', ')}</Text>
-                    : prueba.abrio_ms !== null && prueba.abrio_ms !== undefined
-                      ? <Text size="xs" c="dimmed" mt={4}>El proveedor no mandó ningún evento: la sesión abrió pero no llegó a configurarse.</Text>
-                      : null}
-                </Alert>)}
-          </Card>}
-          <Textarea label="Saludo inicial" description="Lo que dice el bot al atender. Si lo dejás vacío, usa uno por defecto." value={form.greeting_text} onChange={e => up('greeting_text', e.currentTarget.value)} autosize minRows={2} placeholder="Hola, gracias por llamar a IES. ¿En qué puedo ayudarte?" />
-          <Textarea label="Instrucciones (system prompt)" description="Personalidad y reglas del agente. Ej: Sos el asistente de IES, amable y conciso; ofrecé ventas o soporte." value={form.system_prompt} onChange={e => up('system_prompt', e.currentTarget.value)} autosize minRows={3} />
-          <Divider label="Transferencias (function-calling)" labelPosition="center" />
-          <SimpleGrid cols={3}>
-            <TextInput label="Extensión Ventas" value={form.sales_exten} onChange={e => up('sales_exten', e.currentTarget.value)} ff="monospace" placeholder="1001" leftSection={<IconPhoneCall size={14} />} />
-            <TextInput label="Extensión Soporte" value={form.support_exten} onChange={e => up('support_exten', e.currentTarget.value)} ff="monospace" placeholder="1002" leftSection={<IconHeadset size={14} />} />
-            <TextInput label="Extensión por defecto" value={form.default_exten} onChange={e => up('default_exten', e.currentTarget.value)} ff="monospace" placeholder="1001" leftSection={<IconUsers size={14} />} />
-          </SimpleGrid>
-          <TextInput label="Webhook CRM (opcional)" description="URL que recibe {query, caller} y devuelve {result}. El bot la usa para consultar datos del cliente." value={form.crm_webhook} onChange={e => up('crm_webhook', e.currentTarget.value)} placeholder="https://tu-crm/api/lookup" />
-          <Switch label="Agente activo" checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />
+            <Switch size="md" onLabel="ON" offLabel="OFF" checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />
+          </Group>
+          <Tabs value={paso} onChange={setPaso} variant="default">
+            <Tabs.List>
+              <Tabs.Tab value="identidad" leftSection={<IconId size={15} />}>Identidad</Tabs.Tab>
+              <Tabs.Tab value="cerebro" leftSection={<IcoCerebro size={15} activo={enLaNube(form.provider)} />}>Cerebro</Tabs.Tab>
+              <Tabs.Tab value="derivaciones" leftSection={<IconArrowRampRight size={15} />}>Derivaciones</Tabs.Tab>
+            </Tabs.List>
+          </Tabs>
+        </Box>
+
+        <ScrollArea style={{ flex: 1 }} p="md">
+          <Stack gap="md">
+            {paso === 'identidad' && <>
+              <Bloque icon={<IconId size={18} />} titulo="Quién es y dónde atiende">
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                  <TextInput label="Nombre" description="Lo ve el supervisor en el tablero" placeholder="Portería" value={form.name} onChange={e => up('name', e.currentTarget.value)} required />
+                  <TextInput label="Número de acceso" description="El interno que se marca para hablarle" placeholder="7700" value={form.exten} onChange={e => up('exten', e.currentTarget.value)} required leftSection={<IconHash size={15} />} />
+                </SimpleGrid>
+              </Bloque>
+              <Bloque icon={<IconBolt size={18} />} titulo="Estado"
+                ayuda="Un agente apagado no timbra: si está puesto en una cola, esa cola deja de tener quien atienda por ese lado.">
+                <Switch label={form.enabled !== false ? 'Atiende llamadas' : 'Apagado'} checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />
+              </Bloque>
+              <Group justify="flex-end"><Button variant="light" onClick={() => setPaso('cerebro')}>Siguiente: Cerebro →</Button></Group>
+            </>}
+
+            {paso === 'cerebro' && <>
+              <Bloque icon={<IcoCerebro size={18} activo={enLaNube(form.provider)} />} titulo="Con qué piensa y habla"
+                ayuda={provMeta(form.provider).pie}>
+                <Select label="Proveedor" data={PROVIDERS.map(p => ({ value: p.value, label: p.label }))} value={form.provider} onChange={cambiarProveedor} mb="md"
+                  renderOption={({ option }) => {
+                    const m = provMeta(option.value);
+                    return (
+                      <Group gap="sm" wrap="nowrap" py={2}>
+                        <ThemeIcon variant="light" size={30} radius="md" color={m.donde === 'nube' ? 'violet' : 'teal'}>
+                          {m.donde === 'nube' ? <IcoNube size={17} /> : <IcoOnda size={17} />}
+                        </ThemeIcon>
+                        <div style={{ minWidth: 0 }}><Text fz="sm" fw={600} truncate>{option.label}</Text><Text fz={11} c="dimmed" truncate>{m.pie}</Text></div>
+                      </Group>
+                    );
+                  }} />
+                {enLaNube(form.provider)
+                  ? <Alert variant="light" color="violet" icon={<IcoNube size={18} activo />} mb="md" p="xs">
+                      <Text size="xs">El audio de la llamada <b>sale de la central</b> y se paga por minuto. Si se corta el enlace, este agente deja de atender. La clave se carga en la pestaña <b>Nube</b>.</Text>
+                    </Alert>
+                  : <Alert variant="light" color="teal" icon={<IcoOnda size={18} activo />} mb="md" p="xs">
+                      <Text size="xs">Todo adentro del fierro: sin clave, sin internet y sin costo. Entiende poco, pero sirve para probar el recorrido de la llamada.</Text>
+                    </Alert>}
+
+                {form.provider !== 'demo' && (
+                  <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                    {esRT(form.provider)
+                      ? <Autocomplete label="Modelo" placeholder="gpt-live-1"
+                          description={rtModelos === null ? 'gpt-live o gpt-realtime'
+                            : rtModelos.ok ? (rtModelos.modelos.length ? 'Los ' + rtModelos.modelos.length + ' que sirve tu cuenta' : 'Tu cuenta no sirve ninguno de voz a voz')
+                              : 'No se pudo consultar tu cuenta'}
+                          data={rtModelos && rtModelos.ok && rtModelos.modelos.length ? rtModelos.modelos : RT_MODELS}
+                          value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} />
+                      : <Select label="Modelo" data={MODELS} value={form.model} onChange={v => up('model', v)} />}
+                    {esRT(form.provider)
+                      ? <Autocomplete label="Voz" description="Voces del modelo" placeholder="marin" data={RT_VOICES} value={form.voice || ''} onChange={v => { up('voice', v); setPrueba(null); }} />
+                      : <Select label="Voz" description="Voces de OpenAI" data={OPENAI_VOICES} value={form.voice} onChange={v => up('voice', v)} searchable />}
+                  </SimpleGrid>
+                )}
+                {form.provider === 'demo' && (
+                  <Group gap="xs" align="flex-end" wrap="nowrap">
+                    <Select label="Voz" description="Las de tu servidor — se gestionan en «Motor local»" style={{ flex: 1 }} searchable
+                      data={[{ group: 'Local · Piper (offline)', items: vozList.map(k => ({ value: k, label: k })) },
+                        { group: 'Edge (online)', items: edgeList.map(v => ({ value: v.key, label: v.label })) }]}
+                      value={form.voice} onChange={v => up('voice', v)} />
+                    <Tooltip label="Escuchar"><ActionIcon variant="light" size={36} onClick={() => preview(form.voice)} disabled={!form.voice}><IconPlayerPlay size={16} /></ActionIcon></Tooltip>
+                  </Group>
+                )}
+              </Bloque>
+
+              {esRT(form.provider) && (
+                <Bloque icon={<IconPlugConnected size={18} />} titulo="¿Se puede llamar a este agente?"
+                  ayuda="Abre una sesión real y le pide que hable. Comprueba de una vez las tres cosas que hacen que un agente atienda y no diga nada: la clave, el identificador del modelo y la voz.">
+                  <Button variant="light" leftSection={<IconPlugConnected size={16} />} loading={probando} onClick={probarConexion} disabled={!form.model}>Probar conexión</Button>
+                  {prueba && (prueba.ok
+                    ? <Alert variant="light" color="teal" mt="sm" icon={<IconCircleCheck size={18} />}>
+                        <Text size="sm" fw={600}>El modelo contestó. Ya se puede marcar {form.exten || 'el interno'}.</Text>
+                        <Text size="xs" c="dimmed">Sesión en {prueba.abrio_ms} ms · primer audio en {prueba.primer_audio_ms} ms.{' '}
+                          Ese «primer audio» es el silencio que va a escuchar el visitante antes de que el agente hable.</Text>
+                        {prueba.texto ? <Text size="xs" mt={4}>Dijo: «{prueba.texto.trim()}»</Text> : null}
+                        {prueba.api ? <Text size="xs" c="dimmed" mt={2}>API <Code>{prueba.api}</Code></Text> : null}
+                      </Alert>
+                    : <Alert variant="light" color="red" mt="sm" icon={<IconAlertTriangle size={18} />}>
+                        <Text size="sm">{prueba.error || 'falló sin decir por qué'}</Text>
+                        {prueba.intentos && prueba.intentos.length > 1 ? <Text size="xs" c="dimmed" mt={4}>Se probaron {prueba.intentos.length} modos: {prueba.intentos.map(i => i.intento).join(' · ')}</Text> : null}
+                        {prueba.eventos && Object.keys(prueba.eventos).length
+                          ? <Text size="xs" c="dimmed" mt={4}>El proveedor mandó: {Object.entries(prueba.eventos).map(([k, v]) => k + (v > 1 ? ' ×' + v : '')).join(', ')}</Text> : null}
+                        {prueba.endpoint ? <Text size="xs" c="dimmed" mt={4}>Endpoint: <Code>{prueba.endpoint}</Code></Text> : null}
+                      </Alert>)}
+                </Bloque>
+              )}
+
+              <Bloque icon={<IconInfoCircle size={18} />} titulo="Qué dice"
+                ayuda="El saludo es lo primero que escucha quien llama. Las instrucciones son la personalidad y los límites.">
+                <Textarea label="Saludo inicial" placeholder="Hola, portería de IES. ¿Con quién querés hablar?" autosize minRows={2} mb="md"
+                  value={form.greeting_text} onChange={e => up('greeting_text', e.currentTarget.value)} />
+                <Textarea label="Instrucciones (system prompt)" autosize minRows={4}
+                  description="Los modelos de voz a voz parafrasean: si necesitás una frase palabra por palabra, pedila acá explícitamente."
+                  placeholder="Sos el portero de IES. Amable y muy breve. Preguntá a quién viene a ver y el número de unidad. Si dudás, pasá con una persona."
+                  value={form.system_prompt} onChange={e => up('system_prompt', e.currentTarget.value)} />
+              </Bloque>
+              <Group justify="space-between">
+                <Button variant="subtle" onClick={() => setPaso('identidad')}>← Identidad</Button>
+                <Button variant="light" onClick={() => setPaso('derivaciones')}>Siguiente: Derivaciones →</Button>
+              </Group>
+            </>}
+
+            {paso === 'derivaciones' && <>
+              <Bloque icon={<IconArrowRampRight size={18} />} titulo="A dónde manda la llamada"
+                ayuda="Que exista una salida a una persona es la condición para prender esto en un cliente real: el agente va a dudar, y cuando dude tiene que tener a dónde ir.">
+                <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+                  <TextInput label="Ventas" value={form.sales_exten} onChange={e => up('sales_exten', e.currentTarget.value)} placeholder="1001" leftSection={<IconPhoneCall size={14} />} />
+                  <TextInput label="Soporte" value={form.support_exten} onChange={e => up('support_exten', e.currentTarget.value)} placeholder="1002" leftSection={<IconHeadset size={14} />} />
+                  <TextInput label="Por defecto" value={form.default_exten} onChange={e => up('default_exten', e.currentTarget.value)} placeholder="1001" leftSection={<IconUsers size={14} />} />
+                </SimpleGrid>
+              </Bloque>
+              <Bloque icon={<IconInfoCircle size={18} />} titulo="Consulta de datos (opcional)"
+                ayuda="El agente la usa para verificar lo que le dicen. Recibe {query, caller} y devuelve {result}; si tarda, la llamada NO se traba: hay un tope de 2,5 s.">
+                <TextInput label="Webhook del CRM" placeholder="https://tu-crm/api/lookup" value={form.crm_webhook} onChange={e => up('crm_webhook', e.currentTarget.value)} />
+              </Bloque>
+              <Group justify="flex-start"><Button variant="subtle" onClick={() => setPaso('cerebro')}>← Cerebro</Button></Group>
+            </>}
+          </Stack>
           <audio ref={previewRef} style={{ display: 'none' }} />
-          <Divider />
-          <Group justify="flex-end"><Button variant="default" onClick={() => setOpened(false)}>Cancelar</Button><Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Crear agente'}</Button></Group>
-        </Stack>
-      </Modal>
+        </ScrollArea>
+
+        <Box p="md" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+          <Group justify="space-between" wrap="nowrap">
+            <Text size="xs" c="dimmed">{enLaNube(form.provider) ? 'Se paga por minuto de conversación' : 'Sin costo: corre en tu servidor'}</Text>
+            <Group gap="sm" wrap="nowrap">
+              <Button variant="default" onClick={() => setOpened(false)}>Cancelar</Button>
+              <Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Crear agente'}</Button>
+            </Group>
+          </Group>
+        </Box>
+      </Drawer>
     </Stack>
   );
 }
