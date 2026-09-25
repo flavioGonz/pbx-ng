@@ -40,6 +40,25 @@ const MAX_HORA_DEF = 3;
  * CRISTIANO, porque esa descripción es lo único que el modelo usa para decidir cuándo
  * pedirla: una descripción vaga es una herramienta que se dispara cuando no corresponde. */
 const CATALOGO = {
+  verificar_autorizado: {
+    riesgo: 'lee',
+    titulo: 'Verificar a un autorizado',
+    ayuda: 'Confirma contra el CRM de la central si la persona que está en la puerta figura entre los autorizados de esa dirección.',
+    declarar: () => ({
+      type: 'function', name: 'verificar_autorizado',
+      description: 'Confirmar si quien está en la puerta figura entre las personas autorizadas de esta dirección. '
+        + 'Pedile nombre y apellido completos; si hay más de una persona con ese nombre te voy a pedir el documento. '
+        + 'NO inventes el resultado ni digas nombres de residentes que el visitante no haya dicho antes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Nombre y apellido, tal como lo dijo el visitante' },
+          documento: { type: 'string', description: 'Número de documento, si lo dio' },
+        },
+        required: ['nombre'],
+      },
+    }),
+  },
   verificar_unidad: {
     riesgo: 'lee',
     titulo: 'Verificar unidad',
@@ -218,6 +237,19 @@ async function ejecutar(nombre, args, ctx) {
 
   try {
     switch (nombre) {
+      case 'verificar_autorizado': {
+        /* La verificación de verdad: contra el CRM de la central, el MISMO que ve el
+         * operario. Si validara contra otra tabla, dar de baja a alguien en el CRM no lo
+         * sacaría de la puerta. */
+        if (typeof c.verificarPersona !== 'function') return { ok: false, motivo: 'la verificación no está disponible' };
+        const r = await conTope(c.verificarPersona({ nombre: String(a.nombre || ''), documento: String(a.documento || '') }), TOPE_LECTURA_MS);
+        /* La bandera la escribe la central, nunca el modelo: es lo que habilita abrir. */
+        if (r && r.ok && c.sesion) { c.sesion.verificada = true; c.sesion.persona = (r.persona && r.persona.name) || ''; }
+        auditar({ resultado: r && r.ok ? 'verificado' : 'no verificado', razon: (r && r.razon) || '', motivo: String(a.nombre || '') });
+        return r && r.ok
+          ? { ok: true, autorizado: true, detalle: r.alModelo }
+          : { ok: false, autorizado: false, motivo: (r && r.alModelo) || 'no se pudo verificar' };
+      }
       case 'verificar_unidad': {
         const unidad = String(a.unidad || '').trim();
         if (!unidad) return { ok: false, motivo: 'falta el número de unidad' };

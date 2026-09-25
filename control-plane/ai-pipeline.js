@@ -14,6 +14,7 @@ const momento = require('./momento');     // la hora del cliente: el modelo no t
 const inactividad = require('./inactividad');   // qué hacer cuando el visitante deja de hablar
 const herramientas = require('./herramientas'); // lo que el agente puede PEDIR (la central decide)
 const remotas = require('./herramientas-remotas');   // la caja que pone el backoffice del cliente
+const porteria = require('./porteria');         // quién llama y quién está autorizado (CRM de la central)
 
 const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
 const VOSK_MODEL = '/opt/vosk-model-es';
@@ -421,6 +422,12 @@ function ctxHerramientas(session, cfg) {
     hhmm: new Intl.DateTimeFormat('es-UY', { timeZone: session.zona || momento.ZONA_DEF, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()),
     sesion: session.estadoIA || (session.estadoIA = { verificada: false }),
     leerCrm: (tipo, datos) => leerCrmAgente(session, tipo, datos),
+    /* La verificación real: contra las personas autorizadas del cliente que llama, que son
+     * las mismas que ve el operario en su panel. */
+    verificarPersona: async (datos) => {
+      if (!session.identificacion) return { ok: false, razon: 'no se pudo identificar el portero', alModelo: 'no reconozco esta dirección; te paso con una persona' };
+      return porteria.verificarAutorizado(session.identificacion.personas, datos, new Date());
+    },
     transferir: async (motivo) => {
       session.log('transferencia pedida por el agente: ' + motivo);
       await doTransfer(session, session.agent.default_exten || session.agent.support_exten || '', 'Operador');
@@ -813,10 +820,21 @@ async function startAiSession(channel, agent) {
   /* El bloque de contexto va ANTES de lo que escribió el usuario y dice explícitamente que
    * manda sobre el saludo: si no, el modelo repite el «buenos días» que quedó escrito en el
    * texto del saludo y la hora que le pasamos no sirve de nada. */
+  /* ¿Desde dónde entra la llamada? El portero es un interno o un número: se lo busca en el
+   * CRM igual que hace la ficha del agente. Es el único dato de la llamada que el visitante
+   * NO puede falsear, y es lo que convierte «un bot que atiende» en «la portería de este
+   * edificio». Si no está cargado, la llamada sigue igual: el agente atiende sin saber de
+   * dónde viene y no puede verificar a nadie. */
+  let identificacion = null;
+  try { identificacion = await porteria.identificarLlamante(POOL, channel.caller && channel.caller.number); }
+  catch (e) { log.warn('no se pudo identificar el portero', { err: e.message }); }
+  const ctxPorteria = porteria.bloqueContexto(identificacion);
+
   const instrucciones = momento.bloqueHora(new Date(), zona) + '\n\n'
+    + (ctxPorteria ? ctxPorteria + '\n\n' : '')
     + (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.');
   const session = {
-    uuid, channel, agent, keys, useOpenAI, modo, realtimeBase, zona,
+    uuid, channel, agent, keys, useOpenAI, modo, realtimeBase, zona, identificacion,
     callerId: (channel.caller && channel.caller.number) || '', vozUrl, vozSpeed,
     history: [{ role: 'system', content: instrucciones }],
     greetingText: momento.conSaludo(
@@ -836,7 +854,8 @@ async function startAiSession(channel, agent) {
     session.em = em;
     await bridge.addChannel({ channel: channel.id });
     await bridge.addChannel({ channel: em.id });
-    session.log('sesión iniciada (modo=' + modo + ', agente=' + agent.name + ')');
+    session.log('sesión iniciada (modo=' + modo + ', agente=' + agent.name + ')'
+      + (identificacion ? ' · portero de ' + identificacion.cliente.name + ' (' + identificacion.personas.length + ' autorizados)' : ' · llamante no identificado en el CRM'));
     // watchdog: si el caller cuelga
     session.endpointTimer = setInterval(() => checkEndpoint(session), 250);
     channel.once('StasisEnd', () => endSession(session, 'caller-hangup'));

@@ -54,20 +54,25 @@ const nombreOk = (n) => /^[a-z][a-z0-9_]{1,40}$/.test(String(n || ''));
  * @param {object} local el catálogo local, para no dejar que nada lo pise
  * @returns {array} declaraciones listas para el modelo, con prefijo y saneadas
  */
-function normalizarCatalogo(crudo, local) {
+function normalizarCatalogo(crudo, local, descartes) {
   const locales = new Set(Object.keys(local || {}));
   const vistos = new Set();
   const out = [];
+  /* `descartes` es opcional y existe para la PRUEBA del panel: sin él, el que integra el
+   * backoffice ve «0 herramientas» y no tiene forma de saber si fue por el nombre, por la
+   * descripción o por el tope. Con él, la pantalla dice exactamente qué se cayó y por qué. */
+  const tirar = (nombre, razon) => { if (Array.isArray(descartes)) descartes.push({ nombre: String(nombre || '(sin nombre)').slice(0, 60), razon }); };
   for (const it of Array.isArray(crudo) ? crudo : []) {
-    if (out.length >= MAX_HERRAMIENTAS) break;
     const nombre = String((it && it.nombre) || (it && it.name) || '').toLowerCase().trim();
-    if (!nombreOk(nombre)) continue;
+    if (out.length >= MAX_HERRAMIENTAS) { tirar(nombre, 'pasa el tope de ' + MAX_HERRAMIENTAS + ' herramientas'); continue; }
+    if (!nombreOk(nombre)) { tirar(nombre, 'nombre inválido: minúsculas, números y _ (hasta 40)'); continue; }
     /* Trampa 2: un nombre remoto que se llame como uno local se descarta. No se renombra
-     * ni se «gana»: se descarta, y queda en el log. */
-    if (locales.has(nombre) || vistos.has(nombre)) continue;
+     * ni se «gana»: se descarta, y queda registrado. */
+    if (locales.has(nombre)) { tirar(nombre, 'pisa una herramienta de la central'); continue; }
+    if (vistos.has(nombre)) { tirar(nombre, 'repetida'); continue; }
     vistos.add(nombre);
     const desc = limpiar((it && (it.descripcion || it.description)) || '');
-    if (!desc) continue;                       // sin descripción el modelo no sabe cuándo pedirla
+    if (!desc) { tirar(nombre, 'sin descripción: el modelo no sabría cuándo pedirla'); continue; }
     const params = (it && (it.parametros || it.parameters)) || { type: 'object', properties: {} };
     out.push({
       type: 'function',
@@ -123,7 +128,7 @@ async function traerCatalogo(cfg, local, deps) {
     }), Number(cfg.tope_ms) || TOPE_DEF_MS);
     if (!r.ok) { log('el backoffice no publicó su catálogo: HTTP ' + r.status); return []; }
     const j = await r.json();
-    const lista = normalizarCatalogo(j && (j.herramientas || j.tools || j), local);
+    const lista = normalizarCatalogo(j && (j.herramientas || j.tools || j), local, d.descartes);
     log('herramientas del backoffice: ' + (lista.length ? lista.map((x) => x.name).join(', ') : 'ninguna usable'));
     return lista;
   } catch (e) {

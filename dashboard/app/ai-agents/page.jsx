@@ -64,6 +64,7 @@ export default function AiAgents() {
   const [prueba, setPrueba] = useState(null); const [probando, setProbando] = useState(false);
   const [rtModelos, setRtModelos] = useState(null);
   const [catalogo, setCatalogo] = useState([]);
+  const [pruebaBo, setPruebaBo] = useState(null); const [probandoBo, setProbandoBo] = useState(false);
   /* Una sola fuente de verdad para el catálogo: la central. Una copia en el panel es una
    * lista que se desincroniza, y en esta pantalla eso significa ofrecer una herramienta
    * que el backend no sabe ejecutar. */
@@ -113,6 +114,17 @@ export default function AiAgents() {
     if (!confirm('¿Eliminar el agente ' + a.name + '?')) return;
     await fetch('/backend/api/ai-agents/' + a.id, { method: 'DELETE' });
     toast('Agente eliminado', 'info'); load();
+  }
+  /* Probar la caja del backoffice sin llamar por teléfono. Lo importante de lo que
+   * devuelve no es «anda»: es qué se descartó y por qué. */
+  async function probarBackoffice() {
+    setProbandoBo(true); setPruebaBo(null);
+    const r = await fetch('/backend/api/ai-agents/probar-backoffice', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: herr('remoto').url, token: herr('remoto').token, tope_ms: herr('remoto').tope_ms }),
+    }).then(x => x.json()).catch(() => ({ ok: false, error: 'no se pudo contactar la central' }));
+    setProbandoBo(false); setPruebaBo(r);
+    toast(r.ok ? 'El backoffice publicó ' + r.herramientas.length + ' herramienta(s)' : 'El backoffice no publicó nada usable', r.ok ? 'ok' : 'bad');
   }
   async function probarConexion() {
     setProbando(true); setPrueba(null);
@@ -474,6 +486,33 @@ export default function AiAgents() {
                   <NumberInput mt="md" w={220} label="Tope de respuesta" suffix=" ms" min={500} max={10000} step={500}
                     description="Pasado esto, el agente sigue sin ese dato"
                     value={herr('remoto').tope_ms ?? 3000} onChange={v => upHerr('remoto', 'tope_ms', v)} />
+                  <Group mt="md">
+                    <Button size="xs" variant="light" leftSection={<IconPlugConnected size={15} />} loading={probandoBo}
+                      onClick={probarBackoffice} disabled={!herr('remoto').url}>Probar el backoffice</Button>
+                    {pruebaBo ? <Text size="xs" c="dimmed">{pruebaBo.ms} ms en publicar el catálogo</Text> : null}
+                  </Group>
+                  {pruebaBo && (pruebaBo.error
+                    ? <Alert variant="light" color="red" mt="sm" p="xs"><Text size="xs">{pruebaBo.error}</Text></Alert>
+                    : <>
+                      {pruebaBo.herramientas.length
+                        ? <Alert variant="light" color="teal" mt="sm" p="xs" icon={<IconCircleCheck size={15} />}>
+                            <Text size="xs" fw={600} mb={4}>Declaradas al modelo</Text>
+                            <Stack gap={2}>{pruebaBo.herramientas.map(x => (
+                              <Text key={x.nombre} size="xs"><Code fz={10}>{x.nombre}</Code>{x.parametros.length ? ' (' + x.parametros.join(', ') + ')' : ''}</Text>
+                            ))}</Stack>
+                          </Alert>
+                        : <Alert variant="light" color="orange" mt="sm" p="xs" icon={<IconAlertTriangle size={15} />}>
+                            <Text size="xs">El backoffice contestó, pero no quedó ninguna herramienta usable.</Text>
+                          </Alert>}
+                      {pruebaBo.descartes && pruebaBo.descartes.length
+                        ? <Alert variant="light" color="gray" mt="xs" p="xs">
+                            <Text size="xs" fw={600} mb={4}>Descartadas ({pruebaBo.descartes.length})</Text>
+                            <Stack gap={2}>{pruebaBo.descartes.map((d, i) => (
+                              <Text key={i} size="xs"><Code fz={10}>{d.nombre}</Code> — {d.razon}</Text>
+                            ))}</Stack>
+                          </Alert> : null}
+                      {pruebaBo.aviso ? <Alert variant="light" color="yellow" mt="xs" p="xs"><Text size="xs">{pruebaBo.aviso}</Text></Alert> : null}
+                    </>)}
                   <Alert variant="light" color="gray" mt="md" p="xs" icon={<IconShieldLock size={15} />}>
                     <Text size="xs">
                       Lo que publique el backoffice se declara con prefijo <Code fz={10}>bo_</Code> y nunca puede pisar una

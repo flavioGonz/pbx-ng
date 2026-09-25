@@ -436,6 +436,31 @@ module.exports = function init(deps) {
    * lista: una lista duplicada es una lista que se desincroniza. */
   app.get('/api/ai-agents/herramientas', (req, res) => res.json(
     Object.entries(catalogo).map(([id, h]) => ({ id, titulo: h.titulo, ayuda: h.ayuda, riesgo: h.riesgo }))));
+  /* Probar la caja del backoffice SIN llamar por teléfono.
+   *
+   * Lo que contesta no es «anda / no anda»: es qué herramientas quedaron declaradas y —lo
+   * que de verdad hace falta cuando se integra— QUÉ SE DESCARTÓ Y POR QUÉ. Sin eso, el que
+   * está del otro lado ve «0 herramientas» y no tiene forma de saber si fue el nombre, la
+   * descripción o el tope. */
+  app.post('/api/ai-agents/probar-backoffice', async (req, res) => {
+    const b = req.body || {};
+    const url = String(b.url || '').trim();
+    if (!url) return res.status(400).json({ error: 'falta la URL del backoffice' });
+    const remotas = require('./herramientas-remotas');
+    const descartes = [];
+    const t0 = Date.now();
+    const lista = await remotas.traerCatalogo(
+      { on: true, url, token: String(b.token || ''), tope_ms: Math.max(500, Math.min(10000, Number(b.tope_ms) || 3000)) },
+      catalogo, { descartes, log: () => {} });
+    const ms = Date.now() - t0;
+    res.json({
+      ok: lista.length > 0, ms,
+      herramientas: lista.map((x) => ({ nombre: x.name, descripcion: x.description, parametros: Object.keys(x.parameters.properties || {}) })),
+      descartes,
+      /* El número que importa al final: esto se suma a CADA turno en que el modelo consulte. */
+      aviso: ms > 1500 ? 'el backoffice tardó ' + ms + ' ms sólo en publicar su catálogo; cada consulta durante la llamada va a costar parecido' : null,
+    });
+  });
   /* El registro de acciones: quién abrió, cuándo, y los rechazos también. */
   app.get('/api/ai-agents/acciones', async (req, res) => {
     try {
