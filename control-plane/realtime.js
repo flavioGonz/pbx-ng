@@ -299,15 +299,21 @@ function abrir(opts) {
   const marcarListo = () => {
     if (ev.listo) return;
     ev.listo = true;
-    while (pendientes.length) { try { ws.send(JSON.stringify(pendientes.shift())); } catch (_) {} }
+    while (pendientes.length && ws.readyState === 1) {
+      try { ws.send(JSON.stringify(pendientes.shift())); } catch (e) { ev.emit('error', String((e && e.message) || e)); break; }
+    }
+    if (pendientes.length) ev.emit('error', 'la sesión quedó lista con el socket cerrado: ' + pendientes.length + ' mensajes sin mandar');
     ev.emit('listo');
   };
   ws.on('open', () => {
     ws.send(JSON.stringify(P.configurar(o)));
     if (P !== LIVE) return marcarListo();
     /* Red de seguridad: si el proveedor no manda `session.started` (o le cambia el nombre),
-     * igual se sigue — mejor intentar hablar que quedarse esperando para siempre. */
-    setTimeout(marcarListo, o.topeArranque || 3000).unref?.();
+     * igual se sigue — mejor intentar hablar que quedarse esperando para siempre. Pero
+     * SÓLO con el socket abierto: darlo por listo con el socket a medio abrir hacía que el
+     * saludo se descartara sin un solo error, y el visitante escuchaba silencio. */
+    const red = setTimeout(() => { if (ws.readyState === 1) marcarListo(); }, o.topeArranque || 3000);
+    if (red.unref) red.unref();
   });
   ev.cuandoListo = (ms) => new Promise((ok, fail) => {
     if (ev.listo) return ok();
@@ -372,8 +378,11 @@ function abrir(opts) {
 
   const enviar = (obj) => {
     if (!obj) return;
-    if (!ev.listo) { pendientes.push(obj); return; }
-    try { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch (_) {}
+    /* Nada se tira: lo que no se puede mandar todavía se guarda. Antes, un mensaje con el
+     * socket aún no abierto se descartaba en silencio — y el que se perdía era el saludo,
+     * o sea el agente atendía y no decía una palabra, sin error en ningún lado. */
+    if (!ev.listo || ws.readyState !== 1) { pendientes.push(obj); return; }
+    try { ws.send(JSON.stringify(obj)); } catch (e) { ev.emit('error', String((e && e.message) || e)); }
   };
 
   ev.enviarAudio = (pcm8) => { if (pcm8 && pcm8.length) enviar(P.audioEntra(subir(pcm8).toString('base64'))); };

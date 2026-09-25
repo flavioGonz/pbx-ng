@@ -171,3 +171,34 @@ test('{saludo} se reemplaza en la frase que escribió el usuario', () => {
   const t = momento.conSaludo('Gracias por comunicarse. ¡Que tenga {saludo}!', new Date('2026-03-10T18:00:00Z'), 'America/Montevideo');
   assert.equal(t, 'Gracias por comunicarse. ¡Que tenga buenas tardes!');
 });
+
+/* ── El cierre de la llamada: el orden que evita canales zombis ───────────────
+ * Esto se prueba acá y no en una de integración porque lo que hay que fijar es el ORDEN,
+ * y el orden no se ve en un test de punta a punta: se ve leyendo qué se soltó primero.
+ *
+ * El canal AudioSocket de Asterisk está bloqueado LEYENDO nuestro socket. Colgar el canal
+ * antes de soltar el socket deja el canal «Up» para siempre — ni el CLI lo mata—, y con dos
+ * de esos la llamada siguiente al agente no se atiende. Pasó en producción. */
+test('al cerrar, el socket se suelta ANTES de colgar el canal de medios, y con destroy()', () => {
+  const orden = [];
+  const pipeline = require('../ai-pipeline');
+  const ses = {
+    uuid: 'x', closed: false,
+    socket: { destroy: () => orden.push('socket.destroy'), end: () => orden.push('socket.end') },
+    em: { id: 'em1' },
+    bridge: { destroy: () => { orden.push('bridge.destroy'); return Promise.resolve(); } },
+    log: () => {},
+  };
+  /* `cleanupMedia` no se exporta: se ejerce por el camino real, `close()`, que lo llama
+   * para cada sesión viva. Se registra la sesión a mano en el mapa interno. */
+  const mapa = pipeline._sesiones();
+  mapa.set('x', ses);
+  pipeline.close();
+  mapa.delete('x');
+
+  assert.ok(orden.includes('socket.destroy'), 'no soltó el socket: el canal queda trabado leyéndolo');
+  assert.ok(!orden.includes('socket.end'), 'usó end(): manda un FIN y espera a un lector que nunca responde');
+  const iSock = orden.indexOf('socket.destroy');
+  const iBr = orden.indexOf('bridge.destroy');
+  assert.ok(iBr === -1 || iSock < iBr, 'soltó el socket DESPUÉS de tocar el canal: ese es el orden que dejaba canales zombis');
+});

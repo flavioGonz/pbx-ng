@@ -279,24 +279,45 @@ async function doTransfer(session, dest, label) {
   try { if (session.bridge) session.bridge.destroy().catch(() => {}); } catch (_) {}
   try { await ch.continueInDialplan({ context: 'internal', extension: String(dest), priority: 1 }); }
   catch (e) { session.log('transfer err ' + e.message); try { await ch.hangup(); } catch (_) {} }
-  if (session.socket) { try { session.socket.end(); } catch (_) {} }
+  if (session.socket) { try { session.socket.destroy(); } catch (_) {} }
   sessions.delete(session.uuid); pendingByUuid.delete(session.uuid);
 }
 function cleanupMedia(session) {
-  /* Primero el vigilante: si quedara vivo, su temporizador podría cortar una llamada que
-   * ya terminó por otro motivo (o la SIGUIENTE, si el canal se reusa). */
+  /* EL ORDEN IMPORTA, y se pagó caro descubrirlo: el canal AudioSocket de Asterisk está
+   * bloqueado LEYENDO nuestro socket TCP. Si se intenta colgar el canal antes de soltar el
+   * socket, el `hangup` no llega a ejecutarse y el canal queda «Up» para siempre — ni
+   * siquiera `channel request hangup` desde el CLI lo mata. Cada llamada dejaba dos
+   * canales zombis y, con ellos, la llamada siguiente al agente no se atendía.
+   *
+   * Y es `destroy()`, no `end()`: `end()` manda un FIN y espera al otro lado; el canal
+   * trabado no lo procesa nunca. `destroy()` corta y libera al lector. */
   try { if (session.vigilante) session.vigilante.cerrar(); } catch (_) {}
+  try { if (session.socket) { session.socket.destroy(); session.socket = null; } } catch (_) {}
   try { if (session.rtReloj) clearInterval(session.rtReloj); } catch (_) {}
   try { if (session.rt) session.rt.cerrar(); } catch (_) {}
   try { if (session.sttProc) session.sttProc.kill('SIGKILL'); } catch (_) {}
-  try { if (session.em) ARI.channels.hangup({ channelId: session.em.id }).catch(() => {}); } catch (_) {}
-  try { if (session.bridge) session.bridge.destroy().catch(() => {}); } catch (_) {}
+  /* Los errores de ARI NO se tragan: un hangup que falla en silencio es exactamente cómo
+   * se acumularon los canales zombis sin que nadie se enterara. */
+  try {
+    if (session.em) ARI.channels.hangup({ channelId: session.em.id })
+      .catch((e) => session.log('no se pudo colgar el canal de medios: ' + (e && e.message)));
+  } catch (e) { session.log('no se pudo colgar el canal de medios: ' + e.message); }
+  try {
+    if (session.bridge) session.bridge.destroy()
+      .catch((e) => session.log('no se pudo destruir el bridge: ' + (e && e.message)));
+  } catch (e) { session.log('no se pudo destruir el bridge: ' + e.message); }
 }
 async function endSession(session, why) {
   if (session.closed) return;
   session.log('END (' + why + ')');
   cleanupMedia(session);
-  try { await session.channel.hangup(); } catch (_) {}
+  try { await session.channel.hangup(); }
+  catch (e) {
+    /* Un 404 es lo normal cuando el llamante ya colgó. Cualquier otra cosa es un canal que
+     * quedó vivo, y eso hay que verlo en el log y no adivinarlo. */
+    const m = String((e && e.message) || e);
+    if (!/404|not found|Channel not found/i.test(m)) session.log('no se pudo colgar el canal del llamante: ' + m);
+  }
   finalize(session);
 }
 function finalize(session) {
@@ -304,6 +325,50 @@ function finalize(session) {
   try { if (session.endpointTimer) clearInterval(session.endpointTimer); } catch (_) {}
   if (session.socket) { try { session.socket.end(); } catch (_) {} }
   sessions.delete(session.uuid); pendingByUuid.delete(session.uuid);
+}
+
+/* ── Barrido de canales huérfanos ──────────────────────────────────────────────
+ * Una red de seguridad, no el arreglo: el arreglo es soltar el socket antes de colgar (ver
+ * `cleanupMedia`). Pero un canal zombi no se nota hasta la llamada siguiente —que no se
+ * atiende— y para entonces ya hay dos. Así que cada 30 s se mira qué canales están dentro
+ * de NUESTRA aplicación Stasis sin una sesión viva detrás, y se cuelgan.
+ *
+ * Se compara contra `sessions` y `pendingByUuid`: un canal recién creado que todavía no
+ * completó el handshake de AudioSocket está en `pendingByUuid`, y colgarlo sería cortar una
+ * llamada que estaba por empezar. Por eso además se le da un minuto de gracia. */
+const GRACIA_HUERFANO_MS = 60000;
+const MAX_SESION_MS = Number(process.env.AI_MAX_SESION_MS || 3600000);   // 1 h: nada vive para siempre
+let barridoTimer = null;
+
+async function barrerHuerfanos() {
+  if (!ARI) return;
+  try {
+    const canales = await ARI.channels.list();
+    const ahora = Date.now();
+    for (const ch of canales) {
+      const dialplan = ch.dialplan || {};
+      const app = String(dialplan.app_data || '');
+      /* Sólo los canales de medios de la IA: su app_data es `pbxng,<uuid de la sesión>`. */
+      const m = /^pbxng,([0-9a-f-]{36})$/i.exec(app);
+      if (!m) continue;
+      const uuid = m[1];
+      if (sessions.has(uuid) || pendingByUuid.has(uuid)) continue;
+      const nacido = Date.parse(ch.creationtime || '') || 0;
+      if (nacido && ahora - nacido < GRACIA_HUERFANO_MS) continue;
+      log.warn('canal de medios sin sesión: se cuelga', { canal: ch.name, session: uuid.slice(0, 8) });
+      try { await ARI.channels.hangup({ channelId: ch.id }); }
+      catch (e) { log.warn('no se pudo colgar el canal huérfano', { canal: ch.name, err: (e && e.message) }); }
+    }
+    /* Y el tope duro: una sesión de voz se paga por minuto, así que ninguna puede quedar
+     * viva porque el llamante se fue sin colgar y el proveedor no avisó. */
+    for (const ses of Array.from(sessions.values())) {
+      if (ses.closed || !ses.nacida) continue;
+      if (ahora - ses.nacida > MAX_SESION_MS) {
+        ses.log('tope de duración de sesión alcanzado: se corta');
+        endSession(ses, 'tope-duracion');
+      }
+    }
+  } catch (e) { log.warn('barrido de canales', { err: (e && e.message) }); }
 }
 
 // ============================================================
@@ -347,6 +412,7 @@ function startServer() {
   srv.on('error', (e) => { log.error('AudioSocket', e); if (SRV === srv) SRV = null; });
   srv.listen(AS_PORT, '0.0.0.0', () => log.info('AudioSocket escuchando', { port: AS_PORT }));
   SRV = srv;
+  if (!barridoTimer) { barridoTimer = setInterval(barrerHuerfanos, 30000); if (barridoTimer.unref) barridoTimer.unref(); }
 }
 
 /* Cierre ordenado (SIGTERM en app.js): corta las sesiones de IA en curso y deja de
@@ -451,8 +517,23 @@ function arrancarRealtime(session) {
   puente.on('error', (e) => session.log('realtime: ' + e));
   puente.on('cerrado', () => session.log('realtime: sesión cerrada por el proveedor'));
 
+  /* Instrumental mínimo del arranque. Sin esto, «el agente atendió y no habló» era
+   * indistinguible de «el modelo nunca abrió» y de «el audio no llegó al canal»: tres
+   * causas distintas, tres lugares distintos donde se arreglan, y cero pistas en el log. */
+  puente.on('audio', () => {
+    if (!session.rtPrimerAudio) { session.rtPrimerAudio = Date.now(); session.log('primer audio del modelo'); }
+  });
   puente.cuandoListo(10000)
-    .then(() => { if (!session.closed) puente.saludar(session.greetingText); })
+    .then(() => {
+      if (session.closed) return;
+      session.log('sesión del modelo lista (' + puente.api + '): mandando el saludo');
+      puente.saludar(session.greetingText);
+      /* Si en 8 s no llegó un solo byte de audio, el visitante está escuchando silencio.
+       * Se dice y se sigue: al menos queda en el log cuál de las tres cosas falló. */
+      setTimeout(() => {
+        if (!session.closed && !session.rtPrimerAudio) session.log('el modelo no mandó audio tras el saludo: el visitante está escuchando silencio');
+      }, 8000);
+    })
     .catch((e) => {
       /* Si el modelo no abre, la llamada NO se queda muda: se dice la frase de siempre con
        * el camino de toda la vida y se corta. Un agente que atiende y no habla es peor que
@@ -553,6 +634,7 @@ async function startAiSession(channel, agent) {
     greetingText: momento.conSaludo(
       agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),
       new Date(), zona),
+    nacida: Date.now(),
     uttBuf: [], speaking: false, speakToken: 0, bargeMs: 0, busy: false, closed: false, _turns: 0,
     lastPartial: '', speechActive: false, speechMs: 0, silenceMs: 0,
     log: (m) => log.info(m, { session: uuid.slice(0, 8) }),
@@ -588,6 +670,9 @@ function metricas() {
 }
 
 module.exports = { init, startAiSession, close, metricas };
+/* Sólo para la prueba del ORDEN de cierre (test/inactividad.test.js): lo que hay que fijar
+ * es que el socket se suelte antes de tocar el canal, y eso no se ve desde afuera. */
+module.exports._sesiones = () => sessions;
 /* Se exportan SOLO para la prueba del tope (test/ia-topes.test.js): el camino de la
  * llamada no tolera un `fetch` sin corte, y esa prueba es la que lo deja clavado. */
 module.exports._crmLookup = crmLookup;
