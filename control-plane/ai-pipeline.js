@@ -10,6 +10,8 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const log = require('./log')('AI');
 const realtime = require('./realtime');   // puente al modelo de voz realtime (audio in / audio out)
+const momento = require('./momento');     // la hora del cliente: el modelo no tiene reloj
+const inactividad = require('./inactividad');   // qué hacer cuando el visitante deja de hablar
 
 const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
 const VOSK_MODEL = '/opt/vosk-model-es';
@@ -281,6 +283,9 @@ async function doTransfer(session, dest, label) {
   sessions.delete(session.uuid); pendingByUuid.delete(session.uuid);
 }
 function cleanupMedia(session) {
+  /* Primero el vigilante: si quedara vivo, su temporizador podría cortar una llamada que
+   * ya terminó por otro motivo (o la SIGUIENTE, si el canal se reusa). */
+  try { if (session.vigilante) session.vigilante.cerrar(); } catch (_) {}
   try { if (session.rtReloj) clearInterval(session.rtReloj); } catch (_) {}
   try { if (session.rt) session.rt.cerrar(); } catch (_) {}
   try { if (session.sttProc) session.sttProc.kill('SIGKILL'); } catch (_) {}
@@ -376,12 +381,44 @@ function arrancarRealtime(session) {
   session.rt = puente;
   session.rtCola = [];
 
+  /* La escalera de inactividad. Vive del lado nuestro a propósito: el modelo no tiene
+   * reloj, no sabe cuánto silencio pasó y no puede colgar. Apagada (0 s) por defecto. */
+  const ag = session.agent || {};
+  session.vigilante = inactividad.crearVigilante({
+    esperas: { consulta1: ag.inact1_s, consulta2: ag.inact2_s, cierre: ag.cierre_s },
+    frases: {
+      consulta1: momento.conSaludo(ag.inact1_text || inactividad.FRASES.consulta1, new Date(), session.zona),
+      consulta2: momento.conSaludo(ag.inact2_text || inactividad.FRASES.consulta2, new Date(), session.zona),
+      despedida: momento.conSaludo(ag.despedida_text || inactividad.FRASES.despedida, new Date(), session.zona),
+    },
+    decir: (texto) => { if (!session.closed) puente.saludar(texto); },
+    cortar: () => { session.log('inactividad: se corta la llamada'); endSession(session, 'inactividad'); },
+    log: (m) => session.log(m),
+  });
+
   /* El reloj del canal: 20 ms. Sale UN frame por vuelta, ni más ni menos, y si no hay
    * nada en la cola no se escribe silencio —el canal ya reproduce silencio solo—. */
+  /* Cuántas vueltas seguidas sin audio se necesitan para dar por TERMINADA la frase. El
+   * modelo manda el audio a ráfagas y la cola se vacía por un instante entre dos deltas de
+   * la misma oración; sin esta ventana, «terminó de hablar» se dispararía a mitad de
+   * frase y el agente preguntaría «¿sigue ahí?» encima de sí mismo. */
+  const VUELTAS_FIN = 20;   // 20 × 20 ms = 400 ms de silencio real
+  session.rtVacio = 0;
   session.rtReloj = setInterval(() => {
     if (session.closed || !session.socket) return;
     const f = session.rtCola.shift();
-    if (!f) { session.speaking = false; return; }
+    if (!f) {
+      if (session.speaking) {
+        session.rtVacio++;
+        if (session.rtVacio >= VUELTAS_FIN) {
+          session.speaking = false; session.rtVacio = 0;
+          if (session.vigilante) session.vigilante.callado();
+        }
+      }
+      return;
+    }
+    session.rtVacio = 0;
+    if (!session.speaking && session.vigilante) session.vigilante.hablando();
     session.speaking = true;
     const frame = Buffer.alloc(3 + f.length);
     frame[0] = 0x10; frame.writeUInt16BE(f.length, 1); f.copy(frame, 3);
@@ -399,8 +436,18 @@ function arrancarRealtime(session) {
   });
   /* Barge-in: lo que queda por reproducir se TIRA. El puente ya le pidió al modelo que
    * pare; sin esto el visitante seguiría escuchando la frase vieja unos segundos. */
-  puente.on('corte', () => { session.rtCola.length = 0; session.speaking = false; session.log('barge-in (realtime)'); });
-  puente.on('texto', (t) => { session.transcripcion = session.transcripcion || []; session.transcripcion.push(t); });
+  puente.on('corte', () => {
+    session.rtCola.length = 0; session.speaking = false; session.rtVacio = 0;
+    session.log('barge-in (realtime)');
+    /* El visitante habló: se cancela la escalera de inactividad, incluido un corte ya
+     * agendado. Quien vuelve a hablar mientras el agente se despide no pierde la llamada. */
+    if (session.vigilante) session.vigilante.visitanteHabla();
+  });
+  puente.on('texto', (t) => {
+    session.transcripcion = session.transcripcion || [];
+    session.transcripcion.push(t);
+    if (t && t.quien === 'visitante' && session.vigilante) session.vigilante.visitanteHabla();
+  });
   puente.on('error', (e) => session.log('realtime: ' + e));
   puente.on('cerrado', () => session.log('realtime: sesión cerrada por el proveedor'));
 
@@ -491,11 +538,21 @@ async function startAiSession(channel, agent) {
    * LLM → TTS) y el demo local. Sin clave, `realtime` no se intenta: la llamada iría a un
    * socket que va a fallar y el visitante escucharía silencio. */
   const modo = (agent.provider === 'openai-realtime' && keys.openai) ? 'realtime' : (useOpenAI ? 'openai' : 'demo');
+  /* La zona del cliente, no la del servidor: la central puede correr en UTC y el edificio
+   * está en Montevideo. */
+  const zona = (await getSetting('zona_horaria')) || momento.ZONA_DEF;
+  /* El bloque de contexto va ANTES de lo que escribió el usuario y dice explícitamente que
+   * manda sobre el saludo: si no, el modelo repite el «buenos días» que quedó escrito en el
+   * texto del saludo y la hora que le pasamos no sirve de nada. */
+  const instrucciones = momento.bloqueHora(new Date(), zona) + '\n\n'
+    + (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.');
   const session = {
-    uuid, channel, agent, keys, useOpenAI, modo, realtimeBase,
+    uuid, channel, agent, keys, useOpenAI, modo, realtimeBase, zona,
     callerId: (channel.caller && channel.caller.number) || '', vozUrl, vozSpeed,
-    history: [{ role: 'system', content: (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.') }],
-    greetingText: agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),
+    history: [{ role: 'system', content: instrucciones }],
+    greetingText: momento.conSaludo(
+      agent.greeting_text || ('Hola, gracias por comunicarte. Soy el asistente virtual' + (agent.name ? ' de ' + agent.name : '') + '. ¿En qué puedo ayudarte?'),
+      new Date(), zona),
     uttBuf: [], speaking: false, speakToken: 0, bargeMs: 0, busy: false, closed: false, _turns: 0,
     lastPartial: '', speechActive: false, speechMs: 0, silenceMs: 0,
     log: (m) => log.info(m, { session: uuid.slice(0, 8) }),

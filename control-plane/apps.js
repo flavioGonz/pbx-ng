@@ -381,8 +381,18 @@ module.exports = function init(deps) {
     return { modo, agente: agente ? agente.id : null, miembros: activos, penalidad };
   }
 
+  /* Los tres tiempos de la escalera de inactividad. Se acotan acá porque son segundos que
+   * escribe una persona: un 0 apaga la escalera (y es el default), y el techo de 120 s
+   * evita que un dedo de más deje una llamada abierta media hora facturando. */
+  const segs = (v) => Math.max(0, Math.min(120, Math.round(Number(v) || 0)));
+  const camposInact = (b) => ({
+    inact1_s: segs(b.inact1_s), inact2_s: segs(b.inact2_s), cierre_s: segs(b.cierre_s),
+    inact1_text: String(b.inact1_text || ''), inact2_text: String(b.inact2_text || ''),
+    despedida_text: String(b.despedida_text || ''),
+  });
+
   app.get('/api/ai-agents', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
+    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   /* Proveedores que el pipeline entiende. La validación existe por un motivo concreto:
@@ -404,11 +414,16 @@ module.exports = function init(deps) {
   app.post('/api/ai-agents', async (req, res) => {
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
+    const ia = camposInact(req.body || {});
     if (!proveedorOk(provider, res)) return;
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
-      const { rows } = await c.query('INSERT INTO pbxng_ai_agents (name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id', [name, exten, greeting, system_prompt, voice, provider, model, enabled, sales_exten, support_exten, default_exten, crm_webhook, greeting_text]);
+      const { rows } = await c.query(
+        'INSERT INTO pbxng_ai_agents (name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text)'
+        + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id',
+        [name, exten, greeting, system_prompt, voice, provider, model, enabled, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
+          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, rows[0].id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: rows[0].id, exten });
@@ -418,12 +433,18 @@ module.exports = function init(deps) {
     const { id } = req.params;
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!proveedorOk(provider, res)) return;
+    const ia = camposInact(req.body || {});
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
       const { rows: old } = await c.query('SELECT exten FROM pbxng_ai_agents WHERE id=$1', [id]);
       if (!old[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'agente no existe' }); }
-      await c.query('UPDATE pbxng_ai_agents SET name=$1,exten=$2,greeting=$3,system_prompt=$4,voice=$5,provider=$6,model=$7,enabled=$8,sales_exten=$10,support_exten=$11,default_exten=$12,crm_webhook=$13,greeting_text=$14 WHERE id=$9', [name, exten, greeting, system_prompt, voice, provider, model, enabled, id, sales_exten, support_exten, default_exten, crm_webhook, greeting_text]);
+      await c.query(
+        'UPDATE pbxng_ai_agents SET name=$1,exten=$2,greeting=$3,system_prompt=$4,voice=$5,provider=$6,model=$7,enabled=$8,'
+        + 'sales_exten=$10,support_exten=$11,default_exten=$12,crm_webhook=$13,greeting_text=$14,'
+        + 'inact1_s=$15,inact2_s=$16,cierre_s=$17,inact1_text=$18,inact2_text=$19,despedida_text=$20 WHERE id=$9',
+        [name, exten, greeting, system_prompt, voice, provider, model, enabled, id, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
+          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);

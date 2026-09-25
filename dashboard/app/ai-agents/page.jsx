@@ -13,8 +13,8 @@
  *  y por eso la prueba de conexión está ahí y no escondida al final de un formulario.
  * ==========================================================================*/
 import { useEffect, useState, useRef } from 'react';
-import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box } from '@mantine/core';
-import { IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
+import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box, NumberInput } from '@mantine/core';
+import { IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
 import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
 import { toast } from '../notify';
 
@@ -35,7 +35,11 @@ const esRT = (p) => p === 'openai-realtime';
 const enLaNube = (p) => p === 'openai-realtime' || p === 'openai';
 const provMeta = (p) => PROVIDERS.find(x => x.value === p) || PROVIDERS[2];
 
-const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true };
+const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '' };
+/* Los tiempos con los que se despliega la primera vez. Dos consultas antes de cortar, y
+ * no una, porque la primera se pierde seguido: el visitante se dio vuelta, estaba hablando
+ * con alguien, se le cayó el teléfono. */
+const INACT_DEF = { inact1_s: 5, inact2_s: 3, cierre_s: 8 };
 
 /* Encabezado de un bloque del drawer: icono + qué se decide acá. */
 const Bloque = ({ icon, titulo, ayuda, children }) => (
@@ -326,6 +330,34 @@ export default function AiAgents() {
                   description="Los modelos de voz a voz parafrasean: si necesitás una frase palabra por palabra, pedila acá explícitamente."
                   placeholder="Sos el portero de IES. Amable y muy breve. Preguntá a quién viene a ver y el número de unidad. Si dudás, pasá con una persona."
                   value={form.system_prompt} onChange={e => up('system_prompt', e.currentTarget.value)} />
+              </Bloque>
+              <Bloque icon={<IconClockPause size={18} />} titulo="Silencios y cierre"
+                ayuda="Qué hace cuando el visitante deja de hablar. Esto NO se le pide al modelo: un modelo no tiene reloj, no sabe cuánto silencio pasó y no puede colgar. Lo maneja la central.">
+                <Switch mb={form.inact1_s > 0 ? 'md' : 0}
+                  label={form.inact1_s > 0 ? 'La central consulta y, si no hay nadie, corta' : 'Apagado: la llamada queda abierta hasta que alguien cuelgue'}
+                  checked={form.inact1_s > 0}
+                  onChange={e => setForm(s2 => ({ ...s2, ...(e.currentTarget.checked ? INACT_DEF : { inact1_s: 0, inact2_s: 0, cierre_s: 0 }) }))} />
+                {form.inact1_s > 0 && <>
+                  <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md" mb="md">
+                    <NumberInput label="¿Sigue ahí?" description="Silencio antes de consultar" suffix=" s" min={1} max={120}
+                      value={form.inact1_s} onChange={v => up('inact1_s', v)} />
+                    <NumberInput label="Segunda consulta" description="Otra frase, no la misma" suffix=" s" min={1} max={120}
+                      value={form.inact2_s} onChange={v => up('inact2_s', v)} />
+                    <NumberInput label="Despedida y corte" description="Después de esto, cuelga" suffix=" s" min={1} max={120}
+                      value={form.cierre_s} onChange={v => up('cierre_s', v)} />
+                  </SimpleGrid>
+                  <Text size="xs" c="dimmed" mb="md">
+                    Cada cuenta arranca cuando el agente <b>termina</b> de hablar, no cuando se le manda el texto: si arrancara antes,
+                    una respuesta larga se comería la espera y el agente preguntaría «¿sigue ahí?» encima de su propia frase.
+                  </Text>
+                  <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                    <TextInput label="Primera consulta" placeholder="¿Sigue ahí? ¿Hay algo en lo que lo pueda ayudar?" value={form.inact1_text} onChange={e => up('inact1_text', e.currentTarget.value)} />
+                    <TextInput label="Segunda consulta" placeholder="¿Hola? ¿Me escucha? Si necesita algo dígame." value={form.inact2_text} onChange={e => up('inact2_text', e.currentTarget.value)} />
+                  </SimpleGrid>
+                  <TextInput mt="md" label="Despedida" placeholder="Gracias por comunicarse. ¡Que tenga {saludo}!"
+                    description="{saludo} se reemplaza por «buenos días», «buenas tardes» o «buenas noches» según la hora real del cliente"
+                    value={form.despedida_text} onChange={e => up('despedida_text', e.currentTarget.value)} />
+                </>}
               </Bloque>
               <Group justify="space-between">
                 <Button variant="subtle" onClick={() => setPaso('identidad')}>← Identidad</Button>
