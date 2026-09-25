@@ -13,8 +13,8 @@
  *  y por eso la prueba de conexión está ahí y no escondida al final de un formulario.
  * ==========================================================================*/
 import { useEffect, useState, useRef } from 'react';
-import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box, NumberInput } from '@mantine/core';
-import { IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
+import { Stack, Card, Group, Divider, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box, NumberInput, Collapse } from '@mantine/core';
+import { IconTool, IconDoorEnter, IconShieldLock, IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
 import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
 import { toast } from '../notify';
 
@@ -35,7 +35,7 @@ const esRT = (p) => p === 'openai-realtime';
 const enLaNube = (p) => p === 'openai-realtime' || p === 'openai';
 const provMeta = (p) => PROVIDERS.find(x => x.value === p) || PROVIDERS[2];
 
-const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '' };
+const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '', herramientas: {} };
 /* Los tiempos con los que se despliega la primera vez. Dos consultas antes de cortar, y
  * no una, porque la primera se pierde seguido: el visitante se dio vuelta, estaba hablando
  * con alguien, se le cayó el teléfono. */
@@ -63,6 +63,13 @@ export default function AiAgents() {
   const [vozList, setVozList] = useState([]); const [edgeList, setEdgeList] = useState([]);
   const [prueba, setPrueba] = useState(null); const [probando, setProbando] = useState(false);
   const [rtModelos, setRtModelos] = useState(null);
+  const [catalogo, setCatalogo] = useState([]);
+  /* Una sola fuente de verdad para el catálogo: la central. Una copia en el panel es una
+   * lista que se desincroniza, y en esta pantalla eso significa ofrecer una herramienta
+   * que el backend no sabe ejecutar. */
+  async function cargarCatalogo() {
+    try { setCatalogo(await fetch('/backend/api/ai-agents/herramientas').then(r => r.json())); } catch (_) {}
+  }
   const previewRef = useRef(null);
 
   async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) { setList([]); } }
@@ -70,9 +77,13 @@ export default function AiAgents() {
   async function cargarModelos() {
     try { setRtModelos(await fetch('/backend/api/ai-agents/modelos').then(r => r.json())); } catch (_) { setRtModelos({ ok: false }); }
   }
-  useEffect(() => { load(); loadVozList(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); loadVozList(); cargarCatalogo(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
 
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
+  const herr = (id) => (form.herramientas || {})[id] || {};
+  const upHerr = (id, campo, valor) => setForm(s => ({
+    ...s, herramientas: { ...(s.herramientas || {}), [id]: { ...((s.herramientas || {})[id] || {}), [campo]: valor } },
+  }));
   /* Cambiar de proveedor tiene que dejar modelo y voz COHERENTES: un agente de voz a voz
    * con `gpt-4o-mini` y una voz de Piper se guardaba sin error y después no hablaba. */
   function cambiarProveedor(v) {
@@ -230,6 +241,7 @@ export default function AiAgents() {
             <Tabs.List>
               <Tabs.Tab value="identidad" leftSection={<IconId size={15} />}>Identidad</Tabs.Tab>
               <Tabs.Tab value="cerebro" leftSection={<IcoCerebro size={15} activo={enLaNube(form.provider)} />}>Cerebro</Tabs.Tab>
+              <Tabs.Tab value="herramientas" leftSection={<IconTool size={15} />}>Herramientas</Tabs.Tab>
               <Tabs.Tab value="derivaciones" leftSection={<IconArrowRampRight size={15} />}>Derivaciones</Tabs.Tab>
             </Tabs.List>
           </Tabs>
@@ -361,6 +373,88 @@ export default function AiAgents() {
               </Bloque>
               <Group justify="space-between">
                 <Button variant="subtle" onClick={() => setPaso('identidad')}>← Identidad</Button>
+                <Button variant="light" onClick={() => setPaso('herramientas')}>Siguiente: Herramientas →</Button>
+              </Group>
+            </>}
+
+            {paso === 'herramientas' && <>
+              <Alert variant="light" color="blue" icon={<IconTool size={18} />}>
+                El modelo <b>no ejecuta nada: pide</b>. La central decide si corresponde, lo hace y le devuelve el resultado.
+                Lo que está apagado acá no existe, por más que el agente lo nombre.
+              </Alert>
+
+              {catalogo.filter(t => t.riesgo === 'lee').length > 0 && (
+                <Bloque icon={<IconSearch size={18} />} titulo="Consultar datos"
+                  ayuda="Si se equivocan, el agente dice algo incorrecto. Molesto, no grave. Necesitan el webhook del CRM, en «Derivaciones».">
+                  <Stack gap="xs">
+                    {catalogo.filter(t => t.riesgo === 'lee').map(t => (
+                      <Switch key={t.id} label={t.titulo} description={t.ayuda}
+                        checked={!!herr(t.id).on} onChange={e => upHerr(t.id, 'on', e.currentTarget.checked)} />
+                    ))}
+                  </Stack>
+                  {!form.crm_webhook && Object.keys(form.herramientas || {}).some(k => (form.herramientas[k] || {}).on && catalogo.find(t => t.id === k && t.riesgo === 'lee'))
+                    ? <Alert variant="light" color="orange" mt="sm" p="xs" icon={<IconAlertTriangle size={15} />}>
+                        <Text size="xs">Sin webhook del CRM configurado, estas consultas siempre van a fallar y el agente va a decir que no puede confirmar.</Text>
+                      </Alert> : null}
+                </Bloque>
+              )}
+
+              <Bloque icon={<IconArrowRampRight size={18} />} titulo="Acciones sobre la llamada"
+                ayuda="Tienen consecuencia, y todas quedan registradas.">
+                <Stack gap="xs">
+                  {catalogo.filter(t => t.riesgo === 'actua').map(t => (
+                    <Switch key={t.id} label={t.titulo} description={t.ayuda}
+                      checked={!!herr(t.id).on} onChange={e => upHerr(t.id, 'on', e.currentTarget.checked)} />
+                  ))}
+                </Stack>
+              </Bloque>
+
+              {catalogo.some(t => t.riesgo === 'abre') && (
+                <Card withBorder radius="md" padding="md" style={{ borderColor: herr('abrir_porton').on ? 'var(--mantine-color-red-4)' : undefined }}>
+                  <Group gap="sm" mb={4} wrap="nowrap">
+                    <ThemeIcon variant="light" size={32} radius="md" color="red"><IconDoorEnter size={18} /></ThemeIcon>
+                    <Text fw={700} fz="sm">Abrir el portón</Text>
+                  </Group>
+                  <Text size="xs" c="dimmed" mb="sm" ml={44}>
+                    Un agente de voz escucha un nombre y un número de unidad; no puede confirmar que sean ciertos.
+                    Los candados de abajo son lo que separa esto de un portero que se abre diciendo «soy de la 402».
+                  </Text>
+                  <Switch label={herr('abrir_porton').on ? 'El agente puede abrir' : 'Apagado'}
+                    checked={!!herr('abrir_porton').on} onChange={e => upHerr('abrir_porton', 'on', e.currentTarget.checked)} />
+                  <Collapse in={!!herr('abrir_porton').on}>
+                    <Divider my="md" label="Candados" labelPosition="center" />
+                    <Switch mb="md" color="red"
+                      label="Exigir verificación previa en la misma llamada"
+                      description="Sin esto, el portón se abre con lo que alguien dijo por teléfono. Es una decisión del dueño del edificio."
+                      checked={herr('abrir_porton').exigir_verificacion !== false}
+                      onChange={e => upHerr('abrir_porton', 'exigir_verificacion', e.currentTarget.checked)} />
+                    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mb="md">
+                      <TextInput label="Ventana horaria" placeholder="07:00-22:00" description="Fuera de esta franja no abre. Admite cruzar la medianoche (22:00-06:00)."
+                        value={herr('abrir_porton').ventana || ''} onChange={e => upHerr('abrir_porton', 'ventana', e.currentTarget.value)} />
+                      <NumberInput label="Tope por hora" min={1} max={50} description="Frena una ráfaga a las 3 de la mañana."
+                        value={herr('abrir_porton').max_por_hora ?? 3} onChange={v => upHerr('abrir_porton', 'max_por_hora', v)} />
+                    </SimpleGrid>
+                    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+                      <Select label="Cómo abre" data={[{ value: 'dtmf', label: 'DTMF al portero (en la misma llamada)' }, { value: 'webhook', label: 'URL de un relé' }]}
+                        value={herr('abrir_porton').modo || 'dtmf'} onChange={v => upHerr('abrir_porton', 'modo', v)} />
+                      {(herr('abrir_porton').modo || 'dtmf') === 'dtmf'
+                        ? <TextInput label="Tono" placeholder="#" description="Lo que espera tu portero" value={herr('abrir_porton').dtmf || ''} onChange={e => upHerr('abrir_porton', 'dtmf', e.currentTarget.value)} />
+                        : <TextInput label="URL del relé" placeholder="http://portero.local/abrir" value={herr('abrir_porton').url || ''} onChange={e => upHerr('abrir_porton', 'url', e.currentTarget.value)} />}
+                    </SimpleGrid>
+                    <Group gap={6} mt="md" wrap="nowrap">
+                      <IconShieldLock size={14} style={{ opacity: .6, flexShrink: 0 }} />
+                      <Text size="xs" c="dimmed">Cada apertura —y cada intento rechazado— queda registrada con la hora, el llamante y el motivo.</Text>
+                    </Group>
+                  </Collapse>
+                </Card>
+              )}
+
+              <Text size="xs" c="dimmed">
+                Encender cualquier herramienta hace que el modelo <b>delegue el razonamiento</b> en el backend del proveedor:
+                agrega algo de latencia y puede cambiarle el tono. Escuchá una llamada después de prenderlas.
+              </Text>
+              <Group justify="space-between">
+                <Button variant="subtle" onClick={() => setPaso('cerebro')}>← Cerebro</Button>
                 <Button variant="light" onClick={() => setPaso('derivaciones')}>Siguiente: Derivaciones →</Button>
               </Group>
             </>}
@@ -378,7 +472,7 @@ export default function AiAgents() {
                 ayuda="El agente la usa para verificar lo que le dicen. Recibe {query, caller} y devuelve {result}; si tarda, la llamada NO se traba: hay un tope de 2,5 s.">
                 <TextInput label="Webhook del CRM" placeholder="https://tu-crm/api/lookup" value={form.crm_webhook} onChange={e => up('crm_webhook', e.currentTarget.value)} />
               </Bloque>
-              <Group justify="flex-start"><Button variant="subtle" onClick={() => setPaso('cerebro')}>← Cerebro</Button></Group>
+              <Group justify="flex-start"><Button variant="subtle" onClick={() => setPaso('herramientas')}>← Herramientas</Button></Group>
             </>}
           </Stack>
           <audio ref={previewRef} style={{ display: 'none' }} />

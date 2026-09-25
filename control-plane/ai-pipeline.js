@@ -12,6 +12,7 @@ const log = require('./log')('AI');
 const realtime = require('./realtime');   // puente al modelo de voz realtime (audio in / audio out)
 const momento = require('./momento');     // la hora del cliente: el modelo no tiene reloj
 const inactividad = require('./inactividad');   // qué hacer cuando el visitante deja de hablar
+const herramientas = require('./herramientas'); // lo que el agente puede PEDIR (la central decide)
 
 const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
 const VOSK_MODEL = '/opt/vosk-model-es';
@@ -327,6 +328,110 @@ function finalize(session) {
   sessions.delete(session.uuid); pendingByUuid.delete(session.uuid);
 }
 
+/* ── Herramientas: el puente entre «el modelo pidió» y «la central hizo» ───────
+ * Todo lo que toca el mundo real (el CRM, un relé, la transferencia, el corte) se
+ * implementa acá y se le pasa a `herramientas.ejecutar` como funciones. Ese archivo no
+ * sabe de ARI ni de HTTP: sólo decide SI corresponde. La separación es a propósito — los
+ * candados se prueban sin levantar una central. */
+
+/* Consulta al CRM del cliente. Un webhook, con tope, y con la respuesta normalizada:
+ * `{ok, texto, datos}`. Lo que devuelva se le lee al visitante, así que si el CRM
+ * contesta cualquier cosa, mejor que sea un `ok:false` que un texto raro en voz alta. */
+async function leerCrmAgente(session, tipo, datos) {
+  const url = (session.agent && session.agent.crm_webhook) || '';
+  if (!url) return { ok: false, motivo: 'no hay consulta de datos configurada' };
+  try {
+    const r = await fetchTope(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ tipo, caller: session.callerId, agente: session.agent.name }, datos)),
+    }, TOPE_CRM_MS);
+    if (!r.ok) return { ok: false, motivo: 'HTTP ' + r.status };
+    const j = await r.json().catch(() => null);
+    if (!j) return { ok: false, motivo: 'respuesta ilegible' };
+    /* Se aceptan las dos formas: la nuestra y la que ya usaba el pipeline viejo. */
+    const texto = String(j.texto || j.result || j.detalle || '').slice(0, 500);
+    const hallado = j.ok !== false && (j.encontrado !== false) && (texto || j.datos);
+    return hallado ? { ok: true, texto, datos: j.datos || null } : { ok: false, motivo: String(j.motivo || 'sin datos') };
+  } catch (e) {
+    return { ok: false, motivo: String((e && e.message) || e) };
+  }
+}
+
+/* Abrir. Dos modos porque hay dos mundos: el portero SIP que abre con un DTMF en la misma
+ * llamada (lo más común, y lo que no necesita nada más), y el relé con una URL. */
+async function abrirPuerta(session, cfg) {
+  const modo = (cfg && cfg.modo) || 'dtmf';
+  if (modo === 'webhook') {
+    const url = (cfg && cfg.url) || '';
+    if (!url) return { ok: false, detalle: 'sin URL de apertura configurada' };
+    try {
+      const r = await fetchTope(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'abrir', agente: session.agent.name, llamante: session.callerId, sesion: session.uuid }),
+      }, 5000);
+      return r.ok ? { ok: true, detalle: 'webhook ' + r.status } : { ok: false, detalle: 'HTTP ' + r.status };
+    } catch (e) { return { ok: false, detalle: String((e && e.message) || e) }; }
+  }
+  /* DTMF hacia el que llamó: el portero abre cuando recibe el tono. */
+  const digitos = String((cfg && cfg.dtmf) || '#').slice(0, 8);
+  try {
+    await ARI.channels.sendDTMF({ channelId: session.channel.id, dtmf: digitos, duration: 250, between: 100 });
+    return { ok: true, detalle: 'DTMF ' + digitos };
+  } catch (e) { return { ok: false, detalle: String((e && e.message) || e) }; }
+}
+
+/* La despedida con corte: la misma que usa la escalera de inactividad, para que cortar por
+ * pedido y cortar por silencio se escuchen igual. */
+function despedirYCortar(session, texto) {
+  if (session.closed || session.despidiendo) return;
+  session.despidiendo = true;
+  const frase = momento.conSaludo(texto || (session.agent && session.agent.despedida_text) || inactividad.FRASES.despedida, new Date(), session.zona);
+  try { if (session.vigilante) session.vigilante.cerrar(); } catch (_) {}
+  try { if (session.rt) session.rt.saludar(frase); } catch (_) {}
+  /* Se espera a que TERMINE de decirla (un segundo de silencio real) y se corta; y hay un
+   * tope duro por si el audio nunca llega, porque la llamada no puede quedar abierta. */
+  let vacio = 0;
+  const reloj = setInterval(() => {
+    if (session.closed) { clearInterval(reloj); return; }
+    if (session.speaking) { vacio = 0; return; }
+    if (++vacio >= 12) { clearInterval(reloj); endSession(session, 'despedida'); }   // 12 × 250 ms
+  }, 250);
+  if (reloj.unref) reloj.unref();
+  const duro = setTimeout(() => { clearInterval(reloj); if (!session.closed) endSession(session, 'despedida-tope'); }, 12000);
+  if (duro.unref) duro.unref();
+}
+
+/* Guarda una fila en el registro de acciones. Es la respuesta a «¿quién abrió el portón a
+ * las 3 de la mañana?», así que va a la base y no al log del contenedor. */
+function auditarAccion(session, reg) {
+  if (!POOL) return;
+  POOL.query(
+    'INSERT INTO pbxng_ia_acciones (agente_id,sesion,llamante,herramienta,resultado,razon,motivo,args)'
+    + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [session.agent && session.agent.id, session.uuid, session.callerId || '', reg.herramienta,
+      reg.resultado || '', reg.razon || '', reg.motivo || '', JSON.stringify(reg.args || {})],
+  ).catch((e) => session.log('no se pudo auditar la acción: ' + e.message));
+}
+
+function ctxHerramientas(session, cfg) {
+  return {
+    cfg, agenteId: (session.agent && session.agent.id) || 0,
+    ahora: new Date(),
+    hhmm: new Intl.DateTimeFormat('es-UY', { timeZone: session.zona || momento.ZONA_DEF, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()),
+    sesion: session.estadoIA || (session.estadoIA = { verificada: false }),
+    leerCrm: (tipo, datos) => leerCrmAgente(session, tipo, datos),
+    transferir: async (motivo) => {
+      session.log('transferencia pedida por el agente: ' + motivo);
+      await doTransfer(session, session.agent.default_exten || session.agent.support_exten || '', 'Operador');
+    },
+    mensaje: async (datos) => { auditarAccion(session, { herramienta: 'tomar_mensaje', resultado: 'mensaje guardado', motivo: datos.unidad || '', args: datos }); },
+    terminar: async (motivo) => { session.log('corte pedido por el visitante: ' + motivo); despedirYCortar(session); },
+    abrir: (motivo) => abrirPuerta(session, (cfg || {}).abrir_porton).then((r) => { session.log('apertura (' + motivo + '): ' + JSON.stringify(r)); return r; }),
+    auditar: (reg) => auditarAccion(session, reg),
+    log: (m) => session.log(m),
+  };
+}
+
 /* ── Barrido de canales huérfanos ──────────────────────────────────────────────
  * Una red de seguridad, no el arreglo: el arreglo es soltar el socket antes de colgar (ver
  * `cleanupMedia`). Pero un canal zombi no se nota hasta la llamada siguiente —que no se
@@ -437,12 +542,35 @@ function close() {
  *  importante: acá el audio sigue llegando mientras se reproduce.
  */
 function arrancarRealtime(session) {
+  /* Las herramientas ENCENDIDAS de este agente. Si no hay ninguna, la sesión se abre en
+   * modo cliente —el modelo conversa solo— y nada cambia respecto de antes. Con al menos
+   * una, el puente pasa a delegar en el backend de Responses, que es el único modo en que
+   * este proveedor ejecuta funciones. Se enciende por agente, no global: prender
+   * delegación cambia cómo razona el modelo y hay que volver a escuchar el tono. */
+  const cfgHerr = (session.agent && session.agent.herramientas) || {};
+  const declaradas = herramientas.declarar(cfgHerr);
+  if (declaradas.length) session.log('herramientas: ' + declaradas.map((d) => d.name).join(', '));
+
   const puente = realtime.abrir({
     key: session.keys.openai,
     base: session.realtimeBase || '',
     model: session.agent.model || 'gpt-realtime-2.1-mini',
     voz: session.agent.voice || 'alloy',
     instrucciones: session.history[0].content,
+    herramientas: declaradas,
+  });
+
+  /* El modelo pidió algo. Se ejecuta (o se rechaza) y se le devuelve el resultado con su
+   * `call_id`: sin eso el modelo queda esperando y la conversación se traba. */
+  puente.on('herramienta', async (h) => {
+    if (session.closed) return;
+    let args;
+    try { args = JSON.parse(h.args || '{}'); } catch (_) { args = {}; }
+    session.log('el agente pidió: ' + h.nombre + ' ' + JSON.stringify(args).slice(0, 200));
+    let res;
+    try { res = await herramientas.ejecutar(h.nombre, args, ctxHerramientas(session, cfgHerr)); }
+    catch (e) { res = { ok: false, motivo: 'no se pudo completar esa acción' }; session.log('herramienta ' + h.nombre + ': ' + e.message); }
+    try { puente.responderHerramienta(h.call_id, res); } catch (_) {}
   });
   session.rt = puente;
   session.rtCola = [];

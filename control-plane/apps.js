@@ -385,6 +385,16 @@ module.exports = function init(deps) {
    * escribe una persona: un 0 apaga la escalera (y es el default), y el techo de 120 s
    * evita que un dedo de más deje una llamada abierta media hora facturando. */
   const segs = (v) => Math.max(0, Math.min(120, Math.round(Number(v) || 0)));
+  /* Las herramientas se guardan tal como las manda el panel, pero SÓLO las del catálogo:
+   * una clave inventada no llega a la base, así nadie puede declarar una herramienta que
+   * no existe (el modelo la nombraría y el agente prometería algo que no puede hacer). */
+  const catalogo = require('./herramientas').CATALOGO;
+  const camposHerr = (b) => {
+    const dentro = b.herramientas && typeof b.herramientas === 'object' ? b.herramientas : {};
+    const out = {};
+    for (const k of Object.keys(catalogo)) if (dentro[k]) out[k] = dentro[k];
+    return out;
+  };
   const camposInact = (b) => ({
     inact1_s: segs(b.inact1_s), inact2_s: segs(b.inact2_s), cierre_s: segs(b.cierre_s),
     inact1_text: String(b.inact1_text || ''), inact2_text: String(b.inact2_text || ''),
@@ -392,7 +402,7 @@ module.exports = function init(deps) {
   });
 
   app.get('/api/ai-agents', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
+    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   /* Proveedores que el pipeline entiende. La validación existe por un motivo concreto:
@@ -410,20 +420,34 @@ module.exports = function init(deps) {
     return false;
   };
   app.get('/api/ai-agents/proveedores', (req, res) => res.json(PROVEEDORES));
+  /* El catálogo de herramientas, para que el panel lo dibuje sin mantener una copia de la
+   * lista: una lista duplicada es una lista que se desincroniza. */
+  app.get('/api/ai-agents/herramientas', (req, res) => res.json(
+    Object.entries(catalogo).map(([id, h]) => ({ id, titulo: h.titulo, ayuda: h.ayuda, riesgo: h.riesgo }))));
+  /* El registro de acciones: quién abrió, cuándo, y los rechazos también. */
+  app.get('/api/ai-agents/acciones', async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        'SELECT id,ts,agente_id,sesion,llamante,herramienta,resultado,razon,motivo FROM pbxng_ia_acciones ORDER BY ts DESC LIMIT $1',
+        [Math.min(500, Math.max(1, Number(req.query.limite) || 100))]);
+      res.json(rows);
+    } catch (e) { errorHttp(res, e); }
+  });
 
   app.post('/api/ai-agents', async (req, res) => {
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
     const ia = camposInact(req.body || {});
+    const herr = camposHerr(req.body || {});
     if (!proveedorOk(provider, res)) return;
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
       const { rows } = await c.query(
-        'INSERT INTO pbxng_ai_agents (name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text)'
-        + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id',
+        'INSERT INTO pbxng_ai_agents (name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas)'
+        + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
-          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text]);
+          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr)]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, rows[0].id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: rows[0].id, exten });
@@ -434,6 +458,7 @@ module.exports = function init(deps) {
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!proveedorOk(provider, res)) return;
     const ia = camposInact(req.body || {});
+    const herr = camposHerr(req.body || {});
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
@@ -442,9 +467,9 @@ module.exports = function init(deps) {
       await c.query(
         'UPDATE pbxng_ai_agents SET name=$1,exten=$2,greeting=$3,system_prompt=$4,voice=$5,provider=$6,model=$7,enabled=$8,'
         + 'sales_exten=$10,support_exten=$11,default_exten=$12,crm_webhook=$13,greeting_text=$14,'
-        + 'inact1_s=$15,inact2_s=$16,cierre_s=$17,inact1_text=$18,inact2_text=$19,despedida_text=$20 WHERE id=$9',
+        + 'inact1_s=$15,inact2_s=$16,cierre_s=$17,inact1_text=$18,inact2_text=$19,despedida_text=$20,herramientas=$21 WHERE id=$9',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, id, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
-          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text]);
+          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr)]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
