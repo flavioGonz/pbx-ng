@@ -396,6 +396,11 @@ module.exports = function init(deps) {
     /* `remoto` no es una herramienta: es el proveedor de la caja del backoffice. Va aparte
      * de la lista blanca del catálogo, con sus propios campos y nada más — que nadie meta
      * configuración arbitraria en el JSON del agente. */
+    /* El modelo que razona detrás de la voz cuando hay herramientas. Va en el mismo JSON
+     * porque es parte de «cómo funcionan las herramientas de este agente». */
+    if (dentro.delegacion && typeof dentro.delegacion === 'object') {
+      out.delegacion = { model: String(dentro.delegacion.model || '').slice(0, 80) };
+    }
     if (dentro.remoto && typeof dentro.remoto === 'object') {
       const rm = dentro.remoto;
       out.remoto = {

@@ -363,3 +363,21 @@ test('Live: si el modo cliente no habla, reintenta delegando y lo cuenta', async
   assert.equal(starts[1].session.delegation.type, 'responses');
   assert.match(r.error, /ninguno de los dos modos/);
 });
+
+test('con herramientas, la delegación lleva SIEMPRE un modelo que razone', () => {
+  /* `model` es obligatorio y el proveedor no pone default: sin él la sesión NO abre
+   * («Missing required parameter: session.delegation.responses.model») y la llamada se
+   * degrada a «no puedo atenderte». Pasó la primera vez que se encendieron herramientas. */
+  const c = rt.LIVE.configurar({ model: 'gpt-live-1', herramientas: [{ type: 'function', name: 'abrir' }] });
+  assert.ok(c.session.delegation.responses.model, 'la delegación fue sin modelo: la sesión no abre');
+  assert.equal(c.session.delegation.responses.model, rt.MODELO_RAZONA);
+  /* De a una: dos acciones a la vez en una portería es abrir la puerta mientras todavía se
+   * verifica a quién. */
+  assert.equal(c.session.delegation.responses.parallel_tool_calls, false);
+
+  const propio = rt.LIVE.configurar({ model: 'gpt-live-1', herramientas: [{ type: 'function', name: 'x' }], delegacionModel: 'gpt-5-nano' });
+  assert.equal(propio.session.delegation.responses.model, 'gpt-5-nano', 'no respetó el modelo elegido en el panel');
+
+  /* Y sin herramientas no se delega: el modelo conversa solo, como hasta ahora. */
+  assert.equal(rt.LIVE.configurar({ model: 'gpt-live-1' }).session.delegation, undefined);
+});

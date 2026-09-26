@@ -569,6 +569,7 @@ function arrancarRealtime(session) {
     voz: session.agent.voice || 'alloy',
     instrucciones: session.history[0].content,
     herramientas: declaradas,
+    delegacionModel: (cfgHerr.delegacion && cfgHerr.delegacion.model) || '',
   });
 
   /* El modelo pidió algo. Se ejecuta (o se rechaza) y se le devuelve el resultado con su

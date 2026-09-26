@@ -169,6 +169,11 @@ const REALTIME = {
  *     conversa solo. Las herramientas (abrir portón, verificar datos) van a necesitar
  *     `delegation: 'responses'`, y por eso se arma acá abajo sólo si hay herramientas.
  */
+/* El modelo que RAZONA detrás de la voz cuando hay herramientas. Se puede cambiar por
+ * agente desde el panel; este default es el más común y existe para que encender una
+ * herramienta no requiera además elegir un modelo. */
+const MODELO_RAZONA = 'gpt-5.1';
+
 const LIVE = {
   url: (model, base) => (base ? String(base).replace(/\/+$/, '') : 'wss://api.openai.com/v1/live/sessions'),
   cabeceras: (key, base) => (base && /azure/i.test(String(base)) ? { 'api-key': key } : { Authorization: 'Bearer ' + key }),
@@ -182,7 +187,24 @@ const LIVE = {
      * conversa por su cuenta. Con herramientas hay que delegar en el backend de Responses,
      * que es quien las ejecuta. */
     if (o.herramientas && o.herramientas.length) {
-      session.delegation = { type: 'responses', responses: { tools: o.herramientas, tool_choice: 'auto', parallel_tool_calls: false } };
+      /* `model` es OBLIGATORIO en la delegación y no tiene default del lado del proveedor:
+       * sin él, la sesión NO abre («Missing required parameter:
+       * session.delegation.responses.model») y la llamada se degrada a «no puedo
+       * atenderte» — que es exactamente lo que se vio la primera vez que se encendieron
+       * herramientas. Es OTRO modelo que el de la voz: el de voz escucha y habla, este
+       * razona y decide qué herramienta pedir. */
+      session.delegation = {
+        type: 'responses',
+        responses: {
+          model: o.delegacionModel || MODELO_RAZONA,
+          tools: o.herramientas,
+          tool_choice: 'auto',
+          /* De a una por vez: dos acciones simultáneas en una portería es abrir la puerta
+           * mientras todavía se está verificando a quién. */
+          parallel_tool_calls: false,
+        },
+      };
+      if (o.instrucciones) session.delegation.responses.instructions = o.instrucciones;
     } else if (o.delegacion === 'responses') {
       /* Sin herramientas, pero delegando igual: es el segundo escalón de la prueba de
        * conexión. Sirve para distinguir «la cuenta no puede hablar» de «en modo cliente
@@ -506,4 +528,4 @@ async function unIntento(o, esc, live) {
   return r;
 }
 
-module.exports = { abrir, probar, elegirProtocolo, REALTIME, LIVE, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };
+module.exports = { abrir, probar, elegirProtocolo, MODELO_RAZONA, REALTIME, LIVE, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };
