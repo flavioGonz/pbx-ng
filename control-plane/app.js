@@ -1254,9 +1254,17 @@ app.post('/api/net/mode/revert', async (req, res) => {
 /* Qué están haciendo las sesiones de IA AHORA, con su latencia. Es el número que decide
  * si un agente de voz es usable: no el uso de CPU, sino cuánto silencio escucha la
  * persona antes de que el agente conteste. Sólo admin (cae en el default del RBAC). */
-app.get('/api/ai-agents/live', (req, res) => {
-  try { res.json({ sesiones: aiPipeline.metricas(), ts: new Date().toISOString() }); }
-  catch (e) { errorHttp(res, e); }
+app.get('/api/ai-agents/live', async (req, res) => {
+  try {
+    /* Además de las sesiones, el último problema del proveedor: es lo que convierte
+     * «el agente no atiende» en «la cuenta se quedó sin créditos», sin tener que llamar. */
+    let problema = null;
+    try {
+      const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='ia_ultimo_problema'");
+      if (rows[0] && rows[0].value) problema = JSON.parse(rows[0].value);
+    } catch (_) { problema = null; }
+    res.json({ sesiones: aiPipeline.metricas(), problema, ts: new Date().toISOString() });
+  } catch (e) { errorHttp(res, e); }
 });
 
 /* ── Qué modelos sirve ESTA cuenta ────────────────────────────────────────────

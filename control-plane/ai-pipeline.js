@@ -415,6 +415,32 @@ function auditarAccion(session, reg) {
   ).catch((e) => session.log('no se pudo auditar la acción: ' + e.message));
 }
 
+/* ── El último problema del proveedor, a la vista ─────────────────────────────
+ * Se quedó sin créditos y la única forma de enterarse fue llamando al agente y escuchar
+ * «no puedo atenderte». El error estaba en el log del contenedor, donde nadie mira hasta
+ * que algo ya falló. Queda guardado como ajuste y el panel lo muestra: un agente que no
+ * puede atender tiene que verse en la pantalla de agentes, no en una llamada.
+ *
+ * Sólo se guardan los problemas del PROVEEDOR (clave, saldo, modelo), que son los que se
+ * arreglan en otro lado; un corte de red puntual se recupera solo y no vale la alarma. */
+const PROBLEMAS = [
+  { re: /no credits|insufficient[_ ]quota|billing/i, que: 'La cuenta de OpenAI se quedó sin créditos.', arreglo: 'Cargá saldo en platform.openai.com; mientras tanto los agentes no pueden atender.' },
+  { re: /invalid[_ ]api[_ ]key|incorrect api key|401|403/i, que: 'El proveedor rechazó la clave.', arreglo: 'Revisá la clave en IA & Voz → Nube. Si la rotaste, hay que volver a cargarla.' },
+  { re: /does not exist|404|model/i, que: 'El modelo configurado no existe para esta cuenta.', arreglo: 'Elegí uno de la lista en el agente (pestaña Cerebro).' },
+  { re: /rate limit|429/i, que: 'El proveedor está limitando las llamadas.', arreglo: 'Es temporal; si se repite, revisá el plan de la cuenta.' },
+];
+
+function anotarProblemaProveedor(texto) {
+  const t = String(texto || '');
+  const m = PROBLEMAS.find((x) => x.re.test(t));
+  if (!m || !POOL) return;
+  POOL.query(
+    "INSERT INTO pbxng_settings (key,value) VALUES ('ia_ultimo_problema',$1)"
+    + ' ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
+    [JSON.stringify({ que: m.que, arreglo: m.arreglo, detalle: t.slice(0, 300), ts: new Date().toISOString() })],
+  ).catch(() => {});
+}
+
 function ctxHerramientas(session, cfg) {
   return {
     cfg, agenteId: (session.agent && session.agent.id) || 0,
@@ -668,7 +694,7 @@ function arrancarRealtime(session) {
     session.transcripcion.push(t);
     if (t && t.quien === 'visitante' && session.vigilante) session.vigilante.visitanteHabla();
   });
-  puente.on('error', (e) => session.log('realtime: ' + e));
+  puente.on('error', (e) => { session.log('realtime: ' + e); anotarProblemaProveedor(e); });
   puente.on('cerrado', () => session.log('realtime: sesión cerrada por el proveedor'));
 
   /* Instrumental mínimo del arranque. Sin esto, «el agente atendió y no habló» era
@@ -729,6 +755,7 @@ function arrancarRealtime(session) {
        * el camino de toda la vida y se corta. Un agente que atiende y no habla es peor que
        * uno que no atiende. */
       session.log('realtime no abrió (' + e.message + '): se degrada a TTS local');
+      anotarProblemaProveedor(e.message);
       session.rtCaido = true;
       speak(session, 'Disculpá, en este momento no puedo atenderte. Te paso con una persona.')
         .then(() => doTransfer(session, session.agent.default_exten || '', 'Operador'))

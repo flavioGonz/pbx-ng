@@ -63,6 +63,9 @@ export default function AiAgents() {
   const [vozList, setVozList] = useState([]); const [edgeList, setEdgeList] = useState([]);
   const [prueba, setPrueba] = useState(null); const [probando, setProbando] = useState(false);
   const [rtModelos, setRtModelos] = useState(null);
+  /* El último problema del proveedor. Vive acá arriba porque la pregunta que contesta —«¿por
+   * qué el agente no atiende?»— se hace mirando la lista de agentes, no entrando a uno. */
+  const [problema, setProblema] = useState(null);
   const [catalogo, setCatalogo] = useState([]);
   const [pruebaBo, setPruebaBo] = useState(null); const [probandoBo, setProbandoBo] = useState(false);
   /* Una sola fuente de verdad para el catálogo: la central. Una copia en el panel es una
@@ -73,7 +76,10 @@ export default function AiAgents() {
   }
   const previewRef = useRef(null);
 
-  async function load() { try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) { setList([]); } }
+  async function load() {
+    try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) { setList([]); }
+    try { const l = await fetch('/backend/api/ai-agents/live').then(r => r.json()); setProblema(l.problema || null); } catch (_) {}
+  }
   async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (_) {} }
   async function cargarModelos() {
     try { setRtModelos(await fetch('/backend/api/ai-agents/modelos').then(r => r.json())); } catch (_) { setRtModelos({ ok: false }); }
@@ -152,6 +158,13 @@ export default function AiAgents() {
 
   return (
     <Stack gap="lg">
+      {problema && (Date.now() - new Date(problema.ts).getTime() < 86400000) && (
+        <Alert variant="light" color="red" icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => setProblema(null)}>
+          <Text size="sm" fw={600}>{problema.que}</Text>
+          <Text size="xs" c="dimmed">{problema.arreglo} · detectado {new Date(problema.ts).toLocaleString('es-UY')}</Text>
+        </Alert>
+      )}
+
       {/* ── La tabla, primero ─────────────────────────────────────────────── */}
       <Card withBorder radius="lg" padding={0} style={{ overflow: 'hidden' }}>
         <Group justify="space-between" wrap="nowrap" p="md" pb="sm">
