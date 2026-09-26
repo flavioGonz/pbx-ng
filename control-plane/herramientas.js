@@ -155,6 +155,48 @@ const CATALOGO = {
   },
 };
 
+/* ── Lo que el agente PUEDE y lo que NO PUEDE ─────────────────────────────────
+ * Esto nació de una llamada real: con CERO herramientas encendidas, el agente contestó
+ * «listo, ya le avisé a Tathiana, tome asiento». No avisó a nadie — no tenía con qué—,
+ * pero tampoco tenía cómo saberlo: nadie le había dicho qué puede hacer. Un modelo al que
+ * no se le declaran límites improvisa, y en una portería improvisar significa mandar a
+ * alguien a sentarse a esperar a una persona que nunca se enteró.
+ *
+ * Por eso las capacidades se le declaran SIEMPRE y se arman solas desde lo que está
+ * encendido: lo que puede, lo que no, y la regla de oro de no decir que hizo algo. Si
+ * mañana se prende una herramienta, este texto cambia solo. Un párrafo escrito a mano en
+ * el prompt del cliente se desincroniza el primer día. */
+const NO_PUEDO = {
+  verificar_autorizado: 'confirmar si alguien figura entre los autorizados',
+  verificar_unidad: 'confirmar una unidad contra el sistema del cliente',
+  consultar_datos: 'consultar datos del edificio o del cliente',
+  transferir_a_agente: 'pasar la llamada con una persona',
+  tomar_mensaje: 'dejar un mensaje anotado para nadie',
+  terminar_llamada: 'cortar la llamada vos mismo',
+  abrir_porton: 'abrir la puerta ni el portón',
+};
+
+function resumenCapacidades(cfg) {
+  const on = cfg || {};
+  const puedo = Object.keys(CATALOGO).filter((k) => on[k] && on[k].on);
+  const noPuedo = Object.keys(NO_PUEDO).filter((k) => !(on[k] && on[k].on));
+  const lineas = ['LO QUE PODÉS HACER DE VERDAD (dato del sistema, no lo leas en voz alta):'];
+  if (puedo.length) {
+    lineas.push('- Tenés estas herramientas y son las ÚNICAS acciones que podés ejecutar: '
+      + puedo.map((k) => CATALOGO[k].titulo.toLowerCase()).join(', ') + '.');
+    lineas.push('- Una acción sólo está hecha si LLAMASTE a la herramienta y te devolvió que salió bien.');
+  } else {
+    lineas.push('- NO tenés ninguna herramienta: no podés ejecutar ninguna acción, sólo conversar.');
+  }
+  if (noPuedo.length) {
+    lineas.push('- NO podés: ' + noPuedo.map((k) => NO_PUEDO[k]).join('; ') + '.');
+  }
+  lineas.push('- REGLA QUE NO SE ROMPE: nunca digas que hiciste algo que no hiciste. Nada de «ya le avisé», '
+    + '«ya abrí», «quedó registrado» ni «tome asiento» si no ejecutaste una herramienta que lo haga. '
+    + 'Si te piden algo que no podés hacer, decilo en una frase y ofrecé pasar con una persona.');
+  return lineas.join('\n');
+}
+
 /** Las declaraciones de las herramientas ENCENDIDAS para un agente. */
 function declarar(cfg) {
   const on = cfg || {};
@@ -337,4 +379,4 @@ function conTope(promesa, ms) {
   return Promise.race([Promise.resolve(promesa), corte]).finally(() => { if (t) clearTimeout(t); });
 }
 
-module.exports = { CATALOGO, declarar, ejecutar, enVentana, conTope, TOPE_LECTURA_MS, VENTANA_DEF, MAX_HORA_DEF, _resetTopes };
+module.exports = { CATALOGO, declarar, resumenCapacidades, NO_PUEDO, ejecutar, enVentana, conTope, TOPE_LECTURA_MS, VENTANA_DEF, MAX_HORA_DEF, _resetTopes };

@@ -169,3 +169,34 @@ test('los argumentos del modelo se recortan: son dato no confiable', async () =>
   assert.ok(guardado.unidad.length <= 40);
   assert.equal((await h.ejecutar('tomar_mensaje', { mensaje: '   ' }, ctx)).ok, false, 'guardó un mensaje vacío');
 });
+
+/* ── Lo que puede y lo que no ─────────────────────────────────────────────────
+ * Esta prueba existe por una llamada real: con CERO herramientas encendidas, el agente
+ * contestó «listo, ya le avisé a Tathiana, tome asiento». No avisó a nadie. Tampoco tenía
+ * cómo saberlo: nadie le había dicho qué puede hacer. En una portería, improvisar así
+ * significa mandar a alguien a sentarse a esperar a una persona que nunca se enteró. */
+test('sin herramientas, se le dice explícitamente que no puede hacer NADA', () => {
+  const t = h.resumenCapacidades({});
+  assert.match(t, /NO tenés ninguna herramienta/);
+  assert.match(t, /no podés ejecutar ninguna acción/i);
+  assert.match(t, /nunca digas que hiciste algo que no hiciste/i,
+    'falta la regla que evita el «ya le avisé»');
+  assert.match(t, /ya le avisé/, 'conviene nombrar la frase exacta: es la que salió en la llamada real');
+  assert.match(t, /ofrecé pasar con una persona/, 'sin salida, el modelo igual improvisa');
+});
+
+test('el resumen se arma solo desde lo encendido, y nombra lo que NO puede', () => {
+  const t = h.resumenCapacidades({ verificar_autorizado: { on: true }, transferir_a_agente: { on: true } });
+  assert.match(t, /verificar a un autorizado/i);
+  assert.match(t, /transferir a una persona/i);
+  /* Y lo apagado se nombra como lo que es: una acción que no puede hacer. */
+  assert.match(t, /no podés:/i);
+  assert.match(t, /abrir la puerta/i, 'con el portón apagado tiene que decir que no puede abrir');
+  assert.doesNotMatch(t.split('NO podés:')[1] || '', /pasar la llamada con una persona/,
+    'dijo que no puede transferir cuando la herramienta está encendida');
+});
+
+test('una acción sólo cuenta si la herramienta devolvió bien', () => {
+  const t = h.resumenCapacidades({ tomar_mensaje: { on: true } });
+  assert.match(t, /sólo está hecha si LLAMASTE a la herramienta/i);
+});

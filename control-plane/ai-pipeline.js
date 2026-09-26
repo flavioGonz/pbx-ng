@@ -830,7 +830,13 @@ async function startAiSession(channel, agent) {
   catch (e) { log.warn('no se pudo identificar el portero', { err: e.message }); }
   const ctxPorteria = porteria.bloqueContexto(identificacion);
 
+  /* Lo que el agente PUEDE y lo que NO. Se arma solo desde las herramientas encendidas, y
+   * va SIEMPRE: sin esto el modelo improvisa acciones que no existen — pasó en una llamada
+   * real, contestó «ya le avisé» sin tener con qué avisar a nadie. */
+  const capacidades = herramientas.resumenCapacidades((agent && agent.herramientas) || {});
+
   const instrucciones = momento.bloqueHora(new Date(), zona) + '\n\n'
+    + capacidades + '\n\n'
     + (ctxPorteria ? ctxPorteria + '\n\n' : '')
     + (agent.system_prompt || 'Sos un asistente telefónico amable y conciso. Respondé en español rioplatense, en frases cortas. Si el usuario quiere un área o persona, usá transfer_call.');
   const session = {
