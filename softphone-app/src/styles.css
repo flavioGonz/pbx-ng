@@ -1,7 +1,11 @@
-:root { color-scheme: light; }
+/* La aplicación es oscura, y los controles NATIVOS —los desplegables de dispositivos,
+ * la barra de scroll, el selector de archivos— siguen esta línea y no el estilo CSS. Con
+ * `light` acá, el desplegable de micrófonos se abría blanco sobre blanco: se veía el
+ * texto gris clarito sobre fondo claro y no se leía nada. */
+:root { color-scheme: dark; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body, #root { height: 100%; margin: 0; }
-body { font-family: -apple-system, 'Segoe UI', Inter, system-ui, sans-serif; background: #eef1f7; }
+body { font-family: -apple-system, 'Segoe UI', Inter, system-ui, sans-serif; background: #1f2229; color: #e9ebee; }
 input:focus, select:focus { border-color: #2f80ff !important; }
 .ph-key:active { transform: scale(.95); }
 .ph-key { transition: transform .08s, background .12s, filter .12s; }

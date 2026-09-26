@@ -333,6 +333,12 @@ export default function App() {
   const [clientQ, setClientQ] = useState(''); const [contactQ, setContactQ] = useState(''); const [cliTab, setCliTab] = useState('datos');
   const started = useRef(false);
   const spRef = useRef(sp); spRef.current = sp;
+  /* El directorio y los dispositivos, en refs: el puente con el widget flotante se
+   * suscribe UNA vez y si leyera las variables de estado se quedaría con las de ese
+   * primer render —el clásico «la lista siempre vuelve vacía»—. */
+  const dirRef = useRef(null);
+  const devsRef = useRef({ mics: [], cams: [], speakers: [] });
+  const prefsRef = useRef({});
 
   function stopEngines() {
     try { if (window.sphone && window.sphone.sipDisconnect) window.sphone.sipDisconnect(); } catch {}
@@ -407,6 +413,23 @@ export default function App() {
       else if (a === 'volume' && typeof v === 'number') s.setVolume(v);
       else if (a === 'dial') { setTab('llamadas'); setTimeout(() => { try { numRef.current && numRef.current.focus(); } catch {} }, 200); }
       else if (a === 'devices') { setTab('ajustes'); setATab('disp'); }
+      /* ── Lo que el widget flotante resuelve sin abrir la ventana grande ──
+         Buscar un contacto, marcarlo, y cambiar micrófono o altavoz. El widget no tiene
+         sesión con la central ni permiso sobre los dispositivos: los pide acá, que es
+         donde ya están, y se los devolvemos por el mismo puente. */
+      else if (a === 'buscar') {
+        const q = String(v || '').trim();
+        const lista = (q && Array.isArray(dirRef.current) ? dirRef.current : []).filter(d => {
+          const n = String(d.ext || d.number || d.exten || '');
+          const nm = String(d.name || d.cn || d.callerid || '').toLowerCase();
+          return (n && n.includes(q)) || (nm && nm.includes(q.toLowerCase()));
+        }).slice(0, 4).map(d => ({ n: String(d.ext || d.number || d.exten || ''), nm: String(d.name || d.cn || d.callerid || d.ext || '') }));
+        try { window.sphone.miniData({ tipo: 'sug', items: lista }); } catch {}
+      }
+      else if (a === 'marcar') { const t = String(v || '').trim(); if (t) s.placeCall(t, false); }
+      else if (a === 'medios') { mandarMedios(); }
+      else if (a === 'set-mic') { pickDev('mic', v); setTimeout(mandarMedios, 60); }
+      else if (a === 'set-spk') { pickDev('spk', v); setTimeout(mandarMedios, 60); }
     });
   }, []);
   useEffect(() => { try { localStorage.setItem('sp_prefs2', JSON.stringify({ dnd, autoAnswer, ring, showIntercom, soundsUi })); } catch {} }, [dnd, autoAnswer, ring, showIntercom, soundsUi]);
@@ -441,10 +464,20 @@ export default function App() {
   useEffect(() => { if (dnd && sp.incoming) { try { sp.reject(); } catch {} } }, [dnd, sp.incoming]); // eslint-disable-line
   useEffect(() => { if (!dnd && autoAnswer && sp.incoming) { const t = setTimeout(() => { try { sp.accept(false); } catch {} }, 1200); return () => clearTimeout(t); } }, [autoAnswer, dnd, sp.incoming]); // eslint-disable-line
   useEffect(() => { sounds.setUiSounds(soundsUi); sounds.setRingSounds(ring); }, [soundsUi, ring]);
+  /* El temblor de la ventana avisa una llamada ENTRANTE y nada más. La condición incluye
+   * `!ci.since` a propósito: si la llamada ya está establecida —lo normal cuando uno
+   * atiende con video, que reinvita— no hay nada que anunciar, y una ventana que vibra
+   * con la llamada en curso se siente como si alguien más estuviera llamando. */
   useEffect(() => {
-    if (sp.incoming && ring && !dnd) { sounds.startIncomingRing(); try { window.sphone && window.sphone.winShake && window.sphone.winShake(true); } catch {} }
+    const anunciar = !!sp.incoming && !(sp.callInfo && sp.callInfo.since) && ring && !dnd;
+    if (anunciar) { sounds.startIncomingRing(); try { window.sphone && window.sphone.winShake && window.sphone.winShake(true); } catch {} }
     return () => { sounds.stopIncomingRing(); try { window.sphone && window.sphone.winShake && window.sphone.winShake(false); } catch {} };
-  }, [sp.incoming, ring, dnd]); // eslint-disable-line
+  }, [sp.incoming, sp.callInfo, ring, dnd]); // eslint-disable-line
+  /* Red de seguridad: con una llamada ya hablando, el temblor y el tono se apagan sí o
+   * sí. Es barato y evita la clase de error que sólo aparece en la máquina del cliente. */
+  useEffect(() => {
+    if (sp.callInfo && sp.callInfo.since) { sounds.stopIncomingRing(); try { window.sphone && window.sphone.winShake && window.sphone.winShake(false); } catch {} }
+  }, [sp.callInfo]);
   useEffect(() => {
     const calling = sp.inCall && sp.callInfo && !sp.callInfo.since && !sp.incoming;
     if (calling && ring) sounds.startRingback();
@@ -558,10 +591,25 @@ export default function App() {
   async function transcribeVm(id, folder) { setVmTx(t => ({ ...t, [id]: { loading: true } })); try { const d = await api.vmTranscribe(cfg.ext, folder, id); if (d && !d.error) setVmTx(t => ({ ...t, [id]: { text: (d.transcript || '').trim() || '(sin texto reconocido)', analysis: d.analysis } })); else setVmTx(t => ({ ...t, [id]: { error: (d && d.error) || 'no se pudo transcribir' } })); } catch (e) { setVmTx(t => ({ ...t, [id]: { error: String((e && e.message) || e) } })); } }
   const vmUnread = Array.isArray(vm) ? vm.filter(m => (m.folder || 'INBOX') === 'INBOX').length : 0;
   const rec = (apiOn && Array.isArray(scdr)) ? scdr : sp.hist;
+  dirRef.current = dir; devsRef.current = devs; prefsRef.current = prefs;
   const dialMatches = (num && Array.isArray(dir)) ? dir.filter(d => { const n = String(d.ext || d.number || d.exten || ''); const nm = String(d.name || d.cn || d.callerid || '').toLowerCase(); return (n && n.includes(num)) || (nm && nm.includes(num.toLowerCase())); }).slice(0, 6) : [];
   const presColor = (ext) => { const st = String(pres[String(ext)] || '').toLowerCase(); if (!st) return null; if (st.includes('inuse') && !st.includes('not')) return '#f0b429'; if (st === 'busy' || st === 'ringing' || st === 'ring' || st === 'onhold' || st === 'in_call') return '#f0b429'; if (st === 'not_inuse' || st === 'online' || st === 'available' || st === 'idle') return C.green; return '#c2c9d6'; };
   function press(k) { sounds.uiKey(); sp.sendDtmf(k); if (!sp.inCall) setNum(n => (n + k).slice(0, 30)); }
   function callNow(n, video) { sounds.uiClick(); const t = (n || num).trim(); if (t) { setTab('llamadas'); setModal(null); sp.placeCall(t, !!video).then(() => setNum('')); } }
+  /* La foto de los dispositivos tal como la ve el widget: nombre corto y cuál está
+   * elegido. El nombre largo de Windows («Micrófono (2- DM30 RGB USB Microphone)
+   * (352f:0106)») no entra en una ventanita de 300 px, así que se recorta acá. */
+  function mandarMedios() {
+    try {
+      const corto = (l) => String(l || '').replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, '').slice(0, 42);
+      window.sphone.miniData({
+        tipo: 'medios',
+        mics: ((devsRef.current || {}).mics || []).map(d => ({ id: d.deviceId, l: corto(d.label || 'Micrófono') })),
+        spks: ((devsRef.current || {}).speakers || []).map(d => ({ id: d.deviceId, l: corto(d.label || 'Altavoz') })),
+        mic: (prefsRef.current || {}).mic || '', spk: (prefsRef.current || {}).spk || '',
+      });
+    } catch {}
+  }
   function pickDev(kind, id) { setDevPref(kind, id); setPrefs(getDevPrefs()); if (kind === 'spk') sp.applySpeaker(id); }
   async function toggleRecord() { const next = !recording; try { const r = await api.recordCall(cfg.ext, next ? 'start' : 'stop'); if (!r || !r.error) setRecording(next); } catch {} }
   async function doSpy(mode) { if (!spyTarget) return; setSpyMsg('Originando…'); try { const r = await api.spyCall(cfg.ext, spyTarget.ext, mode); if (r && r.error) setSpyMsg('Error: ' + r.error); else { setSpyMsg('✓ Atendé la llamada entrante para escuchar.'); setTimeout(() => { setSpyTarget(null); setSpyMsg(''); }, 1800); } } catch (e) { setSpyMsg('Error: ' + e.message); } }

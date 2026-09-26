@@ -43,6 +43,12 @@ contextBridge.exposeInMainWorld('sphone', {
   miniReady: () => ipcRenderer.send('mini-ready'),
   onMiniState: (cb) => { const h = (_e, st) => cb(st); ipcRenderer.on('mini-state', h); return () => ipcRenderer.removeListener('mini-state', h); },
   onMiniAction: (cb) => { const h = (_e, a) => cb(a); ipcRenderer.on('mini-action', h); return () => ipcRenderer.removeListener('mini-action', h); },
+  /* Respuestas de la ventana grande al widget: los contactos que coinciden con lo que se
+   * escribió y la lista de micrófonos y altavoces. El widget no tiene sesión con la
+   * central ni acceso a los dispositivos: los pide a quien sí los tiene. */
+  miniData: (d) => ipcRenderer.send('mini-data', d),
+  onMiniData: (cb) => { const h = (_e, d) => cb(d); ipcRenderer.on('mini-data', h); return () => ipcRenderer.removeListener('mini-data', h); },
+  miniSize: (h) => ipcRenderer.send('mini-size', h),
   onSysEvent: (cb) => { const h = (_e, e) => cb(e); ipcRenderer.on('sys-event', h); return () => ipcRenderer.removeListener('sys-event', h); },
   // proxy go2rtc (MSE) por el main
   go2rtcOpen: (opts) => ipcRenderer.invoke('go2rtc-open', opts),

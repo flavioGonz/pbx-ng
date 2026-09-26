@@ -67,6 +67,36 @@
   @keyframes glow{0%,100%{box-shadow:0 14px 34px rgba(0,0,0,.55),0 0 0 0 rgba(43,217,90,.4)}
                   50%{box-shadow:0 14px 34px rgba(0,0,0,.55),0 0 0 9px rgba(43,217,90,0)}}
   @media (prefers-reduced-motion:reduce){ .w.timbra,.orbe.vivo,.pulse{animation:none} }
+
+  /* ── Teclado y dispositivos: las dos cosas que antes obligaban a abrir la ventana
+       grande. Marcar desde el widget es el 80 % de lo que uno quiere hacer con el
+       softphone escondido, y cambiar de micrófono es lo que uno necesita JUSTO cuando
+       ya está hablando y no quiere perder la llamada de vista. */
+  .panel{display:flex;flex-direction:column;gap:7px;-webkit-app-region:no-drag;min-height:0}
+  .busca{display:flex;align-items:center;gap:7px;background:#1a1d23;border:1px solid var(--linea);
+    border-radius:8px;padding:6px 9px}
+  .busca input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--texto);font-size:13.5px}
+  .busca input::placeholder{color:var(--tenue)}
+  .sug{display:flex;flex-direction:column;gap:2px;max-height:88px;overflow-y:auto}
+  .sug button{width:100%;height:auto;border-radius:8px;justify-content:flex-start;gap:9px;padding:6px 8px;
+    background:none;text-align:left}
+  .sug button:hover{background:rgba(255,255,255,.09)}
+  .sug .ini{width:24px;height:24px;border-radius:50%;background:#d9d7ef;color:#33404f;font-size:10px;
+    display:flex;align-items:center;justify-content:center;flex:none;font-weight:600}
+  .sug .tx{flex:1;min-width:0;line-height:1.15}
+  .sug .tx b{display:block;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sug .tx i{font-style:normal;font-size:11px;color:var(--tenue)}
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:1px}
+  .pad button{width:100%;height:32px;border-radius:8px;background:none;flex-direction:column;gap:0;line-height:1}
+  .pad button b{font-size:15px;font-weight:500}
+  .pad button i{font-style:normal;font-size:7px;letter-spacing:1px;color:var(--tenue)}
+  .medios{display:flex;flex-direction:column;gap:4px;max-height:196px;overflow-y:auto}
+  .medios h4{margin:2px 0 0;font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--tenue);font-weight:600}
+  .medios button{width:100%;height:auto;border-radius:8px;justify-content:flex-start;gap:8px;padding:6px 8px;
+    background:none;font-size:12px;text-align:left;color:var(--suave)}
+  .medios button:hover{background:rgba(255,255,255,.09)}
+  .medios button.sel{background:rgba(26,115,242,.2);color:#dbe7ff}
+  .medios .tick{width:14px;flex:none;color:var(--verde)}
 </style></head><body>
   <div class="w" id="w">
     <div class="drag"></div>
@@ -76,10 +106,17 @@
       <button class="chico" id="exp" title="Abrir el softphone"></button>
     </div>
     <div class="row" id="row"></div>
+    <div class="panel" id="panel" style="display:none"></div>
   </div>
 <script>
   const $ = (i) => document.getElementById(i);
   let st = null, iv = null;
+  /* La vista actual del widget: la tira de siempre, el teclado, o los dispositivos.
+     Cada una pide su alto a la ventana, que crece hacia arriba. */
+  let vista = 'normal', sug = [], medios = null, escrito = '';
+  const ALTO = { normal: 142, teclado: 368, medios: 296 };
+  const pedirAlto = () => { try { window.sphone.miniSize(ALTO[vista] || 142); } catch (_) {} };
+  const irA = (v) => { vista = (vista === v ? 'normal' : v); if (vista === 'normal') { sug = []; escrito = ''; } pedirAlto(); render(); };
   const fmt = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   const P = {
     mic: '<path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/>',
@@ -102,7 +139,7 @@
     if (cls) b.className = cls;
     b.innerHTML = svg(ic); b.title = title; b.setAttribute('aria-label', title);
     if (rot) b.firstChild.style.transform = 'rotate(134deg)';
-    b.onclick = (e) => { e.preventDefault(); try { window.sphone.miniAction(act); } catch (_) {} };
+    if (act) b.onclick = (e) => { e.preventDefault(); try { window.sphone.miniAction(act); } catch (_) {} };
     return b;
   }
   function volCtl() {
@@ -115,6 +152,79 @@
     r.oninput = () => { r.style.setProperty('--p', Math.round(r.value * 100) + '%'); try { window.sphone.miniAction('volume', parseFloat(r.value)); } catch (_) {} };
     wrap.appendChild(r); return wrap;
   }
+  /* ── El teclado del widget. Un campo que busca y marca a la vez (lo mismo que hace la
+       ventana grande), las coincidencias del directorio debajo, y el teclado numérico
+       para cuando el número no está en la agenda. */
+  function panelTeclado() {
+    const p = $('panel');
+    p.innerHTML = '';
+    const busca = document.createElement('div'); busca.className = 'busca';
+    busca.innerHTML = svg('dial', 14);
+    const inp = document.createElement('input');
+    inp.placeholder = 'Nombre o número'; inp.value = escrito; inp.autofocus = true;
+    inp.oninput = () => { escrito = inp.value; pedir(escrito); pintarSug(); };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') marcar(sug[0] ? sug[0].n : escrito); };
+    busca.appendChild(inp);
+    const llamar = document.createElement('button');
+    llamar.className = 'verde'; llamar.style.width = '28px'; llamar.style.height = '28px';
+    llamar.innerHTML = svg('phone', 14); llamar.title = 'Llamar';
+    llamar.onclick = () => marcar(escrito);
+    busca.appendChild(llamar);
+    p.appendChild(busca);
+
+    const lista = document.createElement('div'); lista.className = 'sug'; lista.id = 'sug';
+    p.appendChild(lista);
+
+    const pad = document.createElement('div'); pad.className = 'pad';
+    [['1',''],['2','ABC'],['3','DEF'],['4','GHI'],['5','JKL'],['6','MNO'],['7','PQRS'],['8','TUV'],['9','WXYZ'],['*',''],['0','+'],['#','']]
+      .forEach(([k, sub]) => {
+        const b = document.createElement('button');
+        b.innerHTML = '<b>' + k + '</b><i>' + sub + '</i>';
+        b.onclick = () => { escrito += k; inp.value = escrito; pedir(escrito); pintarSug(); };
+        pad.appendChild(b);
+      });
+    p.appendChild(pad);
+    setTimeout(() => { try { inp.focus(); } catch (_) {} }, 30);
+    pintarSug();
+  }
+  const pedir = (q) => { try { window.sphone.miniAction('buscar', q); } catch (_) {} };
+  const marcar = (n) => { const t = String(n || '').trim(); if (!t) return; try { window.sphone.miniAction('marcar', t); } catch (_) {} escrito = ''; sug = []; vista = 'normal'; pedirAlto(); render(); };
+  const iniciales = (t) => String(t || '?').replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
+  function pintarSug() {
+    const l = $('sug'); if (!l) return;
+    l.innerHTML = '';
+    sug.forEach(x => {
+      const b = document.createElement('button');
+      b.innerHTML = '<span class="ini">' + iniciales(x.nm || x.n) + '</span><span class="tx"><b>' + (x.nm || x.n) + '</b><i>' + x.n + '</i></span>';
+      b.onclick = () => marcar(x.n);
+      l.appendChild(b);
+    });
+  }
+
+  /* ── Micrófono y altavoz sin abrir la ventana grande. Es lo que uno necesita JUSTO
+       cuando ya está hablando y no quiere perder la llamada de vista. */
+  function panelMedios() {
+    const p = $('panel');
+    p.innerHTML = '';
+    const caja = document.createElement('div'); caja.className = 'medios';
+    if (!medios) { caja.innerHTML = '<h4>Buscando dispositivos…</h4>'; p.appendChild(caja); return; }
+    const grupo = (titulo, items, elegido, accion) => {
+      const h = document.createElement('h4'); h.textContent = titulo; caja.appendChild(h);
+      if (!items.length) { const v = document.createElement('button'); v.textContent = 'Sin dispositivos'; v.disabled = true; caja.appendChild(v); return; }
+      items.forEach(d => {
+        const b = document.createElement('button');
+        const on = (elegido || '') === d.id || (!elegido && d.id === 'default');
+        if (on) b.className = 'sel';
+        b.innerHTML = '<span class="tick">' + (on ? '✓' : '') + '</span>' + d.l;
+        b.onclick = () => { try { window.sphone.miniAction(accion, d.id); } catch (_) {} };
+        caja.appendChild(b);
+      });
+    };
+    grupo('Micrófono', medios.mics || [], medios.mic, 'set-mic');
+    grupo('Altavoz', medios.spks || [], medios.spk, 'set-spk');
+    p.appendChild(caja);
+  }
+
   function tick() {
     if (!st || !st.since) return;
     $('sub').textContent = fmt(Math.max(0, Math.floor((Date.now() - st.since) / 1000)));
@@ -128,6 +238,10 @@
   }
   function render() {
     const row = $('row'); row.innerHTML = '';
+    const panel = $('panel');
+    panel.style.display = vista === 'normal' ? 'none' : 'flex';
+    if (vista === 'teclado') panelTeclado();
+    if (vista === 'medios') panelMedios();
     const timbra = !!(st && st.active && st.incoming);
     $('w').classList.toggle('timbra', timbra);
     $('orbe').classList.toggle('vivo', !!(st && st.active));
@@ -141,8 +255,12 @@
       $('num').textContent = ext ? ('Interno ' + ext) : 'Sin cuenta';
       $('sub').textContent = (st && st.registered) ? 'En línea · listo para llamar' : 'Sin conexión';
       $('sub').className = 'sub';
-      row.appendChild(btn('', 'dial', 'Abrir el teclado', 'dial'));
-      row.appendChild(btn('', 'head', 'Micrófono y auricular', 'devices'));
+      const bt = btn(vista === 'teclado' ? 'on' : '', 'dial', 'Teclado y contactos', null);
+      bt.onclick = () => irA('teclado');
+      row.appendChild(bt);
+      const bm = btn(vista === 'medios' ? 'on' : '', 'head', 'Micrófono y altavoz', null);
+      bm.onclick = () => { if (vista !== 'medios') { medios = null; try { window.sphone.miniAction('medios'); } catch (_) {} } irA('medios'); };
+      row.appendChild(bm);
       row.appendChild(volCtl());
       return;
     }
@@ -162,6 +280,11 @@
     }
     row.appendChild(btn(st.muted ? 'on' : '', st.muted ? 'micoff' : 'mic', st.muted ? 'Activar el micrófono' : 'Silenciar el micrófono', 'mute'));
     row.appendChild(btn(st.held ? 'on' : '', st.held ? 'play' : 'pause', st.held ? 'Reanudar' : 'Poner en espera', 'hold'));
+    /* Cambiar de micrófono o de altavoz CON la llamada en curso: es justo cuando hace
+       falta, y antes obligaba a abrir la ventana grande y perder el widget de vista. */
+    const bm2 = btn(vista === 'medios' ? 'on' : '', 'head', 'Micrófono y altavoz', null);
+    bm2.onclick = () => { if (vista !== 'medios') { medios = null; try { window.sphone.miniAction('medios'); } catch (_) {} } irA('medios'); };
+    row.appendChild(bm2);
     row.appendChild(btn('rojo', 'phone', 'Terminar la llamada', 'hangup', true));
     row.appendChild(volCtl());
   }
@@ -170,6 +293,11 @@
       st = s; render();
       if (iv) { clearInterval(iv); iv = null; }
       if (st && st.since && !st.incoming) { tick(); iv = setInterval(tick, 500); }
+    });
+    window.sphone.onMiniData((d) => {
+      if (!d) return;
+      if (d.tipo === 'sug') { sug = d.items || []; pintarSug(); }
+      if (d.tipo === 'medios') { medios = d; if (vista === 'medios') panelMedios(); }
     });
     window.sphone.miniReady();
   } catch (_) {}

@@ -143,6 +143,11 @@ ipcMain.on('win-shake', (_e, on) => {
       const target = (mini && !mini.isDestroyed() && mini.isVisible()) ? mini : win; // si estás en mini, vibra el mini
       if (!target) return;
       shakeWin = target; const p = target.getPosition(); shakeHome = { x: p[0], y: p[1] }; let n = 0;
+      /* Reloj de seguridad: si por lo que sea nadie manda el «apagá» —la ventana cambió,
+       * la llamada se atendió desde el widget— el temblor se corta solo. Una ventana que
+       * vibra sin llamada es de las cosas más desconcertantes que puede hacer un
+       * programa. */
+      setTimeout(() => { if (shakeIv) { clearInterval(shakeIv); shakeIv = null; if (shakeWin && shakeHome) { try { shakeWin.setPosition(shakeHome.x, shakeHome.y); } catch (_) {} } shakeHome = null; shakeWin = null; } }, 60000);
       shakeIv = setInterval(() => { if (!shakeWin || !shakeHome) return; const dx = [0, 2, 0, -2, 1, -1][n % 6], dy = [1, -1, 2, 0, -2, 0][n % 6]; try { shakeWin.setPosition(shakeHome.x + dx, shakeHome.y + dy); } catch (_) {} n++; }, 55); }
     else { if (shakeIv) { clearInterval(shakeIv); shakeIv = null; } if (shakeWin && shakeHome) { try { shakeWin.setPosition(shakeHome.x, shakeHome.y); } catch (_) {} } shakeHome = null; shakeWin = null; }
   } catch (_) {}
@@ -187,6 +192,19 @@ ipcMain.handle('mini-show', (_e, on) => {
   } catch (_) {}
   return { ok: true };
 });
+/* Lo que la ventana grande le contesta al widget (contactos, dispositivos). */
+ipcMain.on('mini-data', (_e, d) => { try { mini && !mini.isDestroyed() && mini.webContents.send('mini-data', d); } catch (_) {} });
+/* El widget crece y se achica solo: con el teclado abierto necesita alto, y cuando se
+ * cierra vuelve a ser una tira. Se mueve el BORDE DE ARRIBA y no el de abajo, para que
+ * no se meta debajo de la barra de tareas al crecer. */
+ipcMain.on('mini-size', (_e, alto) => {
+  try {
+    if (!mini || mini.isDestroyed()) return;
+    const h = Math.max(120, Math.min(560, Math.round(alto || 0)));
+    const b = mini.getBounds();
+    mini.setBounds({ x: b.x, y: b.y + (b.height - h), width: b.width, height: h });
+  } catch (_) {}
+});
 ipcMain.on('mini-action', (_e, m) => {
   try {
     const act = (m && typeof m === 'object') ? m.a : m;
@@ -194,7 +212,9 @@ ipcMain.on('mini-action', (_e, m) => {
     if (act === 'restore') { try { mini && mini.hide(); } catch (_) {} mainHiddenByMini = false; showWin(); return; }
     if (win) win.webContents.send('mini-action', { a: act, v: val });
     // estas acciones necesitan la ventana grande
-    if (act === 'accept-video' || act === 'dial' || act === 'devices') { try { mini && mini.hide(); } catch (_) {} mainHiddenByMini = false; showWin(); }
+    /* `dial` y `devices` ya no traen la ventana grande: el widget resuelve el teclado y
+     * la elección de micrófono adentro. Queda sólo el video, que sí necesita pantalla. */
+    if (act === 'accept-video') { try { mini && mini.hide(); } catch (_) {} mainHiddenByMini = false; showWin(); }
   } catch (_) {}
 });
 
