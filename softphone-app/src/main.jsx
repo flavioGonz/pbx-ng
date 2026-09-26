@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import DemoLlamada from './DemoLlamada.jsx';
 import './styles.css';
 import { hydrateSecure } from './config.js';
 
@@ -29,4 +30,4 @@ try {
   window.addEventListener('unhandledrejection', (e) => { try { console.error('[app] unhandledrejection', e.reason); } catch (_) {} });
 } catch (_) {}
 
-hydrateSecure().finally(() => { createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>); });
+hydrateSecure().finally(() => { createRoot(document.getElementById('root')).render(<ErrorBoundary>{new URLSearchParams(location.search).get('demo') === 'call' ? <DemoLlamada /> : <App />}</ErrorBoundary>); });

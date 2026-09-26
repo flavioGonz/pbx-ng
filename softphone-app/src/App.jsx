@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import CallScreen from './CallScreen';
 import { flushSync } from 'react-dom';
 import { useSip, listDevices, getDevPrefs, setDevPref } from './useSip.js';
 import { useSipNative } from './useSipNative.js';
@@ -249,6 +250,12 @@ export default function App() {
   const [tab, setTab] = useState(isComplete(loadConfig()) ? 'llamadas' : 'ajustes');
   const [num, setNum] = useState(''); const numRef = useRef(null);
   const [pad, setPad] = useState(false);
+  /* El menú «Más» de la barra de llamada: lo secundario no puede ocupar un botón fijo o la
+   * barra se convierte en una botonera y se pierde lo importante. */
+  const [mas, setMas] = useState(false);
+  /* La llamada terminada se muestra un instante ANTES de volver al marcador: cortar y que
+   * la pantalla salte de golpe deja la duda de si se cortó o se colgó solo. */
+  const [finCall, setFinCall] = useState(null);
   const [devs, setDevs] = useState({ mics: [], cams: [], speakers: [] });
   const [prefs, setPrefs] = useState(getDevPrefs());
   const [photo, setPhoto] = useState(getPhoto);
@@ -378,6 +385,15 @@ export default function App() {
     if (prevInCall.current && !sp.inCall) {
       const ci = lastCI.current;
       if (answeredAt.current && ci) { const dur = Math.max(0, Math.round((Date.now() - answeredAt.current) / 1000)); const sc = qAcc.current; const avg = sc.length ? sc.reduce((a, b) => a + b, 0) / sc.length : null; setCallStats({ number: ci.number, dur, avg, relay: lastRelay.current, codec: lastCodec.current }); }
+      /* Pantalla de «llamada finalizada» por un instante. Cortar y que la vista salte de
+       * golpe al marcador deja la duda de si se cortó o se colgó solo; un segundo y medio
+       * alcanza para cerrar la acción sin hacer esperar a nadie. */
+      if (ci) {
+        const dur = answeredAt.current ? Math.max(0, Math.round((Date.now() - answeredAt.current) / 1000)) : 0;
+        setFinCall({ number: ci.number, dur });
+        setTimeout(() => setFinCall(null), 1600);
+      }
+      setPad(false); setMas(false);
       qAcc.current = []; answeredAt.current = 0; lastCI.current = null; lastRelay.current = null;
     }
     prevInCall.current = sp.inCall;
@@ -1054,90 +1070,127 @@ export default function App() {
             </div>
           )}
 
-          {sp.incoming && (() => {
-            const from = (sp.incoming.remoteIdentity && sp.incoming.remoteIdentity.uri && sp.incoming.remoteIdentity.uri.user) || 'desconocido';
-            return (
-              <div className="call-overlay" style={S.overlay}>
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 42, WebkitAppRegion: 'drag', zIndex: 5 }} />
-                <div style={{ position: 'absolute', top: 8, right: 10, zIndex: 6 }}><WinCtl dark /></div>
-                <div ref={gPop}><RingBell size={120} /></div>
-                <div style={{ fontSize: 26, fontWeight: 700, marginTop: 16 }}>{from}</div>
-                <div style={{ color: 'rgba(255,255,255,.7)', marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>{IcPhoneRing({ s: 16, c: 'rgba(255,255,255,.85)' })}{sp.incomingVideo ? 'Videollamada entrante…' : 'Llamada entrante…'}</div>
-                {popClient && (
-                  <div className="menu-pop" style={{ marginTop: 18, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.22)', borderRadius: 14, padding: '14px 18px', maxWidth: 400, textAlign: 'left' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>{IcUsers({ c: '#9fd0ff', s: 16 })}<span style={{ fontWeight: 700, fontSize: 16 }}>{popClient.name}</span><span style={{ marginLeft: 'auto', fontSize: 10, background: 'rgba(159,208,255,.2)', color: '#cfe6ff', borderRadius: 8, padding: '2px 8px' }}>CRM</span></div>
-                    {popClient.doc && <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>Doc: {popClient.doc}</div>}
-                    {popClient.address && <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>{popClient.address}</div>}
-                    <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 12, color: 'rgba(255,255,255,.85)' }}><span>{(popClient.persons || []).length} personas</span><span>{(popClient.spaces || []).length} espacios</span><span>{(popClient.devices || []).length} disp.</span></div>
-                    {Array.isArray(popClient.persons) && popClient.persons.length > 0 && <div style={{ marginTop: 8, fontSize: 12 }}><span style={{ color: 'rgba(255,255,255,.6)' }}>Autorizados: </span>{popClient.persons.slice(0, 3).map(p => p.name).join(', ')}{popClient.persons.length > 3 ? '…' : ''}</div>}
+          {/* ── Pantalla de llamada ──────────────────────────────────────────
+              Un solo componente para los cinco estados (entrante, marcando, hablando, en
+              espera, terminada): el avatar, el nombre y la barra de abajo son los MISMOS
+              elementos y sólo cambia su contenido. Antes cada estado era un bloque que
+              aparecía de golpe, y el cambio —sobre todo el instante en que el otro
+              atiende— no se notaba. */}
+          {(sp.incoming || sp.inCall || finCall) && (() => {
+            const ci = sp.callInfo || {};
+            const entrante = !!sp.incoming;
+            const from = entrante ? ((sp.incoming.remoteIdentity && sp.incoming.remoteIdentity.uri && sp.incoming.remoteIdentity.uri.user) || 'desconocido') : '';
+            const numero = entrante ? from : (finCall ? finCall.number : (ci.number || '—'));
+            const nombre = (popClient && popClient.name) || '';
+            const estado = finCall ? 'terminada'
+              : entrante ? 'entrante'
+                : sp.held ? 'espera'
+                  : ci.since ? 'hablando' : 'marcando';
+            const videoVivo = !!sp.videoOn && !entrante;
+
+            const nodosVideo = videoVivo ? (
+              <>
+                <video autoPlay playsInline muted ref={el => { if (sp.remoteVideoRef) sp.remoteVideoRef.current = el; if (el) { const st = sp.getRemoteStream && sp.getRemoteStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }} />
+                <video autoPlay playsInline muted ref={el => { if (sp.localVideoRef) sp.localVideoRef.current = el; if (el) { const st = sp.getLocalStream && sp.getLocalStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} style={{ position: 'absolute', top: 16, right: 16, width: 168, height: 112, objectFit: 'cover', borderRadius: 16, border: '2px solid rgba(255,255,255,.22)', boxShadow: '0 8px 24px rgba(0,0,0,.5)', transform: 'scaleX(-1)', zIndex: 3 }} />
+                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(0,0,0,.5),transparent 22%,transparent 62%,rgba(0,0,0,.6))', zIndex: 1, pointerEvents: 'none' }} />
+              </>
+            ) : null;
+
+            /* Lo que no entra en la fila de botones: se agrupa en «Más», como en un
+               teléfono de escritorio. Meterlo todo abajo convierte la barra en una
+               botonera y se pierde lo importante. */
+            const masMenu = mas && !entrante ? (
+              <div className="menu-pop" style={{ position: 'absolute', bottom: 92, left: '50%', transform: 'translateX(-50%)', zIndex: 6, background: 'rgba(32,36,44,.96)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 14, padding: 8, minWidth: 210, boxShadow: '0 20px 44px rgba(0,0,0,.5)' }}>
+                {[
+                  { ok: !sipMode, lbl: sp.speaker ? 'Altavoz encendido' : 'Altavoz', on: sp.speaker, fn: sp.toggleSpeaker },
+                  { ok: true, lbl: 'Transferir', on: !!sp.attended || xfer, fn: () => { setMas(false); if (sp.attended) return; setXferNum(''); setXfer(true); } },
+                  { ok: apiOn, lbl: recording ? 'Grabando…' : 'Grabar', on: recording, fn: () => { setMas(false); toggleRecord(); } },
+                  { ok: !sipMode, lbl: 'Invitar a la llamada', on: !!sp.attended, fn: () => { setMas(false); if (sp.attended) return; const t = prompt('Invitar interno a la conferencia:'); if (t && t.trim()) sp.attendedCall(t.trim()); } },
+                ].filter(x => x.ok).map(x => (
+                  <button key={x.lbl} onClick={x.fn} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 10, background: 'none', border: 'none', color: x.on ? '#3b82f6' : '#e8ebf0', padding: '9px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, textAlign: 'left' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.08)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}>{x.lbl}</button>
+                ))}
+              </div>
+            ) : null;
+
+            /* Las barras de contexto: la ficha del CRM cuando entra una llamada conocida,
+               la consulta en curso de una transferencia atendida, la otra línea en espera
+               y la conferencia. Van juntas bajo el nombre. */
+            const contexto = (
+              <>
+                {masMenu}
+                {entrante && popClient && (
+                  <div className="menu-pop" style={{ marginTop: 18, background: 'rgba(255,255,255,.07)', border: '1px solid rgba(255,255,255,.14)', borderRadius: 14, padding: '12px 16px', maxWidth: 420, textAlign: 'left' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontWeight: 700, fontSize: 15 }}>{popClient.name}</span><span style={{ marginLeft: 'auto', fontSize: 10, background: 'rgba(159,208,255,.18)', color: '#cfe6ff', borderRadius: 8, padding: '2px 8px' }}>CRM</span></div>
+                    {popClient.address && <div style={{ fontSize: 12, color: 'rgba(255,255,255,.62)', marginTop: 2 }}>{popClient.address}</div>}
+                    {Array.isArray(popClient.persons) && popClient.persons.length > 0 && <div style={{ marginTop: 6, fontSize: 12, color: 'rgba(255,255,255,.8)' }}><span style={{ color: 'rgba(255,255,255,.5)' }}>Autorizados: </span>{popClient.persons.slice(0, 3).map(x => x.name).join(', ')}{popClient.persons.length > 3 ? '…' : ''}</div>}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 40, marginTop: 40 }}>
-                  <div style={{ textAlign: 'center' }}><button style={S.hang} onClick={() => { sounds.uiClick(); sp.reject(); }}>{IcPhone({ c: '#fff', s: 28 })}</button><div style={{ fontSize: 12, marginTop: 8, color: 'rgba(255,255,255,.8)' }}>Rechazar</div></div>
-                  <div style={{ textAlign: 'center' }}><button style={{ ...S.hang, background: C.accent, boxShadow: '0 8px 22px rgba(47,128,255,.4)' }} onClick={() => { sounds.uiClick(); sp.accept(true); }}>{IcVideo({ c: '#fff', s: 28 })}</button><div style={{ fontSize: 12, marginTop: 8, color: 'rgba(255,255,255,.8)' }}>Video</div></div>
-                  <div style={{ textAlign: 'center' }}><button style={{ ...S.hang, background: C.green, boxShadow: '0 8px 22px rgba(34,197,94,.4)' }} onClick={() => { sounds.uiClick(); sp.accept(false); }}>{IcPhone({ c: '#fff', s: 28 })}</button><div style={{ fontSize: 12, marginTop: 8, color: 'rgba(255,255,255,.8)' }}>Atender</div></div>
-                </div>
-              </div>
+                {sp.attended && (
+                  <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 12, padding: '8px 12px' }}>
+                    <span style={{ fontSize: 13 }}>Consultando a <b>{sp.attended.number}</b> · {sp.attended.state === 'talking' ? 'en línea' : sp.attended.state === 'calling' ? 'llamando…' : sp.attended.state}</span>
+                    <button onClick={sp.completeAttended} style={{ background: '#2fbf6e', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>Completar</button>
+                    <button onClick={sp.cancelAttended} style={{ background: 'rgba(255,255,255,.16)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12 }}>Cancelar</button>
+                  </div>
+                )}
+                {sp.heldInfo && (
+                  <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 20, padding: '5px 6px 5px 12px', fontSize: 12.5 }}>
+                    {sp.heldInfo.number} en espera
+                    <button onClick={sp.switchLine} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 14, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Cambiar</button>
+                    <button onClick={sp.conference} style={{ background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: 14, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Unir</button>
+                  </div>
+                )}
+                {sp.conf && <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(139,92,246,.2)', border: '1px solid rgba(139,92,246,.45)', borderRadius: 20, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: '#d9c9ff' }}>● Conferencia activa</div>}
+              </>
+            );
+
+            return (
+              <CallScreen
+                estado={estado}
+                titulo={nombre || numero}
+                subtitulo={nombre ? numero : (finCall ? 'Duración ' + fmtDur(finCall.dur) : '')}
+                iniciales={initials(numero)}
+                nota={/rechaz|error|ocupad/i.test(sp.note || '') ? sp.note : (sp.note || '')}
+                desde={ci.since || (finCall ? 0 : 0)}
+                calidad={sp.quality ? sp.quality.score : 0}
+                viaTurn={sp.usingRelay}
+                video={videoVivo}
+                videoNodes={nodosVideo}
+                getRemoteStream={sp.getRemoteStream}
+                ventana={<WinCtl dark />}
+                flags={{ muted: sp.muted, held: sp.held, videoOn: sp.videoOn, pad, masAbierto: mas }}
+                extra={contexto}
+                acciones={{
+                  colgar: () => { sounds.uiClick(); sp.hangup(); },
+                  rechazar: () => { sounds.uiClick(); sp.reject(); },
+                  atender: () => { sounds.uiClick(); sp.accept(false); },
+                  atenderVideo: sipMode ? null : () => { sounds.uiClick(); sp.accept(true); },
+                  mute: sp.toggleMute,
+                  hold: sipMode ? null : sp.toggleHold,
+                  video: sipMode ? null : sp.toggleVideo,
+                  teclado: () => { setMas(false); setPad(v => !v); },
+                  mas: () => { setPad(false); setMas(v => !v); },
+                  tecla: press,
+                }}
+              />
             );
           })()}
 
-          {sp.inCall && !sp.incoming && (() => {
-            const ci = sp.callInfo || {}; const q = sp.quality; const dots = q ? '▂▄▆█'.slice(0, q.score) : '';
-            return (
-              <div className="call-overlay" style={{ ...S.overlay, ...(sp.videoOn ? { background: '#000' } : { justifyContent: 'flex-start', paddingTop: 46 }) }}>
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 42, WebkitAppRegion: 'drag', zIndex: 5 }} />
-                <div style={{ position: 'absolute', top: 8, right: 10, zIndex: 6 }}><WinCtl dark /></div>
-                {sp.videoOn && <video autoPlay playsInline muted ref={el => { if (sp.remoteVideoRef) sp.remoteVideoRef.current = el; if (el) { const st = sp.getRemoteStream && sp.getRemoteStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
-                {sp.videoOn && <video autoPlay playsInline muted ref={el => { if (sp.localVideoRef) sp.localVideoRef.current = el; if (el) { const st = sp.getLocalStream && sp.getLocalStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} style={{ position: 'absolute', top: 16, right: 16, width: 168, height: 112, objectFit: 'cover', borderRadius: 16, border: '2px solid rgba(255,255,255,.22)', boxShadow: '0 8px 24px rgba(0,0,0,.5)', transform: 'scaleX(-1)', zIndex: 3 }} />}
-                {sp.videoOn && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 130, background: 'linear-gradient(180deg,rgba(0,0,0,.55),transparent)', zIndex: 1, pointerEvents: 'none' }} />}
-                {sp.videoOn && <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 210, background: 'linear-gradient(0deg,rgba(0,0,0,.62),transparent)', zIndex: 1, pointerEvents: 'none' }} />}
-                <div style={{ position: sp.videoOn ? 'absolute' : 'static', top: sp.videoOn ? 18 : 24, left: sp.videoOn ? '50%' : undefined, transform: sp.videoOn ? 'translateX(-50%)' : undefined, zIndex: 2, textAlign: 'center', ...(sp.videoOn ? { background: 'rgba(10,16,30,.42)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', borderRadius: 16, padding: '8px 20px', border: '1px solid rgba(255,255,255,.12)', whiteSpace: 'nowrap' } : {}), textShadow: sp.videoOn ? '0 1px 6px rgba(0,0,0,.7)' : 'none' }}>
-                  {!sp.videoOn && (ci.since ? <div ref={gPop} style={{ display: 'flex', justifyContent: 'center' }}><Ava txt={initials(ci.number)} size={96} bg="rgba(255,255,255,.16)" /></div> : <div style={{ display: 'flex', justifyContent: 'center' }}><RingBell size={108} /></div>)}
-                  <div style={{ fontSize: 24, fontWeight: 700, marginTop: sp.videoOn ? 0 : 14 }}>{ci.number || '—'}</div>{popClient && <div style={{ fontSize: 14, color: '#9fd0ff', marginTop: 2, fontWeight: 600 }}>{popClient.name}</div>}
-                  <div style={{ color: 'rgba(255,255,255,.75)', marginTop: 4 }}>{sp.held ? 'En espera' : (ci.since ? <Timer since={ci.since} /> : <span style={{ color: /rechaz|error/i.test(sp.note) ? '#ff6b6b' : 'rgba(255,255,255,.85)' }}>{sp.note || 'Llamando…'}</span>)}{q ? <span style={{ marginLeft: 10, letterSpacing: 1, color: q.score >= 3 ? C.green : q.score === 2 ? '#ffcc00' : '#ff5b52' }}>{dots}</span> : null}{ci.since && sp.usingRelay != null ? <span className={sp.usingRelay ? 'turn-live' : ''} style={{ marginLeft: 10, fontSize: 10.5, fontWeight: 700, letterSpacing: .6, padding: '2px 8px', borderRadius: 20, background: sp.usingRelay ? 'rgba(34,197,94,.22)' : 'rgba(255,255,255,.14)', color: sp.usingRelay ? '#7ee2a6' : 'rgba(255,255,255,.8)' }}>{sp.usingRelay ? 'VÍA TURN' : 'DIRECTO'}</span> : null}</div>{ci.since && !sp.held && !sp.videoOn ? <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}><LiveWave getStream={sp.getRemoteStream} bars={11} h={34} /></div> : null}
-                  {sp.heldInfo && <div style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 20, padding: '5px 6px 5px 12px', fontSize: 12 }}>{IcPause({ c: '#ffd47a', s: 13 })} {sp.heldInfo.number} en espera <button onClick={sp.switchLine} style={{ background: C.accent, color: '#fff', border: 'none', borderRadius: 14, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Cambiar</button><button onClick={sp.conference} style={{ background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: 14, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Unir</button></div>}
-                  {sp.conf && <div style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(139,92,246,.22)', border: '1px solid rgba(139,92,246,.5)', borderRadius: 20, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: '#d9c9ff' }}>● Conferencia activa</div>}
+          {xfer && (
+            <div className="call-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(6,10,20,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }} onClick={() => setXfer(false)}>
+              <div onClick={e => e.stopPropagation()} style={{ background: '#fff', color: C.ink, borderRadius: 16, padding: 20, width: 300, boxShadow: '0 20px 50px rgba(0,0,0,.45)' }}>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Transferir llamada</div>
+                <input autoFocus value={xferNum} onChange={e => setXferNum(e.target.value.replace(/[^\d*#+]/g, ''))} placeholder="Interno o número" style={{ ...S.inp, marginBottom: 14 }} onKeyDown={e => { if (e.key === 'Enter' && xferNum) { sp.transfer(xferNum); setXfer(false); } }} />
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button disabled={!xferNum} onClick={() => { sp.transfer(xferNum); setXfer(false); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: 'none', background: C.accent, color: '#fff', fontWeight: 700, cursor: 'pointer', opacity: xferNum ? 1 : .5 }}>Ciega</button>
+                  <button disabled={!xferNum} onClick={() => { sp.attendedCall(xferNum); setXfer(false); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.accent}`, background: '#fff', color: '#1d4ed8', fontWeight: 700, cursor: 'pointer', opacity: xferNum ? 1 : .5 }}>Atendida</button>
                 </div>
-                {pad && !sp.videoOn && <div style={{ ...S.keypad, marginTop: 18 }}>{['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => <button key={k} className="ph-key" style={{ ...S.key, width: 64, height: 48, background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.2)', color: '#fff' }} onClick={() => press(k)}><span style={{ fontSize: 20 }}>{k}</span></button>)}</div>}
-                <div style={{ flex: 1 }} />
-                <div className="ctl-in" style={{ zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', ...(sp.videoOn ? { position: 'absolute', bottom: 18, left: '50%', transform: 'translateX(-50%)', background: 'rgba(12,20,38,.55)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderRadius: 22, padding: '14px 18px 12px', border: '1px solid rgba(255,255,255,.1)' } : {}) }}>
-                  {sp.attended && <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: 320, marginBottom: 10, background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 12, padding: '8px 12px' }}>
-                    <div style={{ flex: 1, fontSize: 13 }}>Consultando a <b>{sp.attended.number}</b> · {sp.attended.state === 'talking' ? 'en línea' : sp.attended.state === 'calling' ? 'llamando…' : sp.attended.state}</div>
-                    <button onClick={sp.completeAttended} style={{ background: C.green, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>Completar</button>
-                    <button onClick={sp.cancelAttended} style={{ background: 'rgba(255,255,255,.18)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12 }}>Cancelar</button>
-                  </div>}
-                  <div style={S.ctlGrid} ref={gStagger}>
-                    {[
-                      { show: true, node: <CtlBtn key="mute" on={sp.muted} onClick={sp.toggleMute} icon={IcMic} iconOff={IcMicOff} label={sp.muted ? 'Mudo' : 'Silenciar'} /> },
-                      { show: true, node: <CtlBtn key="pad" on={pad} onClick={() => setPad(p => !p)} icon={IcGrid} label="Teclado" /> },
-                      { show: !sipMode, node: <CtlBtn key="spk" on={sp.speaker} onClick={sp.toggleSpeaker} icon={IcSpeaker} label="Altavoz" /> },
-                      { show: !sipMode, node: <CtlBtn key="vid" on={sp.videoOn} onClick={sp.toggleVideo} icon={IcVideo} iconOff={IcVideoOff} label={sp.videoOn ? 'Cortar video' : 'Video'} /> },
-                      { show: !sipMode, node: <CtlBtn key="hold" on={sp.held} onClick={sp.toggleHold} icon={IcPause} label={sp.held ? 'Reanudar' : 'Retener'} /> },
-                      { show: true, node: <CtlBtn key="xfer" on={!!sp.attended || xfer} onClick={() => { if (sp.attended) return; setXferNum(''); setXfer(true); }} icon={IcSwap} label="Transferir" /> },
-                      { show: apiOn, node: <CtlBtn key="rec" on={recording} onClick={toggleRecord} icon={IcRec} label={recording ? 'Grabando' : 'Grabar'} /> },
-                      { show: !sipMode, node: <CtlBtn key="inv" on={!!sp.attended} onClick={() => { if (sp.attended) return; const t = prompt('Invitar interno a la conferencia:'); if (t && t.trim()) sp.attendedCall(t.trim()); }} icon={IcPlus} label="Invitar" /> },
-                    ].filter(c => c.show).map(c => c.node)}
-                  </div>
-                  <button style={{ ...S.hang, marginTop: 20 }} onClick={() => { sounds.uiClick(); sp.hangup(); }}>{IcPhone({ c: '#fff', s: 28 })}</button>
-                </div>
-                <div style={{ flex: 1 }} />
-                {xfer && (
-                  <div className="call-overlay" style={{ position: 'absolute', inset: 0, background: 'rgba(6,10,20,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }} onClick={() => setXfer(false)}>
-                    <div onClick={e => e.stopPropagation()} style={{ background: '#fff', color: C.ink, borderRadius: 16, padding: 20, width: 300, boxShadow: '0 20px 50px rgba(0,0,0,.45)' }}>
-                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Transferir llamada</div>
-                      <input autoFocus value={xferNum} onChange={e => setXferNum(e.target.value.replace(/[^\d*#+]/g, ''))} placeholder="Interno o número" style={{ ...S.inp, marginBottom: 14 }} onKeyDown={e => { if (e.key === 'Enter' && xferNum) { sp.transfer(xferNum); setXfer(false); } }} />
-                      <div style={{ display: 'flex', gap: 10 }}>
-                        <button disabled={!xferNum} onClick={() => { sp.transfer(xferNum); setXfer(false); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: 'none', background: C.accent, color: '#fff', fontWeight: 700, cursor: 'pointer', opacity: xferNum ? 1 : .5 }}>Ciega</button>
-                        <button disabled={!xferNum} onClick={() => { sp.attendedCall(xferNum); setXfer(false); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.accent}`, background: '#fff', color: '#1d4ed8', fontWeight: 700, cursor: 'pointer', opacity: xferNum ? 1 : .5 }}>Atendida</button>
-                      </div>
-                      <div style={{ fontSize: 11, color: C.sub, marginTop: 10 }}>Ciega: transfiere de inmediato. Atendida: hablás primero y después completás.</div>
-                      <button onClick={() => setXfer(false)} style={{ width: '100%', marginTop: 8, background: 'none', border: 'none', color: C.sub, cursor: 'pointer', fontSize: 13 }}>Cancelar</button>
-                    </div>
-                  </div>
-                )}
+                <div style={{ fontSize: 11, color: C.sub, marginTop: 10 }}>Ciega: transfiere de inmediato. Atendida: hablás primero y después completás.</div>
+                <button onClick={() => setXfer(false)} style={{ width: '100%', marginTop: 8, background: 'none', border: 'none', color: C.sub, cursor: 'pointer', fontSize: 13 }}>Cancelar</button>
               </div>
-            );
-          })()}
+            </div>
+          )}
 
           {modal && (
             <div style={S.modalWrap} onClick={() => setModal(null)}>
