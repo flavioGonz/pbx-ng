@@ -230,6 +230,12 @@ services:
       - asterisk_conf:/etc/asterisk/pbxng.d
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
       - respaldos:/respaldos
+      # Los instaladores del telefono (Windows y el APK de Android) que ESTA central sirve
+      # en /descargas/softphone/. Es una carpeta del host y no algo horneado en la imagen a
+      # proposito: publicar una version nueva tiene que ser dejar el archivo ahi, sin
+      # reconstruir ni reiniciar nada. Si la carpeta esta vacia, el boton del login
+      # simplemente no aparece.
+      - ./softphone:/app/softphone
     # Solo loopback: el dialplan de Asterisk (host network) llama a
     # http://127.0.0.1:3000/api/internal/wake. El panel llega por la red interna
     # (API_URL=http://api:3000). Nunca 0.0.0.0: la API no tiene TLS ni rate-limit propio.

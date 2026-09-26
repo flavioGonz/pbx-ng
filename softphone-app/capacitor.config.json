@@ -1,0 +1,7 @@
+{
+  "appId": "uy.com.infratec.pbxng.softphone",
+  "appName": "PBX-NG Softphone",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false },
+  "server": { "androidScheme": "https" }
+}

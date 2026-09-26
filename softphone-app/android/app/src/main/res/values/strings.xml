@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PBX-NG Softphone</string>
+    <string name="title_activity_main">PBX-NG Softphone</string>
+    <string name="package_name">uy.com.infratec.pbxng.softphone</string>
+    <string name="custom_url_scheme">uy.com.infratec.pbxng.softphone</string>
+</resources>

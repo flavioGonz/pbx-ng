@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+# Proyecto Android generado por Capacitor: el codigo fuente SI va al repositorio (es
+# donde viven permisos, iconos y firma), pero no lo que produce Gradle al construir.
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+# Nunca la clave de firma.
+*.jks
+*.keystore
