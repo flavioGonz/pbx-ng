@@ -53,11 +53,31 @@ function fallo(status, cuerpo) {
   return e;
 }
 
+/* Entrar con el usuario del panel. Devuelve SIEMPRE un objeto —{ok} o {error}— y nunca
+ * lanza: quien llama es un botón, y un error que escapa de acá deja la pantalla clavada
+ * en «Conectando…» sin decir nada. El 401 de acá no es una sesión vencida como en el
+ * resto de la API: es la contraseña, y hay que decirlo con esas palabras. */
 export async function apiLogin(base, username, password) {
-  setApiBase(base);
-  const r = await call('POST', '/auth/login', { username, password });
-  if (r && r.token) { setToken(r.token); try { localStorage.setItem(LS_USER, username); } catch {} return { ok: true, user: r.user }; }
-  return { error: (r && r.error) || 'login falló' };
+  const b = String(base || '').trim().replace(/\/$/, '');
+  if (!b) return { error: 'falta la URL del sistema' };
+  if (!/^https?:\/\//i.test(b)) return { error: 'la URL del sistema tiene que empezar con https://' };
+  setApiBase(b);
+  try {
+    const r = await call('POST', '/auth/login', { username, password });
+    if (r && r.token) { setToken(r.token); try { localStorage.setItem(LS_USER, username); } catch {} return { ok: true, user: r.user }; }
+    return { error: (r && r.error) || 'el sistema no devolvió una sesión' };
+  } catch (e) {
+    const m = String((e && e.message) || 'no se pudo conectar');
+    if (e && e.status === 401) return { error: 'usuario o contraseña incorrectos' };
+    if (e && e.status === 404) return { error: 'esa URL responde, pero no es el panel de una central PBX-NG' };
+    if (e && e.status === 429) return { error: 'demasiados intentos seguidos: la central te frenó unos minutos' };
+    if (e && e.status === 403) return { error: m };
+    if (/sesión vencida/i.test(m)) return { error: 'usuario o contraseña incorrectos' };
+    if (/ENOTFOUND|getaddrinfo|EAI_AGAIN/i.test(m)) return { error: 'no se encontró ese servidor: revisá la URL' };
+    if (/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/i.test(m)) return { error: 'el servidor no acepta la conexión desde esta red' };
+    if (/timeout/i.test(m)) return { error: 'el servidor no contestó a tiempo' };
+    return { error: m };
+  }
 }
 
 /* ICE de la central. Es PÚBLICA (no pide sesión): la central la sirve para que cualquier
@@ -85,6 +105,10 @@ export const clientsFull = () => call('GET', '/clients');
 export const clientsLookup = (number) => call('GET', '/clients/lookup?number=' + encodeURIComponent(number || ''));
 export const clientDetail = (id) => call('GET', '/clients/' + encodeURIComponent(id));
 export const clientStreams = (id) => call('GET', '/intercom/streams?client=' + encodeURIComponent(id));
+/* «Entrada» de un solo uso para abrir el video de UNA cámara: vale un minuto y se quema
+ * al usarse. Es lo que se manda en la URL del WebSocket, en vez de la sesión entera —que
+ * quedaría escrita en cualquier registro por el que pase esa URL—. */
+export const intercomTicket = (src) => call('GET', '/intercom/ticket?src=' + encodeURIComponent(src));
 export const recordings = () => call('GET', '/recordings');
 export const recordCall = (ext, action) => call('POST', '/calls/record', { ext, action });
 export const spyCall = (sup, target, mode) => call('POST', '/calls/spy', { sup, target, mode });

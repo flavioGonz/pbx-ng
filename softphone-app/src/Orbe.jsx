@@ -53,8 +53,41 @@ const MANCHAS = [
   { r: 0.38, orbita: 0.52, per: 29.0, fase: 5.5, luz: 0.58, alfa: 1 },    // el color lavado
 ];
 
-export default function Orbe({ size = 132, color = '#1a73f2', quieto = false, className = '', style }) {
+export default function Orbe({ size = 132, color = '#1a73f2', quieto = false, getStream = null, className = '', style }) {
   const ref = useRef(null);
+  /* El nivel del audio del OTRO lado, entre 0 y 1. Vive en un ref y no en el estado de
+   * React a propósito: cambia sesenta veces por segundo y no tiene que repintar nada más
+   * que el canvas. */
+  const nivel = useRef(0);
+
+  /* Escuchar el audio para que el orbe REACCIONE. Es la diferencia entre una animación
+   * que adorna y una que informa: si el otro habla y el orbe no se mueve, el audio no
+   * está llegando, y eso se ve sin abrir ningún diagnóstico. */
+  useEffect(() => {
+    if (!getStream || quieto) { nivel.current = 0; return undefined; }
+    let ctx = null, raf = 0, parado = false;
+    try {
+      const st = getStream(); if (!st) return undefined;
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const anal = ctx.createAnalyser(); anal.fftSize = 512; anal.smoothingTimeConstant = 0.8;
+      ctx.createMediaStreamSource(st).connect(anal);
+      const buf = new Uint8Array(anal.fftSize);
+      const medir = () => {
+        if (parado) return;
+        anal.getByteTimeDomainData(buf);
+        let suma = 0;
+        for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; suma += v * v; }
+        const rms = Math.sqrt(suma / buf.length);
+        /* Subir rápido y bajar despacio: el orbe acompaña la voz en vez de temblar con
+         * cada sílaba. */
+        const v = Math.min(1, rms * 6);
+        nivel.current = v > nivel.current ? v : nivel.current * 0.90 + v * 0.10;
+        raf = requestAnimationFrame(medir);
+      };
+      medir();
+    } catch (_) { /* sin audio: el orbe se mueve solo, como antes */ }
+    return () => { parado = true; cancelAnimationFrame(raf); try { ctx && ctx.close(); } catch (_) {} };
+  }, [getStream, quieto]);
   useEffect(() => {
     const cv = ref.current; if (!cv) return undefined;
     const dpr = Math.min(2, (window.devicePixelRatio || 1));
@@ -68,6 +101,10 @@ export default function Orbe({ size = 132, color = '#1a73f2', quieto = false, cl
     const pintar = (t) => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, size, size);
+      /* Y el disco entero crece apenas: 4 % con la voz al máximo. Más que eso se lee como
+       * un globo que se infla y distrae. */
+      const esc = 1 + nivel.current * 0.04;
+      ctx.translate(R * (1 - esc), R * (1 - esc)); ctx.scale(esc, esc);
       ctx.save();
       ctx.beginPath(); ctx.arc(R, R, R, 0, Math.PI * 2); ctx.clip();
 
@@ -78,20 +115,24 @@ export default function Orbe({ size = 132, color = '#1a73f2', quieto = false, cl
       fondo.addColorStop(1, rgba(hundir(base, 0.18), 1));
       ctx.fillStyle = fondo; ctx.fillRect(0, 0, size, size);
 
-      /* Las manchas, desenfocadas y mezcladas. */
+      /* Las manchas, desenfocadas y mezcladas. Cuanto más fuerte habla el otro, más
+       * lejos del centro viajan y más grandes se ven: el orbe «respira» con la voz. */
+      const voz = nivel.current;
       ctx.globalCompositeOperation = 'source-over';
       ctx.filter = 'blur(' + (size * 0.075).toFixed(1) + 'px)';
       for (const m of MANCHAS) {
         const a = (t / m.per) * Math.PI * 2 + m.fase;
-        const x = R + Math.cos(a) * R * m.orbita;
-        const y = R + Math.sin(a * 0.73 + m.fase) * R * m.orbita + R * 0.22;
+        const orb = m.orbita * (1 + voz * 0.55);
+        const x = R + Math.cos(a) * R * orb;
+        const y = R + Math.sin(a * 0.73 + m.fase) * R * orb + R * 0.22;
         const col = m.luz < 0 ? hundir(base, -m.luz) : lavar(base, m.luz);
-        const g = ctx.createRadialGradient(x, y, 0, x, y, R * m.r);
+        const rr = R * m.r * (1 + voz * 0.30);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
         g.addColorStop(0, rgba(col, m.alfa));
         g.addColorStop(0.55, rgba(col, m.alfa * 0.75));
         g.addColorStop(1, rgba(col, 0));
         ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(x, y, R * m.r, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.fill();
       }
       ctx.filter = 'none';
 

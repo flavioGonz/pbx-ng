@@ -327,7 +327,8 @@ export default function CallScreen(p) {
             y su movimiento dice que la llamada esta viva. Las iniciales no decian ninguna
             de las dos cosas —del otro lado suele haber un interno o un portero, no una
             persona con foto—. */}
-        {!video && <Orbe size={132} color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando} quieto={estado === 'terminada'} />}
+        {!video && <Orbe size={132} color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando} quieto={estado === 'terminada'}
+          getStream={hablando ? getRemoteStream : null} />}
 
         <div className="cs-nombre">{nombre}</div>
         {leyenda ? (

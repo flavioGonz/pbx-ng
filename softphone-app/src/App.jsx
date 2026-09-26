@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import CallScreen from './CallScreen';
+import CallScreen, { colorAvatar } from './CallScreen';
 import { flushSync } from 'react-dom';
 import { useSip, listDevices, getDevPrefs, setDevPref } from './useSip.js';
 import { useSipNative } from './useSipNative.js';
@@ -56,37 +56,45 @@ const IcReload = (p = {}) => <Svg {...p}><path d="M23 4v6h-6M1 20v-6h6" /><path 
  * menú es EL MISMO de la pantalla de llamada, y los colores de estado (verde = en línea o
  * atender, ámbar = en espera, rojo = cortar o error, azul = acción) son los mismos en la
  * ventana grande, en la pantalla de llamada y en el widget flotante. */
-const C = { rail: '#1f2229', railHi: '#31333a', accent: '#1a73f2', green: '#2bd95a', amber: '#f0b429', red: '#eb4c46', ink: '#0b1220', sub: '#667089', bg: '#eef1f7', card: '#ffffff', line: '#e3e8f0', keybg: '#f3f6fc' };
-function Ava({ photo, txt, size = 44, bg = 'linear-gradient(160deg,#4c9dff,#2f6bd6)', style }) {
-  const st = { width: size, height: size, borderRadius: '50%', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: size * 0.36, overflow: 'hidden', ...style };
+const C = { rail: '#1a1d23', railHi: '#2b2f37', accent: '#1a73f2', green: '#2bd95a', amber: '#f0b429', red: '#eb4c46', ink: '#e9ebee', sub: '#8d929a', bg: '#1f2229', card: '#262a31', line: '#33373e', keybg: 'transparent' };
+/* Circulo pastel con las iniciales en oscuro. El color sale del propio nombre, asi el
+ * mismo contacto es siempre del mismo color y se reconoce antes de leerlo. */
+function Ava({ photo, txt, size = 44, bg, style }) {
+  const st = { width: size, height: size, borderRadius: '50%', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 500, fontSize: size * 0.34, overflow: 'hidden', ...style };
   if (photo) return <img src={photo} alt="" style={{ ...st, objectFit: 'cover' }} />;
-  return <div style={{ ...st, background: bg }}>{txt}</div>;
+  return <div style={{ ...st, background: bg || colorAvatar(String(txt || '')), color: bg ? '#fff' : '#33404f' }}>{txt}</div>;
 }
 const S = {
   root: { position: 'fixed', inset: 0, display: 'flex', background: C.bg, color: C.ink, fontSize: 14 },
-  rail: { width: 78, background: C.rail, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 14, gap: 4 },
-  navBtn: (on) => ({ width: 62, height: 56, borderRadius: 12, border: 'none', cursor: 'pointer', background: on ? C.railHi : 'transparent', color: on ? '#fff' : '#8194ba', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, fontSize: 10 }),
+  rail: { width: 68, background: C.rail, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 12, gap: 2, flex: 'none' },
+  navBtn: (on) => ({ width: 58, height: 54, borderRadius: 10, border: 'none', cursor: 'pointer', background: on ? C.railHi : 'transparent', color: on ? '#4c9aff' : '#8d929a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, fontSize: 10 }),
   content: { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 },
-  header: { height: 54, borderBottom: `1px solid ${C.line}`, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', flex: 'none' },
+  header: { height: 40, borderBottom: `1px solid ${C.line}`, background: C.rail, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 6px 0 14px', flex: 'none' },
   body: { flex: 1, position: 'relative', display: 'flex', minHeight: 0 },
-  dialCol: { width: 340, borderRight: `1px solid ${C.line}`, background: C.card, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '22px 24px', flex: 'none' },
-  numIn: { width: '100%', boxSizing: 'border-box', fontSize: 28, fontWeight: 500, textAlign: 'center', border: 'none', outline: 'none', padding: '10px 0', letterSpacing: 1, color: C.ink, background: 'transparent' },
-  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, margin: '12px 0 16px' },
-  key: { width: 80, height: 60, borderRadius: 14, background: C.keybg, border: `1px solid ${C.line}`, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: C.ink },
-  cbtn: (bg) => ({ width: 58, height: 58, borderRadius: '50%', background: bg, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 6px 16px rgba(20,40,90,.18)' }),
+  dialCol: { width: 266, borderRight: `1px solid ${C.line}`, background: C.card, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '14px 16px 16px', flex: 'none' },
+  /* El buscador: una caja con borde, no un numero gigante. Es lo primero de la columna
+     y sirve para dos cosas a la vez —marcar y buscar por nombre—, como en el telefono
+     del cliente. */
+  numIn: { width: '100%', boxSizing: 'border-box', fontSize: 13.5, textAlign: 'left', outline: 'none', padding: '9px 11px', borderRadius: 7, color: C.ink, background: '#1f2229', border: `1px solid ${C.line}` },
+  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 2, margin: '14px 0 16px', width: '100%' },
+  /* Teclas planas: sin caja ni borde, el numero grande y las letras debajo. */
+  key: { height: 50, borderRadius: 10, background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, color: C.ink },
+  /* Los dos botones de abajo son pastillas anchas, no redondos: video a la izquierda,
+     llamar a la derecha. */
+  cbtn: (bg) => ({ width: 78, height: 34, borderRadius: 18, background: bg, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }),
   listCol: { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 },
-  listHdr: { padding: '16px 22px 10px', fontSize: 18, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  listHdr: { padding: '14px 20px 8px', fontSize: 15, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: C.ink },
   scroll: { flex: 1, overflowY: 'auto', padding: '0 14px 14px' },
   row: { display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 10, cursor: 'pointer' },
-  actBtn: (c) => ({ width: 34, height: 34, borderRadius: '50%', border: `1px solid ${C.line}`, background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c }),
+  actBtn: (c) => ({ width: 32, height: 32, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.07)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c }),
   chip: (bg, fg) => ({ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: bg, color: fg, fontSize: 12, fontWeight: 600 }),
-  card: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '4px 16px 8px' },
-  inp: { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 14, outline: 'none', background: '#fff' },
-  sel: { width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 14, background: '#fff', outline: 'none' },
+  card: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '4px 16px 8px', color: C.ink },
+  inp: { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 14, outline: 'none', background: '#1f2229', color: C.ink },
+  sel: { width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 14, background: '#1f2229', color: C.ink, outline: 'none' },
   primary: { width: '100%', padding: 12, borderRadius: 10, border: 'none', background: C.accent, color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' },
   overlay: { position: 'fixed', inset: 0, background: 'linear-gradient(180deg,#132038,#0b1220)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 100 },
   modalWrap: { position: 'fixed', inset: 0, background: 'rgba(10,16,30,.45)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  modal: { width: 440, maxWidth: '90%', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px rgba(10,20,50,.35)', overflow: 'hidden' },
+  modal: { width: 440, maxWidth: '90%', background: C.card, color: C.ink, borderRadius: 16, border: `1px solid ${C.line}`, boxShadow: '0 24px 60px rgba(0,0,0,.5)', overflow: 'hidden' },
   ctlGrid: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginTop: 22, width: 300 },
   ctl: (on) => ({ width: 64, height: 64, borderRadius: '50%', border: '1px solid rgba(255,255,255,.16)', background: on ? '#fff' : 'rgba(255,255,255,.12)', color: on ? '#000' : '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, justifySelf: 'center', fontSize: 10 }),
   hang: { width: 66, height: 66, borderRadius: '50%', border: 'none', background: C.red, color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(239,68,68,.4)' },
@@ -129,7 +137,15 @@ function CtlBtn({ on, onClick, icon, iconOff, label }) {
 function Section({ title, icon, right, children }) {
   return <div>{(title || right) ? <div style={S.section}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>{icon}{title}</span>{right || null}</div> : null}<div style={S.card}>{children}</div></div>;
 }
-const fmtDate = (t) => new Date(t).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+/* La hora sola si fue hoy, y dia/mes + hora si fue antes. La fecha completa con año
+ * ocupaba media fila para decir algo que casi nunca importa: lo de hoy es lo que se
+ * mira, y para lo viejo alcanza con «24/9 15:12». */
+const fmtDate = (t) => {
+  const d = new Date(t), h = new Date();
+  const hoy = d.getDate() === h.getDate() && d.getMonth() === h.getMonth() && d.getFullYear() === h.getFullYear();
+  const hora = d.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return hoy ? hora : (d.getDate() + '/' + (d.getMonth() + 1) + ' ' + hora);
+};
 const fmtDur = (d) => d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : '—';
 
 // ---- Reproductor go2rtc por MSE (fMP4 sobre WebSocket, atraviesa el proxy sin UDP) ----
@@ -144,7 +160,15 @@ function MseTile({ stream }) {
     let stopped = false, ws = null, sb = null, queue = [], connId = null, unsub = null;
     setStatus('connecting');
     const ms = new MediaSource(); video.src = URL.createObjectURL(ms); video.muted = true;
-    const wsUrl = base.replace(/^http/, 'ws').replace(/\/$/, '') + '/api/ws?src=' + encodeURIComponent(src);
+    /* La URL del WebSocket se arma con una «entrada» de un solo uso: un WebSocket del
+     * navegador no puede mandar cabeceras, y meter la sesión entera en la query la deja
+     * escrita en todos los registros del camino. La entrada vale un minuto, sólo para
+     * esta cámara, y se quema al abrirla. */
+    const armarUrl = async () => {
+      const b = base.replace(/^http/, 'ws').replace(/\/$/, '') + '/api/ws?src=' + encodeURIComponent(src);
+      try { const r = await api.intercomTicket(src); if (r && r.ticket) return b + '&t=' + encodeURIComponent(r.ticket); } catch (_) {}
+      return b;
+    };
     const codecsMsg = () => { const cands = ['avc1.640029', 'avc1.64002A', 'avc1.4d002a', 'avc1.42e01e', 'hvc1.1.6.L153.B0', 'mp4a.40.2', 'mp4a.40.5', 'opus']; const codecs = cands.filter(cc => { try { return MediaSource.isTypeSupported('video/mp4; codecs="' + cc + '"') || MediaSource.isTypeSupported('audio/mp4; codecs="' + cc + '"'); } catch { return false; } }).join(','); return JSON.stringify({ type: 'mse', value: codecs }); };
     const flush = () => { if (!sb || sb.updating || !queue.length) return; try { sb.appendBuffer(queue.shift()); } catch {} };
     const trim = () => { try { if (sb && sb.buffered.length) { const end = sb.buffered.end(sb.buffered.length - 1); if (video.currentTime < end - 2 || video.currentTime > end) video.currentTime = end - 0.4; if (sb.buffered.start(0) < end - 10 && !sb.updating) sb.remove(0, end - 8); } } catch {} };
@@ -154,7 +178,7 @@ function MseTile({ stream }) {
     ms.addEventListener('sourceopen', () => {
       if (bridge) {
         let origin = ''; try { origin = new URL(base).origin; } catch {}
-        window.sphone.go2rtcOpen({ url: wsUrl, origin, token: api.getToken() }).then((r) => {
+        armarUrl().then((wsUrl) => window.sphone.go2rtcOpen({ url: wsUrl, origin, token: api.getToken() })).then((r) => {
           if (stopped) return;
           if (!r || r.error) { setStatus('error'); try { console.warn('[go2rtc]', r && r.error); } catch {} return; }
           connId = r.id;
@@ -167,12 +191,15 @@ function MseTile({ stream }) {
           });
         });
       } else {
-        try { ws = new WebSocket(wsUrl); } catch { setStatus('error'); return; }
-        ws.binaryType = 'arraybuffer';
-        ws.onopen = () => ws.send(codecsMsg());
-        ws.onmessage = (ev) => { if (typeof ev.data === 'string') onText(ev.data); else onBin(new Uint8Array(ev.data)); };
-        ws.onerror = () => { if (!stopped) setStatus('error'); };
-        ws.onclose = () => { if (!stopped) setStatus(s => s === 'live' || s === 'connecting' ? 'error' : s); };
+        armarUrl().then((wsUrl) => {
+          if (stopped) return;
+          try { ws = new WebSocket(wsUrl); } catch { setStatus('error'); return; }
+          ws.binaryType = 'arraybuffer';
+          ws.onopen = () => ws.send(codecsMsg());
+          ws.onmessage = (ev) => { if (typeof ev.data === 'string') onText(ev.data); else onBin(new Uint8Array(ev.data)); };
+          ws.onerror = () => { if (!stopped) setStatus('error'); };
+          ws.onclose = () => { if (!stopped) setStatus(s => s === 'live' || s === 'connecting' ? 'error' : s); };
+        });
       }
     });
     return () => { stopped = true; try { ws && ws.close(); } catch {} try { if (connId && window.sphone && window.sphone.go2rtcClose) window.sphone.go2rtcClose(connId); } catch {} try { unsub && unsub(); } catch {} try { if (ms.readyState === 'open') ms.endOfStream(); } catch {} try { video.src = ''; } catch {} };
@@ -204,6 +231,7 @@ function ToggleRow({ label, desc, on, onChange }) {
 function DiagRow({ k, v, good }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.line}` }}><div style={{ fontSize: 13, color: C.sub, width: 132, flex: 'none' }}>{k}</div><div style={{ fontSize: 13, fontWeight: 600, color: good === true ? '#15803d' : C.ink, wordBreak: 'break-all' }}>{v}</div></div>; }
 const qLabel = (avg) => avg == null ? { t: 'sin datos', c: '#94a3b8' } : avg >= 3.5 ? { t: 'Excelente', c: '#2bd95a' } : avg >= 2.5 ? { t: 'Buena', c: '#1fa945' } : avg >= 1.5 ? { t: 'Regular', c: '#f0b429' } : { t: 'Mala', c: '#eb4c46' };
 const candLabel = (ct) => ct === 'relay' ? 'TURN (relay)' : ct === 'srflx' ? 'STUN (srflx)' : ct === 'prflx' ? 'peer-reflexive' : ct === 'host' ? 'directo (host)' : '—';
+const mpRow = { display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '10px 15px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13.5, color: 'inherit', textAlign: 'left' };
 const DIAG_STEPS = ['Datos verificados', 'Conectando al servidor PBX', 'Estableciendo canal seguro', 'Registrando el interno', 'Verificando red (ICE/STUN)', 'Conexión lista'];
 const DIAG_TOTAL = DIAG_STEPS.length;
 function WinCtl({ dark }) {
@@ -540,12 +568,36 @@ export default function App() {
   useEffect(() => { if (!sp.inCall) setRecording(false); }, [sp.inCall]);
   function onPhoto(e) { const f = e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { localStorage.setItem('sp_photo', r.result); } catch {} setPhoto(r.result); }; r.readAsDataURL(f); }
   function clearPhoto() { try { localStorage.removeItem('sp_photo'); } catch {} setPhoto(''); }
+  /* Conectar con el sistema de la central (contactos, clientes, porteros, grabaciones).
+   * El try/catch no es decorativo: sin él, cualquier respuesta que no fuera 200 —una
+   * contraseña mal escrita, sin ir más lejos— escapaba de esta función y la pantalla se
+   * quedaba en «Conectando…» para siempre, sin un solo mensaje. */
   async function doApiLogin() {
     setApiMsg('Conectando…');
-    const base = apiForm.base || api.baseFromWss(cfg.wss);
-    const r = await api.apiLogin(base, apiForm.user, apiForm.pass);
-    if (r.ok) { setApiOn(true); setApiMsg('Conectado al sistema ✓'); setDir(null); setCls(null); }
-    else { setApiOn(false); setApiMsg('Error: ' + (r.error || 'no se pudo conectar')); }
+    const base = String(apiForm.base || api.baseFromWss(cfg.wss) || '').trim();
+    try {
+      const r = await api.apiLogin(base, String(apiForm.user || '').trim(), apiForm.pass);
+      if (r.ok) {
+        setApiOn(true); setApiMsg('Conectado al sistema ✓'); setDir(null); setCls(null);
+        /* Ya que sabemos cuál es la central, que el buscador de actualizaciones apunte ahí. */
+        setUpdateFeed(base);
+      } else {
+        setApiOn(false);
+        /* Distinguir «no llego a la central» de «la central me rechazó» importa: son dos
+         * problemas de dos personas distintas. Para saberlo se pide /ice, que es pública y
+         * no necesita sesión: si eso contesta, la red está bien y el problema es el usuario
+         * o la contraseña; si no contesta, el teléfono no está llegando a la central
+         * (DNS, el nombre público que no vuelve desde adentro de la LAN, un firewall). */
+        let msg = r.error;
+        if (!/incorrect|permiso|intentos/i.test(msg)) {
+          try { await api.iceDeLaCentral(base); msg = r.error + ' (la central responde, así que es el usuario o la contraseña)'; }
+          catch { msg = 'no se llega a la central desde esta red: ' + r.error; }
+        }
+        setApiMsg('No se pudo conectar: ' + msg);
+      }
+    } catch (e) {
+      setApiOn(false); setApiMsg('No se pudo conectar: ' + ((e && e.message) || 'error inesperado'));
+    }
   }
   function apiDisconnect() { api.apiLogout(); setApiOn(false); setApiMsg(''); setDir(null); setCls(null); setClsFull(null); setClientDet(null); setSelClient(null); setStreams(null); }
   async function openCall(h) {
@@ -752,8 +804,28 @@ export default function App() {
         <div style={{ ...S.body, viewTransitionName: 'sp-content' }}>
           {tab === 'llamadas' && (<>
             <div style={S.dialCol}>
-              <input ref={numRef} autoFocus style={S.numIn} value={num} onChange={e => setNum(e.target.value.replace(/[^\w*#+.@\s-]/g, ''))} placeholder="Número, interno o nombre" onKeyDown={e => { if (e.key === 'Enter') { if (dialMatches[0]) callNow(String(dialMatches[0].ext || dialMatches[0].number || dialMatches[0].exten || num)); else callNow(); } }} />
-              <div style={{ height: 1, background: C.line, width: '100%', margin: '2px 0 14px' }} />
+              {/* Las dos secciones de arriba. El teclado va ABAJO de todo, como en el
+                  telefono que ya usa el cliente: lo que uno mira al abrir la aplicacion es
+                  la lista, y marcar es lo que hace despues. */}
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 }}>
+                {[['recientes', IcPhone, 'Llamadas recientes', C.accent],
+                  ...(apiOn ? [['voz', IcVoicemail, 'Mensajes de voz', '#8b5cf6']] : [])].map(([id, Ic, lbl, col]) => {
+                  const on = (id === 'voz' ? tab === 'voz' : tab === 'llamadas');
+                  return (
+                    <button key={id} onClick={() => { sounds.uiClick(); withVT(() => setTab(id === 'voz' ? 'voz' : 'llamadas')); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none', cursor: 'pointer', textAlign: 'left',
+                        background: on ? 'rgba(26,115,242,.16)' : 'transparent', color: on ? '#dbe7ff' : C.ink, fontSize: 13.5, fontWeight: on ? 600 : 500 }}>
+                      <span style={{ width: 28, height: 28, borderRadius: '50%', background: col, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{Ic({ c: '#fff', s: 15 })}</span>
+                      <span style={{ flex: 1, minWidth: 0 }}>{lbl}</span>
+                      {id === 'voz' && vmUnread > 0 ? <span style={{ background: C.red, color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 9, padding: '1px 6px' }}>{vmUnread}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ flex: 1 }} />
+              <div style={{ height: 1, background: C.line, width: '100%', margin: '0 0 12px' }} />
+              <input ref={numRef} autoFocus style={S.numIn} value={num} onChange={e => setNum(e.target.value.replace(/[^\w*#+.@\s-]/g, ''))} placeholder="Ingresá nombre o número" onKeyDown={e => { if (e.key === 'Enter') { if (dialMatches[0]) callNow(String(dialMatches[0].ext || dialMatches[0].number || dialMatches[0].exten || num)); else callNow(); } }} />
+
               {(dialMatches.length > 0 && !sp.inCall) ? (
                 <div ref={gStagger} style={{ width: '100%', maxHeight: 236, overflowY: 'auto', margin: '2px 0 14px' }}>
                   {dialMatches.map((d, i) => { const n = String(d.ext || d.number || d.exten || ''); const nm = d.name || d.cn || d.callerid || n; const pc = presColor(n); return (
@@ -765,12 +837,14 @@ export default function App() {
                     </div>); })}
                 </div>
               ) : (
-                <div style={S.keypad}>{[['1',''],['2','ABC'],['3','DEF'],['4','GHI'],['5','JKL'],['6','MNO'],['7','PQRS'],['8','TUV'],['9','WXYZ'],['*',''],['0','+'],['#','']].map(([k, sub]) => <button key={k} className="ph-key" style={S.key} onClick={() => press(k)}><span style={{ fontSize: 23, fontWeight: 500, lineHeight: 1 }}>{k}</span><span style={{ fontSize: 8.5, letterSpacing: 1, color: C.sub, height: 9 }}>{sub}</span></button>)}</div>
+                <div style={S.keypad}>{[['1',''],['2','ABC'],['3','DEF'],['4','GHI'],['5','JKL'],['6','MNO'],['7','PQRS'],['8','TUV'],['9','WXYZ'],['*',''],['0','+'],['#','']].map(([k, sub]) => <button key={k} className="ph-key" style={S.key} onClick={() => press(k)}><span style={{ fontSize: 20, fontWeight: 500, lineHeight: 1 }}>{k}</span><span style={{ fontSize: 8.5, letterSpacing: 1.2, color: C.sub, height: 9 }}>{sub}</span></button>)}</div>
               )}
-              <div style={{ display: 'flex', gap: 18, alignItems: 'center', justifyContent: 'center' }}>
-                <button style={{ ...S.cbtn(C.accent), opacity: registered && num ? 1 : .4 }} disabled={!registered || !num} onClick={() => callNow(null, true)}>{IcVideo({ c: '#fff', s: 22 })}</button>
-                <button style={{ ...S.cbtn(C.green), width: 64, height: 64, opacity: registered ? 1 : .4 }} disabled={!registered} onClick={() => callNow()}>{IcPhone({ c: '#fff', s: 26 })}</button>
-                <button style={{ ...S.cbtn('#e7ebf3'), color: C.sub, boxShadow: 'none', opacity: num ? 1 : .4 }} onClick={() => setNum(n => n.slice(0, -1))}>{IcBack({ c: C.sub, s: 22 })}</button>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                <button title="Videollamada" style={{ ...S.cbtn(C.accent), opacity: registered && num ? 1 : .4 }} disabled={!registered || !num} onClick={() => callNow(null, true)}>{IcVideo({ c: '#fff', s: 19 })}</button>
+                <button title="Llamar" style={{ ...S.cbtn(C.green), opacity: registered ? 1 : .4 }} disabled={!registered} onClick={() => callNow()}>{IcPhone({ c: '#fff', s: 19 })}</button>
+                {/* El borrar aparece solo cuando hay algo escrito: si esta siempre, compite
+                    con los dos botones que importan. */}
+                {num ? <button title="Borrar" style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.07)', cursor: 'pointer', color: C.sub, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setNum(n => n.slice(0, -1))}>{IcBack({ c: C.sub, s: 18 })}</button> : null}
               </div>
             </div>
             <div style={S.listCol}>
@@ -779,12 +853,25 @@ export default function App() {
                 {rec.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: '40px 0' }}>Sin llamadas</div> :
                   rec.map((h, i) => (
                     <div key={i} className="ph-row" style={S.row} onClick={() => openCall(h)}>
-                      <Ava txt={initials(h.number)} size={40} bg={h.dir === 'out' ? 'linear-gradient(160deg,#9db4e0,#6d8fd6)' : (h.missed ? C.red : C.green)} />
-                      <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600, color: h.missed ? C.red : C.ink, display: 'flex', alignItems: 'center', gap: 6 }}>{presColor(h.number) ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: presColor(h.number), flex: 'none' }} title="estado en vivo" /> : null}{h.number}{h.video ? ' 📹' : ''}</div><div style={{ fontSize: 12, color: C.sub }}>{h.dir === 'out' ? '↗ saliente' : h.missed ? '↙ perdida' : '↙ entrante'}{h.dur ? ' · ' + fmtDur(h.dur) : ''}</div></div>
-                      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
-                        <span style={{ fontSize: 12, color: C.sub, marginRight: 4 }}>{fmtDate(h.t)}</span>
-                        <button style={S.actBtn(C.accent)} onClick={() => callNow(h.number, true)}>{IcVideo({ c: C.accent, s: 16 })}</button>
-                        <button style={S.actBtn(C.green)} onClick={() => callNow(h.number)}>{IcPhone({ c: C.green, s: 16 })}</button>
+                      <span style={{ position: 'relative', display: 'inline-flex', flex: 'none' }}>
+                        <Ava txt={initials(h.name || h.number)} size={38} />
+                        {presColor(h.number) ? <span style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: presColor(h.number), border: '2px solid ' + C.bg }} title="estado en vivo" /> : null}
+                      </span>
+                      <div style={{ minWidth: 0, width: 150 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13.5, color: h.missed ? C.red : C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.name || h.number}</div>
+                        <div style={{ fontSize: 12, color: C.sub }}>{h.number}</div>
+                      </div>
+                      {/* En el medio, que paso con la llamada: el sentido (y si se perdio) mas
+                          la duracion. «No establecido» es una llamada que nadie atendio. */}
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, color: h.missed ? C.red : C.sub, fontSize: 12.5 }}>
+                        <span style={{ flex: 'none', opacity: .85 }}>{h.dir === 'out' ? '↗' : '↙'}</span>
+                        <span style={{ whiteSpace: 'nowrap' }}>{h.dur ? fmtDur(h.dur) : 'No establecido'}</span>
+                        {h.video ? <span title="con video" style={{ opacity: .7 }}>▣</span> : null}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
+                        <span style={{ fontSize: 12, color: C.sub, marginRight: 2 }}>{fmtDate(h.t)}</span>
+                        <button className="ph-acc" style={S.actBtn('#9fb6d8')} title="Videollamada" onClick={() => callNow(h.number, true)}>{IcVideo({ c: '#9fb6d8', s: 15 })}</button>
+                        <button className="ph-acc" style={S.actBtn(C.green)} title="Llamar" onClick={() => callNow(h.number)}>{IcPhone({ c: C.green, s: 15 })}</button>
                       </div>
                     </div>))}
               </div>
@@ -1322,12 +1409,54 @@ export default function App() {
               <button onClick={() => setCallStats(null)} style={{ background: 'rgba(255,255,255,.12)', border: 'none', borderRadius: 8, width: 30, height: 30, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{IcX({ c: '#fff', s: 15 })}</button>
             </div>
           ); })()}
+          {/* ── Menú de la cuenta ──────────────────────────────────────────────
+              Calcado del teléfono que usa el cliente: arriba la ficha (avatar, nombre,
+              interno, estado en línea y el QR a la derecha), abajo la lista de acciones
+              separada en tres grupos. Las opciones son las de PBX-NG, no las de aquel:
+              lo que se copia es la FORMA, porque es la que el usuario ya conoce. */}
           {menu && <><div onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 190 }} />
-            <div className="menu-pop" style={{ position: 'fixed', top: 16, left: 80, zIndex: 200, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: '0 14px 34px rgba(10,20,50,.22)', overflow: 'hidden', minWidth: 180 }}>
-              <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.line}` }}><div style={{ fontWeight: 700, fontSize: 14 }}>{cfg.name || 'Softphone'}</div><div style={{ fontSize: 12, color: C.sub }}>{isComplete(cfg) ? 'Interno ' + cfg.ext : 'sin cuenta'}</div></div>
-              <button onClick={() => { setMenu(false); setShowProfile(true); }} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14 }}>{IcUser({ c: C.sub, s: 16 })} Perfil</button>
-              <button onClick={() => { setMenu(false); setShowAccts(true); }} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14 }}>{IcUsers({ c: C.sub, s: 16 })} Cuentas{accts.length ? ' (' + accts.length + ')' : ''}</button>
-              <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, color: C.red }}>{IcPower({ c: C.red, s: 16 })} Cerrar sesión</button>
+            <div className="menu-pop" style={{ position: 'fixed', top: 44, left: 74, zIndex: 200, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, boxShadow: '0 22px 54px rgba(0,0,0,.55)', overflow: 'hidden', width: 286, color: C.ink }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 14px 12px' }}>
+                <span style={{ position: 'relative', display: 'inline-flex' }}>
+                  <Ava photo={photo} txt={isComplete(cfg) ? initials(cfg.ext) : '·'} size={46} />
+                  <span style={{ position: 'absolute', right: -1, bottom: -1, width: 12, height: 12, borderRadius: '50%', background: registered ? C.green : '#7c8794', border: '2px solid ' + C.card }} />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfg.name || (isComplete(cfg) ? 'Interno ' + cfg.ext : 'Sin cuenta')}</div>
+                  <div style={{ fontSize: 12.5, color: C.sub }}>{cfg.ext || '—'}</div>
+                  <div style={{ fontSize: 12.5, color: registered ? C.green : C.sub, marginTop: 1 }}>{registered ? 'En línea' : (statusTxt || 'Sin conexión')}</div>
+                </div>
+                <button title="Aprovisionar este teléfono por QR" onClick={() => { setMenu(false); setShowQr(true); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.sub, padding: 4, borderRadius: 8 }}>{IcQr({ c: C.sub, s: 19 })}</button>
+              </div>
+              <div style={{ height: 1, background: C.line }} />
+              {[
+                { ic: IcGear, lbl: 'Ajustes', fn: () => { setTab('ajustes'); setATab('registro'); } },
+                { ic: IcUser, lbl: 'Perfil y foto', fn: () => setShowProfile(true) },
+                { ic: IcSpeaker, lbl: 'Micrófono y auricular', fn: () => { setTab('ajustes'); setATab('disp'); } },
+                { ic: IcShield, lbl: 'Red y TURN', fn: () => { setTab('ajustes'); setATab('red'); } },
+              ].map(x => (
+                <button key={x.lbl} className="mp-row" onClick={() => { setMenu(false); x.fn(); }} style={mpRow}>
+                  {x.ic({ c: C.sub, s: 17 })}<span>{x.lbl}</span>
+                </button>
+              ))}
+              <div style={{ height: 1, background: C.line, margin: '4px 0' }} />
+              {[
+                { ic: IcGrid, lbl: 'Diagnóstico de la llamada', fn: () => setShowDiag(true) },
+                { ic: IcUser, lbl: 'Integración con el sistema', fn: () => { setTab('ajustes'); setATab('sistema'); } },
+              ].map(x => (
+                <button key={x.lbl} className="mp-row" onClick={() => { setMenu(false); x.fn(); }} style={mpRow}>
+                  {x.ic({ c: C.sub, s: 17 })}<span>{x.lbl}</span>
+                </button>
+              ))}
+              <div style={{ height: 1, background: C.line, margin: '4px 0' }} />
+              <button className="mp-row" onClick={() => { setMenu(false); setShowAccts(true); }} style={mpRow}>
+                {IcUsers({ c: C.sub, s: 17 })}<span>Cambiar de cuenta{accts.length ? ' (' + accts.length + ')' : ''}</span>
+              </button>
+              <button className="mp-row" onClick={logout} style={{ ...mpRow, color: C.red }}>
+                {IcPower({ c: C.red, s: 17 })}<span>Cerrar sesión</span>
+              </button>
+              <div style={{ padding: '8px 16px 11px', fontSize: 11, color: C.sub, borderTop: `1px solid ${C.line}` }}>PBX-NG Softphone {APP_VERSION}</div>
             </div></>}
           {showAccts && (
             <div style={S.modalWrap} onClick={() => setShowAccts(false)}>

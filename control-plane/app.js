@@ -2154,6 +2154,21 @@ app.post('/api/sip/clear', async (req, res) => {
   catch (e) { errorHttp(res, e); }
 });
 const server = http.createServer(app);
+/* Las cámaras del Intercom pasan por la propia API (ver intercom-proxy.js): así el
+ * softphone las ve desde donde ya ve el panel, sin abrir el puerto de go2rtc en el borde
+ * ni tocar el proxy inverso de cada cliente. */
+const intercomProxy = require('./intercom-proxy');
+intercomProxy.montar({
+  app, server, auth,
+  verificar: (t) => { try { return require("jsonwebtoken").verify(t, SECRET); } catch (_) { return null; } },
+  /* La otra llave: la «entrada» de un solo uso que ya emite /api/intercom/ticket para el
+   * panel. Vale un minuto, sólo para ese canal y se quema al usarla; es lo que hay que
+   * preferir para el video, porque una sesión entera en la URL de un WebSocket queda
+   * escrita en cualquier registro por el que pase. */
+  consumirTicket: (t, src) => consumirEntradaVideo(t, src),
+  destino: () => process.env.GO2RTC_URL || '',
+  log: (...a) => log.warn(a.join(' ')),
+});
 /* Origen del socket: antes `origin: '*'`. El panel llega SIEMPRE por el proxy
  * (dashboard/server.js), sin cabecera Origin cruzada, así que lo normal es que el
  * pedido no traiga Origin o traiga el propio host. Un Origin de otro sitio (una web
@@ -2416,7 +2431,7 @@ async function g2probar(src){
   const codecs = [...new Set(pistas.map(m => String(m).split(/[,\s]+/).find(x => /^[A-Za-z0-9]+$/.test(x)) || '').filter(Boolean))];
   return { ok:true, motivo:'', pistas: pistas.length, codecs };
 }
-app.get('/api/intercom/config', async (req,res)=>{ try{ const q=await pool.query("SELECT value FROM pbxng_settings WHERE key='go2rtc_url'"); res.json({ go2rtc_url: (q.rows[0]&&q.rows[0].value)||'', mgmt: GO2RTC_MGMT }); }catch(e){ errorHttp(res, e); } });
+app.get('/api/intercom/config', async (req,res)=>{ try{ const q=await pool.query("SELECT value FROM pbxng_settings WHERE key='go2rtc_url'"); res.json({ go2rtc_url: (q.rows[0]&&q.rows[0].value)||'', efectiva: baseVideo(req), por_la_central: !((q.rows[0]&&q.rows[0].value)||''), mgmt: GO2RTC_MGMT }); }catch(e){ errorHttp(res, e); } });
 app.post('/api/intercom/config', async (req,res)=>{ const u=(req.body&&req.body.go2rtc_url)||''; try{ const up=await pool.query("UPDATE pbxng_settings SET value=$1 WHERE key='go2rtc_url'",[u]); if(up.rowCount===0) await pool.query("INSERT INTO pbxng_settings(key,value) VALUES('go2rtc_url',$1)",[u]); CRMGO2RTC=u; syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
 app.post('/api/intercom/sync', async (req,res)=>{ try{ await syncGo2rtc(); res.json({ok:true}); }catch(e){ errorHttp(res, e); } });
 
@@ -2435,6 +2450,15 @@ app.post('/api/intercom/sync', async (req,res)=>{ try{ await syncGo2rtc(); res.j
  *  Vive en memoria a propósito: reiniciar la API tiene que invalidar todo lo que haya
  *  suelto, y son objetos de 60 segundos — no merecen una tabla. */
 const entradasVideo = new Map();   // ticket -> { src, exp }
+/* Quemar una entrada: existe o no, y si existe se usa una sola vez. Está acá arriba y
+ * como función declarada a propósito: el proxy del Intercom se monta antes en el archivo
+ * y la necesita. */
+function consumirEntradaVideo(t, src){
+  const e = entradasVideo.get(String(t||''));
+  if(!e || e.exp <= Date.now() || (src && e.src !== src)){ entradasVideo.delete(String(t||'')); return false; }
+  entradasVideo.delete(String(t||''));
+  return true;
+}
 function limpiarEntradas(){ const t=Date.now(); for(const [k,v] of entradasVideo) if(v.exp<=t) entradasVideo.delete(k); }
 setInterval(limpiarEntradas, 60000).unref?.();
 
@@ -2655,10 +2679,16 @@ app.delete('/api/devices/:did', crmWrite, async (req,res)=>{ try{
 app.get('/api/intercom/clients', async (req,res)=>{ try{
   const { rows } = await pool.query(`SELECT DISTINCT c.id, c.name FROM pbxng_clients c JOIN pbxng_client_devices d ON d.client_id=c.id WHERE d.enabled ORDER BY c.name`); res.json(rows);
 }catch(e){errorHttp(res, e);} });
+/* La base de video que se le dice al cliente. Si nadie configuró una `go2rtc_url` a mano
+ * —el caso normal— se le da la de ESTA central: el proxy de arriba. Antes, con el campo
+ * vacío, el panel y el softphone mostraban «sin go2rtc_url · Sin señal» y no había forma
+ * de adivinar que faltaba un ajuste escondido. */
+function baseVideo(req) { return CRMGO2RTC || intercomProxy.basePublica(req); }
 app.get('/api/intercom/streams', async (req,res)=>{ try{
   const cid = req.query.client;
   const { rows } = await pool.query('SELECT id,label,type,go2rtc_src FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[cid]);
-  res.json(rows.map(d=>({ id:d.id, label:d.label, type:d.type, base:CRMGO2RTC, src:d.go2rtc_src })));
+  const base = baseVideo(req);
+  res.json(rows.map(d=>({ id:d.id, label:d.label, type:d.type, base, src:d.go2rtc_src })));
 }catch(e){errorHttp(res, e);} });
 
 app.get('/api/survey/fields', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_survey_fields WHERE active ORDER BY ord, id'); res.json(rows); }catch(e){errorHttp(res, e);} });

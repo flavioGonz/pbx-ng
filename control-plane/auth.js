@@ -93,6 +93,9 @@ module.exports = function init(deps) {
     // lecturas. /api/cdr fuerza ext = la del token (ver la ruta).
     ['GET',  /^\/api\/cdr$/],
     ['GET',  /^\/api\/clients\/lookup$/],
+    /* El video de las cámaras pasa por la central (intercom-proxy.js). El aparato sólo
+     * mira: el propio proxy además le corta todo lo que no sea leer. */
+    ['GET',  /^\/api\/intercom\/g2(\/|$)/],
     /* Porteros y cámaras de los clientes, sólo lectura. Es lo que el aparato necesita
      * para mostrar quién está en la puerta cuando suena el portero: sin esto, la
      * pantalla de Intercom de la PWA pide la lista, se come un 403 y queda vacía.
