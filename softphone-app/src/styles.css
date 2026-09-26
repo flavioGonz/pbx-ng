@@ -215,3 +215,24 @@ button:disabled { cursor: default !important; }
   .cs-titulo{font-size:23px;margin-top:18px}
   .cs-onda{margin-top:22px}
 }
+
+/* ── Mando de la vista de prueba (?demo=call) ────────────────────────────────
+ *  No es parte del producto: es el control para recorrer los estados sin llamar a nadie.
+ *  Por eso se ve como lo que es —chiquito, gris, arriba— y nunca se parte en dos filas. */
+.dm-mando{position:absolute;top:8px;left:8px;right:8px;z-index:20;
+  display:flex;align-items:center;justify-content:center;gap:5px;overflow-x:auto;
+  scrollbar-width:none;padding:4px 6px;border-radius:12px;background:rgba(18,22,28,.82);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,.08);box-shadow:0 8px 22px rgba(0,0,0,.4)}
+.dm-tag{font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(232,235,240,.34);
+  white-space:nowrap;padding-right:2px}
+.dm-seg{display:flex;gap:2px;padding:2px;border-radius:9px;background:rgba(255,255,255,.05)}
+.dm-chip{font:500 10.5px/1 -apple-system,'Segoe UI',Inter,system-ui,sans-serif;white-space:nowrap;
+  padding:5px 7px;border-radius:7px;border:none;cursor:pointer;color:rgba(232,235,240,.66);
+  background:transparent;transition:background .14s,color .14s}
+.dm-chip:hover{background:rgba(255,255,255,.09);color:#e8ebf0}
+.dm-suelto{background:rgba(255,255,255,.05)}
+.dm-on{background:#3b82f6;color:#fff}
+.dm-on:hover{background:#3b82f6;color:#fff}
+.dm-mando::-webkit-scrollbar{display:none}
+@media (max-width:560px){ .dm-tag{display:none} .dm-chip{padding:5px 6px;font-size:10px} }

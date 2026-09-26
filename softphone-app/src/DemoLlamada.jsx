@@ -10,11 +10,11 @@ import CallScreen from './CallScreen';
  *  ruta: se llega sólo con el parámetro, y no molesta a nadie.
  * ==========================================================================*/
 const PASOS = [
-  { estado: 'entrante', desc: 'Entra una llamada' },
-  { estado: 'marcando', desc: 'Estamos llamando' },
-  { estado: 'hablando', desc: 'Conversación' },
-  { estado: 'espera', desc: 'En espera' },
-  { estado: 'terminada', desc: 'Terminó' },
+  { estado: 'entrante', corto: 'Entra', desc: 'Entra una llamada' },
+  { estado: 'marcando', corto: 'Marca', desc: 'Estamos llamando' },
+  { estado: 'hablando', corto: 'Habla', desc: 'Conversación' },
+  { estado: 'espera', corto: 'Espera', desc: 'En espera' },
+  { estado: 'terminada', corto: 'Fin', desc: 'Terminó' },
 ];
 
 export default function DemoLlamada() {
@@ -46,14 +46,20 @@ export default function DemoLlamada() {
           teclado: () => setPad(v => !v), mas: () => {}, tecla: () => {},
         }}
       />
-      <div style={{ position: 'absolute', top: 44, left: 12, zIndex: 20, display: 'flex', gap: 6, alignItems: 'center', background: 'rgba(0,0,0,.4)', padding: 6, borderRadius: 10 }}>
-        {PASOS.map((x, n) => (
-          <button key={x.estado} onClick={() => { setAuto(false); setI(n); }}
-            style={{ fontSize: 11, padding: '4px 8px', borderRadius: 7, cursor: 'pointer', border: '1px solid rgba(255,255,255,.18)', background: n === i ? '#3b82f6' : 'rgba(255,255,255,.08)', color: '#fff' }}>
-            {x.desc}
-          </button>
-        ))}
-        <button onClick={() => setPad(v => !v)} style={{ fontSize: 11, padding: '4px 8px', borderRadius: 7, cursor: 'pointer', border: '1px solid rgba(255,255,255,.18)', background: pad ? '#3b82f6' : 'rgba(255,255,255,.08)', color: '#fff' }}>Teclado</button>
+      {/* Mando de la vista de prueba. Vive arriba, chico y de un solo renglón: si se parte
+          en dos filas o se sale por el costado tapa justo lo que uno vino a mirar. */}
+      <div className="dm-mando">
+        <span className="dm-tag">vista de prueba</span>
+        <div className="dm-seg">
+          {PASOS.map((x, n) => (
+            <button key={x.estado} className={'dm-chip' + (n === i ? ' dm-on' : '')}
+              title={x.desc} onClick={() => { setAuto(false); setI(n); }}>{x.corto}</button>
+          ))}
+        </div>
+        <button className={'dm-chip dm-suelto' + (pad ? ' dm-on' : '')} title="Abrir o cerrar el teclado"
+          onClick={() => setPad(v => !v)}>Teclado</button>
+        <button className={'dm-chip dm-suelto' + (auto ? ' dm-on' : '')} title="Recorrer los estados solo"
+          onClick={() => setAuto(v => !v)}>{auto ? '❚❚' : '▶'}</button>
       </div>
     </div>
   );
