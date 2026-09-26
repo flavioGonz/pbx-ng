@@ -489,11 +489,31 @@ async function barrerHuerfanos() {
       const app = String(dialplan.app_data || '');
       /* Sólo los canales de medios de la IA: su app_data es `pbxng,<uuid de la sesión>`. */
       const m = /^pbxng,([0-9a-f-]{36})$/i.exec(app);
-      if (!m) continue;
-      const uuid = m[1];
-      if (sessions.has(uuid) || pendingByUuid.has(uuid)) continue;
+      /* El OTRO huérfano, el que se veía en el panel como una llamada eterna: el canal
+       * del que LLAMÓ, parado dentro de la aplicación Stasis `pbxng,ai,...`. Cuando la
+       * api se reinicia —y se reinicia en cada despliegue— Asterisk deja ese canal ahí
+       * esperando órdenes de una aplicación que ya no existe: no lo cuelga nadie, sigue
+       * ocupando el interno y el panel lo muestra hablando para siempre. */
+      const enIa = /^pbxng,ai(,|$)/i.test(app);
+      if (!m && !enIa) continue;
       const nacido = Date.parse(ch.creationtime || '') || 0;
       if (nacido && ahora - nacido < GRACIA_HUERFANO_MS) continue;
+
+      if (enIa) {
+        /* Sólo si NINGUNA sesión viva lo reclama: mientras la llamada existe de verdad,
+         * su canal está en sessions y no se toca. */
+        let duenio = false;
+        for (const ses of sessions.values()) if (ses.channel && ses.channel.id === ch.id) { duenio = true; break; }
+        if (!duenio) for (const ses of pendingByUuid.values()) if (ses.channel && ses.channel.id === ch.id) { duenio = true; break; }
+        if (duenio) continue;
+        log.warn('llamada colgada en la aplicación de IA sin sesión: se cuelga', { canal: ch.name });
+        try { await ARI.channels.hangup({ channelId: ch.id }); }
+        catch (e) { log.warn('no se pudo colgar la llamada huérfana', { canal: ch.name, err: (e && e.message) }); }
+        continue;
+      }
+
+      const uuid = m[1];
+      if (sessions.has(uuid) || pendingByUuid.has(uuid)) continue;
       log.warn('canal de medios sin sesión: se cuelga', { canal: ch.name, session: uuid.slice(0, 8) });
       try { await ARI.channels.hangup({ channelId: ch.id }); }
       catch (e) { log.warn('no se pudo colgar el canal huérfano', { canal: ch.name, err: (e && e.message) }); }
@@ -916,5 +936,9 @@ module.exports = { init, startAiSession, close, metricas };
 module.exports._sesiones = () => sessions;
 /* Se exportan SOLO para la prueba del tope (test/ia-topes.test.js): el camino de la
  * llamada no tolera un `fetch` sin corte, y esa prueba es la que lo deja clavado. */
+/* Y para la prueba del barrido de canales colgados (test/ia-huerfanos.test.js): hace falta
+ * poder ponerle un ARI de mentira y mirar a quién cuelga. */
+module.exports._barrer = barrerHuerfanos;
+module.exports._setAri = (x) => { ARI = x; };
 module.exports._crmLookup = crmLookup;
 module.exports._TOPE_CRM_MS = TOPE_CRM_MS;

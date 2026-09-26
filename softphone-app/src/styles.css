@@ -93,132 +93,133 @@ button:disabled { cursor: default !important; }
 .cs-drag{position:absolute;top:0;left:0;right:0;height:38px;-webkit-app-region:drag;z-index:6}
 
 .cs-centro{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:2px;padding:56px 24px 12px;text-align:center;min-height:0}
+  gap:0;padding:40px 24px 12px;text-align:center;min-height:0}
 
 /* Los tres gestos de entrada. Cada estado entra distinto para que el cambio se NOTE sin
    tener que leer: el entrante rebota, la conversación se asienta, el final se apaga. */
-@keyframes csEntra{0%{opacity:0;transform:scale(.88) translateY(10px)}62%{transform:scale(1.03)}100%{opacity:1;transform:none}}
-@keyframes csAsienta{0%{opacity:0;transform:translateY(-10px) scale(1.04)}100%{opacity:1;transform:none}}
-@keyframes csApaga{0%{opacity:0;transform:scale(1.03)}100%{opacity:1;transform:scale(1);filter:saturate(.55)}}
-.cs-entra{animation:csEntra .42s cubic-bezier(.34,1.3,.5,1) both}
-.cs-asienta{animation:csAsienta .34s cubic-bezier(.4,0,.2,1) both}
-.cs-apaga{animation:csApaga .5s ease both}
+@keyframes csEntra{0%{opacity:0;transform:scale(.94) translateY(8px)}62%{transform:scale(1.015)}100%{opacity:1;transform:none}}
+@keyframes csAsienta{0%{opacity:0;transform:translateY(-8px) scale(1.02)}100%{opacity:1;transform:none}}
+@keyframes csApaga{0%{opacity:0}100%{opacity:1;filter:saturate(.5)}}
+.cs-entra{animation:csEntra .34s cubic-bezier(.34,1.24,.5,1) both}
+.cs-asienta{animation:csAsienta .3s cubic-bezier(.4,0,.2,1) both}
+.cs-apaga{animation:csApaga .45s ease both}
 
-/* Anillos del timbrado. Se apagan solos cuando el otro atiende: ese instante es la señal
-   más útil de la pantalla, y por eso no hay que leer nada para verlo. */
-@keyframes csAnillo{0%{transform:scale(.86);opacity:.5}100%{transform:scale(1.75);opacity:0}}
-.cs-anillo{position:absolute;border-radius:50%;border:2px solid rgba(160,195,255,.55);
-  animation:csAnillo 1.65s cubic-bezier(.2,.6,.3,1) infinite;pointer-events:none}
-@keyframes csAvatarIn{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}
-.cs-avatar{animation:csAvatarIn .46s cubic-bezier(.34,1.4,.5,1) both;
-  box-shadow:0 10px 34px rgba(0,0,0,.34),inset 0 -6px 18px rgba(0,0,0,.06)}
-@keyframes csLatido{0%,100%{transform:scale(1)}50%{transform:scale(1.012)}}
-.cs-avatar-viva{animation:csAvatarIn .46s cubic-bezier(.34,1.4,.5,1) both,csLatido 3.4s ease-in-out .5s infinite}
+/* El avatar late apenas mientras timbra: es el único movimiento del círculo, y alcanza
+   para saber que la llamada sigue viva sin llenar la pantalla de anillos. */
+@keyframes csLatido{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
+.cs-avatar{flex:0 0 auto}
+.cs-avatar-in{animation:csLatido 1.9s ease-in-out infinite}
 
-.cs-titulo{font-size:26px;font-weight:600;margin-top:22px;letter-spacing:.2px}
-.cs-sub{font-size:14.5px;color:rgba(232,235,240,.62);margin-top:3px}
-.cs-estado{font-size:14px;color:rgba(232,235,240,.62);margin-top:8px;display:inline-flex;align-items:center;gap:2px}
+.cs-nombre{font-size:15.5px;font-weight:400;margin-top:30px;color:#e9ebee;letter-spacing:.1px}
+.cs-estado{font-size:13px;color:#9aa0a8;margin-top:14px;display:inline-flex;align-items:center;gap:2px}
 .cs-puntos{display:inline-flex;gap:3px;margin-left:5px}
 .cs-puntos i{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.25;animation:csPunto 1.25s infinite}
 .cs-puntos i:nth-child(2){animation-delay:.18s}.cs-puntos i:nth-child(3){animation-delay:.36s}
 @keyframes csPunto{0%,100%{opacity:.25;transform:translateY(0)}35%{opacity:1;transform:translateY(-2px)}}
 
-.cs-onda{margin-top:30px;width:min(560px,86%);opacity:.95}
-@keyframes csRespira{0%,100%{transform:scaleY(.55);opacity:.5}50%{transform:scaleY(1);opacity:1}}
+.cs-dur{font-size:12.5px;color:#8d929a;margin-top:8px}
+.cs-onda{margin-top:62px;width:min(600px,88%);opacity:.95}
+.cs-onda-viva{margin-top:44px}
+@keyframes csRespira{0%,100%{transform:scaleY(.5);opacity:.45}50%{transform:scaleY(1);opacity:1}}
 .cs-reposo{transform-origin:center;animation:csRespira 2.6s ease-in-out infinite}
 
-/* ── Barra inferior ──────────────────────────────────────────────────────── */
-.cs-barra{display:flex;align-items:center;gap:12px;padding:10px 14px;min-height:78px;
-  animation:csBarraIn .34s .06s cubic-bezier(.4,0,.2,1) both}
-@keyframes csBarraIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
-.cs-barra-izq{display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(232,235,240,.62);
-  min-width:0;flex:0 1 170px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
-.cs-barra-centro{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:center;
-  gap:clamp(6px,2.6vw,22px)}
-.cs-barra-der{min-width:0;flex:0 0 auto;display:flex;justify-content:flex-end}
-.cs-chip{font-size:10px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:20px;
-  background:rgba(255,255,255,.08);color:rgba(232,235,240,.72)}
+/* ── Los redondos de timbrado ─────────────────────────────────────────────── */
+.cs-redondos{display:flex;align-items:center;gap:26px;margin-top:34px}
+@keyframes csRedIn{0%{opacity:0;transform:scale(.7)}70%{transform:scale(1.06)}100%{opacity:1;transform:scale(1)}}
+.cs-red{width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;color:#fff;
+  display:grid;place-items:center;transition:filter .14s,transform .12s;
+  animation:csRedIn .3s cubic-bezier(.34,1.4,.5,1) both}
+.cs-red:hover{filter:brightness(1.1)}.cs-red:active{transform:scale(.93)}
+.cs-red-cortar{background:#ff3f00}
+.cs-red-atender{background:#2bd95a;animation:csRedIn .3s cubic-bezier(.34,1.4,.5,1) both,csTiembla 1.1s ease-in-out .3s infinite}
+.cs-red-video{background:#3f6ee6}
+@keyframes csTiembla{0%,72%,100%{transform:rotate(0)}78%{transform:rotate(-9deg)}84%{transform:rotate(9deg)}90%{transform:rotate(-6deg)}}
 
-.cs-ctl-caja{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:64px}
-.cs-ctl-lab{font-size:11.5px;white-space:nowrap}
-.cs-ctl{background:none;border:none;cursor:pointer;padding:6px 4px;display:grid;place-items:center;
-  border-radius:10px;transition:background .14s,transform .12s,color .14s}
-.cs-ctl:hover{background:rgba(255,255,255,.08)}
+/* ── Barra inferior (sólo con la llamada ya establecida) ──────────────────── */
+.cs-barra{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;
+  padding:0 14px;height:63px;flex:0 0 63px;
+  animation:csBarraIn .28s .04s cubic-bezier(.4,0,.2,1) both}
+@keyframes csBarraIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.cs-barra-izq{display:flex;align-items:center;gap:8px;font-size:13px;color:#e9ebee;
+  min-width:0;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
+.cs-via{font-size:11px;color:#8d929a}
+.cs-barra-centro{display:flex;align-items:center;gap:20px;min-width:0}
+.cs-barra-der{display:flex;justify-content:flex-end;min-width:0}
+.cs-sep{width:1px;height:30px;background:#4d4e54;flex:0 0 auto;margin:0 2px}
+
+.cs-ctl-caja{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.cs-ctl-fila{display:flex;align-items:center;gap:1px}
+.cs-ctl-lab{font-size:12px;white-space:nowrap;color:#c6cad0}
+.cs-ctl{background:none;border:none;cursor:pointer;padding:3px;display:grid;place-items:center;
+  border-radius:8px;transition:background .14s,transform .12s,color .14s}
+.cs-ctl:hover{background:rgba(255,255,255,.09)}
 .cs-ctl:active{transform:scale(.92)}
-.cs-caret{background:none;border:none;cursor:pointer;padding:2px;display:grid;place-items:center;
-  border-radius:6px;transition:background .14s,transform .12s}
+.cs-caret{background:none;border:none;cursor:pointer;padding:1px;display:grid;place-items:center;
+  border-radius:5px;transition:background .14s}
 .cs-caret:hover{background:rgba(255,255,255,.1)}
 
-@keyframes csTiembla{0%,100%{transform:rotate(-11deg)}50%{transform:rotate(11deg)}}
-.cs-atender{display:inline-flex;align-items:center;gap:9px;background:#2fbf6e;color:#fff;border:none;
-  border-radius:26px;padding:12px 22px;font-size:14px;font-weight:600;cursor:pointer;
-  box-shadow:0 8px 22px rgba(47,191,110,.34);transition:transform .12s,filter .14s}
-.cs-atender svg{animation:csTiembla .7s ease-in-out infinite;transform-origin:50% 58%}
-.cs-atender:hover{filter:brightness(1.06)}.cs-atender:active{transform:scale(.96)}
-
+/* «Terminar»: rectángulo redondeado rojo con la etiqueta debajo, separado del resto. */
 .cs-terminar{display:inline-flex;flex-direction:column;align-items:center;gap:3px;background:none;
-  border:none;cursor:pointer;color:#fff;padding:2px 6px}
-.cs-terminar svg{background:#f04438;border-radius:9px;padding:7px 12px;box-sizing:content-box;
-  transition:transform .12s,filter .14s;box-shadow:0 6px 18px rgba(240,68,56,.32)}
-.cs-terminar span{font-size:11.5px;color:rgba(232,235,240,.72)}
-.cs-terminar:hover svg{filter:brightness(1.08)}
-.cs-terminar:active svg{transform:scale(.94)}
+  border:none;cursor:pointer;color:#fff;padding:0}
+.cs-terminar-caja{display:grid;place-items:center;width:46px;height:28px;border-radius:7px;
+  background:#eb4c46;transition:filter .14s,transform .12s}
+.cs-terminar span:last-child{font-size:12px;color:#c6cad0}
+.cs-terminar:hover .cs-terminar-caja{filter:brightness(1.08)}
+.cs-terminar:active .cs-terminar-caja{transform:scale(.94)}
 
 /* Con el teclado abierto el bloque de arriba se corre: si no, las teclas tapan el nombre. */
-.cs-con-pad .cs-centro{justify-content:flex-start;padding-top:44px}
+.cs-con-pad .cs-centro{justify-content:flex-start;padding-top:34px}
 .cs-con-pad .cs-onda{display:none}
 
 /* ── Teclado: entra y sale ───────────────────────────────────────────────── */
-.cs-pad{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);z-index:5;
-  display:grid;grid-template-columns:repeat(3,84px);gap:10px;padding:16px;border-radius:20px;
-  background:rgba(32,36,44,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-  border:1px solid rgba(255,255,255,.1);box-shadow:0 22px 50px rgba(0,0,0,.45)}
-@keyframes csPadIn{from{opacity:0;transform:translate(-50%,26px) scale(.96)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
-@keyframes csPadOut{from{opacity:1;transform:translate(-50%,0) scale(1)}to{opacity:0;transform:translate(-50%,20px) scale(.97)}}
+.cs-pad{position:absolute;left:50%;bottom:86px;transform:translateX(-50%);z-index:5;
+  display:grid;grid-template-columns:repeat(3,84px);gap:10px;padding:16px;border-radius:14px;
+  background:rgba(40,44,52,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid rgba(255,255,255,.08);box-shadow:0 22px 50px rgba(0,0,0,.45)}
+@keyframes csPadIn{0%{opacity:0;transform:translate(-50%,18px) scale(.97)}100%{opacity:1;transform:translate(-50%,0) scale(1)}}
+@keyframes csPadOut{0%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,14px)}}
 .cs-pad-in{animation:csPadIn .24s cubic-bezier(.34,1.24,.5,1) both}
 .cs-pad-out{animation:csPadOut .2s cubic-bezier(.4,0,1,1) both;pointer-events:none}
-@keyframes csTeclaIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .cs-tecla{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
-  height:52px;border-radius:12px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);
-  color:#e8ebf0;cursor:pointer;transition:background .12s,transform .1s;animation:csTeclaIn .2s both}
-.cs-tecla span{font-size:19px;font-weight:600;line-height:1}
-.cs-tecla em{font-size:8.5px;font-style:normal;letter-spacing:1px;color:rgba(232,235,240,.42)}
+  height:52px;border-radius:10px;border:1px solid rgba(255,255,255,.07);cursor:pointer;
+  background:rgba(255,255,255,.04);color:#e9ebee;transition:background .12s,transform .1s}
+.cs-tecla span{font-size:19px;font-weight:500;line-height:1}
+.cs-tecla em{font-size:8.5px;font-style:normal;letter-spacing:1px;color:#8d929a}
 .cs-tecla:hover{background:rgba(255,255,255,.12)}
 .cs-tecla:active{transform:scale(.94);background:rgba(120,170,255,.22)}
 
 @media (prefers-reduced-motion:reduce){
-  .cs-raiz,.cs-entra,.cs-asienta,.cs-apaga,.cs-anillo,.cs-avatar,.cs-avatar-viva,.cs-barra,
-  .cs-pad-in,.cs-pad-out,.cs-tecla,.cs-reposo,.cs-puntos i,.cs-atender svg{animation:none!important}
-  .cs-anillo{display:none}
+  .cs-raiz,.cs-entra,.cs-asienta,.cs-apaga,.cs-avatar-in,.cs-barra,.cs-red,.cs-red-atender,
+  .cs-pad-in,.cs-pad-out,.cs-tecla,.cs-reposo,.cs-puntos i{animation:none!important}
 }
 
 /* ── Ventana angosta ─────────────────────────────────────────────────────────
- *  El softphone se usa casi siempre en una ventana finita al costado de la pantalla.
- *  Ahí los cinco controles con etiqueta más el reloj y el botón rojo no entran en una
- *  sola línea: en vez de recortarlos —que es lo que hacía— la barra pasa a dos filas,
- *  los datos de la llamada arriba y los botones abajo, y los iconos achican un punto. */
+ *  El softphone también se usa en una ventana finita al costado de la pantalla. Ahí los
+ *  cinco controles con etiqueta más el reloj y el botón rojo no entran en una sola línea:
+ *  en vez de recortarlos, la barra pasa a dos filas y los iconos achican un punto. */
 @media (max-width:640px){
-  .cs-barra{flex-wrap:wrap;justify-content:center;gap:2px;padding:6px 8px 9px;min-height:0}
-  .cs-barra-izq{order:-1;flex:1 0 100%;justify-content:center;font-size:12px}
-  /* Botones y «Terminar» comparten fila: si se parten en dos, la barra come media pantalla. */
-  .cs-barra-centro{flex:0 1 auto;gap:clamp(2px,1.6vw,14px)}
-  .cs-barra-der{flex:0 0 auto;padding-left:4px}
-  .cs-terminar span{display:none}
-  .cs-terminar svg{padding:6px 10px}
-  .cs-ctl{padding:5px 2px}
-  .cs-ctl-caja{min-width:0}
+  .cs-barra{grid-template-columns:1fr;grid-auto-rows:auto;justify-items:center;gap:1px;
+    height:auto;flex:0 0 auto;padding:6px 8px 9px}
+  .cs-barra-izq{order:-1;justify-content:center;font-size:12px}
+  .cs-barra-centro{gap:clamp(2px,1.6vw,14px)}
+  .cs-barra-der{position:absolute;right:10px;bottom:9px}
   .cs-ctl-lab{font-size:10px}
-  .cs-atender{padding:11px 18px;font-size:13.5px}
-  .cs-terminar span{font-size:10.5px}
-  .cs-pad{bottom:118px;grid-template-columns:repeat(3,74px);gap:8px;padding:13px}
+  .cs-terminar span:last-child{display:none}
+  .cs-sep{height:26px}
+  .cs-pad{bottom:104px;grid-template-columns:repeat(3,74px);gap:8px;padding:13px}
+  .cs-tecla{height:46px}
   .cs-tecla span{font-size:18px}
-  .cs-titulo{font-size:23px;margin-top:18px}
-  .cs-onda{margin-top:22px}
+  .cs-nombre{margin-top:24px}
+  .cs-onda{margin-top:44px}
 }
 
 /* ── Mando de la vista de prueba (?demo=call) ────────────────────────────────
  *  No es parte del producto: es el control para recorrer los estados sin llamar a nadie.
  *  Por eso se ve como lo que es —chiquito, gris, arriba— y nunca se parte en dos filas. */
+.dm-zona{position:absolute;top:0;left:0;right:0;height:52px;z-index:20}
+.dm-zona .dm-mando{opacity:0;transform:translateY(-6px);pointer-events:none;
+  transition:opacity .18s,transform .18s}
+.dm-zona:hover .dm-mando,.dm-zona:focus-within .dm-mando{opacity:1;transform:none;pointer-events:auto}
 .dm-mando{position:absolute;top:8px;left:8px;right:8px;z-index:20;
   display:flex;align-items:center;justify-content:center;gap:5px;overflow-x:auto;
   scrollbar-width:none;padding:4px 6px;border-radius:12px;background:rgba(18,22,28,.82);

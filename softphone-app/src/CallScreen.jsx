@@ -26,20 +26,31 @@ import React, { useEffect, useRef, useState } from 'react';
 
 /* ── Paleta ───────────────────────────────────────────────────────────────── */
 export const T = {
-  fondo: '#1c2027',
-  fondo2: '#22262f',
-  barra: '#20242c',
-  linea: 'rgba(255,255,255,.08)',
-  texto: '#e8ebf0',
-  suave: 'rgba(232,235,240,.62)',
-  tenue: 'rgba(232,235,240,.38)',
-  avatar: '#cfd9f2',
-  avatarTxt: '#2b3648',
-  rojo: '#f04438',
-  verde: '#2fbf6e',
-  azul: '#3b82f6',
+  /* Los valores salieron de medir las capturas del teléfono que ya usa el cliente: el
+   * fondo, la barra y el rojo de cortar son los mismos, para que las dos aplicaciones se
+   * sientan la misma familia y nadie tenga que reaprender dónde está cada cosa. */
+  fondo: '#1f2229',
+  barra: '#31333a',
+  linea: '#4d4e54',
+  texto: '#e9ebee',
+  suave: '#c6cad0',
+  tenue: '#8d929a',
+  avatarTxt: '#33404f',
+  rojo: '#eb4c46',        // el botón «Terminar» de la barra
+  rojoTimbre: '#ff3f00',  // el redondo de cortar mientras timbra: más naranja, más grande
+  verde: '#2bd95a',
+  azul: '#4c9aff',
   ambar: '#f0b429',
 };
+
+/* El color del avatar sale del nombre, como en la agenda del teléfono: así el mismo
+ * contacto es siempre del mismo color y se reconoce antes de leer. */
+const PASTELES = ['#d9d7ef', '#c6ddf2', '#d5ecd7', '#f2dcc6', '#efd7e4', '#d7e9ef', '#e4e2c6'];
+export function colorAvatar(txt) {
+  const s = String(txt || '');
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return PASTELES[h % PASTELES.length];
+}
 
 /* ── Iconos, en SVG propio ─────────────────────────────────────────────────
  * Van acá y no de una librería porque varios se ANIMAN por dentro (el auricular que
@@ -104,23 +115,19 @@ export function Reloj({ desde, className }) {
   return <span className={className} style={{ fontVariantNumeric: 'tabular-nums' }}>{dd(hh)}:{dd(mm)}:{dd(ss)}</span>;
 }
 
-/* ── Avatar con anillos ────────────────────────────────────────────────────
- * Los anillos laten SÓLO mientras timbra. Cuando el otro atiende se apagan: ese momento
- * —el instante en que deja de latir— es la señal más útil de toda la pantalla. */
-function Avatar({ txt, timbrando, hablando, size = 148 }) {
+/* ── Avatar ───────────────────────────────────────────────────────────────
+ * Un círculo liso con las iniciales: nada de sombras ni degradés. Es a propósito —el
+ * teléfono que usa el cliente lo dibuja así, y en una pantalla que se mira cincuenta
+ * veces por día lo plano cansa menos que lo brillante. */
+function Avatar({ txt, size = 120, entra }) {
   return (
-    <div style={{ position: 'relative', width: size, height: size, display: 'grid', placeItems: 'center' }}>
-      {timbrando && [0, 1, 2].map(i => (
-        <span key={i} className="cs-anillo" style={{ animationDelay: (i * 0.55) + 's', width: size, height: size }} />
-      ))}
-      <div className={'cs-avatar' + (hablando ? ' cs-avatar-viva' : '')}
-        style={{
-          width: size, height: size, borderRadius: '50%', background: T.avatar, color: T.avatarTxt,
-          display: 'grid', placeItems: 'center', fontSize: Math.round(size * 0.29), fontWeight: 600,
-          letterSpacing: 0.5, position: 'relative', zIndex: 1, userSelect: 'none',
-        }}>
-        {txt}
-      </div>
+    <div className={'cs-avatar' + (entra ? ' cs-avatar-in' : '')}
+      style={{
+        width: size, height: size, borderRadius: '50%', background: colorAvatar(txt),
+        color: T.avatarTxt, display: 'grid', placeItems: 'center', userSelect: 'none',
+        fontSize: Math.round(size * 0.285), fontWeight: 400, letterSpacing: 0.5,
+      }}>
+      {txt}
     </div>
   );
 }
@@ -128,7 +135,7 @@ function Avatar({ txt, timbrando, hablando, size = 148 }) {
 /* ── Onda del audio REAL del otro lado ─────────────────────────────────────
  * Es la diferencia entre una animación decorativa y una que informa: si las barras no se
  * mueven mientras el otro habla, hay un problema de audio y se ve sin abrir nada. */
-function Onda({ getStream, activa, ancho = 560, alto = 64, barras = 48 }) {
+function Onda({ getStream, activa, ancho = 600, alto = 72, barras = 48 }) {
   const ref = useRef(null);
   const datos = useRef(new Array(barras).fill(0.06));
   useEffect(() => {
@@ -190,7 +197,7 @@ function Onda({ getStream, activa, ancho = 560, alto = 64, barras = 48 }) {
 }
 
 /* Mientras timbra no hay audio que mostrar: una onda en reposo, respirando. */
-function OndaReposo({ ancho = 560, alto = 64 }) {
+function OndaReposo({ ancho = 600, alto = 72 }) {
   const mitad = alto / 2;
   const curva = (amp, fase) => {
     const pts = [];
@@ -205,19 +212,19 @@ function OndaReposo({ ancho = 560, alto = 64 }) {
     <svg width={ancho} height={alto} viewBox={`0 0 ${ancho} ${alto}`} aria-hidden style={{ maxWidth: '100%' }}>
       {[0, 1, 2, 3].map(i => (
         <path key={i} className="cs-reposo" style={{ animationDelay: (i * 0.35) + 's' }}
-          d={curva(7 + i * 3, i * 0.8)} fill="none" stroke="rgba(190,215,255,.45)" strokeWidth={1.1} />
+          d={curva(8 + i * 3.5, i * 0.8)} fill="none" stroke="rgba(198,210,225,.34)" strokeWidth={1} />
       ))}
     </svg>
   );
 }
 
 /* ── Un botón de la barra de abajo ─────────────────────────────────────────── */
-function Ctl({ icon, label, on, peligro, onClick, caret, onCaret, deshabilitado }) {
+function Ctl({ icon, label, on, apagado, onClick, caret, onCaret, deshabilitado }) {
   return (
     <div className="cs-ctl-caja" style={{ opacity: deshabilitado ? 0.4 : 1 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1 }}>
+      <div className="cs-ctl-fila">
         <button className="cs-ctl" onClick={deshabilitado ? undefined : onClick} disabled={deshabilitado} title={label}
-          style={{ color: peligro ? T.rojo : on ? T.azul : T.texto }}>
+          style={{ color: on ? T.azul : T.texto }}>
           {icon}
         </button>
         {caret && (
@@ -226,6 +233,8 @@ function Ctl({ icon, label, on, peligro, onClick, caret, onCaret, deshabilitado 
           </button>
         )}
       </div>
+      {/* La etiqueta NO cambia de color al apagar: lo que cambia es el icono (la raya
+          roja). Si cambiaran los dos, el ojo no sabe cuál de los dos mirar. */}
       <span className="cs-ctl-lab" style={{ color: on ? T.azul : T.suave }}>{label}</span>
     </div>
   );
@@ -289,8 +298,23 @@ export default function CallScreen(p) {
     return () => cancelAnimationFrame(id);
   }, [estado]);
 
+  /* «Carlos (1008)» en un solo renglón, como en el teléfono del cliente. En la pantalla
+   * de llamada terminada el subtítulo ya no es el interno sino la duración, y esa va
+   * debajo: meterla entre paréntesis al lado del nombre se leía como otro número. */
+  const nombre = subtitulo && estado !== 'terminada' ? titulo + ' (' + subtitulo + ')' : titulo;
+  const leyenda = estado === 'entrante' ? (video ? 'Videollamada entrante' : 'Llamada entrante')
+    : estado === 'marcando' ? (nota || 'Timbrando')
+      : estado === 'espera' ? 'En espera'
+        : estado === 'terminada' ? 'Llamada finalizada'
+          : '';
+  /* Mientras timbra no hay barra de abajo: sólo el redondo de cortar, como en el teléfono
+   * del cliente. Poner ahí los cinco controles seria ofrecer cosas que todavía no existen
+   * —no se puede poner en espera una llamada que nadie atendió. */
+  const conBarra = estado === 'hablando' || estado === 'espera';
+
   return (
-    <div className={'cs-raiz' + (flags.pad ? ' cs-con-pad' : '')} style={{ background: T.fondo, color: T.texto }}>
+    <div className={'cs-raiz' + (flags.pad ? ' cs-con-pad' : '') + (conBarra ? '' : ' cs-sin-barra')}
+      style={{ background: T.fondo, color: T.texto }}>
       {/* Barra de arrastre de la ventana: en Electron, sin esto la ventana no se mueve. */}
       <div className="cs-drag" />
       {ventana ? <div style={{ position: 'absolute', top: 6, right: 8, zIndex: 8 }}>{ventana}</div> : null}
@@ -298,28 +322,42 @@ export default function CallScreen(p) {
       {video ? p.videoNodes : null}
 
       <div className={'cs-centro ' + gesto} key={estado === 'hablando' ? 'hablando' : estado}>
-        {!video && (
-          <Avatar txt={iniciales} timbrando={timbrando} hablando={hablando} size={estado === 'entrante' ? 156 : 148} />
+        {!video && <Avatar txt={iniciales} entra={timbrando} />}
+
+        <div className="cs-nombre">{nombre}</div>
+        {leyenda ? (
+          <div className="cs-estado">
+            {leyenda}
+            {estado === 'marcando' ? <span className="cs-puntos"><i /><i /><i /></span> : null}
+          </div>
+        ) : null}
+
+        {/* La onda vive mientras timbra: es lo único que se mueve en esa pantalla y dice
+            «esto sigue vivo». Con la llamada en curso quien informa es el reloj. */}
+        {!video && timbrando && (
+          <div className="cs-onda"><OndaReposo /></div>
+        )}
+        {!video && hablando && getRemoteStream && (
+          <div className="cs-onda cs-onda-viva"><Onda getStream={getRemoteStream} activa /></div>
         )}
 
-        <div className="cs-titulo">{titulo}</div>
-        {subtitulo ? <div className="cs-sub">{subtitulo}</div> : null}
-
-        <div className="cs-estado">
-          {estado === 'entrante' ? (video ? 'Videollamada entrante' : 'Llamada entrante')
-            : estado === 'marcando' ? (nota || 'Timbrando…')
-              : estado === 'espera' ? 'En espera'
-                : estado === 'terminada' ? 'Llamada finalizada'
-                  : null}
-          {estado === 'marcando' ? <span className="cs-puntos"><i /><i /><i /></span> : null}
-        </div>
-
-        {/* La onda vive entre el nombre y los controles, como en el teléfono de escritorio. */}
-        {!video && (hablando || timbrando) && (
-          <div className="cs-onda">
-            {hablando && getRemoteStream ? <Onda getStream={getRemoteStream} activa /> : <OndaReposo />}
+        {/* Los redondos de timbrado, debajo de la onda y centrados. */}
+        {estado === 'marcando' && (
+          <div className="cs-redondos">
+            <button className="cs-red cs-red-cortar" onClick={acciones.colgar} title="Cortar"><IcTelCortar s={24} /></button>
           </div>
         )}
+        {estado === 'entrante' && (
+          <div className="cs-redondos">
+            <button className="cs-red cs-red-cortar" onClick={acciones.rechazar} title="Rechazar"><IcTelCortar s={24} /></button>
+            {acciones.atenderVideo ? (
+              <button className="cs-red cs-red-video" onClick={acciones.atenderVideo} title="Atender con video"><IcCam s={24} /></button>
+            ) : null}
+            <button className="cs-red cs-red-atender" onClick={acciones.atender} title="Atender"><IcTel s={24} /></button>
+          </div>
+        )}
+
+        {estado === 'terminada' && subtitulo ? <div className="cs-dur">{subtitulo}</div> : null}
 
         {extra}
       </div>
@@ -327,52 +365,45 @@ export default function CallScreen(p) {
       <Teclado abierto={!!flags.pad} onTecla={acciones.tecla || (() => {})} />
 
       {/* ── Barra inferior ───────────────────────────────────────────────── */}
-      <div className="cs-barra" style={{ background: T.barra, borderTop: '1px solid ' + T.linea }}>
-        <div className="cs-barra-izq">
-          {estado !== 'entrante' && (
-            <>
+      {conBarra && (
+        <div className="cs-barra" style={{ background: T.barra }}>
+          <div className="cs-barra-izq">
+            <span title={calidad >= 3 ? 'Audio estable' : calidad >= 1 ? 'Audio con pérdidas' : 'Sin datos de calidad'}>
               <Senal score={calidad || 0} />
-              {desde ? <Reloj desde={desde} /> : <span style={{ color: T.tenue }}>--:--:--</span>}
-              {viaTurn != null && desde ? (
-                <span className="cs-chip" title={viaTurn ? 'El audio pasa por el servidor TURN' : 'El audio va directo entre los dos extremos'}>
-                  {viaTurn ? 'TURN' : 'DIRECTO'}
-                </span>
-              ) : null}
-            </>
-          )}
-        </div>
+            </span>
+            {desde ? <Reloj desde={desde} /> : <span style={{ color: T.tenue }}>00:00:00</span>}
+            {viaTurn != null && desde ? (
+              <span className="cs-via" title={viaTurn ? 'El audio pasa por el servidor TURN' : 'El audio va directo entre los dos extremos'}>
+                {viaTurn ? 'TURN' : 'directo'}
+              </span>
+            ) : null}
+          </div>
 
-        {/* Cuando la llamada ya terminó no hay nada que tocar: la barra se queda sólo con el
-            resumen, y los botones desaparecen en vez de quedar ahí pidiendo un clic inútil. */}
-        <div className="cs-barra-centro">
-          {estado === 'terminada' ? null : estado === 'entrante' ? (
-            <>
-              <Ctl icon={<IcTelCortar s={24} />} label="Rechazar" peligro onClick={acciones.rechazar} />
-              {acciones.atenderVideo ? <Ctl icon={<IcCam s={24} />} label="Video" onClick={acciones.atenderVideo} /> : null}
-              <button className="cs-atender" onClick={acciones.atender}>
-                <IcTel s={26} /><span>Atender</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <Ctl icon={<IcMic s={23} off={flags.muted} />} label="Micrófono" on={false} onClick={acciones.mute}
-                caret={!!acciones.elegirMic} onCaret={acciones.elegirMic} />
-              {acciones.video ? <Ctl icon={<IcCam s={23} off={!flags.videoOn} />} label="Cámara web" on={flags.videoOn} onClick={acciones.video} caret={!!acciones.elegirCam} onCaret={acciones.elegirCam} /> : null}
-              {acciones.hold ? <Ctl icon={flags.held ? <IcPlay s={23} /> : <IcPausa s={23} />} label={flags.held ? 'Reanudar' : 'En espera'} on={flags.held} onClick={acciones.hold} /> : null}
-              <Ctl icon={<IcTeclado s={23} />} label="Teclado" on={flags.pad} onClick={acciones.teclado} />
-              <Ctl icon={<IcMas s={23} />} label="Más" on={flags.masAbierto} onClick={acciones.mas} />
-            </>
-          )}
-        </div>
+          <div className="cs-barra-centro">
+            <Ctl icon={<IcMic s={22} off={flags.muted} />} label="Micrófono" apagado={flags.muted} onClick={acciones.mute}
+              caret={!!acciones.elegirMic} onCaret={acciones.elegirMic} />
+            {acciones.video ? (
+              <Ctl icon={<IcCam s={22} off={!flags.videoOn} />} label="Cámara web" apagado={!flags.videoOn} onClick={acciones.video}
+                caret={!!acciones.elegirCam} onCaret={acciones.elegirCam} />
+            ) : null}
+            {/* La misma raya que separa «lo mío» (micrófono, cámara) de «la llamada». */}
+            <span className="cs-sep" />
+            {acciones.hold ? (
+              <Ctl icon={flags.held ? <IcPlay s={22} /> : <IcPausa s={22} />} label={flags.held ? 'Reanudar' : 'En espera'}
+                on={flags.held} onClick={acciones.hold} />
+            ) : null}
+            <Ctl icon={<IcTeclado s={22} />} label="Teclado" on={flags.pad} onClick={acciones.teclado} />
+            <Ctl icon={<IcMas s={22} />} label="Más" on={flags.masAbierto} onClick={acciones.mas} />
+          </div>
 
-        <div className="cs-barra-der">
-          {estado !== 'entrante' && estado !== 'terminada' && (
-            <button className="cs-terminar" onClick={acciones.colgar}>
-              <IcTelCortar s={22} /><span>Terminar</span>
+          <div className="cs-barra-der">
+            <button className="cs-terminar" onClick={acciones.colgar} title="Terminar la llamada">
+              <span className="cs-terminar-caja"><IcTelCortar s={20} /></span>
+              <span>Terminar</span>
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -171,7 +171,29 @@ module.exports = function initCallEngine(deps) {
     const from = soloPropia(req, need(req.body && req.body.from, 'from')); const to = need(req.body && req.body.to, 'to');
     return { ok: true, ...(await originar({ from, to, context: req.body && req.body.context })) };
   }));
-  app.post('/api/calls/:id/hangup', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.hangup({ channelId: req.params.id }); return { ok: true }; }));
+  /* Cortar una llamada desde el panel. Dos caminos a propósito: ARI es el normal, y si
+   * ARI no está o el canal no le responde —el caso de la llamada que queda «colgada» y no
+   * hay forma de sacar de la pantalla— se manda un Hangup por AMI con el NOMBRE del canal,
+   * que es lo mismo que uno haría a mano en la consola de Asterisk. */
+  async function colgarCanal(id) {
+    const fila = channels.get(id);
+    let errAri = null;
+    if (ari) {
+      try { await ari.channels.hangup({ channelId: id }); return { ok: true, via: 'ari' }; }
+      catch (e) { errAri = e; }
+    }
+    const nombre = fila && fila.name;
+    if (!nombre) {
+      if (errAri) throw Object.assign(new Error('no se pudo cortar: ' + errAri.message), { status: 502 });
+      throw Object.assign(new Error('ARI no disponible'), { status: 503 });
+    }
+    try { await amiAction({ Action: 'Hangup', Channel: nombre }); }
+    catch (e) { throw Object.assign(new Error('no se pudo cortar el canal ' + nombre + ': ' + e.message), { status: 502 }); }
+    channels.delete(id); if (broadcastSoon) broadcastSoon();
+    L('corte forzado por AMI', nombre, errAri ? errAri.message : 'sin ARI');
+    return { ok: true, via: 'ami' };
+  }
+  app.post('/api/calls/:id/hangup', auth, wrap(async (req) => colgarCanal(req.params.id)));
   app.post('/api/calls/:id/hold', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.hold({ channelId: req.params.id }); return { ok: true }; }));
   app.post('/api/calls/:id/unhold', auth, wrap(async (req) => { if (!ari) throw Object.assign(new Error('ARI no disponible'), { status: 503 }); await ari.channels.unhold({ channelId: req.params.id }); return { ok: true }; }));
   app.post('/api/calls/transfer', auth, wrap(async (req) => ({ ok: true, ...(await blindTransfer(soloPropia(req, need(req.body && req.body.ext, 'ext')), need(req.body && req.body.to, 'to'), req.body && req.body.context)) })));
@@ -181,5 +203,5 @@ module.exports = function initCallEngine(deps) {
   app.post('/api/calls/spy', auth, wrap(async (req) => { const b = req.body || {}; need(b.sup, 'supervisor'); need(b.target, 'destino'); if (String(b.sup) === String(b.target)) throw Object.assign(new Error('el supervisor no puede espiarse a si mismo'), { status: 400 }); return { ok: true, ...(await startSpy({ sup: b.sup, target: b.target, mode: b.mode })) }; }));
   app.delete('/api/calls/spy/:id', auth, wrap(async (req) => ({ ok: await stopSpy(req.params.id) })));
 
-  return { attach, detach, getChannels, endpointStates, handleStasis, startSpy, stopSpy, blindTransfer, originar, spies };
+  return { attach, detach, colgarCanal, getChannels, endpointStates, handleStasis, startSpy, stopSpy, blindTransfer, originar, spies };
 };

@@ -6,6 +6,7 @@ import { useLive } from '../useLive';
 import { apiPost } from '../api';
 import { toast } from '../notify';
 import Slot from '../Slot';
+import CortarLlamada from '../CortarLlamada';
 
 const SUPKEY = 'pbxng_sup_ext';
 const MODES = {
@@ -27,7 +28,7 @@ export default function Monitor() {
     const m = /PJSIP\/([^-]+)-/.exec(c.name || ''); if (!m) continue;
     const ext = m[1]; const other = c.connected || c.caller || '?';
     const key = [ext, other].sort().join('|'); if (seen.has(key)) continue; seen.add(key);
-    calls.push({ ext, other, state: c.state });
+    calls.push({ id: c.id, name: c.name, ext, other, state: c.state, started: c.started });
   }
 
   function ask(target) { setSel(target); }
@@ -79,7 +80,13 @@ export default function Monitor() {
                     <Table.Td><Group gap={6}><ThemeIcon size="sm" radius="xl" variant="light" color="teal"><IconPhone size={13} /></ThemeIcon><Text ff="monospace" fw={600}>{c.ext}</Text></Group></Table.Td>
                     <Table.Td ff="monospace">{c.other}</Table.Td>
                     <Table.Td><Badge variant="dot" color={c.state === 'Up' ? 'teal' : 'yellow'}>{c.state === 'Up' ? 'Hablando' : c.state}</Badge></Table.Td>
-                    <Table.Td><Button size="compact-sm" variant="light" leftSection={<IconHeadphones size={14} />} onClick={() => ask(c.ext)}>Supervisar</Button></Table.Td>
+                    <Table.Td>
+                      <Group gap={6} wrap="nowrap">
+                        <Button size="compact-sm" variant="light" leftSection={<IconHeadphones size={14} />} onClick={() => ask(c.ext)}>Supervisar</Button>
+                        {/* Faltaba lo mas basico: ver una llamada trabada y poder terminarla. */}
+                        <CortarLlamada id={c.id} canal={c.name} quien={'el interno ' + c.ext} />
+                      </Group>
+                    </Table.Td>
                   </Table.Tr>
                 ))}</Table.Tbody>
               </Table>

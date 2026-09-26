@@ -508,18 +508,18 @@ app.get('/health/ready', healthCheck);
  *  (latest.yml + Setup.exe + .blockmap), asi el softphone actualiza contra
  *  https://<central>/descargas/softphone/ sin depender de Internet ni de GitHub.
  * ============================================================ */
+const descargasSoftphone = require('./softphone-descargas');
 const SOFTPHONE_DIR = process.env.SOFTPHONE_DIR || _pathm.join(__dirname, 'softphone');
 app.use('/softphone', (req, res, next) => { res.set('Cache-Control', 'no-cache'); next(); },
-  express.static(SOFTPHONE_DIR, { index: false, dotfiles: 'deny', setHeaders: (res, fp) => { if (/\.(exe|msi|blockmap)$/i.test(fp)) res.set('Content-Type', 'application/octet-stream'); if (/\.yml$/i.test(fp)) res.set('Content-Type', 'text/yaml'); } }));
+  express.static(SOFTPHONE_DIR, { index: false, dotfiles: 'deny', setHeaders: (res, fp) => { if (/\.(exe|msi|apk|blockmap)$/i.test(fp)) res.set('Content-Type', 'application/octet-stream'); if (/\.yml$/i.test(fp)) res.set('Content-Type', 'text/yaml'); } }));
 function softphoneLatest() {
-  try {
-    const y = _fsm.readFileSync(_pathm.join(SOFTPHONE_DIR, 'latest.yml'), 'utf8');
-    const g = (k) => { const m = new RegExp('^' + k + ':\\s*(.+)$', 'm').exec(y); return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : ''; };
-    const file = g('path'); const version = g('version');
-    if (!file || !version) return { available: false };
-    let size = null; try { size = _fsm.statSync(_pathm.join(SOFTPHONE_DIR, file)).size; } catch (_) { return { available: false, reason: 'falta ' + file }; }
-    return { available: true, version, file, url: '/descargas/softphone/' + encodeURIComponent(file), size, date: g('releaseDate') || null, platform: 'windows' };
-  } catch (_) { return { available: false }; }
+  let yml = null; let nombres = [];
+  try { yml = _fsm.readFileSync(_pathm.join(SOFTPHONE_DIR, 'latest.yml'), 'utf8'); } catch (_) {}
+  try { nombres = _fsm.readdirSync(SOFTPHONE_DIR); } catch (_) {}
+  return descargasSoftphone.armar({
+    latestYml: yml, nombres,
+    tamano: (f) => { try { return _fsm.statSync(_pathm.join(SOFTPHONE_DIR, f)).size; } catch (_) { return null; } },
+  });
 }
 app.get('/api/softphone/latest', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(softphoneLatest()); });
 /* ICE/TURN: lo registra control-plane/turn.js (dueño `medios`), más abajo, junto al

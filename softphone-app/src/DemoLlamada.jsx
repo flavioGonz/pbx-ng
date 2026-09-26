@@ -46,8 +46,10 @@ export default function DemoLlamada() {
           teclado: () => setPad(v => !v), mas: () => {}, tecla: () => {},
         }}
       />
-      {/* Mando de la vista de prueba. Vive arriba, chico y de un solo renglón: si se parte
-          en dos filas o se sale por el costado tapa justo lo que uno vino a mirar. */}
+      {/* Mando de la vista de prueba. Queda ESCONDIDO: se muestra al acercar el mouse al
+          borde de arriba. Estos no son pestañas de la aplicación —son los estados de una
+          misma llamada— y dejarlo fijo hacía creer que el teléfono tiene solapas. */}
+      <div className="dm-zona">
       <div className="dm-mando">
         <span className="dm-tag">vista de prueba</span>
         <div className="dm-seg">
@@ -60,6 +62,7 @@ export default function DemoLlamada() {
           onClick={() => setPad(v => !v)}>Teclado</button>
         <button className={'dm-chip dm-suelto' + (auto ? ' dm-on' : '')} title="Recorrer los estados solo"
           onClick={() => setAuto(v => !v)}>{auto ? '❚❚' : '▶'}</button>
+      </div>
       </div>
     </div>
   );

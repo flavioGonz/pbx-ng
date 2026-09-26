@@ -6,6 +6,7 @@ import { useLive } from '../useLive';
 import { usePoll } from '../api';
 import { fmtReloj } from '../fmt';
 import Slot from '../Slot';
+import CortarLlamada from '../CortarLlamada';
 
 function Spark({ data, color = '#ffffff' }) {
   if (!data || data.length < 2) return null;
@@ -164,7 +165,7 @@ export default function Wallboard() {
         <Card withBorder radius="lg" padding={0} shadow="sm">
           {ch.length === 0 ? <Group justify="center" py={48}><ThemeIcon size={48} radius="xl" variant="light" color="gray"><IconPhone size={26} /></ThemeIcon><Text c="dimmed">No hay llamadas en curso</Text></Group> :
             <Table verticalSpacing="sm" highlightOnHover>
-              <Table.Thead><Table.Tr><Table.Th>Dir.</Table.Th><Table.Th>Origen</Table.Th><Table.Th>Conectado con</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Duración</Table.Th><Table.Th>Canal</Table.Th></Table.Tr></Table.Thead>
+              <Table.Thead><Table.Tr><Table.Th>Dir.</Table.Th><Table.Th>Origen</Table.Th><Table.Th>Conectado con</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Duración</Table.Th><Table.Th>Canal</Table.Th><Table.Th /></Table.Tr></Table.Thead>
               <Table.Tbody>{ch.map(c => {
                 const dir = callDir(c); const dur = c.started ? (now - new Date(c.started).getTime()) / 1000 : null;
                 return (
@@ -175,6 +176,7 @@ export default function Wallboard() {
                     <Table.Td><Badge variant="light" color={stateColor(c.state)}>{c.state}</Badge></Table.Td>
                     <Table.Td ff="monospace" fw={600}>{fmtReloj(dur)}</Table.Td>
                     <Table.Td ff="monospace" fz="xs" c="dimmed">{c.name}</Table.Td>
+                    <Table.Td ta="right"><CortarLlamada id={c.id} canal={c.name} quien={c.caller || c.name} /></Table.Td>
                   </Table.Tr>
                 );
               })}</Table.Tbody>

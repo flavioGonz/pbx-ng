@@ -28,10 +28,11 @@ export default function Login() {
   const [showPass, setShowPass] = useState(false);
   const [role, setRole] = useState('admin');
   const videoRef = useRef(null); const [muted, setMuted] = useState(true);
-  /* Softphone de escritorio: la central publica su ultima version en /api/softphone/latest
-   * (publico). Si no hay instalador cargado, el boton simplemente no aparece. */
+  /* Telefonos que publica ESTA central en /api/softphone/latest (publico): el instalador
+   * de Windows y, si esta cargado, el APK de Android. Lo que no este, no se muestra: un
+   * boton que baja un 404 es peor que no tener boton. */
   const [sphone, setSphone] = useState(null);
-  useEffect(() => { fetch('/backend/api/softphone/latest').then((r) => r.json()).then((d) => setSphone(d && d.available ? d : null)).catch(() => {}); }, []);
+  useEffect(() => { fetch('/backend/api/softphone/latest').then((r) => r.json()).then((d) => setSphone(d && (d.available || (d.android && d.android.available)) ? d : null)).catch(() => {}); }, []);
   const fmtMb = (b) => (b ? (b / 1048576).toFixed(0) + ' MB' : '');
   const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted; if (!v.muted) { try { v.play(); } catch (_) {} } setMuted(v.muted); };
 
@@ -251,12 +252,35 @@ export default function Login() {
             </>
           )}
 
+          {/* Descargas del telefono. Windows y Android en la misma fila: son el mismo
+              producto en dos formatos, y separarlos hacia que el de Android pareciera otra
+              cosa. Si la central todavia no tiene uno de los dos, ese boton no aparece. */}
           {sphone && (
-            <a className="hzn-sphone" href={sphone.url} download title={'Softphone de escritorio para Windows · v' + sphone.version + (sphone.size ? ' · ' + fmtMb(sphone.size) : '')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.5v7H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
-              <span>Softphone para Windows</span>
-              <span className="hzn-sphone-ver">v{sphone.version}</span>
-            </a>
+            <div className="hzn-sphone-bloque">
+              <div className="hzn-sphone-tit">Softphone PBX-NG</div>
+              <div className="hzn-sphone-fila">
+              {sphone && sphone.available && (
+                <a className="hzn-sphone" href={sphone.url} download
+                  title={'Softphone de escritorio para Windows · v' + sphone.version + (sphone.size ? ' · ' + fmtMb(sphone.size) : '')}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.5v7H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+                  <span className="hzn-sphone-txt">
+                    <b>Windows</b>
+                    <i>v{sphone.version}{sphone.size ? ' · ' + fmtMb(sphone.size) : ''}</i>
+                  </span>
+                </a>
+              )}
+              {sphone && sphone.android && sphone.android.available && (
+                <a className="hzn-sphone hzn-sphone-apk" href={sphone.android.url} download
+                  title={'Softphone para Android (APK)' + (sphone.android.version ? ' · v' + sphone.android.version : '') + (sphone.android.size ? ' · ' + fmtMb(sphone.android.size) : '')}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 9h12v8.2a1.3 1.3 0 0 1-1.3 1.3H7.3A1.3 1.3 0 0 1 6 17.2zM4.6 9.4c.6 0 1.1.5 1.1 1.1v4.2a1.1 1.1 0 1 1-2.2 0v-4.2c0-.6.5-1.1 1.1-1.1m14.8 0c.6 0 1.1.5 1.1 1.1v4.2a1.1 1.1 0 1 1-2.2 0v-4.2c0-.6.5-1.1 1.1-1.1M9 19.4h1.9v2a1 1 0 1 1-1.9 0zm4.1 0H15v2a1 1 0 1 1-1.9 0zM8.2 4.2l.9 1.6A6.4 6.4 0 0 1 12 5.1c1 0 2 .2 2.9.7l.9-1.6a.4.4 0 0 1 .7.4l-.9 1.6A5.2 5.2 0 0 1 18 8.1H6a5.2 5.2 0 0 1 2.4-1.9l-.9-1.6a.4.4 0 0 1 .7-.4M9.6 6.7a.6.6 0 1 0 0 1.2.6.6 0 0 0 0-1.2m4.8 0a.6.6 0 1 0 0 1.2.6.6 0 0 0 0-1.2"/></svg>
+                  <span className="hzn-sphone-txt">
+                    <b>Android</b>
+                    <i>{sphone.android.version ? 'v' + sphone.android.version : 'APK'}{sphone.android.size ? ' · ' + fmtMb(sphone.android.size) : ''} · APK</i>
+                  </span>
+                </a>
+              )}
+              </div>
+            </div>
           )}
           <div className="hzn-login-footer">
             <span>PBX-NG</span>
@@ -576,18 +600,31 @@ export default function Login() {
           font-size: 11px; color: #9ca3af;
         }
         .hzn-dot { opacity: 0.4; }
-        /* Descarga del softphone: discreto, estilo boton de Windows */
-        .hzn-sphone {
-          margin: 22px auto 0; width: fit-content;
-          display: inline-flex; align-items: center; gap: 8px;
-          padding: 7px 12px; border-radius: 8px;
-          border: 1px solid #e5e7eb; background: #fff; color: #374151;
-          font-size: 12px; font-weight: 600; text-decoration: none;
-          transition: border-color .15s, box-shadow .15s, color .15s;
+        /* Descargas del telefono. Antes era un boton chico y gris debajo de todo: el que
+           entra por primera vez a la central tiene que poder instalarse el telefono, y
+           costaba encontrarlo. Ahora son dos botones grandes, uno al lado del otro. */
+        .hzn-sphone-bloque { margin: 20px 0 0; }
+        .hzn-sphone-tit {
+          font-size: 11px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase;
+          color: #9ca3af; margin-bottom: 8px;
         }
-        .hzn-sphone:hover { border-color: #0078d4; color: #0b5cad; box-shadow: 0 2px 10px rgba(0,120,212,.12); }
-        .hzn-sphone svg { color: #0078d4; }
-        .hzn-sphone-ver { font-weight: 500; color: #9ca3af; font-size: 11px; }
+        .hzn-sphone-fila { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .hzn-sphone {
+          display: flex; align-items: center; gap: 10px;
+          padding: 11px 13px; border-radius: 10px;
+          border: 1px solid #e5e7eb; background: #fff; color: #374151;
+          text-decoration: none; min-width: 0;
+          transition: border-color .15s, box-shadow .15s, color .15s, transform .12s;
+        }
+        .hzn-sphone:hover { border-color: #0078d4; color: #0b5cad; box-shadow: 0 4px 14px rgba(0,120,212,.14); transform: translateY(-1px); }
+        .hzn-sphone:active { transform: none; }
+        .hzn-sphone svg { color: #0078d4; flex: 0 0 auto; }
+        .hzn-sphone-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+        .hzn-sphone-txt b { font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+        .hzn-sphone-txt i { font-style: normal; font-size: 11px; color: #9ca3af; }
+        .hzn-sphone-apk:hover { border-color: #3ddc84; color: #0f7a45; box-shadow: 0 4px 14px rgba(61,220,132,.18); }
+        .hzn-sphone-apk svg { color: #3ddc84; }
+        @media (max-width: 520px) { .hzn-sphone-fila { grid-template-columns: 1fr; } }
       `}</style>
     </div>
   );
