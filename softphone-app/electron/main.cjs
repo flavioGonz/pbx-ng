@@ -159,9 +159,9 @@ let mini = null, miniState = null, mainHiddenByMini = false;
 function createMini() {
   if (mini) return mini;
   let x, y;
-  try { const { screen } = require('electron'); const wa = screen.getPrimaryDisplay().workAreaSize; x = wa.width - 304; y = wa.height - 158; } catch (_) {}
+  try { const { screen } = require('electron'); const wa = screen.getPrimaryDisplay().workAreaSize; x = wa.width - 320; y = wa.height - 168; } catch (_) {}
   mini = new BrowserWindow({
-    width: 284, height: 132, x, y, frame: false, transparent: true, resizable: false, alwaysOnTop: true,
+    width: 300, height: 142, x, y, frame: false, transparent: true, resizable: false, alwaysOnTop: true,
     skipTaskbar: true, show: false, backgroundColor: '#00000000', maximizable: false, minimizable: false, fullscreenable: false,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false },
   });

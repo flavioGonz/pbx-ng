@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Orbe, { COLOR_ESTADO } from './Orbe';
 
 /* ============================================================================
  *  Softphone-NG · La pantalla de llamada.
@@ -322,7 +323,11 @@ export default function CallScreen(p) {
       {video ? p.videoNodes : null}
 
       <div className={'cs-centro ' + gesto} key={estado === 'hablando' ? 'hablando' : estado}>
-        {!video && <Avatar txt={iniciales} entra={timbrando} />}
+        {/* El orbe en lugar del circulo con iniciales: su COLOR es el estado de la llamada
+            y su movimiento dice que la llamada esta viva. Las iniciales no decian ninguna
+            de las dos cosas —del otro lado suele haber un interno o un portero, no una
+            persona con foto—. */}
+        {!video && <Orbe size={132} color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando} quieto={estado === 'terminada'} />}
 
         <div className="cs-nombre">{nombre}</div>
         {leyenda ? (

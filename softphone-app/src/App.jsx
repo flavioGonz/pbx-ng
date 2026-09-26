@@ -15,7 +15,9 @@ import QrProvision from './QrProvision.jsx';
 
 function withVT(fn) { try { if (typeof document !== 'undefined' && document.startViewTransition) { document.startViewTransition(() => flushSync(fn)); return; } } catch {} fn(); }
 const initials = (n) => (String(n || '?')).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
-const APP_VERSION = 'v0.5.0';
+/* Inyectada por vite desde package.json (ver vite.config.js). Escrita a mano se olvida:
+ * asi la aplicacion no puede mentir sobre que version esta corriendo. */
+const APP_VERSION = 'v' + (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0');
 const getPhoto = () => { try { return localStorage.getItem('sp_photo') || ''; } catch { return ''; } };
 
 function Svg({ s = 22, c = 'currentColor', w = 2, children }) { return <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke={c} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round">{children}</svg>; }
@@ -48,7 +50,13 @@ const IcPlus = (p = {}) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>;
 const IcRec = (p = {}) => <Svg {...p}><circle cx="12" cy="12" r="7" /></Svg>;
 const IcReload = (p = {}) => <Svg {...p}><path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15" /></Svg>;
 
-const C = { rail: '#0f1a30', railHi: '#18294a', accent: '#2f80ff', green: '#22c55e', red: '#ef4444', ink: '#0b1220', sub: '#667089', bg: '#eef1f7', card: '#ffffff', line: '#e3e8f0', keybg: '#f3f6fc' };
+/* Una sola paleta para toda la aplicación. Antes convivían dos: el azul marino del menú
+ * lateral y los verdes/rojos de los botones por un lado, y los de la pantalla de llamada
+ * por otro —parecido pero distinto, que es peor que distinto—. Ahora el gris oscuro del
+ * menú es EL MISMO de la pantalla de llamada, y los colores de estado (verde = en línea o
+ * atender, ámbar = en espera, rojo = cortar o error, azul = acción) son los mismos en la
+ * ventana grande, en la pantalla de llamada y en el widget flotante. */
+const C = { rail: '#1f2229', railHi: '#31333a', accent: '#1a73f2', green: '#2bd95a', amber: '#f0b429', red: '#eb4c46', ink: '#0b1220', sub: '#667089', bg: '#eef1f7', card: '#ffffff', line: '#e3e8f0', keybg: '#f3f6fc' };
 function Ava({ photo, txt, size = 44, bg = 'linear-gradient(160deg,#4c9dff,#2f6bd6)', style }) {
   const st = { width: size, height: size, borderRadius: '50%', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: size * 0.36, overflow: 'hidden', ...style };
   if (photo) return <img src={photo} alt="" style={{ ...st, objectFit: 'cover' }} />;
@@ -106,13 +114,13 @@ function TurnChip({ cfg, sp, t }) {
   const configured = !!(cfg.turn && cfg.turnUser && cfg.turnPass);
   const st = (t && t.state) || 'idle';
   let bg = '#eef1f7', fg = C.sub, label = 'Sin TURN', live = false;
-  if (sp.inCall && sp.usingRelay === true) { bg = 'rgba(34,197,94,.14)'; fg = '#15803d'; label = 'TURN en uso'; live = true; }
-  else if (sp.inCall && sp.usingRelay === false) { bg = 'rgba(47,128,255,.12)'; fg = '#1d4ed8'; label = 'Medios directos'; }
+  if (sp.inCall && sp.usingRelay === true) { bg = 'rgba(43,217,90,.14)'; fg = '#15803d'; label = 'TURN en uso'; live = true; }
+  else if (sp.inCall && sp.usingRelay === false) { bg = 'rgba(26,115,242,.12)'; fg = '#1d4ed8'; label = 'Medios directos'; }
   else if (st === 'testing') { bg = '#eef1f7'; fg = C.sub; label = 'Probando TURN…'; }
-  else if (st === 'ok') { bg = 'rgba(34,197,94,.12)'; fg = '#15803d'; label = 'TURN listo'; }
+  else if (st === 'ok') { bg = 'rgba(43,217,90,.12)'; fg = '#15803d'; label = 'TURN listo'; }
   else if (st === 'turn-auth') { bg = 'rgba(239,68,68,.1)'; fg = '#b91c1c'; label = 'TURN: auth falló'; }
   else if (st === 'turn-unreachable' || st === 'error') { bg = 'rgba(239,68,68,.1)'; fg = '#b91c1c'; label = 'TURN no responde'; }
-  else if (configured) { bg = 'rgba(47,128,255,.12)'; fg = '#1d4ed8'; label = 'TURN sin probar'; }
+  else if (configured) { bg = 'rgba(26,115,242,.12)'; fg = '#1d4ed8'; label = 'TURN sin probar'; }
   return <span className={live ? 'turn-live' : ''} style={S.chip(bg, fg)}>{IcShield({ c: fg, s: 14 })}{label}</span>;
 }
 function CtlBtn({ on, onClick, icon, iconOff, label }) {
@@ -194,7 +202,7 @@ function ToggleRow({ label, desc, on, onChange }) {
   </div>;
 }
 function DiagRow({ k, v, good }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.line}` }}><div style={{ fontSize: 13, color: C.sub, width: 132, flex: 'none' }}>{k}</div><div style={{ fontSize: 13, fontWeight: 600, color: good === true ? '#15803d' : C.ink, wordBreak: 'break-all' }}>{v}</div></div>; }
-const qLabel = (avg) => avg == null ? { t: 'sin datos', c: '#94a3b8' } : avg >= 3.5 ? { t: 'Excelente', c: '#22c55e' } : avg >= 2.5 ? { t: 'Buena', c: '#16a34a' } : avg >= 1.5 ? { t: 'Regular', c: '#f59e0b' } : { t: 'Mala', c: '#ef4444' };
+const qLabel = (avg) => avg == null ? { t: 'sin datos', c: '#94a3b8' } : avg >= 3.5 ? { t: 'Excelente', c: '#2bd95a' } : avg >= 2.5 ? { t: 'Buena', c: '#1fa945' } : avg >= 1.5 ? { t: 'Regular', c: '#f0b429' } : { t: 'Mala', c: '#eb4c46' };
 const candLabel = (ct) => ct === 'relay' ? 'TURN (relay)' : ct === 'srflx' ? 'STUN (srflx)' : ct === 'prflx' ? 'peer-reflexive' : ct === 'host' ? 'directo (host)' : '—';
 const DIAG_STEPS = ['Datos verificados', 'Conectando al servidor PBX', 'Estableciendo canal seguro', 'Registrando el interno', 'Verificando red (ICE/STUN)', 'Conexión lista'];
 const DIAG_TOTAL = DIAG_STEPS.length;
@@ -206,7 +214,7 @@ function WinCtl({ dark }) {
     <div style={{ display: 'flex', gap: 2, WebkitAppRegion: 'no-drag', marginLeft: 6 }}>
       {hasMini && <button title="Modo mini (flotante)" style={base} onClick={() => { try { window.sphone.miniShow(true); } catch (_) {} }} onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,.1)' : '#eef1f7'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="14" rx="2" /><rect x="12" y="11" width="7" height="5" rx="1" /></svg></button>}
       <button title="Minimizar" style={base} onClick={() => window.sphone.winMinimize()} onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,.1)' : '#eef1f7'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}><svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" strokeWidth="1.4" /></svg></button>
-      <button title="Cerrar" style={base} onClick={() => window.sphone.winClose()} onMouseEnter={e => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.color = '#fff'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = dark ? '#cfe0ff' : '#5b6b8c'; }}><svg width="12" height="12" viewBox="0 0 12 12"><line x1="2.6" y1="2.6" x2="9.4" y2="9.4" stroke="currentColor" strokeWidth="1.4" /><line x1="9.4" y1="2.6" x2="2.6" y2="9.4" stroke="currentColor" strokeWidth="1.4" /></svg></button>
+      <button title="Cerrar" style={base} onClick={() => window.sphone.winClose()} onMouseEnter={e => { e.currentTarget.style.background = '#eb4c46'; e.currentTarget.style.color = '#fff'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = dark ? '#cfe0ff' : '#5b6b8c'; }}><svg width="12" height="12" viewBox="0 0 12 12"><line x1="2.6" y1="2.6" x2="9.4" y2="9.4" stroke="currentColor" strokeWidth="1.4" /><line x1="9.4" y1="2.6" x2="2.6" y2="9.4" stroke="currentColor" strokeWidth="1.4" /></svg></button>
     </div>
   );
 }
@@ -217,7 +225,7 @@ function RingBell({ size = 110 }) {
     <div style={{ position: 'relative', width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <span className="bell-ring" style={{ width: size, height: size }} />
       <span className="bell-ring" style={{ width: size, height: size, animationDelay: '.8s' }} />
-      <div style={{ width: Math.round(size * 0.62), height: Math.round(size * 0.62), borderRadius: '50%', background: 'linear-gradient(160deg,#4c9dff,#2f6bd6)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 30px rgba(47,128,255,.5)' }}>
+      <div style={{ width: Math.round(size * 0.62), height: Math.round(size * 0.62), borderRadius: '50%', background: 'linear-gradient(160deg,#4c9dff,#2f6bd6)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 30px rgba(26,115,242,.5)' }}>
         <svg ref={b} width={Math.round(size * 0.34)} height={Math.round(size * 0.34)} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
       </div>
     </div>
@@ -355,14 +363,15 @@ export default function App() {
     if (!(window.sphone && window.sphone.miniState)) return;
     const ci = sp.callInfo || {};
     const inNum = sp.incoming ? ((sp.incoming.remoteIdentity && sp.incoming.remoteIdentity.uri && sp.incoming.remoteIdentity.uri.user) || '') : '';
-    window.sphone.miniState({ active: !!(sp.inCall || sp.incoming), incoming: !!sp.incoming, video: !!sp.incomingVideo, number: sp.incoming ? inNum : (ci.number || ''), name: (popClient && popClient.name) || '', since: ci.since || 0, muted: !!sp.muted, ext: cfg.ext || '', registered: !!(sp.registered || sipReg === 'registered'), volume: typeof sp.volume === 'number' ? sp.volume : 1 });
-  }, [sp.inCall, sp.incoming, sp.callInfo, sp.muted, popClient, cfg.ext, sp.registered, sipReg, sp.volume]); // eslint-disable-line
+    window.sphone.miniState({ active: !!(sp.inCall || sp.incoming), incoming: !!sp.incoming, video: !!sp.incomingVideo, number: sp.incoming ? inNum : (ci.number || ''), name: (popClient && popClient.name) || '', since: ci.since || 0, muted: !!sp.muted, held: !!sp.held, ext: cfg.ext || '', registered: !!(sp.registered || sipReg === 'registered'), volume: typeof sp.volume === 'number' ? sp.volume : 1 });
+  }, [sp.inCall, sp.incoming, sp.callInfo, sp.muted, sp.held, popClient, cfg.ext, sp.registered, sipReg, sp.volume]); // eslint-disable-line
   useEffect(() => {
     if (!(window.sphone && window.sphone.onMiniAction)) return;
     return window.sphone.onMiniAction((m) => {
       const s = spRef.current; if (!s) return;
       const a = (m && typeof m === 'object') ? m.a : m, v = (m && typeof m === 'object') ? m.v : undefined;
       if (a === 'mute') s.toggleMute();
+      else if (a === 'hold') { if (s.toggleHold) s.toggleHold(); }
       else if (a === 'hangup') s.hangup();
       else if (a === 'accept') s.accept(false);
       else if (a === 'accept-video') s.accept(true);
@@ -470,7 +479,15 @@ export default function App() {
   /* La central aprovisionada publica el instalador y el feed OTA del softphone en
    * /descargas/softphone/. Se lo pasamos al proceso main (electron-updater). */
   function setUpdateFeed(base) {
-    try { const b = String(base || api.getApiBase() || '').replace(/\/$/, ''); if (b && window.sphone && window.sphone.updateSetFeed) window.sphone.updateSetFeed(b + '/descargas/softphone/'); } catch {}
+    try {
+      /* De donde sale la central: primero el sistema aprovisionado (CRM/API), y si no hay,
+       * del propio WSS con el que el telefono se registra. Antes solo miraba el primero, y
+       * un telefono aprovisionado sin API se quedaba con el respaldo de GitHub —que tiene
+       * la version vieja—: el boton «Buscar» decia «estas al dia» aunque la central ya
+       * tuviera una nueva. */
+      const b = String(base || api.getApiBase() || api.baseFromWss(cfgLatest.current && cfgLatest.current.wss) || '').replace(/\/$/, '');
+      if (b && window.sphone && window.sphone.updateSetFeed) window.sphone.updateSetFeed(b + '/descargas/softphone/');
+    } catch {}
   }
   useEffect(() => { setUpdateFeed(); }, []);
   function applyProv(prov) {
@@ -514,7 +531,7 @@ export default function App() {
   const vmUnread = Array.isArray(vm) ? vm.filter(m => (m.folder || 'INBOX') === 'INBOX').length : 0;
   const rec = (apiOn && Array.isArray(scdr)) ? scdr : sp.hist;
   const dialMatches = (num && Array.isArray(dir)) ? dir.filter(d => { const n = String(d.ext || d.number || d.exten || ''); const nm = String(d.name || d.cn || d.callerid || '').toLowerCase(); return (n && n.includes(num)) || (nm && nm.includes(num.toLowerCase())); }).slice(0, 6) : [];
-  const presColor = (ext) => { const st = String(pres[String(ext)] || '').toLowerCase(); if (!st) return null; if (st.includes('inuse') && !st.includes('not')) return '#f59e0b'; if (st === 'busy' || st === 'ringing' || st === 'ring' || st === 'onhold' || st === 'in_call') return '#f59e0b'; if (st === 'not_inuse' || st === 'online' || st === 'available' || st === 'idle') return C.green; return '#c2c9d6'; };
+  const presColor = (ext) => { const st = String(pres[String(ext)] || '').toLowerCase(); if (!st) return null; if (st.includes('inuse') && !st.includes('not')) return '#f0b429'; if (st === 'busy' || st === 'ringing' || st === 'ring' || st === 'onhold' || st === 'in_call') return '#f0b429'; if (st === 'not_inuse' || st === 'online' || st === 'available' || st === 'idle') return C.green; return '#c2c9d6'; };
   function press(k) { sounds.uiKey(); sp.sendDtmf(k); if (!sp.inCall) setNum(n => (n + k).slice(0, 30)); }
   function callNow(n, video) { sounds.uiClick(); const t = (n || num).trim(); if (t) { setTab('llamadas'); setModal(null); sp.placeCall(t, !!video).then(() => setNum('')); } }
   function pickDev(kind, id) { setDevPref(kind, id); setPrefs(getDevPrefs()); if (kind === 'spk') sp.applySpeaker(id); }
@@ -586,23 +603,23 @@ export default function App() {
         <div ref={splashRef} style={{ position: 'fixed', inset: 0, zIndex: 400, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: 'radial-gradient(120% 120% at 50% 0%,#16233f 0%,#0b1220 60%,#070c16 100%)', color: '#eaf1ff', opacity: splashOut ? 0 : 1, transition: 'opacity .45s ease', pointerEvents: splashOut ? 'none' : 'auto' }}>
           <div style={{ position: 'relative', width: 104, height: 104, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <span className="sp-ring" /><span className="sp-ring" style={{ animationDelay: '.6s' }} /><span className="sp-ring" style={{ animationDelay: '1.2s' }} />
-            <div className="sp-badge" style={{ width: 76, height: 76, borderRadius: 22, background: 'linear-gradient(160deg,#22c55e,#16a34a)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 30px rgba(34,197,94,.45)' }}>
+            <div className="sp-badge" style={{ width: 76, height: 76, borderRadius: 22, background: 'linear-gradient(160deg,#2bd95a,#1fa945)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 30px rgba(43,217,90,.45)' }}>
               <svg className="sp-handset" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></svg>
             </div>
           </div>
           <div className="sp-title" style={{ fontSize: 22, fontWeight: 700, letterSpacing: .3, marginTop: 4 }}>PBX-NG <b style={{ color: '#4ade80' }}>Softphone</b></div>
           <div className="sp-ver" style={{ fontSize: 13, color: '#8fa6cc', marginTop: -8 }}>{APP_VERSION}</div>
-          <div style={{ width: 190, height: 4, borderRadius: 4, background: 'rgba(255,255,255,.12)', overflow: 'hidden', marginTop: 6 }}><i className="sp-bar" style={{ display: 'block', height: '100%', width: '40%', borderRadius: 4, background: 'linear-gradient(90deg,#22c55e,#4c9dff)' }} /></div>
+          <div style={{ width: 190, height: 4, borderRadius: 4, background: 'rgba(255,255,255,.12)', overflow: 'hidden', marginTop: 6 }}><i className="sp-bar" style={{ display: 'block', height: '100%', width: '40%', borderRadius: 4, background: 'linear-gradient(90deg,#2bd95a,#4c9dff)' }} /></div>
           <div style={{ position: 'absolute', bottom: 22, fontSize: 11, color: '#5c7099', letterSpacing: .4 }}>Infratec · WebRTC / SIP</div>
         </div>
       )}
       {!authed && !splash && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', background: 'radial-gradient(120% 120% at 50% 0%,#16233f 0%,#0b1220 60%,#070c16 100%)', color: '#eaf1ff' }}>
           <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }} aria-hidden>
-            <svg viewBox="0 0 24 24" width="120" height="120" fill="none" stroke="#2f80ff" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: 70, left: 40, opacity: .06 }} className="lfloat"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></svg>
-            <svg viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="#22c55e" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: 220, right: 50, opacity: .06 }} className="lfloat2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></svg>
-            <svg className="lwave lwave1" viewBox="0 0 1440 200" preserveAspectRatio="none" style={{ position: 'absolute', bottom: 0, left: 0, width: '200%', height: 190 }}><path fill="#2f80ff" fillOpacity="0.14" d="M0,90 C240,150 480,30 720,90 C960,150 1200,30 1440,90 L1440,200 L0,200 Z" /></svg>
-            <svg className="lwave lwave2" viewBox="0 0 1440 200" preserveAspectRatio="none" style={{ position: 'absolute', bottom: -12, left: 0, width: '200%', height: 210 }}><path fill="#22c55e" fillOpacity="0.10" d="M0,100 C300,40 520,160 760,100 C1000,40 1200,160 1440,100 L1440,200 L0,200 Z" /></svg>
+            <svg viewBox="0 0 24 24" width="120" height="120" fill="none" stroke="#1a73f2" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: 70, left: 40, opacity: .06 }} className="lfloat"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></svg>
+            <svg viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="#2bd95a" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: 220, right: 50, opacity: .06 }} className="lfloat2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></svg>
+            <svg className="lwave lwave1" viewBox="0 0 1440 200" preserveAspectRatio="none" style={{ position: 'absolute', bottom: 0, left: 0, width: '200%', height: 190 }}><path fill="#1a73f2" fillOpacity="0.14" d="M0,90 C240,150 480,30 720,90 C960,150 1200,30 1440,90 L1440,200 L0,200 Z" /></svg>
+            <svg className="lwave lwave2" viewBox="0 0 1440 200" preserveAspectRatio="none" style={{ position: 'absolute', bottom: -12, left: 0, width: '200%', height: 210 }}><path fill="#2bd95a" fillOpacity="0.10" d="M0,100 C300,40 520,160 760,100 C1000,40 1200,160 1440,100 L1440,200 L0,200 Z" /></svg>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', WebkitAppRegion: 'drag' }}>
             <div />
@@ -666,7 +683,7 @@ export default function App() {
                     </div>
                   );
                 })()}
-                <button onClick={loginConnect} disabled={!isComplete(cfg)} style={{ width: '100%', marginTop: 8, padding: '13px 0', borderRadius: 11, border: 'none', background: isComplete(cfg) ? 'linear-gradient(90deg,#22c55e,#16a34a)' : 'rgba(255,255,255,.1)', color: '#fff', fontWeight: 700, fontSize: 15, cursor: isComplete(cfg) ? 'pointer' : 'not-allowed', opacity: isComplete(cfg) ? 1 : .6 }}>Conectar y verificar</button>
+                <button onClick={loginConnect} disabled={!isComplete(cfg)} style={{ width: '100%', marginTop: 8, padding: '13px 0', borderRadius: 11, border: 'none', background: isComplete(cfg) ? 'linear-gradient(90deg,#2bd95a,#1fa945)' : 'rgba(255,255,255,.1)', color: '#fff', fontWeight: 700, fontSize: 15, cursor: isComplete(cfg) ? 'pointer' : 'not-allowed', opacity: isComplete(cfg) ? 1 : .6 }}>Conectar y verificar</button>
                 <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: '#5c7099' }}>{APP_VERSION} · datos cifrados en este equipo</div>
               </div>
             )}
@@ -674,14 +691,14 @@ export default function App() {
               <div key="verify" ref={gEnter} style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
                 <div style={{ position: 'relative', width: 88, height: 88, margin: '0 auto 18px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {!diag.error && <><span className="sp-ring" /><span className="sp-ring" style={{ animationDelay: '.6s' }} /></>}
-                  <div style={{ width: 64, height: 64, borderRadius: 18, background: diag.error ? 'linear-gradient(160deg,#ef4444,#b91c1c)' : 'linear-gradient(160deg,#22c55e,#16a34a)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{IcPhone({ c: '#fff', s: 30 })}</div>
+                  <div style={{ width: 64, height: 64, borderRadius: 18, background: diag.error ? 'linear-gradient(160deg,#eb4c46,#b91c1c)' : 'linear-gradient(160deg,#2bd95a,#1fa945)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{IcPhone({ c: '#fff', s: 30 })}</div>
                 </div>
                 <div style={{ fontSize: 19, fontWeight: 700, marginBottom: 4 }}>{diag.error ? 'No se pudo conectar' : 'Verificando conexión…'}</div>
                 <div style={{ fontSize: 13, color: '#8fa6cc', marginBottom: 18 }}>{diag.error ? 'Revisá los datos e intentá de nuevo.' : 'Comprobando el registro con la central PBX-NG.'}</div>
                 <div style={{ textAlign: 'left', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 14, padding: '14px 16px' }}>
                   {rows.map((lb, i) => { const n = i + 1; const state = cur > n ? 'done' : cur === n ? (diag.error ? 'error' : 'active') : 'pending'; return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0' }}>
-                      <span style={{ width: 23, height: 23, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', background: state === 'done' ? 'rgba(34,197,94,.2)' : state === 'error' ? 'rgba(239,68,68,.2)' : 'rgba(255,255,255,.08)' }}>
+                      <span style={{ width: 23, height: 23, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', background: state === 'done' ? 'rgba(43,217,90,.2)' : state === 'error' ? 'rgba(239,68,68,.2)' : 'rgba(255,255,255,.08)' }}>
                         {state === 'done' ? <span style={{ color: '#4ade80', fontWeight: 800, fontSize: 13 }}>✓</span> : state === 'error' ? <span style={{ color: '#f87171', fontWeight: 800, fontSize: 13 }}>✕</span> : state === 'active' ? <span className="spin" style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid rgba(159,208,255,.35)', borderTopColor: '#7cc0ff', display: 'block' }} /> : <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#5c7099' }} />}
                       </span>
                       <span style={{ fontSize: 13.5, color: state === 'pending' ? '#6b7f9f' : '#dbe6fb', fontWeight: state === 'active' ? 700 : 500 }}>{lb}</span>
@@ -696,7 +713,7 @@ export default function App() {
               </div>); })()}
             {loginPhase === 'ok' && (
               <div key="ok" ref={gEnter} style={{ width: '100%', maxWidth: 330, textAlign: 'center' }}>
-                <div ref={gPop} style={{ width: 92, height: 92, borderRadius: '50%', margin: '0 auto 16px', background: 'linear-gradient(160deg,#22c55e,#16a34a)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 34px rgba(34,197,94,.5)' }}><span style={{ color: '#fff', fontSize: 46, fontWeight: 800 }}>✓</span></div>
+                <div ref={gPop} style={{ width: 92, height: 92, borderRadius: '50%', margin: '0 auto 16px', background: 'linear-gradient(160deg,#2bd95a,#1fa945)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 34px rgba(43,217,90,.5)' }}><span style={{ color: '#fff', fontSize: 46, fontWeight: 800 }}>✓</span></div>
                 <div style={{ fontSize: 22, fontWeight: 700 }}>¡Conectado!</div>
                 <div style={{ fontSize: 13, color: '#8fa6cc', marginTop: 6 }}>Interno {cfg.ext} en línea · {sipMode ? 'SIP' : 'WebRTC'}</div>
                 <div style={{ fontSize: 12, color: '#5c7099', marginTop: 3 }}>Abriendo tu softphone…</div>
@@ -790,7 +807,7 @@ export default function App() {
                         <button style={S.actBtn(C.red)} title="Eliminar" onClick={() => vmDelete(id, folder)}>{IcX({ c: C.red, s: 16 })}</button>
                       </div>
                       {vmAudio[id] ? <audio controls autoPlay src={vmAudio[id]} style={{ width: '100%' }} /> :
-                        <button onClick={() => vmPlay(id, folder)} style={{ ...S.chip('rgba(47,128,255,.1)', '#1d4ed8'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px' }}>▶ Escuchar</button>}
+                        <button onClick={() => vmPlay(id, folder)} style={{ ...S.chip('rgba(26,115,242,.1)', '#1d4ed8'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px' }}>▶ Escuchar</button>}
                       {apiOn && (vmTx[id] ? (
                         vmTx[id].loading ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: C.sub }}><span className="spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: C.accent, display: 'block' }} /> Transcribiendo…</div> :
                         vmTx[id].error ? <div style={{ fontSize: 12, color: C.red }}>✕ {vmTx[id].error}</div> :
@@ -825,9 +842,9 @@ export default function App() {
                     <div key={i} className="ph-row" style={S.row} onClick={() => callNow(d.ext)}>
                       <Ava txt={initials(d.name || d.ext)} size={40} bg="linear-gradient(160deg,#7c9be0,#4f6fc9)" />
                       <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{d.name || d.ext}</div><div style={{ fontSize: 12, color: C.sub }}>{d.ext}{d.webrtc ? ' · WebRTC' : ''}</div></div>
-                      <span style={{ marginLeft: 'auto', ...S.chip(d.status === 'online' ? 'rgba(34,197,94,.14)' : d.status === 'in_call' ? 'rgba(245,158,11,.15)' : '#eef1f7', d.status === 'online' ? '#15803d' : d.status === 'in_call' ? '#b45309' : C.sub) }}>{d.status === 'online' ? 'en línea' : d.status === 'in_call' ? 'en llamada' : 'offline'}</span>
+                      <span style={{ marginLeft: 'auto', ...S.chip(d.status === 'online' ? 'rgba(43,217,90,.14)' : d.status === 'in_call' ? 'rgba(245,158,11,.15)' : '#eef1f7', d.status === 'online' ? '#15803d' : d.status === 'in_call' ? '#b45309' : C.sub) }}>{d.status === 'online' ? 'en línea' : d.status === 'in_call' ? 'en llamada' : 'offline'}</span>
                       <div style={{ display: 'flex', gap: 6, marginLeft: 8 }} onClick={e => e.stopPropagation()}>
-                        <button title="Favorito" onClick={() => toggleFav(d.ext)} style={{ ...S.actBtn(favs.includes(String(d.ext)) ? '#f59e0b' : C.sub), fontSize: 15, lineHeight: 1, fontWeight: 700 }}>{favs.includes(String(d.ext)) ? '\u2605' : '\u2606'}</button>
+                        <button title="Favorito" onClick={() => toggleFav(d.ext)} style={{ ...S.actBtn(favs.includes(String(d.ext)) ? '#f0b429' : C.sub), fontSize: 15, lineHeight: 1, fontWeight: 700 }}>{favs.includes(String(d.ext)) ? '\u2605' : '\u2606'}</button>
                         <button title="Supervisar" style={S.actBtn('#8b5cf6')} onClick={() => { setSpyMsg(''); setSpyTarget(d); }}>{IcHead({ c: '#8b5cf6', s: 16 })}</button>
                         <button style={S.actBtn(C.accent)} onClick={() => callNow(d.ext, true)}>{IcVideo({ c: C.accent, s: 16 })}</button>
                         <button style={S.actBtn(C.green)} onClick={() => callNow(d.ext)}>{IcPhone({ c: C.green, s: 16 })}</button>
@@ -873,7 +890,7 @@ export default function App() {
                     </>)}
                     {cliTab === 'personas' && (Array.isArray(clientDet.persons) && clientDet.persons.length > 0 ? <div style={S.card}>{clientDet.persons.map((pr, i) => <div key={i} className="ph-row" style={S.row}><Ava txt={initials(pr.name)} size={34} bg="#4f6fc9" /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{pr.name}</div>{(pr.phone || pr.role) && <div style={{ fontSize: 12, color: C.sub }}>{[pr.role, pr.phone].filter(Boolean).join(' · ')}</div>}</div>{pr.phone && <button style={S.actBtn(C.green)} onClick={() => callNow(String(pr.phone))}>{IcPhone({ c: C.green, s: 16 })}</button>}</div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin personas autorizadas.</div>)}
                     {cliTab === 'espacios' && (Array.isArray(clientDet.spaces) && clientDet.spaces.length > 0 ? <div style={S.card}>{clientDet.spaces.map((sx, i) => <div key={i} className="ph-row" style={S.row}>{IcGrid({ c: C.sub, s: 16 })}<div style={{ flex: 1 }}><b>{sx.name}</b>{sx.notes ? <div style={{ fontSize: 12, color: C.sub }}>{sx.notes}</div> : null}</div></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin espacios.</div>)}
-                    {cliTab === 'disp' && (Array.isArray(clientDet.devices) && clientDet.devices.length > 0 ? <div style={S.card}>{clientDet.devices.map((d, i) => <div key={i} className="ph-row" style={S.row}>{IcCam({ c: C.sub, s: 18 })}<div style={{ flex: 1 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}</div></div><button onClick={() => { setSelClient(clientDet); setTab('intercom'); }} style={{ ...S.chip('rgba(47,128,255,.12)', '#1d4ed8'), border: 'none', cursor: 'pointer' }}>Ver en vivo</button></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin dispositivos.</div>)}
+                    {cliTab === 'disp' && (Array.isArray(clientDet.devices) && clientDet.devices.length > 0 ? <div style={S.card}>{clientDet.devices.map((d, i) => <div key={i} className="ph-row" style={S.row}>{IcCam({ c: C.sub, s: 18 })}<div style={{ flex: 1 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}</div></div><button onClick={() => { setSelClient(clientDet); setTab('intercom'); }} style={{ ...S.chip('rgba(26,115,242,.12)', '#1d4ed8'), border: 'none', cursor: 'pointer' }}>Ver en vivo</button></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin dispositivos.</div>)}
                     </div>
                   </div>}
               </div>
@@ -908,7 +925,7 @@ export default function App() {
                         <div key={i} className="ph-row" style={S.row}>
                           <Ava txt="" size={38} bg="#0f1a30" />
                           <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}{d.src ? ' · ' + d.src : ''}</div></div>
-                          <button onClick={() => { setSelClient(selClient); setTab('intercom'); }} style={{ marginLeft: 'auto', ...S.chip('rgba(47,128,255,.12)', '#1d4ed8'), border: 'none', cursor: 'pointer' }}>{IcCam({ c: '#1d4ed8', s: 14 })} Ver en vivo</button>
+                          <button onClick={() => { setSelClient(selClient); setTab('intercom'); }} style={{ marginLeft: 'auto', ...S.chip('rgba(26,115,242,.12)', '#1d4ed8'), border: 'none', cursor: 'pointer' }}>{IcCam({ c: '#1d4ed8', s: 14 })} Ver en vivo</button>
                         </div>))}
                 </div>
               </div>
@@ -934,8 +951,8 @@ export default function App() {
 
                   {aTab === 'registro' && <Section>
                     <div style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
-                      <button onClick={() => setCfg(c => ({ ...c, transport: 'webrtc' }))} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${!sipMode ? C.accent : C.line}`, background: !sipMode ? 'rgba(47,128,255,.1)' : '#fff', color: !sipMode ? '#1d4ed8' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>WebRTC (WSS/WS)</button>
-                      <button onClick={() => { if (!window.sphone) { alert('El modo SIP UDP/TCP solo funciona en la app de Windows (Electron).'); return; } setCfg(c => ({ ...c, transport: 'sip' })); }} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${sipMode ? C.accent : C.line}`, background: sipMode ? 'rgba(47,128,255,.1)' : '#fff', color: sipMode ? '#1d4ed8' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>SIP UDP/TCP/TLS</button>
+                      <button onClick={() => setCfg(c => ({ ...c, transport: 'webrtc' }))} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${!sipMode ? C.accent : C.line}`, background: !sipMode ? 'rgba(26,115,242,.1)' : '#fff', color: !sipMode ? '#1d4ed8' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>WebRTC (WSS/WS)</button>
+                      <button onClick={() => { if (!window.sphone) { alert('El modo SIP UDP/TCP solo funciona en la app de Windows (Electron).'); return; } setCfg(c => ({ ...c, transport: 'sip' })); }} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${sipMode ? C.accent : C.line}`, background: sipMode ? 'rgba(26,115,242,.1)' : '#fff', color: sipMode ? '#1d4ed8' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>SIP UDP/TCP/TLS</button>
                     </div>
                     {sipMode ? (<>
                       {F('Servidor SIP (host o IP)', 'sipServer', 'text', '192.168.1.10')}
@@ -984,7 +1001,7 @@ export default function App() {
                             ? 'Lo entrega la central' + (iceInfo.origen ? ' · origen «' + iceInfo.origen + '»' : '')
                             : iceInfo.fuente === 'manual' ? 'Cargado a mano en este aparato' : 'Sin servidores ICE';
                           const cuando = iceInfo.at ? new Date(iceInfo.at).toLocaleString() : '';
-                          const col = iceInfo.fuente === 'central' ? C.green : iceInfo.fuente === 'manual' ? '#f59e0b' : C.red;
+                          const col = iceInfo.fuente === 'central' ? C.green : iceInfo.fuente === 'manual' ? '#f0b429' : C.red;
                           return (
                             <div style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${col}`, borderRadius: 9, padding: '10px 12px', marginBottom: 10, background: '#fff' }}>
                               <div style={{ fontWeight: 700, fontSize: 13 }}>{desde}</div>
@@ -1003,7 +1020,7 @@ export default function App() {
                         <div style={{ fontSize: 11.5, color: C.sub, margin: '2px 0 6px' }}>Respaldo manual (sólo se usa si la central no contesta):</div>
                         {F('STUN', 'stun')}{F('TURN', 'turn', 'text', 'turn:host:3478')}{F('TURN usuario', 'turnUser')}
                         <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>TURN clave</div><input style={S.inp} type="password" value={cfg.turnPass || ''} onChange={e => setCfg(c => ({ ...c, turnPass: e.target.value }))} /></div>
-                        <button onClick={() => { sounds.uiClick(); saveConfig(cfg); runTurnTest(); }} style={{ width: '100%', marginTop: 8, padding: 10, borderRadius: 9, border: `1px solid ${C.accent}`, background: 'rgba(47,128,255,.06)', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600 }}>Probar TURN ahora</button>
+                        <button onClick={() => { sounds.uiClick(); saveConfig(cfg); runTurnTest(); }} style={{ width: '100%', marginTop: 8, padding: 10, borderRadius: 9, border: `1px solid ${C.accent}`, background: 'rgba(26,115,242,.06)', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600 }}>Probar TURN ahora</button>
                       </div>
                       {(() => {
                         const t = turnT || { state: 'idle' };
@@ -1011,12 +1028,12 @@ export default function App() {
                         const inUse = sp.usingRelay === true;
                         const ok = t.state === 'ok';
                         const bad = t.state === 'turn-auth' || t.state === 'turn-unreachable' || t.state === 'error';
-                        const col = ok ? C.green : bad ? C.red : configured ? '#f59e0b' : '#c2c9d6';
+                        const col = ok ? C.green : bad ? C.red : configured ? '#f0b429' : '#c2c9d6';
                         const title = t.state === 'testing' ? 'Probando…' : ok ? (inUse ? 'TURN en uso' : 'TURN operativo') : t.state === 'turn-auth' ? 'Credenciales rechazadas' : t.state === 'turn-unreachable' ? 'TURN no responde' : t.state === 'error' ? 'Error' : configured ? 'Sin probar' : 'TURN off';
                         const sub = t.state === 'testing' ? 'levantando ICE…' : ok ? (inUse ? 'la llamada pasa por relay' : 'alcanzable y autenticado') : t.state === 'turn-auth' ? (iceInfo.fuente === 'central' ? 'la central dio esta credencial y el relay la rechazó (401)' : 'usuario/clave inválidos (401): probá actualizar desde la central') : t.state === 'turn-unreachable' ? 'no llegó candidato relay' : configured ? 'tocá "Probar TURN ahora"' : 'sin configurar';
                         return (
                           <div style={{ width: 160, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderLeft: `1px solid ${C.line}`, paddingLeft: 18, textAlign: 'center' }}>
-                            <div className={(ok && inUse) ? 'turn-live' : ''} style={{ width: 88, height: 88, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: ok ? 'rgba(34,197,94,.12)' : bad ? 'rgba(239,68,68,.1)' : '#f1f3f8' }}>
+                            <div className={(ok && inUse) ? 'turn-live' : ''} style={{ width: 88, height: 88, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: ok ? 'rgba(43,217,90,.12)' : bad ? 'rgba(239,68,68,.1)' : '#f1f3f8' }}>
                               {t.state === 'testing' ? <span className="spin" style={{ width: 30, height: 30, borderRadius: '50%', border: '3px solid #dbe3ef', borderTopColor: C.accent, display: 'block' }} /> : IcAudioCloud({ c: col, s: 46 })}
                             </div>
                             <div style={{ marginTop: 10, fontWeight: 700, fontSize: 13, color: ok ? '#15803d' : bad ? C.red : C.sub }}>{title}</div>
@@ -1044,9 +1061,9 @@ export default function App() {
                         </div>); })()}
                   </Section>}
 
-                  {aTab === 'sistema' && <Section title="INTEGRACIÓN CON EL SISTEMA" icon={IcUsers({ c: C.sub, s: 14 })} right={apiOn ? <span style={S.chip('rgba(34,197,94,.14)', '#15803d')}>conectado</span> : null}>
+                  {aTab === 'sistema' && <Section title="INTEGRACIÓN CON EL SISTEMA" icon={IcUsers({ c: C.sub, s: 14 })} right={apiOn ? <span style={S.chip('rgba(43,217,90,.14)', '#15803d')}>conectado</span> : null}>
                     {apiOn ? (
-                      <div style={{ padding: '10px 0' }}><div style={{ fontSize: 13 }}>Conectado como <b>{api.getApiUser()}</b>. Contactos, Clientes, Intercom y grabaciones activos.</div><button onClick={apiDisconnect} style={{ marginTop: 10, background: 'none', border: `1px solid ${C.line}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: C.red }}>Desconectar</button><button onClick={() => { setShowProv(true); setProvExt(''); setProvQr(''); setProvErr(''); setProvUrl(''); }} style={{ marginTop: 10, marginLeft: 8, background: 'rgba(47,128,255,.08)', border: `1px solid ${C.accent}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: '#1d4ed8', fontWeight: 600 }}>Aprovisionar teléfono (QR)</button></div>
+                      <div style={{ padding: '10px 0' }}><div style={{ fontSize: 13 }}>Conectado como <b>{api.getApiUser()}</b>. Contactos, Clientes, Intercom y grabaciones activos.</div><button onClick={apiDisconnect} style={{ marginTop: 10, background: 'none', border: `1px solid ${C.line}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: C.red }}>Desconectar</button><button onClick={() => { setShowProv(true); setProvExt(''); setProvQr(''); setProvErr(''); setProvUrl(''); }} style={{ marginTop: 10, marginLeft: 8, background: 'rgba(26,115,242,.08)', border: `1px solid ${C.accent}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: '#1d4ed8', fontWeight: 600 }}>Aprovisionar teléfono (QR)</button></div>
                     ) : (<>
                       <div style={{ padding: '8px 0', borderBottom: `1px solid ${C.line}` }}><div style={S.fieldLbl}>URL del sistema</div><input style={S.inp} value={apiForm.base} onChange={e => setApiForm(f => ({ ...f, base: e.target.value }))} placeholder={api.baseFromWss(cfg.wss) || 'https://pbx01.tu-dominio'} /></div>
                       <div style={{ padding: '8px 0', borderBottom: `1px solid ${C.line}` }}><div style={S.fieldLbl}>Usuario del panel</div><input style={S.inp} value={apiForm.user} onChange={e => setApiForm(f => ({ ...f, user: e.target.value }))} autoCapitalize="off" /></div>
@@ -1062,7 +1079,32 @@ export default function App() {
                     <ToggleRow label="Timbre de llamada" desc="Tono de ring al recibir y al llamar." on={ring} onChange={setRing} />
                     <ToggleRow label="Sonidos de interfaz" desc="Clicks del teclado y de las acciones." on={soundsUi} onChange={setSoundsUi} />
                     <ToggleRow label="Mostrar Intercom" desc="Muestra u oculta cámaras/porteros en el menú." on={showIntercom} onChange={setShowIntercom} />
-                    {window.sphone && <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 2px' }}><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 14, color: C.ink }}>Actualizaciones</div><div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>Versión actual {APP_VERSION}.</div></div><button onClick={() => { setUpd({ state: 'checking' }); try { window.sphone.updateCheck(); } catch {} }} style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${C.accent}`, background: '#fff', color: '#1d4ed8', fontWeight: 600, cursor: 'pointer' }}>Buscar</button></div>}
+                    {window.sphone && (() => {
+                      /* El estado del chequeo se ve ACA, no en un aviso que se va solo: el que
+                         aprieta «Buscar» esta mirando esta fila y espera una respuesta. */
+                      const e = upd && upd.state;
+                      const txt = e === 'checking' ? 'Buscando…'
+                        : e === 'available' ? 'Hay una version nueva: v' + (upd.version || '?') + ' · bajando…'
+                          : e === 'downloading' ? 'Bajando… ' + (upd.percent || 0) + '%'
+                            : e === 'downloaded' ? 'v' + (upd.version || '') + ' lista: se instala al cerrar'
+                              : e === 'none' ? 'Estas al dia.'
+                                : e === 'error' ? ('No se pudo consultar: ' + (upd.msg || 'error')) : '';
+                      const col = e === 'error' ? C.red : e === 'downloaded' || e === 'available' ? '#1d4ed8' : C.sub;
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 2px' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14, color: C.ink }}>Actualizaciones</div>
+                            <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>Version actual {APP_VERSION}.{' '}
+                              <span style={{ color: col }}>{txt}</span>
+                            </div>
+                          </div>
+                          {e === 'downloaded'
+                            ? <button onClick={() => { try { window.sphone.updateInstall(); } catch {} }} style={{ padding: '8px 16px', borderRadius: 10, border: 'none', background: C.green, color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Instalar y reiniciar</button>
+                            : <button disabled={e === 'checking' || e === 'downloading'} onClick={() => { setUpd({ state: 'checking' }); setUpdateFeed(); try { window.sphone.updateCheck(); } catch {} }}
+                              style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${C.accent}`, background: '#fff', color: '#1d4ed8', fontWeight: 600, cursor: e === 'checking' ? 'default' : 'pointer', opacity: e === 'checking' || e === 'downloading' ? .6 : 1 }}>Buscar</button>}
+                        </div>
+                      );
+                    })()}
                   </Section>}
                 </div>
                 <div style={{ textAlign: 'center', color: C.sub, fontSize: 12, marginTop: 16 }}>PBX-NG Softphone {APP_VERSION} · sirve con cualquier central con internos WebRTC.</div>
@@ -1076,6 +1118,12 @@ export default function App() {
               elementos y sólo cambia su contenido. Antes cada estado era un bloque que
               aparecía de golpe, y el cambio —sobre todo el instante en que el otro
               atiende— no se notaba. */}
+          {/* La pantalla de llamada tapa TODA la ventana: el menu lateral y la barra de
+              titulo clara quedan afuera. Antes convivian —franja clara arriba, menu azul a
+              la izquierda, llamada oscura en el medio, y dos juegos de botones de ventana
+              uno encima del otro—: parecian dos aplicaciones pegadas. Durante una llamada
+              no hay nada que navegar. */}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: (sp.incoming || sp.inCall || finCall) ? 'block' : 'none' }}>
           {(sp.incoming || sp.inCall || finCall) && (() => {
             const ci = sp.callInfo || {};
             const entrante = !!sp.incoming;
@@ -1176,6 +1224,7 @@ export default function App() {
               />
             );
           })()}
+          </div>
 
           {xfer && (
             <div className="call-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(6,10,20,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }} onClick={() => setXfer(false)}>
@@ -1287,9 +1336,9 @@ export default function App() {
                 {accts.length === 0 ? <div style={{ fontSize: 13, color: C.sub, padding: '6px 0 12px' }}>No hay cuentas guardadas. Guardá la actual para cambiar rápido entre internos.</div> :
                   accts.map(a => { const active = isComplete(cfg) && a.id === acctId(cfg); return (
                     <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: `1px solid ${C.line}` }}>
-                      <Ava txt={initials(a.label)} size={36} bg={active ? 'linear-gradient(160deg,#22c55e,#16a34a)' : 'linear-gradient(160deg,#7c9be0,#4f6fc9)'} />
-                      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{a.label}{active && <span style={{ marginLeft: 8, fontSize: 10, background: 'rgba(34,197,94,.15)', color: '#15803d', borderRadius: 8, padding: '1px 7px' }}>activa</span>}</div><div style={{ fontSize: 12, color: C.sub }}>{a.id}{a.api && a.api.token ? ' · CRM' : ''}</div></div>
-                      {!active && <button onClick={() => switchAccount(a)} style={{ ...S.chip('rgba(47,128,255,.1)', '#1d4ed8'), border: 'none', cursor: 'pointer', fontWeight: 600 }}>Usar</button>}
+                      <Ava txt={initials(a.label)} size={36} bg={active ? 'linear-gradient(160deg,#2bd95a,#1fa945)' : 'linear-gradient(160deg,#7c9be0,#4f6fc9)'} />
+                      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{a.label}{active && <span style={{ marginLeft: 8, fontSize: 10, background: 'rgba(43,217,90,.15)', color: '#15803d', borderRadius: 8, padding: '1px 7px' }}>activa</span>}</div><div style={{ fontSize: 12, color: C.sub }}>{a.id}{a.api && a.api.token ? ' · CRM' : ''}</div></div>
+                      {!active && <button onClick={() => switchAccount(a)} style={{ ...S.chip('rgba(26,115,242,.1)', '#1d4ed8'), border: 'none', cursor: 'pointer', fontWeight: 600 }}>Usar</button>}
                       <button onClick={() => removeAccount(a.id)} title="Eliminar" style={S.actBtn(C.red)}>{IcX({ c: C.red, s: 15 })}</button>
                     </div>); })}
                 <button onClick={saveCurrentAccount} disabled={!isComplete(cfg)} style={{ ...S.primary, marginTop: 14, opacity: isComplete(cfg) ? 1 : .5 }}>Guardar la cuenta actual</button>
@@ -1305,7 +1354,7 @@ export default function App() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
                     <Ava photo={photo} txt={isComplete(cfg) ? initials(cfg.ext) : '·'} size={72} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <label style={{ ...S.chip('rgba(47,128,255,.12)', '#1d4ed8'), cursor: 'pointer' }}>Subir foto<input type="file" accept="image/*" style={{ display: 'none' }} onChange={onPhoto} /></label>
+                      <label style={{ ...S.chip('rgba(26,115,242,.12)', '#1d4ed8'), cursor: 'pointer' }}>Subir foto<input type="file" accept="image/*" style={{ display: 'none' }} onChange={onPhoto} /></label>
                       {photo && <button onClick={clearPhoto} style={{ background: 'none', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>Quitar foto</button>}
                     </div>
                   </div>
@@ -1323,7 +1372,7 @@ export default function App() {
                 <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <button onClick={() => doSpy('listen')} style={{ ...S.primary, background: '#4f46e5', textAlign: 'left', paddingLeft: 16 }}>🎧 Escuchar <span style={{ fontWeight: 400, opacity: .8 }}>· ninguno te oye</span></button>
                   <button onClick={() => doSpy('whisper')} style={{ ...S.primary, background: '#8b5cf6', textAlign: 'left', paddingLeft: 16 }}>🤫 Susurrar <span style={{ fontWeight: 400, opacity: .8 }}>· solo te oye tu agente</span></button>
-                  <button onClick={() => doSpy('barge')} style={{ ...S.primary, background: '#f59e0b', textAlign: 'left', paddingLeft: 16 }}>📢 Irrumpir <span style={{ fontWeight: 400, opacity: .8 }}>· entrás a la llamada</span></button>
+                  <button onClick={() => doSpy('barge')} style={{ ...S.primary, background: '#f0b429', textAlign: 'left', paddingLeft: 16 }}>📢 Irrumpir <span style={{ fontWeight: 400, opacity: .8 }}>· entrás a la llamada</span></button>
                   <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>La central te va a llamar; atendé para monitorear.</div>
                   {spyMsg && <div style={{ fontSize: 12, color: /error/i.test(spyMsg) ? C.red : '#15803d' }}>{spyMsg}</div>}
                 </div>
