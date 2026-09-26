@@ -30,6 +30,9 @@ export default function ProveedoresNube() {
   const [baseSaving, setBaseSaving] = useState(false);
   const [modelos, setModelos] = useState(null);
   const [cargando, setCargando] = useState(false);
+  /* «¿Podemos atender una llamada ahora?» — la central lo prueba cada 15 minutos. No es el
+   * saldo (el proveedor no lo publica): es la pregunta útil. */
+  const [salud, setSalud] = useState(null); const [revisando, setRevisando] = useState(false);
 
   async function cargar() {
     try {
@@ -44,7 +47,15 @@ export default function ProveedoresNube() {
     catch (_) { setModelos({ ok: false, error: 'no se pudo consultar', modelos: [] }); }
     setCargando(false);
   }
-  useEffect(() => { cargar().then(cargarModelos); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  async function cargarSalud() {
+    try { const l = await fetch('/backend/api/ai-agents/live').then(r => r.json()); setSalud(l.salud || null); } catch (_) {}
+  }
+  async function revisarAhora() {
+    setRevisando(true);
+    try { setSalud(await fetch('/backend/api/ai-agents/salud', { method: 'POST' }).then(r => r.json())); } catch (_) {}
+    setRevisando(false);
+  }
+  useEffect(() => { cargar().then(cargarModelos); cargarSalud(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function guardar(campo, valor, setLoading) {
     setLoading(true);
@@ -73,8 +84,13 @@ export default function ProveedoresNube() {
                 <Text fz={11} c="dimmed">Voz a voz (GPT-Live / Realtime) y el pipeline de tres pasos</Text>
               </div>
             </Group>
-            <Badge variant="light" color={keySet ? 'teal' : 'gray'} leftSection={keySet ? <IconCircleCheck size={12} /> : <IconAlertTriangle size={12} />}>
-              {keySet ? 'Conectado' : 'Sin clave'}
+            <Badge variant="light" color={!salud ? (keySet ? 'gray' : 'gray') : salud.estado === 'ok' ? 'teal' : salud.estado === 'sin_clave' ? 'gray' : 'red'}
+              leftSection={salud && salud.estado === 'ok' ? <IconCircleCheck size={12} /> : <IconAlertTriangle size={12} />}>
+              {!salud ? (keySet ? 'Clave cargada' : 'Sin clave')
+                : salud.estado === 'ok' ? 'Puede atender'
+                  : salud.estado === 'sin_saldo' ? 'Sin crédito'
+                    : salud.estado === 'clave' ? 'Clave rechazada'
+                      : salud.estado === 'sin_clave' ? 'Sin clave' : 'Con problemas'}
             </Badge>
           </Group>
 
@@ -90,6 +106,20 @@ export default function ProveedoresNube() {
             <Button size="sm" variant="default" leftSection={<IconDeviceFloppy size={15} />} loading={baseSaving}
               onClick={() => guardar('realtime_url', base, setBaseSaving)}>Guardar</Button>
           </Group>
+
+          <Card withBorder radius="md" padding="xs" mt="md" bg="var(--mantine-color-default-hover)">
+            <Group justify="space-between" wrap="nowrap">
+              <div style={{ minWidth: 0 }}>
+                <Text fz="xs" fw={600}>{salud ? salud.que : '¿La cuenta puede atender una llamada?'}</Text>
+                <Text fz={11} c="dimmed">
+                  {salud
+                    ? (salud.arreglo || ('Probado con ' + (salud.probado_con || 'un modelo chico') + ' · ' + new Date(salud.ts).toLocaleString('es-UY')))
+                    : 'La central lo prueba sola cada 15 minutos. No es el saldo —el proveedor no lo publica— sino si una llamada que entre ahora se va a poder atender.'}
+                </Text>
+              </div>
+              <Button size="compact-xs" variant="light" loading={revisando} onClick={revisarAhora}>Revisar ahora</Button>
+            </Group>
+          </Card>
 
           <Group gap={6} mt="sm" wrap="nowrap">
             <IconShieldLock size={13} style={{ opacity: .5, flexShrink: 0 }} />

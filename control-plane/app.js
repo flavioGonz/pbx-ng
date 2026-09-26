@@ -1254,6 +1254,42 @@ app.post('/api/net/mode/revert', async (req, res) => {
 /* Qué están haciendo las sesiones de IA AHORA, con su latencia. Es el número que decide
  * si un agente de voz es usable: no el uso de CPU, sino cuánto silencio escucha la
  * persona antes de que el agente conteste. Sólo admin (cae en el default del RBAC). */
+/* ── Latido del proveedor ──────────────────────────────────────────────────────
+ * Cada 15 minutos se prueba si la cuenta puede atender una llamada. No se lee el saldo
+ * —el proveedor no publica eso— sino que se hace la pregunta útil: ¿una llamada que entre
+ * ahora se va a poder atender? Cuesta una fracción de centavo, y cuando NO hay crédito no
+ * cuesta nada porque falla antes de generar.
+ *
+ * Se guarda en un ajuste para que el panel lo muestre sin consultar al proveedor cada vez
+ * que alguien abre la pantalla. */
+const saludProveedor = require('./proveedor-salud');
+let saludTimer = null;
+
+async function latidoProveedor() {
+  try {
+    const key = await getProvSetting('openai_api_key', '');
+    const modelo = await getProvSetting('ia_modelo_chequeo', '');
+    const r = await saludProveedor.revisar({ key, modelo: modelo || undefined });
+    await pool.query(
+      "INSERT INTO pbxng_settings (key,value) VALUES ('ia_salud_proveedor',$1)"
+      + ' ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [JSON.stringify(r)]);
+    if (r.estado !== 'ok' && r.estado !== 'sin_clave') log.warn('proveedor de IA', { estado: r.estado, que: r.que });
+  } catch (e) { log.warn('latido del proveedor', { err: e.message }); }
+}
+/* El primero al minuto de arrancar: si la central se reinicia porque algo anda mal, que el
+ * panel tenga el diagnóstico antes de que alguien pregunte. */
+if (!saludTimer) {
+  setTimeout(latidoProveedor, 60000).unref?.();
+  saludTimer = setInterval(latidoProveedor, 15 * 60000);
+  if (saludTimer.unref) saludTimer.unref();
+}
+
+/* Forzar el chequeo desde el panel, para no esperar 15 minutos después de cargar saldo. */
+app.post('/api/ai-agents/salud', async (req, res) => {
+  try { await latidoProveedor(); const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='ia_salud_proveedor'"); res.json(JSON.parse(rows[0].value)); }
+  catch (e) { errorHttp(res, e); }
+});
+
 app.get('/api/ai-agents/live', async (req, res) => {
   try {
     /* Además de las sesiones, el último problema del proveedor: es lo que convierte
@@ -1263,7 +1299,12 @@ app.get('/api/ai-agents/live', async (req, res) => {
       const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='ia_ultimo_problema'");
       if (rows[0] && rows[0].value) problema = JSON.parse(rows[0].value);
     } catch (_) { problema = null; }
-    res.json({ sesiones: aiPipeline.metricas(), problema, ts: new Date().toISOString() });
+    let saludProv = null;
+    try {
+      const { rows } = await pool.query("SELECT value FROM pbxng_settings WHERE key='ia_salud_proveedor'");
+      if (rows[0] && rows[0].value) saludProv = JSON.parse(rows[0].value);
+    } catch (_) { saludProv = null; }
+    res.json({ sesiones: aiPipeline.metricas(), problema, salud: saludProv, ts: new Date().toISOString() });
   } catch (e) { errorHttp(res, e); }
 });
 

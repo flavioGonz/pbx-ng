@@ -78,7 +78,14 @@ export default function AiAgents() {
 
   async function load() {
     try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) { setList([]); }
-    try { const l = await fetch('/backend/api/ai-agents/live').then(r => r.json()); setProblema(l.problema || null); } catch (_) {}
+    try {
+      const l = await fetch('/backend/api/ai-agents/live').then(r => r.json());
+      /* El chequeo periódico manda sobre el último error visto en una llamada: si la cuenta
+       * ya se recuperó (cargaron saldo), el banner tiene que irse solo. */
+      if (l.salud && l.salud.estado !== 'ok' && l.salud.estado !== 'sin_clave') setProblema({ que: l.salud.que, arreglo: l.salud.arreglo, ts: l.salud.ts });
+      else if (l.salud && l.salud.estado === 'ok') setProblema(null);
+      else setProblema(l.problema || null);
+    } catch (_) {}
   }
   async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (_) {} }
   async function cargarModelos() {
