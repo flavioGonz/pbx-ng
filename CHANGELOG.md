@@ -2,6 +2,38 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.0] - 2026-09-27
+### Added
+- **Portería por la propia central**: el video de los porteros (go2rtc) se sirve **a través de la
+  API** —HTTP y el WebSocket del video—, así que el softphone ve las cámaras desde donde ya ve el
+  panel. Antes go2rtc escuchaba en su puerto y había que abrirlo en el borde o tocar el proxy
+  inverso de cada cliente; mientras tanto el campo `go2rtc_url` quedaba vacío y el teléfono decía
+  «sin go2rtc_url · Sin señal» sin manera de adivinar que faltaba un ajuste escondido. Si nadie
+  configuró una URL a mano, la central se anuncia a sí misma. Cada stream se abre con la entrada
+  de un solo uso que ya existía (un minuto, un canal, se quema al usarla) en vez de mandar la
+  sesión en la URL; un token de softphone por ahí sólo puede mirar. (`control-plane/intercom-proxy.js`)
+- **Cortar una llamada desde el panel**: botón en *Llamadas en vivo* y en el wallboard, que
+  pregunta a quién va a cortar antes de hacerlo. Corta por ARI y, si ARI no está o el canal no le
+  responde, fuerza un `Hangup` por AMI —lo mismo que uno hace a mano en la consola— y el panel
+  avisa cuando tuvo que forzarlo.
+- **El APK de Android del softphone**: la misma aplicación web dentro de Capacitor, no una segunda
+  aplicación que mantener. El servidor no viene fijo adentro (se aprovisiona por QR), así que el
+  mismo APK sirve para todas las centrales. La central lo publica junto al instalador de Windows.
+- `docs/SOFTPHONE-PUBLICAR.md`: cómo se arma y se publica cada teléfono.
+### Changed
+- **Los instaladores del teléfono salieron de la imagen**: `docker/softphone/` es una carpeta del
+  host montada en el contenedor `api`. Publicar una versión nueva es dejar el archivo ahí —antes
+  había que reconstruir la imagen, y por eso el login mostraba durante semanas una versión vieja—.
+- El login reparte **Windows y Android** en la misma fila, con botones de tamaño de verdad: el que
+  entra por primera vez a una central tiene que poder instalarse el teléfono sin buscarlo.
+- El panel estrena el **icono de PBX-NG** (venía con el de otro producto).
+### Fixed
+- **Llamadas que quedaban colgadas para siempre**: al reiniciarse la API —o sea, en cada
+  despliegue— la llamada que estaba hablando con un agente de IA quedaba parada dentro de la
+  aplicación Stasis esperando órdenes de un proceso que ya no existe. El interno quedaba ocupado y
+  el panel la mostraba hablando eternamente. El barrido de huérfanos ahora también levanta el
+  canal del que llamó, con un minuto de gracia y sin tocar jamás uno que una sesión viva reclame.
+
 ## [1.13.0] - 2026-09-23
 ### Added
 - **`/api/v1`: el contrato público con sistemas** (Tanda 1 de la auditoría de entrega). No es

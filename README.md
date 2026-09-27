@@ -32,7 +32,7 @@ Todo se administra desde un **dashboard web** en tiempo real.
 - [Características](#características)
 - [Instalación](#instalación)
 - [Firewall y NAT (requisito)](#firewall-y-nat-requisito)
-- [Softphone de escritorio (Windows)](#softphone-de-escritorio-windows)
+- [Softphone de escritorio y Android](#softphone-de-escritorio-y-android)
 - [Configuración](#configuración)
 - [Estructura del repositorio](#estructura-del-repositorio)
 - [Desarrollo](#desarrollo)
@@ -109,6 +109,8 @@ La seguridad perimetral, el LCR con failover, la salud de operadores, la manipul
 - **Telefonía clásica de oficina (desde 1.9.0)**: horarios de atención con tramos, feriados (anuales y puntuales) y modo noche `auto|abierto|cerrado` aplicados a cada ruta entrante (`GotoIfTime` generado desde el panel); **desvíos** incondicional / si ocupado / si no contesta, **no molestar** y **sígueme** por interno, configurables desde el panel o desde el teléfono; y un **catálogo de 15 códigos de función con el código editable** (`*78`, `*21*…`, `*24*…`, `*28`…). La verdad vive en PostgreSQL y Asterisk la lee en caliente de la AstDB: cambiar un desvío no recarga el dialplan.
 - **Licitaciones y clientes medianos (desde 1.10.0)**: **reportes de call center** (nivel de servicio, abandono, esperas y conversación por cola y por agente, con CSV, informe A4 y envío programado por correo, calculados sobre los eventos de cola del AMI y no sobre el CDR); **failover de troncal** (una principal más una lista ordenada de respaldos, que salta sólo cuando el corte es de la troncal y no cuando lo dijo el destino); **DISA, callback, directorio por nombre y marcación abreviada** (el PIN en bcrypt en Postgres, nunca en el dialplan; DISA y callback nacen apagados); y **salas de reunión** con dos PIN, agenda, invitación por correo y moderación en vivo.
 - **Medio y plataforma (desde 1.11.0)**: el **coturn propio viene encendido de fábrica** y el **origen del TURN se elige desde el panel** —propio, el del SBC-NG o uno externo, **uno solo a la vez**—, con estado medido y sonda de verdad (STUN + Allocate firmado, UDP y TCP: un relay en una dirección que ningún cliente puede usar sale FALLA, no OK). El **STUN por defecto es el propio appliance**, no un servicio público. El módulo **Portería** (antes «Intercom») estrena grupo propio en el menú, con edición y prueba de porteros y las credenciales RTSP tapadas. La **AstDB dejó de ser efímera** (volumen `asterisk_db`). Y el **fax sale del producto** por decisión de producto: no va más en PBX-NG.
+- **Portería y cámaras por la propia central (desde 1.20.0)**: el video de los porteros (go2rtc) se sirve **a través de la API**, no por un puerto aparte —ni HTTP ni el WebSocket del video salen del `443` de la central—, así que el softphone ve las cámaras desde donde ya ve el panel, sin abrir puertos en el borde ni tocar el proxy inverso de cada cliente. Cada stream se abre con una **entrada de un solo uso** (un minuto, un canal, se quema al usarla) en vez de mandar la sesión en la URL; un token de softphone por ahí sólo puede mirar.
+- **Cortar una llamada desde el panel (desde 1.20.0)**: botón en *Llamadas en vivo* y en el wallboard, con confirmación que dice a quién va a cortar. Corta por ARI y, si ARI no responde, fuerza un `Hangup` por AMI —lo mismo que uno hace a mano en la consola— y avisa cuando tuvo que forzarlo. Además, las llamadas que quedaban colgadas dentro de la aplicación de IA cuando se reiniciaba la API (o sea, en cada despliegue) ahora las levanta solo un barrido, con un minuto de gracia.
 - Grabación por interno o global (local/NAS/S3) con transcripción y análisis.
 - **Buzón de voz activado por defecto** en cada interno, con **PIN al azar de seis dígitos** (desde 1.11.0; antes el PIN era el número del buzón, o sea ninguno). `*97` escucha el propio sin PIN —la identidad sale del endpoint que autenticó, no del CallerID— y `*98` entra al de otro pidiendo buzón y PIN. MWI vía SUBSCRIBE/NOTIFY y buzón visual en el softphone.
 - **Audios de la central en español rioplatense (voz uruguaya)**: los 326 prompts de Asterisk (buzón, números, fechas, colas, conferencias, directorio, agentes) generados con el TTS propio. Se regeneran con otra voz en un comando: `scripts/gen-sounds.py --voice es-UY-MateoNeural`.
@@ -261,28 +263,54 @@ scripts/check-turn.py --env docker/.env --tcp            # verificar el TURN a m
 Trampas frecuentes (port-forward incompleto, `external-ip` mal seteada, **NAT hairpin**, cómo
 leer los errores ICE `701` vs `401`) y recetas de router: **[`docs/FIREWALL.md`](docs/FIREWALL.md)**.
 
-## Softphone de escritorio (Windows)
+## Softphone de escritorio y Android
 
 Además del softphone WebRTC embebido en el panel y de la PWA, el repo trae un **softphone
-standalone** (`softphone-app/`) que se instala como aplicación de escritorio y **registra
-contra cualquier PBX**, no solo PBX-NG:
+standalone** (`softphone-app/`) que **registra contra cualquier PBX**, no sólo PBX-NG. Una sola
+base de código, tres formas de correrlo: aplicación de escritorio (Electron/Windows), APK de
+Android (Capacitor) y PWA.
 
 - **Doble motor**: WebRTC (WSS, SIP.js) o **SIP nativo** (UDP/TCP/TLS, RTP/SRTP propio) para
   centrales que no exponen WebSocket.
 - G.711 µ/A, DTMF RFC 4733 / SIP INFO, SDES-SRTP, REFER (transferencia ciega), DNS SRV, MWI,
   RTCP y estadísticas de calidad reales.
-- Ventana sin bordes, **mini-widget flotante** de llamada, re-registro al despertar el equipo,
-  buzón visual, CRM screen-pop, provisioning remoto por QR/`pbxng://`, config **cifrada** (DPAPI),
-  auto-update y diagnóstico ICE/TURN en vivo.
-- Empaquetado con Electron Builder (instalador NSIS en español, `.exe` + `.msi`).
+- **Pantalla de llamada de una sola pieza**: un componente para los cinco estados (entra,
+  marcando, hablando, en espera, terminada), que ocupa toda la ventana —durante una llamada no
+  hay nada que navegar—. En el centro, un **orbe animado que reacciona al audio del otro lado**:
+  su color es el estado (verde entra, azul hablando, ámbar en espera) y su movimiento sigue la
+  voz, así que si el otro habla y el orbe no se mueve, el audio no está llegando y se ve sin
+  abrir ningún diagnóstico. Todo se apaga con `prefers-reduced-motion`.
+- **Widget flotante** siempre visible: atender, cortar, silenciar, poner en espera, volumen, y
+  —sin abrir la ventana grande— un **teclado con buscador de contactos** de la central y el
+  **cambio de micrófono y altavoz** en plena llamada.
+- Ventana sin bordes, re-registro al despertar el equipo, buzón visual, CRM screen-pop,
+  **porteros y cámaras** (a través de la API de la central), provisioning remoto por
+  QR/`pbxng://`, config **cifrada** (DPAPI), auto-update y diagnóstico ICE/TURN en vivo.
 
 ```bash
 cd softphone-app
 npm install
 npm run dev        # desarrollo (Vite)
 npm run electron   # ventana de escritorio
-npm run dist       # instalador Windows en release/
+npm run dist       # instalador Windows en release/  (en Linux requiere wine64 + wine32:i386)
+
+# APK de Android (Capacitor: el mismo dist/ que usa Electron)
+npx cap sync android
+cd android && PBXNG_KEYSTORE=<ruta.jks> PBXNG_KEYSTORE_PASS=<clave> PBXNG_KEY_ALIAS=<alias> \
+  ./gradlew assembleRelease
 ```
+
+> La clave de firma del APK **no está en el repositorio** y no puede perderse: Android se niega a
+> actualizar una aplicación firmada con otra clave.
+
+### Cada central reparte su propio teléfono
+
+El instalador de Windows y el APK se sirven desde `https://<central>/descargas/softphone/`, y el
+botón del login muestra lo que haya ahí. Es una carpeta del host (`docker/softphone/`) montada en
+el contenedor `api` **a propósito**: publicar una versión nueva es dejar el archivo ahí, sin
+reconstruir la imagen ni reiniciar nada. `latest.yml` es además el feed de actualización
+automática, así que el teléfono ya instalado se actualiza contra **su** central, sin Internet ni
+GitHub de por medio. Receta completa en [`docs/SOFTPHONE-PUBLICAR.md`](docs/SOFTPHONE-PUBLICAR.md).
 
 ## Configuración
 
@@ -297,11 +325,11 @@ npm run dist       # instalador Windows en release/
 ```
 control-plane/     API Node/Express (ARI+AMI, Socket.io, auth JWT) + migraciones
 dashboard/         Frontend Next.js (admin + softphone web + paneles agente/supervisor)
-softphone-app/     Softphone standalone (Vite+React+SIP.js) -> PWA + Electron/Windows
+softphone-app/     Softphone standalone (Vite+React+SIP.js) -> PWA + Electron/Windows + Android (Capacitor)
 voice-service/     Microservicio de voz IA (Piper TTS + faster-whisper STT)
 docker/            docker-compose, install.sh multi-rol, release.sh/deploy.sh, pbxng-ctl
 deploy/            orquestador de despliegue en Proxmox (pbxng-proxmox.sh)
-docs/              FIREWALL.md · TOPOLOGY.md · PACKAGING.md · schema de referencia
+docs/              FIREWALL.md · TOPOLOGY.md · PACKAGING.md · SOFTPHONE-PUBLICAR.md · schema de referencia
 scripts/           check-turn.py (sonda TURN real), verify-pbxng.sh, gen-sounds.py (audios es-UY)
 .github/workflows/ ci.yml (lint + tests + build en PR/main) · release.yml (imágenes a GHCR por tag v*, depende de ci) · softphone.yml (instalador Windows)
 VERSION · CHANGELOG.md · RELEASE.md · ROADMAP.md
