@@ -175,9 +175,33 @@ function createMini() {
   return mini;
 }
 function hideMini() { try { mini && mini.hide(); } catch (_) {} if (mainHiddenByMini) { mainHiddenByMini = false; showWin(); } }
+/* Timbrado con la ventana escondida: el widget SALE SOLO.
+ *
+ * Antes, con el softphone minimizado a la barra de tareas, una llamada entrante no se veia
+ * en ninguna parte: sonaba el tono y habia que ir a buscar la ventana. Ahora el widget
+ * aparece en la esquina con el nombre y los tres botones —rechazar, atender, atender con
+ * video—, y se va solo cuando la llamada termina. No robamos el foco (`showInactive`):
+ * si el usuario esta escribiendo en otra cosa, sigue escribiendo. */
+let miniPorTimbre = false;
+function ventanaALaVista() { try { return !!(win && win.isVisible() && !win.isMinimized()); } catch (_) { return false; } }
+function miniVisible() { try { return !!(mini && !mini.isDestroyed() && mini.isVisible()); } catch (_) { return false; } }
+function miniAutomatico(st) {
+  const timbra = !!(st && st.active && st.incoming);
+  if (timbra && !ventanaALaVista() && !miniVisible()) {
+    createMini();
+    try { mini.showInactive(); } catch (_) { try { mini.show(); } catch (_) {} }
+    try { mini.setAlwaysOnTop(true, 'floating'); } catch (_) {}
+    try { mini.webContents.send('mini-state', st); } catch (_) {}
+    /* A proposito NO se toca `mainHiddenByMini`: la ventana grande no la escondimos
+     * nosotros, asi que al cerrarse el widget no hay que volver a mostrarla. */
+    miniPorTimbre = true;
+  }
+  if (!(st && st.active) && miniPorTimbre) { miniPorTimbre = false; try { mini && !mini.isDestroyed() && mini.hide(); } catch (_) {} }
+}
 ipcMain.on('mini-state', (_e, st) => {
   miniState = st;
   try { mini && mini.webContents.send('mini-state', st); } catch (_) {}
+  miniAutomatico(st);
 });
 ipcMain.on('mini-ready', () => { try { mini && miniState && mini.webContents.send('mini-state', miniState); } catch (_) {} });
 ipcMain.handle('mini-show', (_e, on) => {
@@ -187,6 +211,7 @@ ipcMain.handle('mini-show', (_e, on) => {
       try { mini.showInactive(); } catch (_) { mini.show(); }
       try { mini.setAlwaysOnTop(true, 'floating'); } catch (_) {}
       if (miniState) { try { mini.webContents.send('mini-state', miniState); } catch (_) {} }
+      miniPorTimbre = false;
       if (win && win.isVisible()) { mainHiddenByMini = true; win.hide(); }
     } else hideMini();
   } catch (_) {}
@@ -214,7 +239,7 @@ ipcMain.on('mini-action', (_e, m) => {
     // estas acciones necesitan la ventana grande
     /* `dial` y `devices` ya no traen la ventana grande: el widget resuelve el teclado y
      * la elección de micrófono adentro. Queda sólo el video, que sí necesita pantalla. */
-    if (act === 'accept-video') { try { mini && mini.hide(); } catch (_) {} mainHiddenByMini = false; showWin(); }
+    if (act === 'accept-video') { miniPorTimbre = false; try { mini && mini.hide(); } catch (_) {} mainHiddenByMini = false; showWin(); }
   } catch (_) {}
 });
 

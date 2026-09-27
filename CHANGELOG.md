@@ -2,6 +2,32 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.1] - 2026-09-27
+### Fixed
+- **Las cámaras de los porteros ya se ven en el softphone.** El proxy le reenviaba a go2rtc el
+  `Origin` del navegador, y go2rtc contesta 403 a cualquier pedido cuyo `Origin` no sea el suyo
+  —es su defensa contra CSRF y está bien que la tenga—. El WebSocket del video moría con un
+  1006 seco y todas las cámaras decían «Sin señal», mientras que probando desde la línea de
+  comandos —sin `Origin`— funcionaba perfecto: de ahí que costara tanto encontrarlo. El cliente
+  acá no es el navegador sino el proxy, que ya verificó la sesión o la entrada de un solo uso
+  antes de hablar con go2rtc, así que sale el `Origin` (y el `Referer` y las cookies).
+  Medido contra pbx01: `wss` público con el `Origin` del panel, **4,45 MB en 9 s**.
+  (`control-plane/intercom-proxy.js`)
+
+### Softphone 0.10.0
+- **Timbrado con la ventana escondida**: el widget flotante **sale solo** cuando entra una
+  llamada y el softphone está minimizado, con los tres botones grandes —rechazar, atender y
+  atender con video— y se va solo cuando la llamada termina. No roba el foco: si estabas
+  escribiendo en otra cosa, seguís escribiendo. Antes, minimizado, una llamada entrante no se
+  veía en ninguna parte: sonaba el tono y había que ir a buscar la ventana.
+- **Entrada y salida de la llamada**: la pantalla crece un punto y medio al entrar y se va con
+  el mismo gesto al revés, un poco más rápido (190 ms). Antes desaparecía de un cuadro al otro
+  y se sentía un corte de video. Los botones y el reloj se van un pelo antes que el fondo.
+- **Tema oscuro, lo que faltaba**: la tarjeta de TURN en *Ajustes → Red*, los desplegables de
+  *Dispositivos*, el diálogo del QR de aprovisionamiento —que era una ventana clara encima de
+  una aplicación oscura—, la fila seleccionada en Contactos / Intercom / Clientes, la barra de
+  scroll, y los textos que estaban pensados para fondo claro y no se leían.
+
 ## [1.21.0] - 2026-09-27
 ### Added
 - **Portería por la propia central**: el video de los porteros (go2rtc) se sirve **a través de la

@@ -334,6 +334,7 @@ export default function CallScreen(p) {
     flags = {},          // { muted, held, videoOn, grabando, altavoz, pad, transfiriendo }
     extra = null,        // barras de estado (consulta en curso, conferencia, CRM…)
     ventana = null,      // controles de ventana del sistema
+    saliendo = false,    // la pantalla se esta yendo: se anima la salida antes de desmontar
   } = p;
 
   const timbrando = estado === 'entrante' || estado === 'marcando';
@@ -405,6 +406,7 @@ export default function CallScreen(p) {
 
   return (
     <div className={'cs-raiz'
+      + (saliendo ? ' cs-sale' : '')
       + (flags.pad ? ' cs-con-pad' : '')
       + (conBarra ? '' : ' cs-sin-barra')
       + (video ? ' cs-modo-video' : '')

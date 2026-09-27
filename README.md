@@ -282,7 +282,9 @@ Android (Capacitor) y PWA.
   abrir ningún diagnóstico. Todo se apaga con `prefers-reduced-motion`.
 - **Widget flotante** siempre visible: atender, cortar, silenciar, poner en espera, volumen, y
   —sin abrir la ventana grande— un **teclado con buscador de contactos** de la central y el
-  **cambio de micrófono y altavoz** en plena llamada.
+  **cambio de micrófono y altavoz** en plena llamada. Con el softphone minimizado el widget
+  **sale solo al timbrar**, con los tres botones grandes (rechazar, atender, atender con video),
+  y se va solo cuando la llamada termina; no roba el foco de lo que estabas haciendo.
 - Ventana sin bordes, re-registro al despertar el equipo, buzón visual, CRM screen-pop,
   **porteros y cámaras** (a través de la API de la central), provisioning remoto por
   QR/`pbxng://`, config **cifrada** (DPAPI), auto-update y diagnóstico ICE/TURN en vivo.

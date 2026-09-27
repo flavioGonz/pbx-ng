@@ -56,7 +56,7 @@ const IcReload = (p = {}) => <Svg {...p}><path d="M23 4v6h-6M1 20v-6h6" /><path 
  * menú es EL MISMO de la pantalla de llamada, y los colores de estado (verde = en línea o
  * atender, ámbar = en espera, rojo = cortar o error, azul = acción) son los mismos en la
  * ventana grande, en la pantalla de llamada y en el widget flotante. */
-const C = { rail: '#1a1d23', railHi: '#2b2f37', accent: '#1a73f2', green: '#2bd95a', amber: '#f0b429', red: '#eb4c46', ink: '#e9ebee', sub: '#8d929a', bg: '#1f2229', card: '#262a31', line: '#33373e', keybg: 'transparent' };
+const C = { rail: '#1a1d23', railHi: '#2b2f37', accent: '#1a73f2', green: '#2bd95a', amber: '#f0b429', red: '#eb4c46', ink: '#e9ebee', sub: '#8d929a', bg: '#1f2229', card: '#262a31', line: '#33373e', keybg: 'transparent', field: '#1f2229', sel: 'rgba(76,154,255,.15)', soft: '#2b2f37' };
 /* Circulo pastel con las iniciales en oscuro. El color sale del propio nombre, asi el
  * mismo contacto es siempre del mismo color y se reconoce antes de leerlo. */
 function Ava({ photo, txt, size = 44, bg, style }) {
@@ -121,14 +121,14 @@ function Timer({ since }) {
 function TurnChip({ cfg, sp, t }) {
   const configured = !!(cfg.turn && cfg.turnUser && cfg.turnPass);
   const st = (t && t.state) || 'idle';
-  let bg = '#eef1f7', fg = C.sub, label = 'Sin TURN', live = false;
-  if (sp.inCall && sp.usingRelay === true) { bg = 'rgba(43,217,90,.14)'; fg = '#15803d'; label = 'TURN en uso'; live = true; }
-  else if (sp.inCall && sp.usingRelay === false) { bg = 'rgba(26,115,242,.12)'; fg = '#1d4ed8'; label = 'Medios directos'; }
-  else if (st === 'testing') { bg = '#eef1f7'; fg = C.sub; label = 'Probando TURN…'; }
-  else if (st === 'ok') { bg = 'rgba(43,217,90,.12)'; fg = '#15803d'; label = 'TURN listo'; }
+  let bg = C.soft, fg = C.sub, label = 'Sin TURN', live = false;
+  if (sp.inCall && sp.usingRelay === true) { bg = 'rgba(43,217,90,.14)'; fg = '#4ade80'; label = 'TURN en uso'; live = true; }
+  else if (sp.inCall && sp.usingRelay === false) { bg = 'rgba(26,115,242,.12)'; fg = '#7cb0ff'; label = 'Medios directos'; }
+  else if (st === 'testing') { bg = C.soft; fg = C.sub; label = 'Probando TURN…'; }
+  else if (st === 'ok') { bg = 'rgba(43,217,90,.12)'; fg = '#4ade80'; label = 'TURN listo'; }
   else if (st === 'turn-auth') { bg = 'rgba(239,68,68,.1)'; fg = '#b91c1c'; label = 'TURN: auth falló'; }
   else if (st === 'turn-unreachable' || st === 'error') { bg = 'rgba(239,68,68,.1)'; fg = '#b91c1c'; label = 'TURN no responde'; }
-  else if (configured) { bg = 'rgba(26,115,242,.12)'; fg = '#1d4ed8'; label = 'TURN sin probar'; }
+  else if (configured) { bg = 'rgba(26,115,242,.12)'; fg = '#7cb0ff'; label = 'TURN sin probar'; }
   return <span className={live ? 'turn-live' : ''} style={S.chip(bg, fg)}>{IcShield({ c: fg, s: 14 })}{label}</span>;
 }
 function CtlBtn({ on, onClick, icon, iconOff, label }) {
@@ -225,10 +225,10 @@ function loadPref(k, d) { try { const o = JSON.parse(localStorage.getItem('sp_pr
 function ToggleRow({ label, desc, on, onChange }) {
   return <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 2px', borderBottom: `1px solid ${C.line}` }}>
     <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 14, color: C.ink }}>{label}</div>{desc && <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>{desc}</div>}</div>
-    <button onClick={() => onChange(!on)} aria-pressed={on} style={{ width: 46, height: 26, borderRadius: 20, border: 'none', cursor: 'pointer', background: on ? C.green : '#cbd5e1', position: 'relative', transition: 'background .18s', flex: 'none' }}><span style={{ position: 'absolute', top: 3, left: on ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.3)', transition: 'left .18s' }} /></button>
+    <button onClick={() => onChange(!on)} aria-pressed={on} style={{ width: 46, height: 26, borderRadius: 20, border: 'none', cursor: 'pointer', background: on ? C.green : '#3f444d', position: 'relative', transition: 'background .18s', flex: 'none' }}><span style={{ position: 'absolute', top: 3, left: on ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: C.card, boxShadow: '0 1px 3px rgba(0,0,0,.3)', transition: 'left .18s' }} /></button>
   </div>;
 }
-function DiagRow({ k, v, good }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.line}` }}><div style={{ fontSize: 13, color: C.sub, width: 132, flex: 'none' }}>{k}</div><div style={{ fontSize: 13, fontWeight: 600, color: good === true ? '#15803d' : C.ink, wordBreak: 'break-all' }}>{v}</div></div>; }
+function DiagRow({ k, v, good }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.line}` }}><div style={{ fontSize: 13, color: C.sub, width: 132, flex: 'none' }}>{k}</div><div style={{ fontSize: 13, fontWeight: 600, color: good === true ? '#4ade80' : C.ink, wordBreak: 'break-all' }}>{v}</div></div>; }
 const qLabel = (avg) => avg == null ? { t: 'sin datos', c: '#94a3b8' } : avg >= 3.5 ? { t: 'Excelente', c: '#2bd95a' } : avg >= 2.5 ? { t: 'Buena', c: '#1fa945' } : avg >= 1.5 ? { t: 'Regular', c: '#f0b429' } : { t: 'Mala', c: '#eb4c46' };
 const candLabel = (ct) => ct === 'relay' ? 'TURN (relay)' : ct === 'srflx' ? 'STUN (srflx)' : ct === 'prflx' ? 'peer-reflexive' : ct === 'host' ? 'directo (host)' : '—';
 const mpRow = { display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '10px 15px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13.5, color: 'inherit', textAlign: 'left' };
@@ -240,8 +240,8 @@ function WinCtl({ dark }) {
   const hasMini = !!(window.sphone && window.sphone.miniShow);
   return (
     <div style={{ display: 'flex', gap: 2, WebkitAppRegion: 'no-drag', marginLeft: 6 }}>
-      {hasMini && <button title="Modo mini (flotante)" style={base} onClick={() => { try { window.sphone.miniShow(true); } catch (_) {} }} onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,.1)' : '#eef1f7'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="14" rx="2" /><rect x="12" y="11" width="7" height="5" rx="1" /></svg></button>}
-      <button title="Minimizar" style={base} onClick={() => window.sphone.winMinimize()} onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,.1)' : '#eef1f7'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}><svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" strokeWidth="1.4" /></svg></button>
+      {hasMini && <button title="Modo mini (flotante)" style={base} onClick={() => { try { window.sphone.miniShow(true); } catch (_) {} }} onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,.1)' : C.soft; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="14" rx="2" /><rect x="12" y="11" width="7" height="5" rx="1" /></svg></button>}
+      <button title="Minimizar" style={base} onClick={() => window.sphone.winMinimize()} onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,.1)' : C.soft; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}><svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" strokeWidth="1.4" /></svg></button>
       <button title="Cerrar" style={base} onClick={() => window.sphone.winClose()} onMouseEnter={e => { e.currentTarget.style.background = '#eb4c46'; e.currentTarget.style.color = '#fff'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = dark ? '#cfe0ff' : '#5b6b8c'; }}><svg width="12" height="12" viewBox="0 0 12 12"><line x1="2.6" y1="2.6" x2="9.4" y2="9.4" stroke="currentColor" strokeWidth="1.4" /><line x1="9.4" y1="2.6" x2="2.6" y2="9.4" stroke="currentColor" strokeWidth="1.4" /></svg></button>
     </div>
   );
@@ -292,6 +292,10 @@ export default function App() {
   /* La llamada terminada se muestra un instante ANTES de volver al marcador: cortar y que
    * la pantalla salte de golpe deja la duda de si se cortó o se colgó solo. */
   const [finCall, setFinCall] = useState(null);
+  /* La pantalla de llamada no desaparece de golpe: pasa 190 ms con la clase de salida.
+   * Sin esto el marcador aparecia de un cuadro al otro y se sentia un corte de video. */
+  const [cerrandoLlamada, setCerrandoLlamada] = useState(false);
+  const finTimers = useRef([]);
   const [devs, setDevs] = useState({ mics: [], cams: [], speakers: [] });
   const [prefs, setPrefs] = useState(getDevPrefs());
   const [photo, setPhoto] = useState(getPhoto);
@@ -451,13 +455,20 @@ export default function App() {
       if (ci) {
         const dur = answeredAt.current ? Math.max(0, Math.round((Date.now() - answeredAt.current) / 1000)) : 0;
         setFinCall({ number: ci.number, dur });
-        setTimeout(() => setFinCall(null), 1600);
+        setCerrandoLlamada(false);
+        finTimers.current.forEach(clearTimeout);
+        finTimers.current = [
+          setTimeout(() => setCerrandoLlamada(true), 1600),
+          setTimeout(() => { setFinCall(null); setCerrandoLlamada(false); }, 1800),
+        ];
       }
       setPad(false); setMas(false);
       qAcc.current = []; answeredAt.current = 0; lastCI.current = null; lastRelay.current = null;
     }
     prevInCall.current = sp.inCall;
   }, [sp.inCall]); // eslint-disable-line
+  useEffect(() => { if (sp.incoming || sp.inCall) { finTimers.current.forEach(clearTimeout); finTimers.current = []; setCerrandoLlamada(false); } }, [sp.incoming, sp.inCall]);
+  useEffect(() => () => finTimers.current.forEach(clearTimeout), []);
   useEffect(() => { if (callStats) { const t = setTimeout(() => setCallStats(null), 9000); return () => clearTimeout(t); } }, [callStats]);
   useEffect(() => { if (!window.sphone || !window.sphone.onUpdate) return; const off = window.sphone.onUpdate(m => setUpd(m)); return off; }, []);
   useEffect(() => { if (upd && (upd.state === 'none' || upd.state === 'error')) { const t = setTimeout(() => setUpd(null), 5000); return () => clearTimeout(t); } }, [upd]);
@@ -857,7 +868,7 @@ export default function App() {
                   la lista, y marcar es lo que hace despues. */}
               <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 }}>
                 {[['recientes', IcPhone, 'Llamadas recientes', C.accent],
-                  ...(apiOn ? [['voz', IcVoicemail, 'Mensajes de voz', '#8b5cf6']] : [])].map(([id, Ic, lbl, col]) => {
+                  ...(apiOn ? [['voz', IcVoicemail, 'Mensajes de voz', '#a78bfa']] : [])].map(([id, Ic, lbl, col]) => {
                   const on = (id === 'voz' ? tab === 'voz' : tab === 'llamadas');
                   return (
                     <button key={id} onClick={() => { sounds.uiClick(); withVT(() => setTab(id === 'voz' ? 'voz' : 'llamadas')); }}
@@ -877,8 +888,8 @@ export default function App() {
               {(dialMatches.length > 0 && !sp.inCall) ? (
                 <div ref={gStagger} style={{ width: '100%', maxHeight: 236, overflowY: 'auto', margin: '2px 0 14px' }}>
                   {dialMatches.map((d, i) => { const n = String(d.ext || d.number || d.exten || ''); const nm = d.name || d.cn || d.callerid || n; const pc = presColor(n); return (
-                    <div key={i} className="dd-row" onClick={() => { setNum(n); try { numRef.current && numRef.current.focus(); } catch {} }} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 10px', cursor: 'pointer', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', marginBottom: 6 }}>
-                      <span style={{ position: 'relative', display: 'inline-flex', flex: 'none' }}><Ava txt={initials(String(nm))} size={34} bg="linear-gradient(160deg,#7c9be0,#4f6fc9)" />{pc ? <span style={{ position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: '50%', background: pc, border: '2px solid #fff' }} /> : null}</span>
+                    <div key={i} className="dd-row" onClick={() => { setNum(n); try { numRef.current && numRef.current.focus(); } catch {} }} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 10px', cursor: 'pointer', borderRadius: 10, border: `1px solid ${C.line}`, background: C.card, marginBottom: 6 }}>
+                      <span style={{ position: 'relative', display: 'inline-flex', flex: 'none' }}><Ava txt={initials(String(nm))} size={34} bg="linear-gradient(160deg,#7c9be0,#4f6fc9)" />{pc ? <span style={{ position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: '50%', background: pc, border: `2px solid ${C.card}` }} /> : null}</span>
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}><div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nm}</div><div style={{ fontSize: 12, color: C.sub }}>{n}</div></div>
                       <button style={S.actBtn(C.accent)} title="Video" onClick={e => { e.stopPropagation(); callNow(n, true); }}>{IcVideo({ c: C.accent, s: 15 })}</button>
                       <button style={S.actBtn(C.green)} title="Llamar" onClick={e => { e.stopPropagation(); callNow(n); }}>{IcPhone({ c: C.green, s: 15 })}</button>
@@ -942,12 +953,12 @@ export default function App() {
                         <button style={S.actBtn(C.red)} title="Eliminar" onClick={() => vmDelete(id, folder)}>{IcX({ c: C.red, s: 16 })}</button>
                       </div>
                       {vmAudio[id] ? <audio controls autoPlay src={vmAudio[id]} style={{ width: '100%' }} /> :
-                        <button onClick={() => vmPlay(id, folder)} style={{ ...S.chip('rgba(26,115,242,.1)', '#1d4ed8'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px' }}>▶ Escuchar</button>}
+                        <button onClick={() => vmPlay(id, folder)} style={{ ...S.chip('rgba(26,115,242,.1)', '#7cb0ff'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px' }}>▶ Escuchar</button>}
                       {apiOn && (vmTx[id] ? (
                         vmTx[id].loading ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: C.sub }}><span className="spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: C.accent, display: 'block' }} /> Transcribiendo…</div> :
                         vmTx[id].error ? <div style={{ fontSize: 12, color: C.red }}>✕ {vmTx[id].error}</div> :
-                        <div style={{ background: '#f5f8ff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '9px 12px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: .4, color: C.sub, marginBottom: 4 }}>{IcVoicemail({ c: C.accent, s: 13 })} TRANSCRIPCIÓN{vmTx[id].analysis && vmTx[id].analysis.summary ? '' : ''}</div><div style={{ fontSize: 13, color: C.ink, lineHeight: 1.45 }}>{vmTx[id].text}</div></div>
-                      ) : <button onClick={() => transcribeVm(id, folder)} style={{ ...S.chip('rgba(139,92,246,.1)', '#6d28d9'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{IcVoicemail({ c: '#6d28d9', s: 14 })} Transcribir</button>)}
+                        <div style={{ background: C.soft, border: `1px solid ${C.line}`, borderRadius: 10, padding: '9px 12px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: .4, color: C.sub, marginBottom: 4 }}>{IcVoicemail({ c: C.accent, s: 13 })} TRANSCRIPCIÓN{vmTx[id].analysis && vmTx[id].analysis.summary ? '' : ''}</div><div style={{ fontSize: 13, color: C.ink, lineHeight: 1.45 }}>{vmTx[id].text}</div></div>
+                      ) : <button onClick={() => transcribeVm(id, folder)} style={{ ...S.chip('rgba(139,92,246,.1)', '#b794f6'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{IcVoicemail({ c: '#b794f6', s: 14 })} Transcribir</button>)}
                     </div>); })}
               </div>
             </div>
@@ -956,14 +967,14 @@ export default function App() {
           {tab === 'contactos' && (
             <div style={S.listCol}>
               <div style={S.listHdr}>Contactos {dir ? <span style={{ fontSize: 12, color: C.sub, fontWeight: 400 }}>{dir.length} internos</span> : null}</div>
-              {apiOn && dir && dir.length > 0 && <div style={{ padding: '0 14px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 10, padding: '0 12px', background: '#fff' }}>{IcSearch({ c: C.sub, s: 16 })}<input value={contactQ} onChange={e => setContactQ(e.target.value)} placeholder="Buscar por nombre o interno…" style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0' }} />{contactQ && <button onClick={() => setContactQ('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17 }}>×</button>}</div></div>}
+              {apiOn && dir && dir.length > 0 && <div style={{ padding: '0 14px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 10, padding: '0 12px', background: C.card }}>{IcSearch({ c: C.sub, s: 16 })}<input value={contactQ} onChange={e => setContactQ(e.target.value)} placeholder="Buscar por nombre o interno…" style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0' }} />{contactQ && <button onClick={() => setContactQ('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17 }}>×</button>}</div></div>}
               {apiOn && favs.length > 0 && (
                 <div style={{ padding: '0 14px 10px' }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, color: C.sub, letterSpacing: .5, marginBottom: 7 }}>FAVORITOS</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                     {favs.map(fx => { const fc = presColor(fx); const fn = favName(fx); return (
                       <button key={fx} onClick={() => callNow(fx)} title={'Llamar a ' + fn} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: 56, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                        <span style={{ position: 'relative', display: 'inline-flex' }}><Ava txt={initials(String(fn))} size={46} bg="linear-gradient(160deg,#7c9be0,#4f6fc9)" /><span style={{ position: 'absolute', right: 1, bottom: 1, width: 12, height: 12, borderRadius: '50%', background: fc || '#c2c9d6', border: '2px solid #fff' }} /></span>
+                        <span style={{ position: 'relative', display: 'inline-flex' }}><Ava txt={initials(String(fn))} size={46} bg="linear-gradient(160deg,#7c9be0,#4f6fc9)" /><span style={{ position: 'absolute', right: 1, bottom: 1, width: 12, height: 12, borderRadius: '50%', background: fc || '#c2c9d6', border: `2px solid ${C.card}` }} /></span>
                         <span style={{ fontSize: 11, color: C.ink, maxWidth: 56, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fn}</span>
                       </button>); })}
                   </div>
@@ -977,10 +988,10 @@ export default function App() {
                     <div key={i} className="ph-row" style={S.row} onClick={() => callNow(d.ext)}>
                       <Ava txt={initials(d.name || d.ext)} size={40} bg="linear-gradient(160deg,#7c9be0,#4f6fc9)" />
                       <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{d.name || d.ext}</div><div style={{ fontSize: 12, color: C.sub }}>{d.ext}{d.webrtc ? ' · WebRTC' : ''}</div></div>
-                      <span style={{ marginLeft: 'auto', ...S.chip(d.status === 'online' ? 'rgba(43,217,90,.14)' : d.status === 'in_call' ? 'rgba(245,158,11,.15)' : '#eef1f7', d.status === 'online' ? '#15803d' : d.status === 'in_call' ? '#b45309' : C.sub) }}>{d.status === 'online' ? 'en línea' : d.status === 'in_call' ? 'en llamada' : 'offline'}</span>
+                      <span style={{ marginLeft: 'auto', ...S.chip(d.status === 'online' ? 'rgba(43,217,90,.14)' : d.status === 'in_call' ? 'rgba(245,158,11,.15)' : C.soft, d.status === 'online' ? '#4ade80' : d.status === 'in_call' ? '#f0b429' : C.sub) }}>{d.status === 'online' ? 'en línea' : d.status === 'in_call' ? 'en llamada' : 'offline'}</span>
                       <div style={{ display: 'flex', gap: 6, marginLeft: 8 }} onClick={e => e.stopPropagation()}>
                         <button title="Favorito" onClick={() => toggleFav(d.ext)} style={{ ...S.actBtn(favs.includes(String(d.ext)) ? '#f0b429' : C.sub), fontSize: 15, lineHeight: 1, fontWeight: 700 }}>{favs.includes(String(d.ext)) ? '\u2605' : '\u2606'}</button>
-                        <button title="Supervisar" style={S.actBtn('#8b5cf6')} onClick={() => { setSpyMsg(''); setSpyTarget(d); }}>{IcHead({ c: '#8b5cf6', s: 16 })}</button>
+                        <button title="Supervisar" style={S.actBtn('#a78bfa')} onClick={() => { setSpyMsg(''); setSpyTarget(d); }}>{IcHead({ c: '#a78bfa', s: 16 })}</button>
                         <button style={S.actBtn(C.accent)} onClick={() => callNow(d.ext, true)}>{IcVideo({ c: C.accent, s: 16 })}</button>
                         <button style={S.actBtn(C.green)} onClick={() => callNow(d.ext)}>{IcPhone({ c: C.green, s: 16 })}</button>
                       </div>
@@ -993,13 +1004,13 @@ export default function App() {
             <>
               <div style={{ width: 300, borderRight: `1px solid ${C.line}`, background: C.card, display: 'flex', flexDirection: 'column' }}>
                 <div style={S.listHdr}>Clientes {clsFull ? <span style={{ fontSize: 12, color: C.sub, fontWeight: 400 }}>{clsFull.length}</span> : null}</div>
-                {apiOn && clsFull && clsFull.length > 0 && <div style={{ padding: '0 14px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 10, padding: '0 12px', background: '#fff' }}>{IcSearch({ c: C.sub, s: 16 })}<input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0' }} />{clientQ && <button onClick={() => setClientQ('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17 }}>×</button>}</div></div>}
+                {apiOn && clsFull && clsFull.length > 0 && <div style={{ padding: '0 14px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 10, padding: '0 12px', background: C.card }}>{IcSearch({ c: C.sub, s: 16 })}<input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0' }} />{clientQ && <button onClick={() => setClientQ('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17 }}>×</button>}</div></div>}
                 <div style={S.scroll}>
                   {!apiOn ? <EmptySystem onGo={() => setTab('ajustes')} /> :
                     clsFull === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
                     clsFull.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin clientes</div> :
                     (() => { const f = clsFull.filter(c => !clientQ || ((c.name || '') + ' ' + (c.doc || '')).toLowerCase().includes(clientQ.toLowerCase())); return f.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin resultados</div> : f.map((c, i) => (
-                      <div key={i} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? '#eef4ff' : 'transparent' }} onClick={() => setSelClient(c)}>
+                      <div key={i} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? C.sel : 'transparent' }} onClick={() => setSelClient(c)}>
                         <Ava txt={initials(c.name)} size={38} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
                         <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{c.name}</div>{c.doc && <div style={{ fontSize: 12, color: C.sub }}>{c.doc}</div>}</div>
                       </div>)); })()}
@@ -1015,7 +1026,7 @@ export default function App() {
                     </div>
                     <div style={{ display: 'flex', gap: 2, marginBottom: 14, borderBottom: `1px solid ${C.line}` }}>
                       {[['datos', 'Datos', IcUser, null], ['personas', 'Personas', IcUsers, (clientDet.persons || []).length], ['espacios', 'Espacios', IcGrid, (clientDet.spaces || []).length], ['disp', 'Dispositivos', IcCam, (clientDet.devices || []).length]].map(([id, lbl, Ic, n]) => { const on = cliTab === id; return (
-                        <button key={id} onClick={() => setCliTab(id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', border: 'none', borderBottom: `2px solid ${on ? '#8b5cf6' : 'transparent'}`, background: 'none', color: on ? '#6d28d9' : C.sub, cursor: 'pointer', fontWeight: on ? 700 : 600, fontSize: 13, marginBottom: -1 }}>{Ic({ c: on ? '#6d28d9' : C.sub, s: 15 })}{lbl}{n ? <span style={{ fontSize: 11, background: on ? 'rgba(139,92,246,.15)' : '#eef1f7', color: on ? '#6d28d9' : C.sub, borderRadius: 8, padding: '0 6px' }}>{n}</span> : null}</button>); })}
+                        <button key={id} onClick={() => setCliTab(id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', border: 'none', borderBottom: `2px solid ${on ? '#a78bfa' : 'transparent'}`, background: 'none', color: on ? '#b794f6' : C.sub, cursor: 'pointer', fontWeight: on ? 700 : 600, fontSize: 13, marginBottom: -1 }}>{Ic({ c: on ? '#b794f6' : C.sub, s: 15 })}{lbl}{n ? <span style={{ fontSize: 11, background: on ? 'rgba(139,92,246,.15)' : C.soft, color: on ? '#b794f6' : C.sub, borderRadius: 8, padding: '0 6px' }}>{n}</span> : null}</button>); })}
                     </div>
                     <div key={cliTab} ref={gEnter}>
                     {cliTab === 'datos' && (<>
@@ -1025,7 +1036,7 @@ export default function App() {
                     </>)}
                     {cliTab === 'personas' && (Array.isArray(clientDet.persons) && clientDet.persons.length > 0 ? <div style={S.card}>{clientDet.persons.map((pr, i) => <div key={i} className="ph-row" style={S.row}><Ava txt={initials(pr.name)} size={34} bg="#4f6fc9" /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{pr.name}</div>{(pr.phone || pr.role) && <div style={{ fontSize: 12, color: C.sub }}>{[pr.role, pr.phone].filter(Boolean).join(' · ')}</div>}</div>{pr.phone && <button style={S.actBtn(C.green)} onClick={() => callNow(String(pr.phone))}>{IcPhone({ c: C.green, s: 16 })}</button>}</div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin personas autorizadas.</div>)}
                     {cliTab === 'espacios' && (Array.isArray(clientDet.spaces) && clientDet.spaces.length > 0 ? <div style={S.card}>{clientDet.spaces.map((sx, i) => <div key={i} className="ph-row" style={S.row}>{IcGrid({ c: C.sub, s: 16 })}<div style={{ flex: 1 }}><b>{sx.name}</b>{sx.notes ? <div style={{ fontSize: 12, color: C.sub }}>{sx.notes}</div> : null}</div></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin espacios.</div>)}
-                    {cliTab === 'disp' && (Array.isArray(clientDet.devices) && clientDet.devices.length > 0 ? <div style={S.card}>{clientDet.devices.map((d, i) => <div key={i} className="ph-row" style={S.row}>{IcCam({ c: C.sub, s: 18 })}<div style={{ flex: 1 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}</div></div><button onClick={() => { setSelClient(clientDet); setTab('intercom'); }} style={{ ...S.chip('rgba(26,115,242,.12)', '#1d4ed8'), border: 'none', cursor: 'pointer' }}>Ver en vivo</button></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin dispositivos.</div>)}
+                    {cliTab === 'disp' && (Array.isArray(clientDet.devices) && clientDet.devices.length > 0 ? <div style={S.card}>{clientDet.devices.map((d, i) => <div key={i} className="ph-row" style={S.row}>{IcCam({ c: C.sub, s: 18 })}<div style={{ flex: 1 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}</div></div><button onClick={() => { setSelClient(clientDet); setTab('intercom'); }} style={{ ...S.chip('rgba(26,115,242,.12)', '#7cb0ff'), border: 'none', cursor: 'pointer' }}>Ver en vivo</button></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin dispositivos.</div>)}
                     </div>
                   </div>}
               </div>
@@ -1042,7 +1053,7 @@ export default function App() {
                     cls === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
                     cls.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errCls ? '#b91c1c' : C.sub }}>{errCls ? 'No se pudo leer la lista: ' + errCls : 'Sin clientes'}</div> :
                     (() => { const clsF = cls.filter(c => !clientQ || (c.name || '').toLowerCase().includes(clientQ.toLowerCase())); return clsF.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin resultados</div> : clsF.map((c, i) => (
-                      <div key={i} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? '#eef4ff' : 'transparent' }} onClick={() => setSelClient(c)}>
+                      <div key={i} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? C.sel : 'transparent' }} onClick={() => setSelClient(c)}>
                         <Ava txt={initials(c.name)} size={38} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
                         <div style={{ fontWeight: 600 }}>{c.name}</div>
                       </div>)); })()}
@@ -1060,7 +1071,7 @@ export default function App() {
                         <div key={i} className="ph-row" style={S.row}>
                           <Ava txt="" size={38} bg="#0f1a30" />
                           <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}{d.src ? ' · ' + d.src : ''}</div></div>
-                          <button onClick={() => { setSelClient(selClient); setTab('intercom'); }} style={{ marginLeft: 'auto', ...S.chip('rgba(26,115,242,.12)', '#1d4ed8'), border: 'none', cursor: 'pointer' }}>{IcCam({ c: '#1d4ed8', s: 14 })} Ver en vivo</button>
+                          <button onClick={() => { setSelClient(selClient); setTab('intercom'); }} style={{ marginLeft: 'auto', ...S.chip('rgba(26,115,242,.12)', '#7cb0ff'), border: 'none', cursor: 'pointer' }}>{IcCam({ c: '#7cb0ff', s: 14 })} Ver en vivo</button>
                         </div>))}
                 </div>
               </div>
@@ -1079,15 +1090,15 @@ export default function App() {
                     {[['Micrófono', IcMic, 'mic', devs.mics, 'Micrófono'], ['Cámara', IcVideo, 'cam', devs.cams, 'Cámara'], ['Altavoz / Salida', IcSpeaker, 'spk', devs.speakers, 'Salida']].map(([lbl, Ic, key, list, ph]) => (
                       <div key={key} style={{ padding: '7px 0', borderBottom: `1px solid ${C.line}` }}>
                         <div style={S.fieldLbl}>{lbl}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 9, padding: '0 10px', background: '#fff' }}>{Ic({ c: C.accent, s: 17 })}<select style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0', color: C.ink, cursor: 'pointer' }} value={prefs[key]} onChange={e => pickDev(key, e.target.value)}><option value="">Predeterminado</option>{list.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || ph}</option>)}</select></div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 9, padding: '0 10px', background: C.card }}>{Ic({ c: C.accent, s: 17 })}<select style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0', color: C.ink, cursor: 'pointer' }} value={prefs[key]} onChange={e => pickDev(key, e.target.value)}><option value="">Predeterminado</option>{list.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || ph}</option>)}</select></div>
                       </div>))}
                     <div style={{ padding: '10px 0 4px' }}><div style={S.fieldLbl}>Volumen</div><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>{IcSpeaker({ c: C.sub, s: 16 })}<input type="range" min="0" max="1" step="0.05" value={sp.volume} onChange={e => sp.setVolume(parseFloat(e.target.value))} style={{ flex: 1, accentColor: C.green }} /></div></div>
                   </Section>}
 
                   {aTab === 'registro' && <Section>
                     <div style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
-                      <button onClick={() => setCfg(c => ({ ...c, transport: 'webrtc' }))} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${!sipMode ? C.accent : C.line}`, background: !sipMode ? 'rgba(26,115,242,.1)' : '#fff', color: !sipMode ? '#1d4ed8' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>WebRTC (WSS/WS)</button>
-                      <button onClick={() => { if (!window.sphone) { alert('El modo SIP UDP/TCP solo funciona en la app de Windows (Electron).'); return; } setCfg(c => ({ ...c, transport: 'sip' })); }} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${sipMode ? C.accent : C.line}`, background: sipMode ? 'rgba(26,115,242,.1)' : '#fff', color: sipMode ? '#1d4ed8' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>SIP UDP/TCP/TLS</button>
+                      <button onClick={() => setCfg(c => ({ ...c, transport: 'webrtc' }))} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${!sipMode ? C.accent : C.line}`, background: !sipMode ? 'rgba(26,115,242,.1)' : '#fff', color: !sipMode ? '#7cb0ff' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>WebRTC (WSS/WS)</button>
+                      <button onClick={() => { if (!window.sphone) { alert('El modo SIP UDP/TCP solo funciona en la app de Windows (Electron).'); return; } setCfg(c => ({ ...c, transport: 'sip' })); }} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${sipMode ? C.accent : C.line}`, background: sipMode ? 'rgba(26,115,242,.1)' : '#fff', color: sipMode ? '#7cb0ff' : C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>SIP UDP/TCP/TLS</button>
                     </div>
                     {sipMode ? (<>
                       {F('Servidor SIP (host o IP)', 'sipServer', 'text', '192.168.1.10')}
@@ -1119,8 +1130,8 @@ export default function App() {
                         : cfg.codec && cfg.codec !== 'auto' && <ToggleRow label="Forzar este códec" desc="Ofrece sólo este códec: obliga al SBC a transcodificar si la central usa otro." on={!!cfg.codecForce} onChange={v => setCfg(c => ({ ...c, codecForce: v }))} />}
                     </div>
                     <button style={{ ...S.primary, margin: '4px 0 6px' }} disabled={!isComplete(cfg)} onClick={connectNow}>{registered ? 'Reconectar' : 'Conectar'}</button>
-                    <button onClick={() => setShowDiag(true)} style={{ width: '100%', padding: 9, borderRadius: 9, border: `1px solid ${C.line}`, background: '#fff', color: C.sub, cursor: 'pointer', fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>{IcShield({ c: C.sub, s: 15 })} Diagnóstico</button>
-                    {sipMode && sipMsg && <div style={{ fontSize: 12, color: sipReg === 'registered' ? '#15803d' : C.red, marginBottom: 6 }}>{sipReg === 'registered' ? '✓ ' : '✗ '}{sipMsg}</div>}
+                    <button onClick={() => setShowDiag(true)} style={{ width: '100%', padding: 9, borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>{IcShield({ c: C.sub, s: 15 })} Diagnóstico</button>
+                    {sipMode && sipMsg && <div style={{ fontSize: 12, color: sipReg === 'registered' ? '#4ade80' : C.red, marginBottom: 6 }}>{sipReg === 'registered' ? '✓ ' : '✗ '}{sipMsg}</div>}
                     {sipMode && sipLogs.length > 0 && <div style={{ fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 11, lineHeight: 1.5, background: '#0f1a30', color: '#a9c2ea', borderRadius: 8, padding: '8px 10px', marginBottom: 8, maxHeight: 150, overflowY: 'auto' }}>{sipLogs.map((l, i) => <div key={i} style={{ color: /40[0-9]|48[0-9]|50[0-9]|✗|sin respuesta|error/i.test(l) ? '#ff9a9a' : /200|registered/i.test(l) ? '#8ce6a6' : '#a9c2ea' }}>{l}</div>)}</div>}
                   </Section>}
 
@@ -1138,7 +1149,7 @@ export default function App() {
                           const cuando = iceInfo.at ? new Date(iceInfo.at).toLocaleString() : '';
                           const col = iceInfo.fuente === 'central' ? C.green : iceInfo.fuente === 'manual' ? '#f0b429' : C.red;
                           return (
-                            <div style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${col}`, borderRadius: 9, padding: '10px 12px', marginBottom: 10, background: '#fff' }}>
+                            <div style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${col}`, borderRadius: 9, padding: '10px 12px', marginBottom: 10, background: C.card }}>
                               <div style={{ fontWeight: 700, fontSize: 13 }}>{desde}</div>
                               <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3 }}>
                                 {iceInfo.fuente === 'central'
@@ -1148,14 +1159,14 @@ export default function App() {
                                     : 'Conectate a la central o cargá un TURN abajo.'}
                               </div>
                               {iceErr ? <div style={{ fontSize: 11.5, color: C.red, marginTop: 4 }}>{iceErr}</div> : null}
-                              <button onClick={() => { sounds.uiClick(); runTurnTest(); }} style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: '#fff', color: C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>Actualizar desde la central</button>
+                              <button onClick={() => { sounds.uiClick(); runTurnTest(); }} style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>Actualizar desde la central</button>
                             </div>
                           );
                         })()}
                         <div style={{ fontSize: 11.5, color: C.sub, margin: '2px 0 6px' }}>Respaldo manual (sólo se usa si la central no contesta):</div>
                         {F('STUN', 'stun')}{F('TURN', 'turn', 'text', 'turn:host:3478')}{F('TURN usuario', 'turnUser')}
                         <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>TURN clave</div><input style={S.inp} type="password" value={cfg.turnPass || ''} onChange={e => setCfg(c => ({ ...c, turnPass: e.target.value }))} /></div>
-                        <button onClick={() => { sounds.uiClick(); saveConfig(cfg); runTurnTest(); }} style={{ width: '100%', marginTop: 8, padding: 10, borderRadius: 9, border: `1px solid ${C.accent}`, background: 'rgba(26,115,242,.06)', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600 }}>Probar TURN ahora</button>
+                        <button onClick={() => { sounds.uiClick(); saveConfig(cfg); runTurnTest(); }} style={{ width: '100%', marginTop: 8, padding: 10, borderRadius: 9, border: `1px solid ${C.accent}`, background: 'rgba(26,115,242,.06)', color: '#7cb0ff', cursor: 'pointer', fontWeight: 600 }}>Probar TURN ahora</button>
                       </div>
                       {(() => {
                         const t = turnT || { state: 'idle' };
@@ -1168,10 +1179,10 @@ export default function App() {
                         const sub = t.state === 'testing' ? 'levantando ICE…' : ok ? (inUse ? 'la llamada pasa por relay' : 'alcanzable y autenticado') : t.state === 'turn-auth' ? (iceInfo.fuente === 'central' ? 'la central dio esta credencial y el relay la rechazó (401)' : 'usuario/clave inválidos (401): probá actualizar desde la central') : t.state === 'turn-unreachable' ? 'no llegó candidato relay' : configured ? 'tocá "Probar TURN ahora"' : 'sin configurar';
                         return (
                           <div style={{ width: 160, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderLeft: `1px solid ${C.line}`, paddingLeft: 18, textAlign: 'center' }}>
-                            <div className={(ok && inUse) ? 'turn-live' : ''} style={{ width: 88, height: 88, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: ok ? 'rgba(43,217,90,.12)' : bad ? 'rgba(239,68,68,.1)' : '#f1f3f8' }}>
-                              {t.state === 'testing' ? <span className="spin" style={{ width: 30, height: 30, borderRadius: '50%', border: '3px solid #dbe3ef', borderTopColor: C.accent, display: 'block' }} /> : IcAudioCloud({ c: col, s: 46 })}
+                            <div className={(ok && inUse) ? 'turn-live' : ''} style={{ width: 88, height: 88, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: ok ? 'rgba(43,217,90,.12)' : bad ? 'rgba(239,68,68,.1)' : C.soft }}>
+                              {t.state === 'testing' ? <span className="spin" style={{ width: 30, height: 30, borderRadius: '50%', border: '3px solid #3f444d', borderTopColor: C.accent, display: 'block' }} /> : IcAudioCloud({ c: col, s: 46 })}
                             </div>
-                            <div style={{ marginTop: 10, fontWeight: 700, fontSize: 13, color: ok ? '#15803d' : bad ? C.red : C.sub }}>{title}</div>
+                            <div style={{ marginTop: 10, fontWeight: 700, fontSize: 13, color: ok ? '#4ade80' : bad ? C.red : C.sub }}>{title}</div>
                             <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{sub}</div>
                           </div>); })()}
                     </div>
@@ -1183,9 +1194,9 @@ export default function App() {
                         <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 12 }}>
                           <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: .5, color: C.sub, marginBottom: 8 }}>DIAGNÓSTICO EN VIVO</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 14px', fontSize: 12.5 }}>
-                            {row('RTP de la llamada', rtp, sp.inCall ? (sp.usingRelay === true ? '#15803d' : sp.usingRelay === false ? '#1d4ed8' : C.sub) : C.sub)}
-                            {row('Candidatos relay (TURN)', t.relay > 0 ? t.relay + ' ✓' : (t.state === 'testing' ? '…' : '0'), t.relay > 0 ? '#15803d' : C.sub)}
-                            {row('Candidatos srflx (STUN)', t.srflx > 0 ? t.srflx + ' ✓' : (t.state === 'testing' ? '…' : '0'), t.srflx > 0 ? '#15803d' : C.sub)}
+                            {row('RTP de la llamada', rtp, sp.inCall ? (sp.usingRelay === true ? '#4ade80' : sp.usingRelay === false ? '#7cb0ff' : C.sub) : C.sub)}
+                            {row('Candidatos relay (TURN)', t.relay > 0 ? t.relay + ' ✓' : (t.state === 'testing' ? '…' : '0'), t.relay > 0 ? '#4ade80' : C.sub)}
+                            {row('Candidatos srflx (STUN)', t.srflx > 0 ? t.srflx + ' ✓' : (t.state === 'testing' ? '…' : '0'), t.srflx > 0 ? '#4ade80' : C.sub)}
                             {row('Candidatos host (LAN)', t.host || 0)}
                             {row('IP pública (por STUN)', t.publicIp || '—')}
                             {row('IP del relay (TURN)', t.relayIp || '—')}
@@ -1196,9 +1207,9 @@ export default function App() {
                         </div>); })()}
                   </Section>}
 
-                  {aTab === 'sistema' && <Section title="INTEGRACIÓN CON EL SISTEMA" icon={IcUsers({ c: C.sub, s: 14 })} right={apiOn ? <span style={S.chip('rgba(43,217,90,.14)', '#15803d')}>conectado</span> : null}>
+                  {aTab === 'sistema' && <Section title="INTEGRACIÓN CON EL SISTEMA" icon={IcUsers({ c: C.sub, s: 14 })} right={apiOn ? <span style={S.chip('rgba(43,217,90,.14)', '#4ade80')}>conectado</span> : null}>
                     {apiOn ? (
-                      <div style={{ padding: '10px 0' }}><div style={{ fontSize: 13 }}>Conectado como <b>{api.getApiUser()}</b>. Contactos, Clientes, Intercom y grabaciones activos.</div><button onClick={apiDisconnect} style={{ marginTop: 10, background: 'none', border: `1px solid ${C.line}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: C.red }}>Desconectar</button><button onClick={() => { setShowProv(true); setProvExt(''); setProvQr(''); setProvErr(''); setProvUrl(''); }} style={{ marginTop: 10, marginLeft: 8, background: 'rgba(26,115,242,.08)', border: `1px solid ${C.accent}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: '#1d4ed8', fontWeight: 600 }}>Aprovisionar teléfono (QR)</button></div>
+                      <div style={{ padding: '10px 0' }}><div style={{ fontSize: 13 }}>Conectado como <b>{api.getApiUser()}</b>. Contactos, Clientes, Intercom y grabaciones activos.</div><button onClick={apiDisconnect} style={{ marginTop: 10, background: 'none', border: `1px solid ${C.line}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: C.red }}>Desconectar</button><button onClick={() => { setShowProv(true); setProvExt(''); setProvQr(''); setProvErr(''); setProvUrl(''); }} style={{ marginTop: 10, marginLeft: 8, background: 'rgba(26,115,242,.08)', border: `1px solid ${C.accent}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', color: '#7cb0ff', fontWeight: 600 }}>Aprovisionar teléfono (QR)</button></div>
                     ) : (<>
                       <div style={{ padding: '8px 0', borderBottom: `1px solid ${C.line}` }}><div style={S.fieldLbl}>URL del sistema</div><input style={S.inp} value={apiForm.base} onChange={e => setApiForm(f => ({ ...f, base: e.target.value }))} placeholder={api.baseFromWss(cfg.wss) || 'https://pbx01.tu-dominio'} /></div>
                       <div style={{ padding: '8px 0', borderBottom: `1px solid ${C.line}` }}><div style={S.fieldLbl}>Usuario del panel</div><input style={S.inp} value={apiForm.user} onChange={e => setApiForm(f => ({ ...f, user: e.target.value }))} autoCapitalize="off" /></div>
@@ -1224,7 +1235,7 @@ export default function App() {
                             : e === 'downloaded' ? 'v' + (upd.version || '') + ' lista: se instala al cerrar'
                               : e === 'none' ? 'Estas al dia.'
                                 : e === 'error' ? ('No se pudo consultar: ' + (upd.msg || 'error')) : '';
-                      const col = e === 'error' ? C.red : e === 'downloaded' || e === 'available' ? '#1d4ed8' : C.sub;
+                      const col = e === 'error' ? C.red : e === 'downloaded' || e === 'available' ? '#7cb0ff' : C.sub;
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 2px' }}>
                           <div style={{ flex: 1 }}>
@@ -1236,7 +1247,7 @@ export default function App() {
                           {e === 'downloaded'
                             ? <button onClick={() => { try { window.sphone.updateInstall(); } catch {} }} style={{ padding: '8px 16px', borderRadius: 10, border: 'none', background: C.green, color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Instalar y reiniciar</button>
                             : <button disabled={e === 'checking' || e === 'downloading'} onClick={() => { setUpd({ state: 'checking' }); setUpdateFeed(); try { window.sphone.updateCheck(); } catch {} }}
-                              style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${C.accent}`, background: '#fff', color: '#1d4ed8', fontWeight: 600, cursor: e === 'checking' ? 'default' : 'pointer', opacity: e === 'checking' || e === 'downloading' ? .6 : 1 }}>Buscar</button>}
+                              style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${C.accent}`, background: C.card, color: '#7cb0ff', fontWeight: 600, cursor: e === 'checking' ? 'default' : 'pointer', opacity: e === 'checking' || e === 'downloading' ? .6 : 1 }}>Buscar</button>}
                         </div>
                       );
                     })()}
@@ -1323,7 +1334,7 @@ export default function App() {
                   <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 20, padding: '5px 6px 5px 12px', fontSize: 12.5 }}>
                     {sp.heldInfo.number} en espera
                     <button onClick={sp.switchLine} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 14, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Cambiar</button>
-                    <button onClick={sp.conference} style={{ background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: 14, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Unir</button>
+                    <button onClick={sp.conference} style={{ background: '#a78bfa', color: '#fff', border: 'none', borderRadius: 14, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Unir</button>
                   </div>
                 )}
                 {sp.conf && <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(139,92,246,.2)', border: '1px solid rgba(139,92,246,.45)', borderRadius: 20, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: '#d9c9ff' }}>● Conferencia activa</div>}
@@ -1333,6 +1344,7 @@ export default function App() {
             return (
               <CallScreen
                 estado={estado}
+                saliendo={cerrandoLlamada}
                 titulo={nombre || numero}
                 subtitulo={nombre ? numero : (finCall ? 'Duración ' + fmtDur(finCall.dur) : '')}
                 iniciales={initials(numero)}
@@ -1365,12 +1377,12 @@ export default function App() {
 
           {xfer && (
             <div className="call-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(6,10,20,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }} onClick={() => setXfer(false)}>
-              <div onClick={e => e.stopPropagation()} style={{ background: '#fff', color: C.ink, borderRadius: 16, padding: 20, width: 300, boxShadow: '0 20px 50px rgba(0,0,0,.45)' }}>
+              <div onClick={e => e.stopPropagation()} style={{ background: C.card, color: C.ink, borderRadius: 16, padding: 20, width: 300, boxShadow: '0 20px 50px rgba(0,0,0,.45)' }}>
                 <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Transferir llamada</div>
                 <input autoFocus value={xferNum} onChange={e => setXferNum(e.target.value.replace(/[^\d*#+]/g, ''))} placeholder="Interno o número" style={{ ...S.inp, marginBottom: 14 }} onKeyDown={e => { if (e.key === 'Enter' && xferNum) { sp.transfer(xferNum); setXfer(false); } }} />
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button disabled={!xferNum} onClick={() => { sp.transfer(xferNum); setXfer(false); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: 'none', background: C.accent, color: '#fff', fontWeight: 700, cursor: 'pointer', opacity: xferNum ? 1 : .5 }}>Ciega</button>
-                  <button disabled={!xferNum} onClick={() => { sp.attendedCall(xferNum); setXfer(false); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.accent}`, background: '#fff', color: '#1d4ed8', fontWeight: 700, cursor: 'pointer', opacity: xferNum ? 1 : .5 }}>Atendida</button>
+                  <button disabled={!xferNum} onClick={() => { sp.attendedCall(xferNum); setXfer(false); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.accent}`, background: C.card, color: '#7cb0ff', fontWeight: 700, cursor: 'pointer', opacity: xferNum ? 1 : .5 }}>Atendida</button>
                 </div>
                 <div style={{ fontSize: 11, color: C.sub, marginTop: 10 }}>Ciega: transfiere de inmediato. Atendida: hablás primero y después completás.</div>
                 <button onClick={() => setXfer(false)} style={{ width: '100%', marginTop: 8, background: 'none', border: 'none', color: C.sub, cursor: 'pointer', fontSize: 13 }}>Cancelar</button>
@@ -1407,7 +1419,7 @@ export default function App() {
 
           {showProv && (
             <div style={S.modalWrap} onClick={() => setShowProv(false)}>
-              <div ref={gModal} onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 22, width: 360, boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
+              <div ref={gModal} onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, padding: 22, width: 360, boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}><div style={{ fontWeight: 700, fontSize: 17 }}>Aprovisionar teléfono</div><button onClick={() => setShowProv(false)} style={{ marginLeft: 'auto', ...S.actBtn(C.sub) }}>{IcX({ c: C.sub, s: 16 })}</button></div>
                 <div style={{ fontSize: 13, color: C.sub, marginBottom: 12 }}>Genera un QR que provisiona SIP + CRM en un escaneo. Requiere permisos de admin/supervisor.</div>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -1422,7 +1434,7 @@ export default function App() {
 
           {showDiag && (
             <div style={S.modalWrap} onClick={() => setShowDiag(false)}>
-              <div ref={gModal} onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 22, width: 430, maxHeight: '82vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
+              <div ref={gModal} onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, padding: 22, width: 430, maxHeight: '82vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>{IcShield({ c: C.accent, s: 20 })}<div style={{ fontWeight: 700, fontSize: 17 }}>Diagnóstico</div><button onClick={() => setShowDiag(false)} style={{ marginLeft: 'auto', ...S.actBtn(C.sub) }}>{IcX({ c: C.sub, s: 16 })}</button></div>
                 <DiagRow k="Registro" v={registered ? 'registrado ✓' : (regState || 'no')} good={registered} />
                 {!registered && regMsg ? <DiagRow k="Motivo" v={regMsg} /> : null}
@@ -1445,7 +1457,7 @@ export default function App() {
                 <DiagRow k="Entorno" v={window.sphone ? 'App Windows (Electron)' : 'Navegador'} />
                 <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
                   <button onClick={exportDiag} style={{ ...S.primary, flex: 1 }}>Exportar log</button>
-                  <button onClick={() => setShowDiag(false)} style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', color: C.sub, cursor: 'pointer', fontWeight: 600 }}>Cerrar</button>
+                  <button onClick={() => setShowDiag(false)} style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontWeight: 600 }}>Cerrar</button>
                 </div>
                 <div style={{ fontSize: 11, color: C.sub, marginTop: 8, textAlign: 'center' }}>Copia al portapapeles y descarga un .txt.</div>
               </div>
@@ -1510,14 +1522,14 @@ export default function App() {
             </div></>}
           {showAccts && (
             <div style={S.modalWrap} onClick={() => setShowAccts(false)}>
-              <div ref={gModal} onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 22, width: 390, maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
+              <div ref={gModal} onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, padding: 22, width: 390, maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>{IcUsers({ c: C.accent, s: 20 })}<div style={{ fontWeight: 700, fontSize: 17 }}>Cuentas</div><button onClick={() => setShowAccts(false)} style={{ marginLeft: 'auto', ...S.actBtn(C.sub) }}>{IcX({ c: C.sub, s: 16 })}</button></div>
                 {accts.length === 0 ? <div style={{ fontSize: 13, color: C.sub, padding: '6px 0 12px' }}>No hay cuentas guardadas. Guardá la actual para cambiar rápido entre internos.</div> :
                   accts.map(a => { const active = isComplete(cfg) && a.id === acctId(cfg); return (
                     <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: `1px solid ${C.line}` }}>
                       <Ava txt={initials(a.label)} size={36} bg={active ? 'linear-gradient(160deg,#2bd95a,#1fa945)' : 'linear-gradient(160deg,#7c9be0,#4f6fc9)'} />
-                      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{a.label}{active && <span style={{ marginLeft: 8, fontSize: 10, background: 'rgba(43,217,90,.15)', color: '#15803d', borderRadius: 8, padding: '1px 7px' }}>activa</span>}</div><div style={{ fontSize: 12, color: C.sub }}>{a.id}{a.api && a.api.token ? ' · CRM' : ''}</div></div>
-                      {!active && <button onClick={() => switchAccount(a)} style={{ ...S.chip('rgba(26,115,242,.1)', '#1d4ed8'), border: 'none', cursor: 'pointer', fontWeight: 600 }}>Usar</button>}
+                      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{a.label}{active && <span style={{ marginLeft: 8, fontSize: 10, background: 'rgba(43,217,90,.15)', color: '#4ade80', borderRadius: 8, padding: '1px 7px' }}>activa</span>}</div><div style={{ fontSize: 12, color: C.sub }}>{a.id}{a.api && a.api.token ? ' · CRM' : ''}</div></div>
+                      {!active && <button onClick={() => switchAccount(a)} style={{ ...S.chip('rgba(26,115,242,.1)', '#7cb0ff'), border: 'none', cursor: 'pointer', fontWeight: 600 }}>Usar</button>}
                       <button onClick={() => removeAccount(a.id)} title="Eliminar" style={S.actBtn(C.red)}>{IcX({ c: C.red, s: 15 })}</button>
                     </div>); })}
                 <button onClick={saveCurrentAccount} disabled={!isComplete(cfg)} style={{ ...S.primary, marginTop: 14, opacity: isComplete(cfg) ? 1 : .5 }}>Guardar la cuenta actual</button>
@@ -1533,7 +1545,7 @@ export default function App() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
                     <Ava photo={photo} txt={isComplete(cfg) ? initials(cfg.ext) : '·'} size={72} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <label style={{ ...S.chip('rgba(26,115,242,.12)', '#1d4ed8'), cursor: 'pointer' }}>Subir foto<input type="file" accept="image/*" style={{ display: 'none' }} onChange={onPhoto} /></label>
+                      <label style={{ ...S.chip('rgba(26,115,242,.12)', '#7cb0ff'), cursor: 'pointer' }}>Subir foto<input type="file" accept="image/*" style={{ display: 'none' }} onChange={onPhoto} /></label>
                       {photo && <button onClick={clearPhoto} style={{ background: 'none', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>Quitar foto</button>}
                     </div>
                   </div>
@@ -1550,10 +1562,10 @@ export default function App() {
                 <div style={{ background: 'linear-gradient(160deg,#3b2a6b,#241546)', color: '#fff', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>{IcHead({ c: '#fff', s: 24 })}<div><div style={{ fontWeight: 700, fontSize: 17 }}>Supervisar</div><div style={{ fontSize: 13, color: 'rgba(255,255,255,.75)' }}>{spyTarget.name || spyTarget.ext} · {spyTarget.ext}</div></div></div>
                 <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <button onClick={() => doSpy('listen')} style={{ ...S.primary, background: '#4f46e5', textAlign: 'left', paddingLeft: 16 }}>🎧 Escuchar <span style={{ fontWeight: 400, opacity: .8 }}>· ninguno te oye</span></button>
-                  <button onClick={() => doSpy('whisper')} style={{ ...S.primary, background: '#8b5cf6', textAlign: 'left', paddingLeft: 16 }}>🤫 Susurrar <span style={{ fontWeight: 400, opacity: .8 }}>· solo te oye tu agente</span></button>
+                  <button onClick={() => doSpy('whisper')} style={{ ...S.primary, background: '#a78bfa', textAlign: 'left', paddingLeft: 16 }}>🤫 Susurrar <span style={{ fontWeight: 400, opacity: .8 }}>· solo te oye tu agente</span></button>
                   <button onClick={() => doSpy('barge')} style={{ ...S.primary, background: '#f0b429', textAlign: 'left', paddingLeft: 16 }}>📢 Irrumpir <span style={{ fontWeight: 400, opacity: .8 }}>· entrás a la llamada</span></button>
                   <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>La central te va a llamar; atendé para monitorear.</div>
-                  {spyMsg && <div style={{ fontSize: 12, color: /error/i.test(spyMsg) ? C.red : '#15803d' }}>{spyMsg}</div>}
+                  {spyMsg && <div style={{ fontSize: 12, color: /error/i.test(spyMsg) ? C.red : '#4ade80' }}>{spyMsg}</div>}
                 </div>
               </div>
             </div>

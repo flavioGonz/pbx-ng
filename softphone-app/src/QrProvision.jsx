@@ -3,8 +3,10 @@ import QRCode from 'qrcode';
 import jsQR from 'jsqr';
 import { encodeProv, decodeProv, parseEnroll, resolveEnroll } from './prov.js';
 
-const C = { accent: '#2f80ff', ink: '#0b1220', sub: '#667089', line: '#e3e8f0', red: '#ef4444', green: '#22c55e' };
-const inp = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 13, outline: 'none', fontFamily: 'ui-monospace, Consolas, monospace' };
+/* Mismos tonos que el resto de la app: este dialogo vivia en claro y quedaba como
+ * una ventana de otro programa encima del softphone oscuro. */
+const C = { accent: '#4c9aff', ink: '#e9ebee', sub: '#8d929a', line: '#33373e', red: '#eb4c46', green: '#2bd95a', card: '#262a31', field: '#1f2229' };
+const inp = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 13, outline: 'none', fontFamily: 'ui-monospace, Consolas, monospace', background: C.field, color: C.ink };
 const tabBtn = (on) => ({ flex: 1, padding: '9px', border: 'none', borderBottom: `2px solid ${on ? C.accent : 'transparent'}`, background: 'none', cursor: 'pointer', fontWeight: 600, color: on ? C.accent : C.sub });
 const prim = { width: '100%', padding: 11, borderRadius: 10, border: 'none', background: C.accent, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' };
 
@@ -85,7 +87,7 @@ export default function QrProvision({ cfg, onApply, onClose }) {
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,16,30,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40 }} onClick={onClose}>
-      <div style={{ width: 420, maxWidth: '92%', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 24px 60px rgba(10,20,50,.35)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ width: 420, maxWidth: '92%', background: C.card, borderRadius: 16, overflow: 'hidden', boxShadow: '0 24px 60px rgba(10,20,50,.35)' }} onClick={e => e.stopPropagation()}>
         <div style={{ background: 'linear-gradient(160deg,#16233f,#0f1a30)', color: '#fff', padding: '16px 18px', fontWeight: 700, fontSize: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Configurar por QR</span>
           <button onClick={onClose} style={{ background: 'rgba(255,255,255,.15)', border: 'none', color: '#fff', borderRadius: 8, width: 28, height: 28, cursor: 'pointer' }}>✕</button>
