@@ -78,6 +78,13 @@ function montar(o) {
     const cabeceras = Object.assign({}, req.headers, { host: d.host + ':' + d.port });
     delete cabeceras.authorization;
     delete cabeceras.cookie;
+    /* Y el Origin: go2rtc RECHAZA con 403 cualquier pedido cuyo Origin no sea el suyo —es su
+     * defensa contra CSRF, y está bien que la tenga—. Pero acá el cliente no es el navegador
+     * sino nosotros: ya verificamos la sesión o la entrada de un solo uso antes de llegar a
+     * esta línea. Reenviar el Origin del navegador convertía todas las cámaras en «Sin
+     * señal» sin una sola pista de por qué. */
+    delete cabeceras.origin;
+    delete cabeceras.referer;
     const arriba = http.request({
       host: d.host, port: d.port, method: req.method, path: req.url, headers: cabeceras, timeout: 15000,
     }, (r) => { res.writeHead(r.statusCode || 502, r.headers); r.pipe(res); });
@@ -128,8 +135,11 @@ function montar(o) {
        * que hacer con él, y un token que no hace falta no se reenvía. */
       let q = '';
       try { const u = new URL(req.url, 'http://x'); u.searchParams.delete('token'); q = u.search; } catch (_) {}
+      /* Mismo cuidado que en el camino HTTP: sin Origin. Con él, go2rtc corta el WebSocket
+       * con 403 y el navegador sólo ve un cierre 1006, que no dice nada. */
+      const fuera = ['authorization', 'host', 'origin', 'referer', 'cookie'];
       const cabeceras = Object.entries(req.headers)
-        .filter(([k]) => k.toLowerCase() !== 'authorization' && k.toLowerCase() !== 'host')
+        .filter(([k]) => !fuera.includes(k.toLowerCase()))
         .map(([k, v]) => k + ': ' + (Array.isArray(v) ? v.join(', ') : v));
       arriba.write('GET ' + restoCamino + q + ' HTTP/1.1\r\nHost: ' + d.host + ':' + d.port + '\r\n' + cabeceras.join('\r\n') + '\r\n\r\n');
       if (head && head.length) arriba.write(head);
