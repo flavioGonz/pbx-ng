@@ -219,6 +219,60 @@ function OndaReposo({ ancho = 600, alto = 72 }) {
   );
 }
 
+/* ── La cámara propia, en una tarjeta que se puede mover ────────────────────
+ * Va en una ESQUINA y se queda en la que uno la suelte. Suena a capricho y no lo es: la
+ * miniatura siempre tapa algo, y quién está hablando cambia de lado según la llamada. Al
+ * soltarla se acomoda sola a la esquina más cercana —nada de dejarla a mitad de camino— y
+ * respeta el borde de abajo, donde viven los controles. */
+function TarjetaCamara({ children, apagada, iniciales, color }) {
+  const [esq, setEsq] = useState(() => {
+    try { return localStorage.getItem('sp_video_esquina') || 'sup-der'; } catch (_) { return 'sup-der'; }
+  });
+  const ref = useRef(null);
+  const arr = useRef(null);
+
+  const bajar = (e) => {
+    const el = ref.current; if (!el) return;
+    const caja = el.getBoundingClientRect();
+    arr.current = { dx: e.clientX - caja.left, dy: e.clientY - caja.top, movido: false };
+    el.setPointerCapture(e.pointerId);
+    el.style.transition = 'none';
+  };
+  const mover = (e) => {
+    const a = arr.current, el = ref.current; if (!a || !el) return;
+    a.movido = true;
+    el.style.left = (e.clientX - a.dx) + 'px';
+    el.style.top = (e.clientY - a.dy) + 'px';
+    el.style.right = 'auto'; el.style.bottom = 'auto';
+  };
+  const soltar = (e) => {
+    const a = arr.current, el = ref.current; if (!a || !el) return;
+    arr.current = null;
+    try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+    el.style.transition = '';
+    if (!a.movido) return;
+    const caja = el.getBoundingClientRect();
+    const pad = el.parentElement.getBoundingClientRect();
+    const izq = (caja.left + caja.width / 2) < (pad.left + pad.width / 2);
+    const arriba = (caja.top + caja.height / 2) < (pad.top + pad.height / 2);
+    const nueva = (arriba ? 'sup-' : 'inf-') + (izq ? 'izq' : 'der');
+    el.style.left = el.style.top = el.style.right = el.style.bottom = '';
+    setEsq(nueva);
+    try { localStorage.setItem('sp_video_esquina', nueva); } catch (_) {}
+  };
+
+  return (
+    <div ref={ref} className={'cs-yo cs-yo-' + esq} onPointerDown={bajar} onPointerMove={mover}
+      onPointerUp={soltar} onPointerCancel={soltar} title="Arrastrala a la esquina que quieras">
+      {/* Con la cámara apagada NO va un rectángulo negro —que parece una falla— sino el
+          mismo orbe que representa la llamada, y la palabra que lo explica. */}
+      {apagada
+        ? <div className="cs-yo-apagada"><Orbe size={54} color={color} quieto /><span>Cámara apagada</span></div>
+        : children}
+    </div>
+  );
+}
+
 /* ── Un botón de la barra de abajo ─────────────────────────────────────────── */
 function Ctl({ icon, label, on, apagado, onClick, caret, onCaret, deshabilitado }) {
   return (
@@ -285,6 +339,42 @@ export default function CallScreen(p) {
   const timbrando = estado === 'entrante' || estado === 'marcando';
   const hablando = estado === 'hablando';
 
+  /* ¿Ya está LLEGANDO imagen del otro lado? Mientras la pista existe pero está muda, el
+   * video es un rectángulo negro y uno no sabe si se colgó la llamada o si el otro todavía
+   * no encendió la cámara. Hasta que llega la primera imagen se muestra el orbe y se dice
+   * en palabras qué está pasando. */
+  const [hayVideoRemoto, setHayVideoRemoto] = useState(false);
+  useEffect(() => {
+    if (!video || !getRemoteStream) { setHayVideoRemoto(false); return undefined; }
+    const mirar = () => {
+      const st = getRemoteStream();
+      const t = st && st.getVideoTracks && st.getVideoTracks()[0];
+      setHayVideoRemoto(!!(t && t.readyState === 'live' && !t.muted));
+    };
+    mirar();
+    const id = setInterval(mirar, 700);
+    return () => clearInterval(id);
+  }, [video, getRemoteStream]);
+
+  /* Los controles se van solos a los tres segundos y vuelven con cualquier movimiento.
+   * Sólo en video: en una llamada de audio no hay nada abajo que tapar, y una barra que
+   * desaparece sin motivo es un botón que hay que ir a buscar. */
+  const [controles, setControles] = useState(true);
+  useEffect(() => {
+    if (!video || !hablando) { setControles(true); return undefined; }
+    let t = null;
+    const despertar = () => {
+      setControles(true);
+      clearTimeout(t);
+      t = setTimeout(() => setControles(false), 3000);
+    };
+    despertar();
+    window.addEventListener('mousemove', despertar);
+    window.addEventListener('pointerdown', despertar);
+    window.addEventListener('keydown', despertar);
+    return () => { clearTimeout(t); window.removeEventListener('mousemove', despertar); window.removeEventListener('pointerdown', despertar); window.removeEventListener('keydown', despertar); };
+  }, [video, hablando]);
+
   /* La transición entre estados: se anima el bloque del medio cada vez que cambia. No es
    * un fade genérico — cada estado entra con su gesto (el entrante «rebota», hablando
    * «asienta», terminada «se apaga»), y eso hace que el cambio se note sin mirarlo. */
@@ -314,15 +404,48 @@ export default function CallScreen(p) {
   const conBarra = estado === 'hablando' || estado === 'espera';
 
   return (
-    <div className={'cs-raiz' + (flags.pad ? ' cs-con-pad' : '') + (conBarra ? '' : ' cs-sin-barra')}
+    <div className={'cs-raiz'
+      + (flags.pad ? ' cs-con-pad' : '')
+      + (conBarra ? '' : ' cs-sin-barra')
+      + (video ? ' cs-modo-video' : '')
+      + (video && !controles ? ' cs-ocultos' : '')}
       style={{ background: T.fondo, color: T.texto }}>
       {/* Barra de arrastre de la ventana: en Electron, sin esto la ventana no se mueve. */}
       <div className="cs-drag" />
       {ventana ? <div style={{ position: 'absolute', top: 6, right: 8, zIndex: 8 }}>{ventana}</div> : null}
 
-      {video ? p.videoNodes : null}
+      {/* ── La escena de video ──────────────────────────────────────────────
+          El otro ocupa toda la ventana; encima, y sólo mientras los controles están a la
+          vista, una franja arriba con el nombre y el reloj —porque en video el nombre no
+          puede estar en el medio, ahí está la cara— y la barra de siempre abajo. */}
+      {video && p.videoNodes ? (
+        <div className="cs-video">
+          {p.videoNodes.remoto}
+          <div className="cs-video-velo" />
 
-      <div className={'cs-centro ' + gesto} key={estado === 'hablando' ? 'hablando' : estado}>
+          {!hayVideoRemoto && (
+            <div className="cs-video-espera">
+              <Orbe size={116} color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando}
+                getStream={hablando ? getRemoteStream : null} />
+              <div className="cs-nombre">{nombre}</div>
+              <div className="cs-estado">{hablando ? 'Esperando el video del otro lado…' : leyenda}</div>
+            </div>
+          )}
+
+          <TarjetaCamara apagada={!flags.videoOn} iniciales={iniciales}
+            color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando}>
+            {p.videoNodes.yo}
+          </TarjetaCamara>
+
+          <div className="cs-video-top">
+            <span className="cs-video-quien">{nombre}</span>
+            {desde ? <Reloj desde={desde} className="cs-video-reloj" /> : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className={'cs-centro ' + gesto} key={estado === 'hablando' ? 'hablando' : estado}
+        style={video ? { display: 'none' } : undefined}>
         {/* El orbe en lugar del circulo con iniciales: su COLOR es el estado de la llamada
             y su movimiento dice que la llamada esta viva. Las iniciales no decian ninguna
             de las dos cosas —del otro lado suele haber un interno o un portero, no una

@@ -1271,13 +1271,15 @@ export default function App() {
                   : ci.since ? 'hablando' : 'marcando';
             const videoVivo = !!sp.videoOn && !entrante;
 
-            const nodosVideo = videoVivo ? (
-              <>
-                <video autoPlay playsInline muted ref={el => { if (sp.remoteVideoRef) sp.remoteVideoRef.current = el; if (el) { const st = sp.getRemoteStream && sp.getRemoteStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }} />
-                <video autoPlay playsInline muted ref={el => { if (sp.localVideoRef) sp.localVideoRef.current = el; if (el) { const st = sp.getLocalStream && sp.getLocalStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} style={{ position: 'absolute', top: 16, right: 16, width: 168, height: 112, objectFit: 'cover', borderRadius: 16, border: '2px solid rgba(255,255,255,.22)', boxShadow: '0 8px 24px rgba(0,0,0,.5)', transform: 'scaleX(-1)', zIndex: 3 }} />
-                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(0,0,0,.5),transparent 22%,transparent 62%,rgba(0,0,0,.6))', zIndex: 1, pointerEvents: 'none' }} />
-              </>
-            ) : null;
+            /* Los dos videos se entregan SUELTOS (no una escena ya armada): la pantalla de
+               llamada decide dónde va cada uno, porque es la que sabe si los controles están
+               a la vista, si la cámara propia está encendida y si el otro lado ya mandó
+               imagen. Antes venían con la posición escrita acá y la miniatura terminaba
+               debajo de la barra en una ventana angosta. */
+            const nodosVideo = videoVivo ? {
+              remoto: <video autoPlay playsInline muted className="cs-video-remoto" ref={el => { if (sp.remoteVideoRef) sp.remoteVideoRef.current = el; if (el) { const st = sp.getRemoteStream && sp.getRemoteStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} />,
+              yo: <video autoPlay playsInline muted className="cs-video-yo" ref={el => { if (sp.localVideoRef) sp.localVideoRef.current = el; if (el) { const st = sp.getLocalStream && sp.getLocalStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} />,
+            } : null;
 
             /* Lo que no entra en la fila de botones: se agrupa en «Más», como en un
                teléfono de escritorio. Meterlo todo abajo convierte la barra en una

@@ -217,6 +217,74 @@ button:disabled { cursor: default !important; }
   .cs-onda{margin-top:44px}
 }
 
+/* ── Videollamada ────────────────────────────────────────────────────────────
+ *  Misma pantalla que el audio, otra piel. Tres decisiones que valen la pena contar:
+ *   · el que habla ocupa TODA la ventana y los controles flotan encima; una franja de
+ *     controles fija le come un quinto de la cara al otro;
+ *   · los controles se esconden solos y vuelven con cualquier movimiento, así que a los
+ *     tres segundos queda la llamada y nada más;
+ *   · la cámara propia es una tarjeta que se arrastra y se acomoda a la esquina más
+ *     cercana: siempre tapa algo, y qué tapa depende de la llamada, no de nosotros.
+ */
+.cs-video{position:absolute;inset:0;z-index:1;background:#000;overflow:hidden}
+.cs-video-remoto{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+/* El velo: sin él, un nombre blanco sobre una camisa blanca no se lee. */
+.cs-video-velo{position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(180deg,rgba(0,0,0,.55),transparent 18%,transparent 58%,rgba(0,0,0,.65));
+  opacity:1;transition:opacity .3s}
+.cs-ocultos .cs-video-velo{opacity:.35}
+
+/* Mientras no llega imagen del otro lado: el orbe, el nombre y la explicación. */
+.cs-video-espera{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:0;text-align:center;padding:0 24px;
+  background:radial-gradient(120% 90% at 50% 40%,#232730 0%,#15171c 100%)}
+
+/* La franja de arriba: quién es y hace cuánto. Se va con los controles. */
+.cs-video-top{position:absolute;top:0;left:0;right:0;z-index:4;display:flex;align-items:center;gap:10px;
+  padding:12px 16px;padding-left:86px;   /* deja libre el arrastre de la ventana y los botones */
+  color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.6);pointer-events:none;
+  transition:opacity .25s,transform .25s}
+.cs-video-quien{font-size:15px;font-weight:600}
+.cs-video-reloj{font-size:13px;color:rgba(255,255,255,.82)}
+.cs-ocultos .cs-video-top{opacity:0;transform:translateY(-8px)}
+
+/* La barra de controles, flotando sobre el video. */
+.cs-modo-video .cs-barra{position:absolute;left:0;right:0;bottom:0;z-index:5;background:linear-gradient(180deg,rgba(18,20,24,0),rgba(18,20,24,.82) 42%)!important;
+  transition:opacity .25s,transform .25s}
+/* `animation: … both` deja fijada la opacidad final de la entrada, y una animación le gana
+   a una declaración normal: sin apagarla, la barra se quedaba visible por más que acá
+   dijera opacity:0. Una hora se puede ir en esto. */
+.cs-modo-video.cs-ocultos .cs-barra{animation:none!important;opacity:0;transform:translateY(12px);pointer-events:none}
+.cs-modo-video .cs-ctl-lab,.cs-modo-video .cs-terminar span:last-child{text-shadow:0 1px 5px rgba(0,0,0,.7)}
+.cs-modo-video.cs-ocultos{cursor:none}
+
+/* ── La cámara propia ───────────────────────────────────────────────────────── */
+.cs-yo{position:absolute;z-index:6;width:172px;height:116px;border-radius:14px;overflow:hidden;
+  background:#15171c;border:1px solid rgba(255,255,255,.18);box-shadow:0 10px 28px rgba(0,0,0,.5);
+  cursor:grab;touch-action:none;transition:top .22s cubic-bezier(.4,0,.2,1),left .22s cubic-bezier(.4,0,.2,1),
+  right .22s cubic-bezier(.4,0,.2,1),bottom .22s cubic-bezier(.4,0,.2,1),opacity .25s}
+.cs-yo:active{cursor:grabbing}
+/* Las cuatro esquinas seguras: abajo respeta la barra de controles. */
+.cs-yo-sup-izq{top:56px;left:16px}
+.cs-yo-sup-der{top:56px;right:16px}
+.cs-yo-inf-izq{bottom:86px;left:16px}
+.cs-yo-inf-der{bottom:86px;right:16px}
+.cs-modo-video.cs-ocultos .cs-yo-inf-izq,.cs-modo-video.cs-ocultos .cs-yo-inf-der{bottom:20px}
+.cs-modo-video.cs-ocultos .cs-yo-sup-izq,.cs-modo-video.cs-ocultos .cs-yo-sup-der{top:20px}
+/* Espejada, como todo el mundo espera verse. */
+.cs-video-yo{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block}
+.cs-yo-apagada{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:6px;color:#8d929a;font-size:11px}
+
+@media (max-width:640px){
+  .cs-yo{width:124px;height:84px}
+  .cs-yo-inf-izq,.cs-yo-inf-der{bottom:104px}
+  .cs-video-top{padding-left:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  .cs-yo,.cs-video-top,.cs-modo-video .cs-barra,.cs-video-velo{transition:none}
+}
+
 /* ── Mando de la vista de prueba (?demo=call) ────────────────────────────────
  *  No es parte del producto: es el control para recorrer los estados sin llamar a nadie.
  *  Por eso se ve como lo que es —chiquito, gris, arriba— y nunca se parte en dos filas. */
