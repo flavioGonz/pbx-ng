@@ -228,7 +228,14 @@
     if (!medios) { caja.innerHTML = '<h4>Buscando dispositivos…</h4>'; p.appendChild(caja); return; }
     const grupo = (titulo, items, elegido, accion) => {
       const h = document.createElement('h4'); h.textContent = titulo; caja.appendChild(h);
-      if (!items.length) { const v = document.createElement('button'); v.textContent = 'Sin dispositivos'; v.disabled = true; caja.appendChild(v); return; }
+      if (!items.length) {
+        /* «Sin dispositivos» a secas no dice nada: puede ser que no haya ninguno, o que
+           Windows no nos dejó mirar. Son dos problemas distintos y se arreglan en lugares
+           distintos, así que se dicen distinto. */
+        const v = document.createElement('button');
+        v.textContent = (medios.permiso === false) ? 'Sin permiso de micrófono' : 'Sin dispositivos';
+        v.disabled = true; caja.appendChild(v); return;
+      }
       items.forEach(d => {
         const b = document.createElement('button');
         const on = (elegido || '') === d.id || (!elegido && d.id === 'default');

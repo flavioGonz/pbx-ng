@@ -15,17 +15,30 @@ export function setDevPref(kind, id) {
   const k = kind === 'mic' ? 'sp_dev_mic' : kind === 'cam' ? 'sp_dev_cam' : 'sp_dev_speaker';
   try { id ? localStorage.setItem(k, id) : localStorage.removeItem(k); } catch {}
 }
-export async function listDevices() {
+export async function listDevices(pedirPermiso = true) {
+  /* `permiso` sale de acá y no es un detalle: sin permiso de micrófono el navegador
+   * devuelve la lista IGUAL pero con las etiquetas vacías —o directamente vacía—, y
+   * «no hay dispositivos» y «no me dejaste mirar» se ven exactamente igual del otro
+   * lado. Quien lo muestre necesita poder decir cuál de las dos cosas pasó. */
+  let permiso = false;
   try {
-    // Pedimos permiso una vez para poder leer las etiquetas
-    try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); } catch {}
+    /* Abrir el micrófono es lo que destraba las ETIQUETAS. Se hace cuando alguien va a
+     * leer la lista (Ajustes, el widget), no al arrancar: encender el micrófono apenas se
+     * abre el programa prende el indicador de «en uso» de Windows sin que nadie lo haya
+     * pedido, y eso asusta con razón. */
+    if (pedirPermiso) {
+      try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); permiso = true; } catch { permiso = false; }
+    } else {
+      try { const st = await navigator.permissions.query({ name: 'microphone' }); permiso = st.state === 'granted'; } catch { permiso = true; }
+    }
     const d = await navigator.mediaDevices.enumerateDevices();
     return {
       mics: d.filter(x => x.kind === 'audioinput'),
       cams: d.filter(x => x.kind === 'videoinput'),
       speakers: d.filter(x => x.kind === 'audiooutput'),
+      permiso,
     };
-  } catch { return { mics: [], cams: [], speakers: [] }; }
+  } catch { return { mics: [], cams: [], speakers: [], permiso }; }
 }
 async function primeMedia(video) {
   const st = await navigator.mediaDevices.getUserMedia(constraints(video));

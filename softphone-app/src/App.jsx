@@ -389,7 +389,20 @@ export default function App() {
     const from = (sp.incoming.remoteIdentity && sp.incoming.remoteIdentity.uri && sp.incoming.remoteIdentity.uri.user) || 'desconocido';
     try { if (window.Notification && Notification.permission === 'granted') new Notification(sp.incomingVideo ? 'Videollamada entrante' : 'Llamada entrante', { body: from }); } catch {}
   }, [sp.incoming, sp.incomingVideo]);
+  /* Los dispositivos se leían SÓLO al abrir Ajustes. Quien nunca entró a esa pantalla
+   * —que es casi todo el mundo— tenía la lista vacía, y el widget flotante mostraba «Sin
+   * dispositivos» aunque el micrófono estuviera ahí funcionando. Ahora se leen al
+   * arrancar, al volver a Ajustes, y cada vez que el sistema avisa que se enchufó o se
+   * desenchufó algo (`devicechange`), que es justo cuando la lista vieja miente. */
+  useEffect(() => { listDevices(false).then(setDevs); }, []);
   useEffect(() => { if (tab === 'ajustes') listDevices().then(setDevs); }, [tab]);
+  useEffect(() => {
+    const md = navigator.mediaDevices;
+    if (!md || !md.addEventListener) return undefined;
+    const alCambiar = () => { listDevices(false).then(setDevs); };
+    md.addEventListener('devicechange', alCambiar);
+    return () => md.removeEventListener('devicechange', alCambiar);
+  }, []);
   useEffect(() => { if (tab === 'llamadas' && !sp.inCall && !sp.incoming && !splash && authed) { const t = setTimeout(() => { try { numRef.current && numRef.current.focus(); } catch {} }, 120); return () => clearTimeout(t); } }, [tab, sp.inCall, sp.incoming, splash, authed]);
   useEffect(() => { if ((!apiOn && (tab === 'clientes' || tab === 'intercom' || tab === 'voz')) || (!showIntercom && tab === 'intercom')) setTab('llamadas'); }, [apiOn, tab, showIntercom]);
   const loadVm = () => { if (apiOn && cfg.ext) api.vmList(cfg.ext).then(d => setVm(Array.isArray(d) ? d : (d && (d.messages || d.msgs)) || [])).catch(() => setVm([])); };
@@ -625,14 +638,20 @@ export default function App() {
   /* La foto de los dispositivos tal como la ve el widget: nombre corto y cuál está
    * elegido. El nombre largo de Windows («Micrófono (2- DM30 RGB USB Microphone)
    * (352f:0106)») no entra en una ventanita de 300 px, así que se recorta acá. */
-  function mandarMedios() {
+  async function mandarMedios() {
+    const corto = (l) => String(l || '').replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, '').slice(0, 42);
+    /* Se vuelve a leer la lista ACÁ, no se usa la que había: entre que se abrió el
+     * softphone y que alguien abre el panel del widget puede haberse enchufado un
+     * headset, y una lista vieja es peor que ninguna. */
+    let d = devsRef.current || {};
+    try { d = await listDevices(); setDevs(d); } catch {}
     try {
-      const corto = (l) => String(l || '').replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, '').slice(0, 42);
       window.sphone.miniData({
         tipo: 'medios',
-        mics: ((devsRef.current || {}).mics || []).map(d => ({ id: d.deviceId, l: corto(d.label || 'Micrófono') })),
-        spks: ((devsRef.current || {}).speakers || []).map(d => ({ id: d.deviceId, l: corto(d.label || 'Altavoz') })),
+        mics: (d.mics || []).map(x => ({ id: x.deviceId, l: corto(x.label || 'Micrófono') })),
+        spks: (d.speakers || []).map(x => ({ id: x.deviceId, l: corto(x.label || 'Altavoz') })),
         mic: (prefsRef.current || {}).mic || '', spk: (prefsRef.current || {}).spk || '',
+        permiso: d.permiso !== false,
       });
     } catch {}
   }
@@ -1540,7 +1559,7 @@ export default function App() {
               <button className="mp-row" onClick={() => { setMenu(false); setShowAccts(true); }} style={mpRow}>
                 {IcUsers({ c: C.sub, s: 17 })}<span>Cambiar de cuenta{accts.length ? ' (' + accts.length + ')' : ''}</span>
               </button>
-              <button className="mp-row" onClick={logout} style={{ ...mpRow, color: C.red }}>
+              <button className="mp-row mp-row-salir" onClick={logout} style={{ ...mpRow, color: C.red }}>
                 {IcPower({ c: C.red, s: 17 })}<span>Cerrar sesión</span>
               </button>
               <div style={{ padding: '8px 16px 11px', fontSize: 11, color: C.sub, borderTop: `1px solid ${C.line}` }}>PBX-NG Softphone {APP_VERSION}</div>

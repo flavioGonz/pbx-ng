@@ -58,6 +58,15 @@ button:disabled { cursor: default !important; }
 @keyframes spBar{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
 .sp-bar{animation:spBar 1.1s ease-in-out infinite}
 .dd-row:hover{background:rgba(76,154,255,.15)}
+/* Las filas del menú de la cuenta. Tenían la clase puesta y NINGUNA regla detrás: se
+ * apretaban igual, pero nada se encendía al pasar por encima y el menú parecía una lista
+ * de texto en vez de algo que se puede tocar. */
+.mp-row{transition:background .12s,color .12s;border-radius:9px;margin:0 6px;width:calc(100% - 12px)!important}
+.mp-row:hover{background:rgba(255,255,255,.075)}
+.mp-row:active{background:rgba(255,255,255,.12)}
+.mp-row:focus-visible{outline:2px solid rgba(76,154,255,.6);outline-offset:-2px}
+/* La de cerrar sesión se enciende en rojo: es la única que no se puede deshacer. */
+.mp-row-salir:hover{background:rgba(235,76,70,.16)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{animation:spin .7s linear infinite}
 

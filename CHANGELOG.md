@@ -2,6 +2,26 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.6] - 2026-09-28
+### Softphone 0.14.0
+- **El widget decía «Sin dispositivos» con el micrófono ahí funcionando.** La lista de
+  micrófonos y altavoces se leía **sólo al abrir Ajustes**; quien nunca entró a esa
+  pantalla —casi todo el mundo— la tenía vacía. Ahora se lee al arrancar, cada vez que el
+  sistema avisa que se enchufó o se desenchufó algo (`devicechange`), y **de nuevo en el
+  momento** en que el widget abre el panel: entre que se abre el softphone y que alguien
+  va a elegir el micrófono puede haberse enchufado un headset, y una lista vieja es peor
+  que ninguna. Verificado con tres micrófonos y tres salidas, con nombre.
+  - El micrófono **no** se abre al arrancar para leer las etiquetas: eso prendería el
+    indicador de «micrófono en uso» de Windows sin que nadie lo haya pedido. Se abre
+    cuando alguien va a mirar la lista de verdad.
+  - Y si el permiso está denegado ahora lo dice —«Sin permiso de micrófono»— en vez de
+    hacerlo pasar por «no hay dispositivos»: son dos problemas distintos, y se arreglan en
+    lugares distintos.
+- **El menú de la cuenta no se encendía al pasar el mouse.** Las filas tenían la clase
+  `.mp-row` puesta y ninguna regla CSS detrás: se apretaban igual, pero el menú parecía
+  una lista de texto en vez de algo que se puede tocar. «Cerrar sesión» se enciende en
+  rojo, que es la única que no se puede deshacer.
+
 ## [1.21.5] - 2026-09-28
 ### Softphone 0.13.0
 - **«Más» es un menú de verdad, colgado de su botón.** Flotaba centrado a media altura de
