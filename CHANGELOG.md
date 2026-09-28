@@ -2,6 +2,27 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.23.0] - 2026-09-28
+### Added
+- **La libreta de la central, en los teléfonos de escritorio.** Un Yealink o un Grandstream
+  no saben pedirle contactos a una API, pero todos saben ir cada tantas horas a una URL y
+  bajar un XML. El problema es que **cada marca inventó el suyo** —el `<AddressBook>` de
+  Grandstream no lo entiende un Yealink—, así que la central sirve la misma libreta en
+  cinco dialectos: Yealink, Grandstream, Fanvil (el mismo que usa Akuvox), Snom y un CSV
+  para cualquier otra marca. Los internos siempre, y los clientes del CRM si se enciende.
+  - **Los teléfonos que aprovisiona la central la reciben solos**: la URL de la libreta
+    ahora va dentro del `.cfg` de Yealink (`remote_phonebook`) y del XML de Grandstream
+    (`P330`/`P331`). Se agrega un interno en el panel y aparece en todos los teléfonos en
+    el próximo refresco, sin tocar ningún aparato.
+  - Va por el mismo camino y con el mismo token que el aprovisionamiento
+    (`/prov/<token>/agenda-<marca>.xml`): una sola cosa que administrar. Grandstream no
+    deja elegir el nombre del archivo, así que `/prov/phonebook.xml` también responde.
+  - En *Teléfonos* hay una tarjeta con el título que se ve en el aparato, el interruptor de
+    los clientes, y las URLs de cada marca con botón de copiar.
+  - 14 pruebas nuevas, sobre lo que de verdad rompe: el `&` de un nombre sin escapar hace
+    que el teléfono descarte el XML **entero** y muestre la agenda vacía sin decir por qué,
+    y un número con espacios se ve lindo y no marca. (319 en total, todas en verde.)
+
 ## [1.22.0] - 2026-09-28
 ### Added
 - **«Qué hicieron»: el registro de acciones de los agentes IA tiene pantalla.** La tabla

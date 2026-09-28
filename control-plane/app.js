@@ -767,17 +767,47 @@ async function createSipEndpoint(c, id, password, context = 'internal', tenant_i
   await vmpin.seed(c, id);
 }
 const normMac = (m) => String(m || '').toLowerCase().replace(/[^0-9a-f]/g, '');
-async function getProvSetting(k, def) { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return (rows[0] && rows[0].value) || def; } catch (_) { return def; } }
-function yealinkCfg(ph, server, port) {
-  const L = ph.line_label || ph.label || ph.ext;
-  return ['#!version:1.0.0.1', 'account.1.enable = 1', 'account.1.label = ' + L, 'account.1.display_name = ' + (ph.label || ph.ext), 'account.1.auth_name = ' + ph.ext, 'account.1.user_name = ' + ph.ext, 'account.1.password = ' + ph.password, 'account.1.sip_server.1.address = ' + server, 'account.1.sip_server.1.port = ' + port, 'account.1.sip_server.1.transport_type = 0', 'account.1.srtp_encryption = 0', 'account.1.codec.pcmu.enable = 1', 'account.1.codec.pcma.enable = 1', 'account.1.codec.g722.enable = 1', ''].join('\n');
+/* La URL por la que ESTE teléfono acaba de entrar: es la que le sirve, sin adivinar ni
+ * pedir que alguien configure un dominio a mano. Si hay proxy adelante, se respeta lo que
+ * dice, que es lo único que el teléfono puede volver a alcanzar. */
+function baseProv(req, token) {
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return proto + '://' + host + '/prov' + (token ? '/' + token : '');
 }
-function grandstreamXml(ph, server, port) {
+async function getProvSetting(k, def) { try { const { rows } = await pool.query('SELECT value FROM pbxng_settings WHERE key=$1', [k]); return (rows[0] && rows[0].value) || def; } catch (_) { return def; } }
+function yealinkCfg(ph, server, port, baseAgenda, titulo) {
+  const L = ph.line_label || ph.label || ph.ext;
+  /* La libreta remota: el teléfono la baja solo cada hora. Sin estas tres líneas hay que
+   * ir aparato por aparato a pegar la URL a mano, que es exactamente lo que se quería
+   * evitar. */
+  const agenda = baseAgenda ? [
+    'features.remote_phonebook.enable = 1',
+    'features.remote_phonebook.flash_time = 3600',
+    'remote_phonebook.data.1.url = ' + baseAgenda + '/agenda-yealink.xml',
+    'remote_phonebook.data.1.name = ' + (titulo || 'Central'),
+  ] : [];
+  return ['#!version:1.0.0.1', 'account.1.enable = 1', 'account.1.label = ' + L, 'account.1.display_name = ' + (ph.label || ph.ext), 'account.1.auth_name = ' + ph.ext, 'account.1.user_name = ' + ph.ext, 'account.1.password = ' + ph.password, 'account.1.sip_server.1.address = ' + server, 'account.1.sip_server.1.port = ' + port, 'account.1.sip_server.1.transport_type = 0', 'account.1.srtp_encryption = 0', 'account.1.codec.pcmu.enable = 1', 'account.1.codec.pcma.enable = 1', 'account.1.codec.g722.enable = 1'].concat(agenda).concat(['']).join('\n');
+}
+function grandstreamXml(ph, server, port, baseAgenda) {
   const cd = (x) => '<![CDATA[' + String(x == null ? '' : x) + ']]>';
-  return ['<?xml version="1.0" encoding="UTF-8"?>', '<gs_provision version="1">', ' <config version="1">', '  <P271>1</P271>', '  <P270>' + cd(ph.label || ph.ext) + '</P270>', '  <P47>' + cd(server) + '</P47>', '  <P35>' + cd(ph.ext) + '</P35>', '  <P36>' + cd(ph.ext) + '</P36>', '  <P34>' + cd(ph.password) + '</P34>', '  <P3>' + cd(ph.label || ph.ext) + '</P3>', ' </config>', '</gs_provision>', ''].join('\n');
+  /* P330 es la RUTA del servidor de la libreta (sin esquema, como la quiere el teléfono) y
+   * P331 cada cuántos minutos la vuelve a bajar. El archivo tiene que llamarse
+   * `phonebook.xml`: eso no se negocia con Grandstream, se obedece. */
+  const ruta = baseAgenda ? String(baseAgenda).replace(/^https?:\/\//, '') : '';
+  const agenda = ruta ? ['  <P330>' + cd(ruta) + '</P330>', '  <P331>60</P331>', '  <P332>0</P332>'] : [];
+  return ['<?xml version="1.0" encoding="UTF-8"?>', '<gs_provision version="1">', ' <config version="1">', '  <P271>1</P271>', '  <P270>' + cd(ph.label || ph.ext) + '</P270>', '  <P47>' + cd(server) + '</P47>', '  <P35>' + cd(ph.ext) + '</P35>', '  <P36>' + cd(ph.ext) + '</P36>', '  <P34>' + cd(ph.password) + '</P34>', '  <P3>' + cd(ph.label || ph.ext) + '</P3>'].concat(agenda).concat([' </config>', '</gs_provision>', '']).join('\n');
 }
 async function serveProv(req, res, file) {
   const fl = String(file || '').toLowerCase(); let mac = null, vendor = null, m;
+  /* `agenda-yealink.xml`, `agenda-grandstream.xml`, `agenda-fanvil.xml`, `agenda-snom.xml`,
+   * `agenda-akuvox.xml` y `agenda.csv`. Van por acá y no por una ruta propia para que
+   * compartan el token del aprovisionamiento: una sola cosa que administrar. */
+  if ((m = fl.match(/^agenda-([a-z]+)\.xml$/))) return serveAgenda(req, res, m[1]);
+  if (fl === 'agenda.csv') return serveAgenda(req, res, 'csv');
+  /* Grandstream NO deja elegir el nombre: baja `phonebook.xml` de la ruta que se le
+   * configuró, y punto. Así que ese nombre también responde, con su dialecto. */
+  if (fl === 'phonebook.xml') return serveAgenda(req, res, 'grandstream');
   if ((m = fl.match(/^([0-9a-f]{12})\.cfg$/))) { mac = m[1]; vendor = 'yealink'; }
   else if ((m = fl.match(/^cfg([0-9a-f]{12})(\.xml)?$/))) { mac = m[1]; vendor = 'grandstream'; }
   if (!mac) return res.status(404).type('text/plain').send('not found');
@@ -787,10 +817,61 @@ async function serveProv(req, res, file) {
     pool.query('UPDATE pbxng_phones SET last_seen=now() WHERE id=$1', [ph.id]).catch(() => {});
     const server = await getProvSetting('prov_sip_server', NODES.asterisk);
     const port = await getProvSetting('prov_sip_port', '5060');
-    if (vendor === 'yealink') res.type('text/plain').send(yealinkCfg(ph, server, port));
-    else res.type('application/xml').send(grandstreamXml(ph, server, port));
+    const tokenProv = await getProvSetting('prov_token', '');
+    const base = baseProv(req, tokenProv);
+    const titulo = await getProvSetting('prov_agenda_titulo', 'Central');
+    if (vendor === 'yealink') res.type('text/plain').send(yealinkCfg(ph, server, port, base, titulo));
+    else res.type('application/xml').send(grandstreamXml(ph, server, port, base));
   } catch (e) { res.status(500).type('text/plain').send('error'); }
 }
+/* ── La libreta de la central en los teléfonos de escritorio ────────────────
+ *
+ *  Un Yealink o un Grandstream no saben pedirle contactos a una API, pero TODOS saben ir
+ *  cada tantas horas a una URL y bajar un XML. Se sirve por el mismo camino y con el mismo
+ *  token que el aprovisionamiento —`/prov/<token>/…`— porque es el mismo problema: cosas
+ *  que la central le da a un teléfono que todavía no tiene sesión de nadie.
+ *
+ *  La alternativa es cargar los contactos a mano en cada aparato, y eso queda viejo el
+ *  mismo día. Con esto, se agrega un interno en el panel y aparece solo en todos los
+ *  teléfonos en el próximo refresco.
+ */
+const agendaTel = require('./agenda-telefonos');
+async function agendaContactos() {
+  const fuera = [];
+  /* Los internos: es la libreta que todo el mundo espera encontrar. Un interno sin nombre
+   * entra igual con su número, que es mejor que no estar. */
+  try {
+    const eps = await getExtensions();
+    for (const e of eps) fuera.push({ nombre: e.name || ('Interno ' + e.id), numeros: [e.id], grupo: 'Internos' });
+  } catch (_) {}
+  /* Los clientes del CRM, si están encendidos. En una central de portería son los
+   * edificios, y quien atiende los llama todo el día. */
+  const conClientes = String(await getProvSetting('agenda_clientes', '1')) !== '0';
+  if (conClientes) {
+    try {
+      const { rows } = await pool.query('SELECT name, phones FROM pbxng_clients ORDER BY name');
+      for (const c of rows) {
+        const tel = Array.isArray(c.phones) ? c.phones : [];
+        if (tel.length) fuera.push({ nombre: c.name, numeros: tel, grupo: 'Clientes' });
+      }
+    } catch (_) {}
+  }
+  return fuera;
+}
+async function serveAgenda(req, res, formato) {
+  try {
+    const titulo = await getProvSetting('prov_agenda_titulo', 'Central');
+    const r = agendaTel.rendir(formato, await agendaContactos(), titulo);
+    if (!r) return res.status(404).type('text/plain').send('formato desconocido');
+    /* Cache corto: el teléfono la relee cada tantas horas igual, pero si alguien la pide
+     * tres veces seguidas desde el panel no hace falta recalcularla. */
+    res.set('Cache-Control', 'public, max-age=60');
+    res.type(r.tipo).send(r.cuerpo);
+  } catch (e) { res.status(500).type('text/plain').send('error'); }
+}
+/* Desde el panel, con sesión: sirve para mirarla y para bajarla a mano. */
+app.get('/api/agenda/:formato', auth, (req, res) => serveAgenda(req, res, req.params.formato));
+
 app.get('/prov/:file', async (req, res) => { const tok = await getProvSetting('prov_token', ''); if (tok) return res.status(403).type('text/plain').send('token requerido'); return serveProv(req, res, req.params.file); });
 app.get('/prov/:token/:file', async (req, res) => { const tok = await getProvSetting('prov_token', ''); if (tok && req.params.token !== tok) return res.status(403).type('text/plain').send('forbidden'); return serveProv(req, res, req.params.file); });
 app.post('/api/geo/report', async (req, res) => {
