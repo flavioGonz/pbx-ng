@@ -219,7 +219,7 @@ export default function Troncales() {
       )}
 
       {/* editor completo */}
-      <TrunkEditor opened={open} onClose={() => setOpen(false)} initialName={editName} onSaved={load} />
+      <TrunkEditor opened={open} onClose={() => setOpen(false)} initialName={editName} onSaved={load} vivo={editName ? trunks.find(t => t.name === editName) || null : null} />
     </div>
   );
 }

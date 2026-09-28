@@ -2,6 +2,28 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.25.0] - 2026-09-28
+### Changed
+- **La troncal deja de ser un asistente de 5 pasos y pasa a ser un cajón con solapas.**
+  El *stepper* imponía un orden que la troncal no tiene: quien vuelve a tocar una troncal ya
+  creada casi siempre va a **una** cosa —cambiar la clave, agregar un DID, sacar un códec— y
+  tenía que atravesar los pasos anteriores o adivinar en cuál había quedado. Las solapas
+  —*Identidad, Enlace, Credenciales, Medios, Números*— dicen de entrada qué hay en cada una
+  y se salta directo. Además el cajón deja la topología a la izquierda mientras se edita, y
+  el botón de guardar queda fijo abajo en vez de irse con el scroll.
+  (`dashboard/app/TrunkEditor.jsx`)
+  - **El encabezado dice si la troncal está arriba**: conectada / caída con el motivo real
+    que ya calcula la central (`pjsip show registrations` o el qualify), y la **latencia**
+    del OPTIONS contra el operador. Se dice lo que es: mide la señalización, no el audio de
+    las llamadas.
+  - Cada bloque lleva su línea de explicación, igual que en Internos: qué hace *direct
+    media*, para qué sirve *From domain*, qué significa «quitar dígitos». Antes esos campos
+    quedaban como estaban «por las dudas».
+  - El **tipo** (SIP directa / WebRTC) sólo se elige al crear; editando se muestra en frío,
+    porque cambiarlo sería rehacer la troncal —otro transporte, otras credenciales—.
+  - El diagnóstico animado y el alta WebRTC con sus tres datos para copiar siguen igual,
+    ahora dentro del cajón.
+
 ## [1.24.0] - 2026-09-28
 ### Added
 - **Las ventanas modales empiezan a ser cajones laterales.** Arranca por *Internos*, que es
