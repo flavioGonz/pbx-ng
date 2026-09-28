@@ -2,6 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.4] - 2026-09-28
+### Fixed
+- **Las llamadas al agente de IA no se cortaban.** Encontrado en vivo en pbx01: un canal
+  llevaba **quince minutos arriba**, con el visitante escuchando silencio. Tres agujeros,
+  los tres tapados:
+  - Cuando el proveedor del modelo **cerraba la sesión**, eso sólo se anotaba en el log y
+    la llamada seguía viva. Ahora se corta: si el modelo ya no está, la llamada no tiene
+    con quién hablar.
+  - Si el modelo **nunca llegaba a hablar**, no había nada que cortara. La escalera de
+    inactividad no cubre ese caso —recién arranca cuando el agente terminó su primera
+    frase—, así que un modelo mudo dejaba la llamada abierta para siempre. Ahora se corta
+    a los 25 s del saludo sin una sola muestra de audio (`AI_MUDO_MS`).
+  - El **tope duro** de una llamada con la IA baja de 1 hora a 15 minutos
+    (`AI_MAX_SESION_MS`): como red de seguridad, una hora no sirve de mucho.
+- Dos pruebas nuevas para el tope de duración (305 en total, todas en verde).
+
 ## [1.21.3] - 2026-09-28
 ### Softphone 0.12.0
 - **Llamar con video en modo SIP nativo mostraba una «llamada entrante» de uno mismo.**

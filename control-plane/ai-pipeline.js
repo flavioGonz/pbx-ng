@@ -49,6 +49,11 @@ const TOPE_CRM_MS = 2500;
 const TOPE_STT_MS = 6000;
 const TOPE_LLM_MS = 8000;
 const TOPE_TTS_MS = 8000;
+/* Cuánto se le aguanta al modelo estar mudo después del saludo antes de cortar. No es un
+ * capricho de diseño: con GPT-Live pasa que la sesión abre, acepta el saludo y no emite
+ * una sola muestra —ningún error en ningún lado—, y del otro lado hay alguien parado
+ * frente a un portero escuchando nada. Cortar es feo; dejarlo ahí es peor. */
+const MUDO_MS = Number(process.env.AI_MUDO_MS || 25000);
 /* `fetch` con tope. Se agrega `signal` sin pisar uno que venga del llamador. */
 function fetchTope(url, opts, ms) {
   return fetch(url, Object.assign({}, opts, { signal: AbortSignal.timeout(ms) }));
@@ -476,7 +481,10 @@ function ctxHerramientas(session, cfg) {
  * completó el handshake de AudioSocket está en `pendingByUuid`, y colgarlo sería cortar una
  * llamada que estaba por empezar. Por eso además se le da un minuto de gracia. */
 const GRACIA_HUERFANO_MS = 60000;
-const MAX_SESION_MS = Number(process.env.AI_MAX_SESION_MS || 3600000);   // 1 h: nada vive para siempre
+/* Tope duro de una llamada con la IA. Estaba en una hora, que como red de seguridad no
+ * sirve de mucho: un canal colgado se veía vivo en el panel media tarde. Un agente de
+ * portería que lleva un cuarto de hora hablando ya está roto por otra razón. */
+const MAX_SESION_MS = Number(process.env.AI_MAX_SESION_MS || 900000);   // 15 min
 let barridoTimer = null;
 
 async function barrerHuerfanos() {
@@ -715,7 +723,16 @@ function arrancarRealtime(session) {
     if (t && t.quien === 'visitante' && session.vigilante) session.vigilante.visitanteHabla();
   });
   puente.on('error', (e) => { session.log('realtime: ' + e); anotarProblemaProveedor(e); });
-  puente.on('cerrado', () => session.log('realtime: sesión cerrada por el proveedor'));
+  /* El proveedor cerró la sesión. Antes esto SÓLO se anotaba en el log, y la llamada
+   * quedaba viva: el visitante se quedaba escuchando silencio hasta que a alguien se le
+   * ocurriera colgar del otro lado —se vio un canal arriba 15 minutos así—. Si el modelo
+   * ya no está, la llamada no tiene con quién hablar: se corta. (`endSession` no hace nada
+   * si la sesión ya estaba cerrada, que es el caso normal del cierre ordenado.) */
+  puente.on('cerrado', () => {
+    if (session.closed) return;
+    session.log('realtime: sesión cerrada por el proveedor — se corta la llamada');
+    endSession(session, 'proveedor-cerro');
+  });
 
   /* Instrumental mínimo del arranque. Sin esto, «el agente atendió y no habló» era
    * indistinguible de «el modelo nunca abrió» y de «el audio no llegó al canal»: tres
@@ -751,6 +768,16 @@ function arrancarRealtime(session) {
       setTimeout(() => {
         if (!session.closed && !session.rtPrimerAudio) session.log('el modelo sigue sin mandar audio: el visitante está escuchando silencio');
       }, 9000);
+      /* Y si a los MUDO_MS del saludo el modelo no dijo una sola palabra, se corta. La
+       * escalera de inactividad no sirve acá: esa recién arranca cuando el agente terminó
+       * de hablar por primera vez, así que con un modelo que nunca abre la boca no llega a
+       * armarse nunca. Colgar es peor que atender bien, pero es mucho mejor que dejar a
+       * alguien pegado al portero escuchando nada. */
+      setTimeout(() => {
+        if (session.closed || session.rtPrimerAudio) return;
+        session.log('el modelo no habló en ' + Math.round(MUDO_MS / 1000) + ' s: se corta la llamada');
+        endSession(session, 'modelo-mudo');
+      }, MUDO_MS);
     }, listo ? 400 : 0);
   }
 

@@ -60,3 +60,35 @@ test('los canales ajenos no se tocan nunca', async () => {
   await pipe._barrer();
   assert.deepEqual(ari.colgados, []);
 });
+
+/* El caso que se vio en pbx01 el 28/9: el proveedor cerró la sesión del modelo y la
+ * llamada quedó ARRIBA, con el visitante escuchando silencio; el canal llevaba quince
+ * minutos así. El tope de duración es la última red: si algo se escapó de todos los
+ * caminos de cierre, el barrido lo corta igual. */
+test('el tope de duración corta una sesión que quedó viva de más', async () => {
+  const ari = ariFalso([]);
+  pipe._setAri(ari);
+  const ses = pipe._sesiones();
+  const colgado = [];
+  ses.set('eterna', {
+    uuid: 'eterna', nacida: Date.now() - 16 * 60000,
+    channel: { id: 'cE', hangup: async () => { colgado.push('cE'); } },
+    log: () => {},
+  });
+  try { await pipe._barrer(); } finally { ses.delete('eterna'); }
+  assert.deepEqual(colgado, ['cE'], 'la llamada pasada de tiempo tiene que colgarse');
+});
+
+test('una sesión dentro del tope no se toca', async () => {
+  const ari = ariFalso([]);
+  pipe._setAri(ari);
+  const ses = pipe._sesiones();
+  const colgado = [];
+  ses.set('normal', {
+    uuid: 'normal', nacida: Date.now() - 60000,
+    channel: { id: 'cN', hangup: async () => { colgado.push('cN'); } },
+    log: () => {},
+  });
+  try { await pipe._barrer(); } finally { ses.delete('normal'); }
+  assert.deepEqual(colgado, []);
+});
