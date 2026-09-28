@@ -2,6 +2,27 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.2] - 2026-09-28
+### Changed
+- **El login estrena fondo**: una grilla de puntos que se deforma sola y se abre donde pasa
+  el puntero, dibujada con un shader de WebGL. Reemplaza el video del panel —varios
+  megabytes que hay que servir, que tardan en arrancar y que en una central sin salida a
+  Internet hay que empaquetar igual— y las ondas animadas del teléfono. Son dos triángulos
+  y cuarenta líneas de shader, se dibuja a la resolución real de la pantalla así que nunca
+  se ve pixelado, se apaga con la pestaña escondida y con `prefers-reduced-motion` queda
+  un cuadro fijo. Sin WebGL el fondo queda liso: no hay hueco ni error. **Es el mismo fondo
+  en el panel y en el teléfono**, para que las dos puertas de entrada al producto sean la
+  misma puerta. (`dashboard/app/ShaderPuntos.jsx`, `softphone-app/src/ShaderPuntos.jsx`)
+
+### Softphone 0.11.0
+- **Altavoz y Transferir salieron de «Más» a la barra de la llamada.** Son de las tres cosas
+  que uno hace con una llamada en curso —subirla al altavoz, pasarla a otro, o dejarla
+  esperando— y estaban escondidas detrás de un menú. La barra queda como en el teléfono que
+  ya usa el cliente: micrófono · cámara | altavoz · en espera · transferir · teclado · más,
+  y sigue entrando en una ventana angosta. En «Más» quedan grabar e invitar, que son de a
+  ratos, y ahora con icono en vez de sólo texto.
+- El fondo del login del teléfono es el mismo shader de puntos que el del panel.
+
 ## [1.21.1] - 2026-09-27
 ### Fixed
 - **Las cámaras de los porteros ya se ven en el softphone.** El proxy le reenviaba a go2rtc el

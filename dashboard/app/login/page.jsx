@@ -1,6 +1,7 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import PbxLogo from '../PbxLogo';
+import ShaderPuntos from '../ShaderPuntos';
 
 const ROLES = {
   admin: { label: 'Administrador', icon: 'admin_panel_settings', heading: 'Panel de administración' },
@@ -27,14 +28,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [role, setRole] = useState('admin');
-  const videoRef = useRef(null); const [muted, setMuted] = useState(true);
   /* Telefonos que publica ESTA central en /api/softphone/latest (publico): el instalador
    * de Windows y, si esta cargado, el APK de Android. Lo que no este, no se muestra: un
    * boton que baja un 404 es peor que no tener boton. */
   const [sphone, setSphone] = useState(null);
   useEffect(() => { fetch('/backend/api/softphone/latest').then((r) => r.json()).then((d) => setSphone(d && (d.available || (d.android && d.android.available)) ? d : null)).catch(() => {}); }, []);
   const fmtMb = (b) => (b ? (b / 1048576).toFixed(0) + ' MB' : '');
-  const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !v.muted; if (!v.muted) { try { v.play(); } catch (_) {} } setMuted(v.muted); };
 
   const [brand, setBrand] = useState({ name: 'PBX-NG', subtitle: 'Comunicaciones', tagline: 'Central telefónica unificada', logo: '' });
   const [setup, setSetup] = useState(null);
@@ -292,9 +291,13 @@ export default function Login() {
 
       {/* HERO (derecha) */}
       <div className="hzn-login-hero">
-        <video ref={videoRef} className="hzn-login-hero-video" autoPlay loop muted playsInline preload="auto"><source src="/background-login.mp4" type="video/mp4" /></video>
+        {/* El fondo: una grilla de puntos que se deforma sola y se abre donde pasa el
+            puntero. Antes era un video de varios megabytes —que hay que servir, que tarda
+            en arrancar y que en una central sin salida a Internet hay que empaquetar
+            igual—; esto son dos triangulos y un shader, y se dibuja a la resolucion real
+            de la pantalla asi que nunca se ve pixelado. */}
+        <ShaderPuntos className="hzn-login-hero-video" fondo="#030704" colorA="#0d3a1e" colorB="#7ef0a4" paso={19} />
         <div className="hzn-login-hero-overlay" />
-        <button type="button" className="hzn-hero-mute" onClick={toggleMute} aria-label={muted ? 'Activar sonido' : 'Silenciar'}><span className="material-icons-round">{muted ? 'volume_off' : 'volume_up'}</span></button>
         <div className="hzn-login-hero-content">
           {/* El logo, grande y flotando: es lo primero que se ve del producto. */}
           <div className="pbx-login-float" aria-hidden>
@@ -394,23 +397,13 @@ export default function Login() {
         }
         .hzn-login-hero-video {
           position: absolute; inset: 0; width: 100%; height: 100%;
-          object-fit: cover; z-index: 0; filter: saturate(1.06) contrast(1.03);
-          animation: heroZoom 34s ease-in-out infinite alternate;
+          object-fit: cover; z-index: 0;
         }
-        @keyframes heroZoom { from { transform: scale(1); } to { transform: scale(1.09); } }
-        .hzn-hero-mute {
-          position: absolute; bottom: 22px; left: 22px; z-index: 3;
-          width: 44px; height: 44px; border-radius: 50%;
-          border: 1px solid rgba(255,255,255,.25); background: rgba(18,18,18,.5);
-          backdrop-filter: blur(6px); color: #fff; display: flex; align-items: center; justify-content: center;
-          cursor: pointer; transition: background .2s, transform .2s; box-shadow: 0 6px 18px rgba(0,0,0,.35);
-        }
-        .hzn-hero-mute:hover { background: rgba(17,179,40,.6); transform: scale(1.06); }
         .hzn-login-hero-overlay {
           position: absolute; inset: 0;
           background:
-            radial-gradient(ellipse at 30% 50%, rgba(17, 179, 40, 0.18), transparent 60%),
-            linear-gradient(135deg, rgba(26,26,26,0.65) 0%, rgba(26,26,26,0.45) 50%, rgba(26,26,26,0.75) 100%);
+            radial-gradient(ellipse at 30% 50%, rgba(17, 179, 40, 0.14), transparent 62%),
+            linear-gradient(135deg, rgba(10,12,10,0.42) 0%, rgba(10,12,10,0.18) 50%, rgba(10,12,10,0.58) 100%);
         }
         .hzn-login-hero-content {
           position: relative; z-index: 1;

@@ -78,6 +78,7 @@ export default function DemoLlamada() {
         acciones={{
           colgar: () => {}, rechazar: () => {}, atender: () => {}, atenderVideo: () => {},
           mute: () => {}, hold: () => {}, video: () => {}, elegirMic: () => {}, elegirCam: () => {},
+          altavoz: () => {}, transferir: () => {},
           teclado: () => setPad(v => !v), mas: () => {}, tecla: () => {},
         }}
       />

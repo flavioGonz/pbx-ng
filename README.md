@@ -280,6 +280,9 @@ Android (Capacitor) y PWA.
   su color es el estado (verde entra, azul hablando, ámbar en espera) y su movimiento sigue la
   voz, así que si el otro habla y el orbe no se mueve, el audio no está llegando y se ve sin
   abrir ningún diagnóstico. Todo se apaga con `prefers-reduced-motion`.
+- **Login con fondo de puntos**: una grilla que se deforma sola y se abre donde pasa el
+  puntero (WebGL, `ShaderPuntos.jsx`). Es el mismo fondo que el login del panel, no pesa
+  nada y sin WebGL queda liso.
 - **Widget flotante** siempre visible: atender, cortar, silenciar, poner en espera, volumen, y
   —sin abrir la ventana grande— un **teclado con buscador de contactos** de la central y el
   **cambio de micrófono y altavoz** en plena llamada. Con el softphone minimizado el widget

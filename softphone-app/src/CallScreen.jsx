@@ -331,7 +331,7 @@ export default function CallScreen(p) {
     video,               // hay video activo
     getRemoteStream,
     acciones = {},       // { colgar, atender, atenderVideo, rechazar, mute, hold, video, teclado, transferir, grabar, altavoz, invitar, elegirMic, elegirCam }
-    flags = {},          // { muted, held, videoOn, grabando, altavoz, pad, transfiriendo }
+    flags = {},          // { muted, held, videoOn, grabando, altavoz, pad, transfiriendo, masAbierto }
     extra = null,        // barras de estado (consulta en curso, conferencia, CRM…)
     ventana = null,      // controles de ventana del sistema
     saliendo = false,    // la pantalla se esta yendo: se anima la salida antes de desmontar
@@ -519,9 +519,19 @@ export default function CallScreen(p) {
             ) : null}
             {/* La misma raya que separa «lo mío» (micrófono, cámara) de «la llamada». */}
             <span className="cs-sep" />
+            {/* Altavoz y transferir estaban escondidos dentro de «Más», y son de las tres
+                cosas que uno hace con una llamada en curso: subirla al altavoz, pasarla a
+                otro, o dejarla esperando. Un control que se usa todos los días no vive
+                dentro de un menú. En «Más» quedan grabar e invitar, que son de a ratos. */}
+            {acciones.altavoz ? (
+              <Ctl icon={<IcAlta s={22} />} label="Altavoz" on={flags.altavoz} onClick={acciones.altavoz} />
+            ) : null}
             {acciones.hold ? (
               <Ctl icon={flags.held ? <IcPlay s={22} /> : <IcPausa s={22} />} label={flags.held ? 'Reanudar' : 'En espera'}
                 on={flags.held} onClick={acciones.hold} />
+            ) : null}
+            {acciones.transferir ? (
+              <Ctl icon={<IcSwap s={22} />} label="Transferir" on={flags.transfiriendo} onClick={acciones.transferir} />
             ) : null}
             <Ctl icon={<IcTeclado s={22} />} label="Teclado" on={flags.pad} onClick={acciones.teclado} />
             <Ctl icon={<IcMas s={22} />} label="Más" on={flags.masAbierto} onClick={acciones.mas} />

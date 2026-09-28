@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import CallScreen, { colorAvatar } from './CallScreen';
+import ShaderPuntos from './ShaderPuntos';
 import { flushSync } from 'react-dom';
 import { useSip, listDevices, getDevPrefs, setDevPref } from './useSip.js';
 import { useSipNative } from './useSipNative.js';
@@ -726,20 +727,22 @@ export default function App() {
       )}
       {!authed && !splash && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', background: 'radial-gradient(120% 120% at 50% 0%,#16233f 0%,#0b1220 60%,#070c16 100%)', color: '#eaf1ff' }}>
-          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }} aria-hidden>
-            <svg viewBox="0 0 24 24" width="120" height="120" fill="none" stroke="#1a73f2" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: 70, left: 40, opacity: .06 }} className="lfloat"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></svg>
-            <svg viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="#2bd95a" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: 220, right: 50, opacity: .06 }} className="lfloat2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></svg>
-            <svg className="lwave lwave1" viewBox="0 0 1440 200" preserveAspectRatio="none" style={{ position: 'absolute', bottom: 0, left: 0, width: '200%', height: 190 }}><path fill="#1a73f2" fillOpacity="0.14" d="M0,90 C240,150 480,30 720,90 C960,150 1200,30 1440,90 L1440,200 L0,200 Z" /></svg>
-            <svg className="lwave lwave2" viewBox="0 0 1440 200" preserveAspectRatio="none" style={{ position: 'absolute', bottom: -12, left: 0, width: '200%', height: 210 }}><path fill="#2bd95a" fillOpacity="0.10" d="M0,100 C300,40 520,160 760,100 C1000,40 1200,160 1440,100 L1440,200 L0,200 Z" /></svg>
+          {/* El fondo del login: una grilla de puntos que se deforma sola y se abre donde
+              pasa el puntero. Reemplaza las ondas y los telefonos flotando —que eran
+              tres SVG animados por CSS— por un unico shader que se dibuja a la
+              resolucion real de la pantalla; es el MISMO fondo que el login del panel,
+              para que las dos puertas de entrada al producto sean la misma puerta. */}
+          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }} aria-hidden>
+            <ShaderPuntos fondo="transparent" colorA="#16305e" colorB="#9fb6ff" fuerza={1.7} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', WebkitAppRegion: 'drag' }}>
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', padding: '14px 20px', WebkitAppRegion: 'drag' }}>
             <div />
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, WebkitAppRegion: 'no-drag' }}>
               {accts.length > 0 && <button onClick={() => setShowAccts(true)} title="Cuentas guardadas" style={{ background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 9, padding: '7px 9px', cursor: 'pointer', color: '#cfe0ff', display: 'flex' }}>{IcUsers({ c: '#cfe0ff', s: 18 })}</button>}
               <WinCtl dark />
             </div>
           </div>
-          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 20px 20px' }}>
+          <div style={{ position: 'relative', zIndex: 1, flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 20px 20px' }}>
             {loginPhase === 'form' && (
               <div key="form" ref={gEnter} style={{ width: '100%', maxWidth: 380 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
@@ -1298,14 +1301,12 @@ export default function App() {
             const masMenu = mas && !entrante ? (
               <div className="menu-pop" style={{ position: 'absolute', bottom: 92, left: '50%', transform: 'translateX(-50%)', zIndex: 6, background: 'rgba(32,36,44,.96)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 14, padding: 8, minWidth: 210, boxShadow: '0 20px 44px rgba(0,0,0,.5)' }}>
                 {[
-                  { ok: !sipMode, lbl: sp.speaker ? 'Altavoz encendido' : 'Altavoz', on: sp.speaker, fn: sp.toggleSpeaker },
-                  { ok: true, lbl: 'Transferir', on: !!sp.attended || xfer, fn: () => { setMas(false); if (sp.attended) return; setXferNum(''); setXfer(true); } },
-                  { ok: apiOn, lbl: recording ? 'Grabando…' : 'Grabar', on: recording, fn: () => { setMas(false); toggleRecord(); } },
-                  { ok: !sipMode, lbl: 'Invitar a la llamada', on: !!sp.attended, fn: () => { setMas(false); if (sp.attended) return; const t = prompt('Invitar interno a la conferencia:'); if (t && t.trim()) sp.attendedCall(t.trim()); } },
+                  { ok: apiOn, lbl: recording ? 'Grabando…' : 'Grabar la llamada', ic: IcRec, on: recording, fn: () => { setMas(false); toggleRecord(); } },
+                  { ok: !sipMode, lbl: 'Invitar a la llamada', ic: IcUsers, on: !!sp.attended, fn: () => { setMas(false); if (sp.attended) return; const t = prompt('Invitar interno a la conferencia:'); if (t && t.trim()) sp.attendedCall(t.trim()); } },
                 ].filter(x => x.ok).map(x => (
                   <button key={x.lbl} onClick={x.fn} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 10, background: 'none', border: 'none', color: x.on ? '#3b82f6' : '#e8ebf0', padding: '9px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, textAlign: 'left' }}
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.08)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}>{x.lbl}</button>
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}>{x.ic ? x.ic({ s: 17, c: x.on ? '#3b82f6' : '#9fb0cc' }) : null}{x.lbl}</button>
                 ))}
               </div>
             ) : null;
@@ -1356,7 +1357,7 @@ export default function App() {
                 videoNodes={nodosVideo}
                 getRemoteStream={sp.getRemoteStream}
                 ventana={<WinCtl dark />}
-                flags={{ muted: sp.muted, held: sp.held, videoOn: sp.videoOn, pad, masAbierto: mas }}
+                flags={{ muted: sp.muted, held: sp.held, videoOn: sp.videoOn, pad, masAbierto: mas, altavoz: !!sp.speaker, transfiriendo: !!sp.attended || xfer, grabando: recording }}
                 extra={contexto}
                 acciones={{
                   colgar: () => { sounds.uiClick(); sp.hangup(); },
@@ -1366,6 +1367,8 @@ export default function App() {
                   mute: sp.toggleMute,
                   hold: sipMode ? null : sp.toggleHold,
                   video: sipMode ? null : sp.toggleVideo,
+                  altavoz: sipMode ? null : sp.toggleSpeaker,
+                  transferir: () => { setMas(false); if (sp.attended) return; setXferNum(''); setXfer(true); },
                   teclado: () => { setMas(false); setPad(v => !v); },
                   mas: () => { setPad(false); setMas(v => !v); },
                   tecla: press,
