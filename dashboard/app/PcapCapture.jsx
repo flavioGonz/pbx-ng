@@ -1,9 +1,10 @@
 /* PcapCapture.jsx - navaja de diagnóstico: captura de paquetes (pcap) en Asterisk. (El borde se captura desde el panel de SBC-NG.) */
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Button, Modal, Group, Stack, Text, SegmentedControl, NumberInput, Badge, ActionIcon, Tooltip, Table, ThemeIcon, Card } from '@mantine/core';
+import { Button, Group, Stack, Text, SegmentedControl, NumberInput, Badge, ActionIcon, Tooltip, Table, ThemeIcon, Card } from '@mantine/core';
 import { IconWaveSine, IconPlayerPlay, IconPlayerStop, IconDownload, IconTrash, IconRefresh } from '@tabler/icons-react';
 import { toast } from './notify';
+import DrawerNG from './DrawerNG';
 
 const PRESETS = [{ label: 'SIP (5060)', value: 'sip' }, { label: 'SIP + RTP', value: 'siprtp' }, { label: 'Todo', value: 'all' }];
 const STCOL = { pending: 'gray', running: 'blue', done: 'teal', error: 'red', stopping: 'orange' };
@@ -39,9 +40,12 @@ export default function PcapCapture() {
   return (
     <>
       <Tooltip label="Captura de paquetes (.pcap para Wireshark)"><Button size="xs" variant="light" color="grape" leftSection={<IconWaveSine size={14} />} onClick={() => setOpen(true)}>PCAP</Button></Tooltip>
-      <Modal opened={open} onClose={() => setOpen(false)} size="xl" radius="lg" overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
-        title={<Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="grape"><IconWaveSine size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>Captura de paquetes</Text><Text size="xs" c="dimmed">Navaja de diagnóstico · genera un .pcap listo para Wireshark</Text></div></Group>}>
-        <Stack gap="md">
+      <DrawerNG
+        opened={open} onClose={() => setOpen(false)} ancho={820} color="grape"
+        icono={<IconWaveSine size={24} />} titulo="Captura de paquetes"
+        subtitulo="Navaja de diagnóstico · genera un .pcap listo para Wireshark"
+        solapas={[{ value: 'captura', label: 'Captura', contenido: (
+          <>
           <Card withBorder radius="md" padding="md">
             <Text size="sm" fw={600} mb={8}>Nueva captura</Text>
             <Group align="flex-end" gap="md" wrap="wrap">
@@ -76,8 +80,9 @@ export default function PcapCapture() {
                 </Table.Tr>
               ))}</Table.Tbody>
           </Table>
-        </Stack>
-      </Modal>
+          </>
+        ) }]}
+      />
     </>
   );
 }

@@ -7,6 +7,7 @@ import { IconNetwork, IconStethoscope, IconActivity, IconMapPin, IconInfoCircle,
 import RoutesPanel from './RoutesPanel';
 import { toast } from './notify';
 import { apiPost, usePoll } from './api';
+import DrawerNG, { BloqueNG } from './DrawerNG';
 
 const UP = (fi) => /UP/i.test(fi.state || '');
 const primaryIp = (fi) => ((fi.addrs || []).find((a) => a.includes('/')) || (fi.addrs || [])[0] || '').split('/')[0];
@@ -207,17 +208,30 @@ export default function AstNet() {
 
       <RoutesPanel scope="asterisk" />
 
-      {/* Modal: cambiar IP */}
-      <Modal opened={!!ipModal} onClose={() => setIpModal(null)} centered radius="lg" title={<Group gap="sm"><ThemeIcon variant="light" color="blue"><IconWorld size={18} /></ThemeIcon><Text fw={800}>Cambiar IP · {ipModal && ipModal.dev}</Text></Group>}>
-        <Stack gap="md">
-          <TextInput label="Nueva IP / CIDR" placeholder="192.168.1.50/24" value={cidr} onChange={(e) => setCidr(e.currentTarget.value)} leftSection={<IconWorld size={15} />} description="Formato IP/máscara. Ej: 192.168.99.60/24" />
-          <MSwitch label="Reemplazar la IP actual (borra las que tenga)" checked={replace} onChange={(e) => setReplace(e.currentTarget.checked)} color="red" />
-          <Alert variant="light" color={replace ? 'red' : 'orange'} radius="md" icon={<IconAlertTriangle size={16} />}>
-            {replace ? 'Vas a BORRAR las IP actuales de la placa y dejar solo la nueva. Si es la placa de gestión, perdés el acceso al panel.' : 'Se AGREGA la IP como secundaria (no borra la actual). Es la opción segura.'}
-          </Alert>
-          <Group justify="flex-end"><Button variant="default" onClick={() => setIpModal(null)}>Cancelar</Button><Button color={replace ? 'red' : 'blue'} loading={busy} onClick={applyIp}>Aplicar</Button></Group>
-        </Stack>
-      </Modal>
+      {/* La IP va en un cajón; el activar/desactivar de abajo NO: es una pregunta de una
+          línea y para eso el modal centrado es mejor que un panel lateral. */}
+      <DrawerNG
+        opened={!!ipModal} onClose={() => setIpModal(null)} ancho={520} color="blue"
+        icono={<IconWorld size={24} />}
+        titulo={'Cambiar IP · ' + (ipModal ? ipModal.dev : '')}
+        subtitulo="Dirección de esta placa dentro del contenedor de Asterisk"
+        solapas={[{ value: 'ip', label: 'Dirección', contenido: (
+          <BloqueNG icon={<IconWorld size={16} />} titulo="Nueva dirección"
+            ayuda="Agregar una IP secundaria es reversible y no corta nada. Reemplazar borra las que tenga: si es la placa por la que llega el panel, el acceso se pierde en el momento en que se aplica.">
+            <TextInput label="Nueva IP / CIDR" placeholder="192.168.1.50/24" value={cidr} onChange={(e) => setCidr(e.currentTarget.value)} leftSection={<IconWorld size={15} />} description="Formato IP/máscara. Ej: 192.168.99.60/24" />
+            <MSwitch label="Reemplazar la IP actual (borra las que tenga)" checked={replace} onChange={(e) => setReplace(e.currentTarget.checked)} color="red" />
+            <Alert variant="light" color={replace ? 'red' : 'orange'} radius="md" icon={<IconAlertTriangle size={16} />}>
+              {replace ? 'Vas a BORRAR las IP actuales de la placa y dejar solo la nueva. Si es la placa de gestión, perdés el acceso al panel.' : 'Se AGREGA la IP como secundaria (no borra la actual). Es la opción segura.'}
+            </Alert>
+          </BloqueNG>
+        ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={() => setIpModal(null)}>Cancelar</Button>
+            <Button color={replace ? 'red' : 'blue'} loading={busy} onClick={applyIp}>Aplicar</Button>
+          </Group>
+        }
+      />
 
       {/* Modal: activar/desactivar */}
       <Modal opened={!!confirm} onClose={() => setConfirm(null)} centered radius="lg" size="sm" withCloseButton={false}>

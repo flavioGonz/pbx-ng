@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Stack, Title, Text, Card, Group, Badge, Table, Button, Modal, TextInput, ThemeIcon, SimpleGrid } from '@mantine/core';
+import { Stack, Title, Text, Card, Group, Badge, Table, Button, TextInput, ThemeIcon, SimpleGrid } from '@mantine/core';
 import { IconHeadphones, IconMicrophone, IconUsersGroup, IconPhone, IconActivity, IconEar, IconBroadcast } from '@tabler/icons-react';
 import { useLive } from '../useLive';
 import { apiPost } from '../api';
 import { toast } from '../notify';
 import Slot from '../Slot';
 import CortarLlamada from '../CortarLlamada';
+import DrawerNG, { BloqueNG } from '../DrawerNG';
 
 const SUPKEY = 'pbxng_sup_ext';
 const MODES = {
@@ -93,18 +94,25 @@ export default function Monitor() {
             </Table.ScrollContainer>}
       </Card>
 
-      <Modal opened={!!sel} onClose={() => setSel(null)} centered radius="lg" title={<Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="pbx"><IconHeadphones size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>Supervisar extensión {sel}</Text><Text size="xs" c="dimmed">Sonará tu extensión {sup || '—'} y se conectará a la llamada</Text></div></Group>}>
-        <Stack>
-          <TextInput label="Tu extensión (supervisor)" value={sup} onChange={e => setSup(e.target.value)} required />
-          <SimpleGrid cols={1} spacing="xs">
-            {Object.entries(MODES).map(([m, info]) => (
-              <Button key={m} variant="light" color={info.color} justify="flex-start" h={56} leftSection={<info.icon size={20} />} disabled={!sup} onClick={() => go(m)}>
-                <div style={{ textAlign: 'left' }}><div style={{ fontWeight: 700 }}>{info.label}</div><div style={{ fontSize: 11, opacity: .75 }}>{info.desc}</div></div>
-              </Button>
-            ))}
-          </SimpleGrid>
-        </Stack>
-      </Modal>
+      <DrawerNG
+        opened={!!sel} onClose={() => setSel(null)} ancho={480}
+        icono={<IconHeadphones size={24} />}
+        titulo={'Supervisar extensión ' + (sel || '')}
+        subtitulo={'Sonará tu extensión ' + (sup || '—') + ' y se conectará a la llamada'}
+        solapas={[{ value: 'modo', label: 'Modo', contenido: (
+          <BloqueNG icon={<IconHeadphones size={16} />} titulo="Cómo entrás a la llamada"
+            ayuda="Escuchar es invisible para los dos lados; susurrar lo oye sólo tu agente; irrumpir te suma a la conversación y lo escuchan todos. Elegí con eso en mente: el cliente no sabe que hay alguien más.">
+            <TextInput label="Tu extensión (supervisor)" value={sup} onChange={e => setSup(e.target.value)} required />
+            <SimpleGrid cols={1} spacing="xs">
+              {Object.entries(MODES).map(([m, info]) => (
+                <Button key={m} variant="light" color={info.color} justify="flex-start" h={56} leftSection={<info.icon size={20} />} disabled={!sup} onClick={() => go(m)}>
+                  <div style={{ textAlign: 'left' }}><div style={{ fontWeight: 700 }}>{info.label}</div><div style={{ fontSize: 11, opacity: .75 }}>{info.desc}</div></div>
+                </Button>
+              ))}
+            </SimpleGrid>
+          </BloqueNG>
+        ) }]}
+      />
     </Stack>
   );
 }

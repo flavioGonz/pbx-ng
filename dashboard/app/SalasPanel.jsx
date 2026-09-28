@@ -26,7 +26,7 @@
  * ==========================================================================*/
 import { useEffect, useState } from 'react';
 import {
-  Card, Group, Text, Title, Button, Table, Modal, Drawer, TextInput, NumberInput, Switch,
+  Card, Group, Text, Title, Button, Table, Drawer, TextInput, NumberInput, Switch,
   Stack, ActionIcon, ThemeIcon, Badge, Tooltip, Divider, Alert, Textarea, CopyButton, Loader,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
@@ -34,7 +34,7 @@ import {
   IconUsers, IconPlus, IconTrash, IconPencil, IconEye, IconMail, IconLock, IconHash,
   IconTag, IconMicrophoneOff, IconMicrophone, IconDoorExit, IconInfoCircle, IconDice,
   IconCalendarEvent, IconPlayerRecord, IconCopy, IconCheck, IconRefresh, IconKey,
-  IconAlertTriangle,
+  IconAlertTriangle, IconUsersGroup, IconUserPlus,
 } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import { TableSkeleton } from './Skeletons';
@@ -42,6 +42,7 @@ import { apiDel, apiGet, apiPost, apiPut, usePoll } from './api';
 import { useEsAdmin } from './auth';
 import { fmtFechaHora, fmtInputFechaHora } from './fmt';
 import { toast } from './notify';
+import DrawerNG from './DrawerNG';
 
 const VACIA = {
   name: '', label: '', access_exten: '', pin: '', pin_mod: '', max_part: 0,
@@ -484,20 +485,38 @@ export default function SalasPanel({ conEncabezado = true }) {
           )}
       </Card>
 
-      <Modal opened={form} onClose={() => { cerrarForm(); setEditar(null); }} centered radius="lg" size="lg"
-        title={editar === 'nueva' ? 'Nueva sala de reunión' : 'Editar sala'}>
-        {form && <SalaForm sala={editar === 'nueva' ? null : editar} onListo={listo} onCancelar={() => { cerrarForm(); setEditar(null); }} />}
-      </Modal>
+      {/* Tres cajones y no tres modales: la sala que se está editando, invitando o mirando
+          es una fila de la tabla de atrás, y taparla entera obliga a cerrar para volver a
+          ver cuál era. */}
+      <DrawerNG
+        opened={!!form} onClose={() => { cerrarForm(); setEditar(null); }} ancho={640}
+        icono={<IconUsersGroup size={24} />}
+        titulo={editar === 'nueva' ? 'Nueva sala de reunión' : 'Editar sala'}
+        subtitulo="Un número al que entran varios y se escuchan entre todos"
+        solapas={[{ value: 'sala', label: 'Sala', contenido: (
+          form ? <SalaForm sala={editar === 'nueva' ? null : editar} onListo={listo} onCancelar={() => { cerrarForm(); setEditar(null); }} /> : null
+        ) }]}
+      />
 
-      <Modal opened={!!invitar} onClose={() => setInvitar(null)} centered radius="lg" size="lg"
-        title={invitar ? 'Invitar a «' + (invitar.label || invitar.name) + '»' : ''}>
-        {invitar && <Invitar sala={invitar} onCerrar={() => setInvitar(null)} />}
-      </Modal>
+      <DrawerNG
+        opened={!!invitar} onClose={() => setInvitar(null)} ancho={600} color="teal"
+        icono={<IconUserPlus size={24} />}
+        titulo={invitar ? 'Invitar a «' + (invitar.label || invitar.name) + '»' : ''}
+        subtitulo="El enlace y el PIN que se le pasan a quien va a entrar"
+        solapas={[{ value: 'invitar', label: 'Invitación', contenido: (
+          invitar ? <Invitar sala={invitar} onCerrar={() => setInvitar(null)} /> : null
+        ) }]}
+      />
 
-      <Modal opened={!!verPin} onClose={() => setVerPin(null)} centered radius="lg"
-        title={verPin ? 'PIN de «' + (verPin.label || verPin.name) + '»' : ''}>
-        {verPin && <VerPin sala={verPin} onCerrar={() => setVerPin(null)} />}
-      </Modal>
+      <DrawerNG
+        opened={!!verPin} onClose={() => setVerPin(null)} ancho={440} color="gray"
+        icono={<IconKey size={24} />}
+        titulo={verPin ? 'PIN de «' + (verPin.label || verPin.name) + '»' : ''}
+        subtitulo="Se muestra sólo mientras este cajón está abierto"
+        solapas={[{ value: 'pin', label: 'PIN', contenido: (
+          verPin ? <VerPin sala={verPin} onCerrar={() => setVerPin(null)} /> : null
+        ) }]}
+      />
 
       <Drawer opened={!!enVivo} onClose={() => setEnVivo(null)} position="right" size="md"
         title={enVivo ? 'En la sala «' + (enVivo.label || enVivo.name) + '»' : ''}>

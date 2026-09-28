@@ -15,12 +15,13 @@ import {
 } from '@mantine/core';
 import {
   IconRouter, IconTopologyBus, IconAlertTriangle, IconPlayerPlay, IconCheck,
-  IconArrowBackUp, IconListCheck, IconInfoCircle,
+  IconArrowBackUp, IconListCheck, IconInfoCircle, IconTerminal2,
 } from '@tabler/icons-react';
 import { toast, toastPromise } from './notify';
 /* Tenía su propia copia del helper (misma firma, mismo `throw`): ahora usa la capa
  * compartida, que además da el mensaje en español y el `status` del error. */
 import { api } from './api';
+import DrawerNG from './DrawerNG';
 
 /* Dibujo simple del modo: dos placas separadas (router) o unidas por un puente (switch). */
 function Diagrama({ modo, wan, lan, nat }) {
@@ -266,21 +267,31 @@ export default function NetMode() {
         </Stack>
       </Modal>
 
-      <Modal opened={!!plan && !confirmar} onClose={() => setPlan(null)} title="Lo que se va a ejecutar" size="lg" centered radius="lg">
-        <Text size="sm" c="dimmed" mb="sm">
-          Estos son los comandos exactos, en orden. Se ejecutan en el contenedor de Asterisk, que es
-          el que tiene las placas del equipo. Si uno falla, se corta ahí y te dice cuál fue.
-        </Text>
-        <List spacing="xs" size="sm">
-          {(plan || []).map((p, i) => (
-            <List.Item key={i}>
-              <Text size="sm" fw={600}>{p.desc}</Text>
-              <Code block fz="11px">{p.texto}</Code>
-            </List.Item>
-          ))}
-          {(plan || []).length === 0 && <Text size="sm" c="dimmed">Sin pasos.</Text>}
-        </List>
-      </Modal>
+      {/* La confirmación de arriba sigue siendo un modal —es una pregunta de sí o no—;
+          esta lista, en cambio, se lee, se compara con lo que uno esperaba y a veces se
+          copia: para eso sirve el alto de la ventana. */}
+      <DrawerNG
+        opened={!!plan && !confirmar} onClose={() => setPlan(null)} ancho={640} color="gray"
+        icono={<IconTerminal2 size={24} />} titulo="Lo que se va a ejecutar"
+        subtitulo="Los comandos exactos, en orden"
+        solapas={[{ value: 'plan', label: 'Comandos', contenido: (
+          <>
+            <Text size="sm" c="dimmed">
+              Se ejecutan en el contenedor de Asterisk, que es el que tiene las placas del equipo.
+              Si uno falla, se corta ahí y te dice cuál fue.
+            </Text>
+            <List spacing="xs" size="sm">
+              {(plan || []).map((p, i) => (
+                <List.Item key={i}>
+                  <Text size="sm" fw={600}>{p.desc}</Text>
+                  <Code block fz="11px">{p.texto}</Code>
+                </List.Item>
+              ))}
+              {(plan || []).length === 0 && <Text size="sm" c="dimmed">Sin pasos.</Text>}
+            </List>
+          </>
+        ) }]}
+      />
     </Stack>
   );
 }

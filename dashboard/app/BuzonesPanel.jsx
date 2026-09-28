@@ -16,7 +16,7 @@
  * los marca acá para que el administrador los rote uno por uno, cuando pueda avisar. */
 import { useEffect, useState } from 'react';
 import {
-  Card, Group, Title, Text, Button, Table, Modal, TextInput, Badge, Stack, ActionIcon,
+  Card, Group, Title, Text, Button, Table, TextInput, Badge, Stack, ActionIcon,
   ThemeIcon, Tooltip, Alert, CopyButton, Loader, Divider,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
@@ -27,6 +27,8 @@ import {
 import { toast } from './notify';
 import { apiDel, apiGet, apiPost, usePoll } from './api';
 import { TableSkeleton } from './Skeletons';
+import DrawerNG, { BloqueNG } from './DrawerNG';
+import { IcoLlave } from './IconosNG';
 
 /* PIN con un clic para copiarlo: el operador lo dicta por teléfono o lo pega en un chat.
  * Mismo componente y mismo gesto que en SalasPanel, para que se lea igual en las dos. */
@@ -195,57 +197,75 @@ export default function BuzonesPanel() {
           )}
       </Card>
 
-      <Modal opened={form} onClose={cerrarForm} title="Nuevo buzón de voz" centered>
-        <Stack gap="sm">
-          <TextInput label="Buzón (interno)" required leftSection={<IconHash size={15} />} placeholder="1001"
-            description="Número del interno dueño del buzón."
-            value={nuevo.mailbox} onChange={(e) => setNuevo((s) => ({ ...s, mailbox: e.currentTarget.value }))} />
-          <TextInput label="Nombre completo" leftSection={<IconUser size={15} />} placeholder="Juan Pérez"
-            value={nuevo.fullname} onChange={(e) => setNuevo((s) => ({ ...s, fullname: e.currentTarget.value }))} />
-          <TextInput label="Email" leftSection={<IconMail size={15} />} placeholder="juan@empresa.com"
-            description="Para recibir los mensajes por correo (opcional)."
-            value={nuevo.email} onChange={(e) => setNuevo((s) => ({ ...s, email: e.currentTarget.value }))} />
-          <Alert variant="light" color="indigo" icon={<IconKey size={18} />}>
-            El <b>PIN se genera solo</b>, al azar, y se muestra una vez al terminar. Después se
-            puede ver o cambiar desde la lista.
-          </Alert>
-          <Divider />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={cerrarForm}>Cancelar</Button>
+      <DrawerNG
+        opened={!!form} onClose={cerrarForm} ancho={520}
+        icono={<IconMail size={24} />} titulo="Nuevo buzón de voz"
+        subtitulo="Dónde caen los mensajes cuando no atiende nadie"
+        solapas={[{ value: 'buzon', label: 'Buzón', contenido: (
+          <BloqueNG icon={<IconHash size={16} />} titulo="De quién es"
+            ayuda="El buzón se identifica por el número del interno dueño. El correo es opcional: si está, cada mensaje le llega también por mail.">
+            <TextInput label="Buzón (interno)" required leftSection={<IconHash size={15} />} placeholder="1001"
+              description="Número del interno dueño del buzón."
+              value={nuevo.mailbox} onChange={(e) => setNuevo((s) => ({ ...s, mailbox: e.currentTarget.value }))} />
+            <TextInput label="Nombre completo" leftSection={<IconUser size={15} />} placeholder="Juan Pérez"
+              value={nuevo.fullname} onChange={(e) => setNuevo((s) => ({ ...s, fullname: e.currentTarget.value }))} />
+            <TextInput label="Email" leftSection={<IconMail size={15} />} placeholder="juan@empresa.com"
+              description="Para recibir los mensajes por correo (opcional)."
+              value={nuevo.email} onChange={(e) => setNuevo((s) => ({ ...s, email: e.currentTarget.value }))} />
+            <Alert variant="light" color="indigo" icon={<IconKey size={18} />}>
+              El <b>PIN se genera solo</b>, al azar, y se muestra una vez al terminar. Después se
+              puede ver o cambiar desde la lista.
+            </Alert>
+          </BloqueNG>
+        ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={cerrarForm}>Cancelar</Button>
             <Button loading={guardando} disabled={!nuevo.mailbox.trim()} onClick={crear}>Crear buzón</Button>
           </Group>
-        </Stack>
-      </Modal>
+        }
+      />
 
       {/* El PIN recién generado se muestra en un cartel aparte y no en un toast que se va
           solo: es el único momento en que aparece sin tener que ir a buscarlo, y si el
           operador lo pierde tiene que volver a rotarlo. */}
-      <Modal opened={!!recien} onClose={() => setRecien(null)} title={recien && recien.nuevo ? 'Buzón creado' : 'PIN nuevo'} centered>
-        {recien && (
-          <Stack gap="sm">
-            <Group gap={10}>
-              <Text fz="sm" w={110}>Buzón {recien.mailbox}</Text>
-              <Pin valor={recien.pin} />
-            </Group>
-            {recien.yaExistia && (
-              <Alert variant="light" color="blue" icon={<IconInfoCircle size={18} />}>
-                Ese buzón <b>ya existía</b> (cada interno nace con el suyo): se le actualizó el nombre
-                y el correo, y arriba está el PIN que ya tenía. Si querés otro, usá <b>PIN nuevo</b>.
+      <DrawerNG
+        opened={!!recien} onClose={() => setRecien(null)} ancho={480} color="indigo"
+        icono={<IcoLlave s={24} />}
+        titulo={recien && recien.nuevo ? 'Buzón creado' : 'PIN nuevo'}
+        subtitulo={recien ? 'Buzón ' + recien.mailbox : ''}
+        solapas={[{ value: 'pin', label: 'PIN', contenido: (
+          recien ? (
+            <Stack gap="sm">
+              <Group gap={10}>
+                <Text fz="sm" w={110}>Buzón {recien.mailbox}</Text>
+                <Pin valor={recien.pin} />
+              </Group>
+              {recien.yaExistia && (
+                <Alert variant="light" color="blue" icon={<IconInfoCircle size={18} />}>
+                  Ese buzón <b>ya existía</b> (cada interno nace con el suyo): se le actualizó el nombre
+                  y el correo, y arriba está el PIN que ya tenía. Si querés otro, usá <b>PIN nuevo</b>.
+                </Alert>
+              )}
+              <Alert variant="light" color={recien.avisado ? 'teal' : 'orange'} icon={<IconInfoCircle size={18} />}>
+                {recien.avisado
+                  ? <>Se le mandó el PIN nuevo por correo al dueño del buzón.</>
+                  : <>Anotalo o copialo ahora y <b>pasáselo al dueño</b>: la central no se lo avisa sola (el buzón no tiene correo configurado, o la central no tiene servidor de correo).</>}
               </Alert>
-            )}
-            <Alert variant="light" color={recien.avisado ? 'teal' : 'orange'} icon={<IconInfoCircle size={18} />}>
-              {recien.avisado
-                ? <>Se le mandó el PIN nuevo por correo al dueño del buzón.</>
-                : <>Anotalo o copialo ahora y <b>pasáselo al dueño</b>: la central no se lo avisa sola (el buzón no tiene correo configurado, o la central no tiene servidor de correo).</>}
-            </Alert>
-            <Group justify="flex-end"><Button onClick={() => setRecien(null)}>Listo</Button></Group>
-          </Stack>
-        )}
-      </Modal>
+            </Stack>
+          ) : null
+        ) }]}
+        pie={<Group justify="flex-end"><Button onClick={() => setRecien(null)}>Listo</Button></Group>}
+      />
 
-      <Modal opened={!!verPin} onClose={() => setVerPin(null)} title={'PIN del buzón ' + (verPin || '')} centered>
-        {verPin && <VerPin mailbox={verPin} onCerrar={() => setVerPin(null)} />}
-      </Modal>
+      <DrawerNG
+        opened={!!verPin} onClose={() => setVerPin(null)} ancho={440} color="gray"
+        icono={<IcoLlave s={24} />} titulo={'PIN del buzón ' + (verPin || '')}
+        subtitulo="Se muestra sólo mientras este cajón está abierto"
+        solapas={[{ value: 'pin', label: 'PIN', contenido: (
+          verPin ? <VerPin mailbox={verPin} onCerrar={() => setVerPin(null)} /> : null
+        ) }]}
+      />
     </Stack>
   );
 }

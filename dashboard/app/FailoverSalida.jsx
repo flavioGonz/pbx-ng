@@ -9,11 +9,12 @@
  */
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Group, Text, Table, Button, ActionIcon, Tooltip, Modal, Select, Stack, Badge, ThemeIcon, Alert, Divider, NumberInput, Code } from '@mantine/core';
+import { Card, Group, Text, Table, Button, ActionIcon, Tooltip, Select, Stack, Badge, ThemeIcon, Alert, Divider, NumberInput, Code } from '@mantine/core';
 import { IconRouteAltLeft, IconChevronUp, IconChevronDown, IconTrash, IconPlus, IconAlertTriangle, IconShieldLock, IconArrowRight, IconPhoneOff, IconSettings } from '@tabler/icons-react';
 import { toast } from './notify';
 import { apiPut, usePoll, useApi } from './api';
 import { estadoColor } from './fmt';
+import DrawerNG, { BloqueNG } from './DrawerNG';
 
 const SBC = 'to-sbc';
 
@@ -152,9 +153,13 @@ export default function FailoverSalida() {
           </Table.ScrollContainer>
         )}
 
-      <Modal opened={!!edit} onClose={() => setEdit(null)} centered radius="lg" size="lg"
-        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color="teal"><IconRouteAltLeft size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>Respaldos de {edit?.name || ('_' + (edit?.pattern || ''))}</Text><Text size="xs" c="dimmed">Se intenta de arriba hacia abajo</Text></div></Group>}>
-        {edit && (
+      <DrawerNG
+        opened={!!edit} onClose={() => setEdit(null)} ancho={600} color="teal"
+        icono={<IconRouteAltLeft size={24} />}
+        titulo={'Respaldos de ' + (edit ? (edit.name || ('_' + (edit.pattern || ''))) : '')}
+        subtitulo="Se intenta de arriba hacia abajo"
+        solapas={[{ value: 'respaldos', label: 'Respaldos', contenido: (
+          edit ? (
           <Stack gap="md">
             <Group gap={8} wrap="nowrap">
               <Badge color="teal" variant="filled" style={{ textTransform: 'none' }}>{edit.principal}</Badge>
@@ -183,10 +188,16 @@ export default function FailoverSalida() {
               <NumberInput label="Tope total (s)" min={5} max={300} value={edit.total_seg} onChange={(v) => setEdit((e) => ({ ...e, total_seg: +v || 45 }))}
                 description="Pasado este tiempo se corta con congestión aunque queden respaldos sin probar." />
             </Group>
-            <Group justify="flex-end"><Button variant="default" onClick={() => setEdit(null)}>Cancelar</Button><Button onClick={guardar} loading={busy}>Guardar</Button></Group>
           </Stack>
-        )}
-      </Modal>
+          ) : null
+        ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={() => setEdit(null)}>Cancelar</Button>
+            <Button onClick={guardar} loading={busy}>Guardar</Button>
+          </Group>
+        }
+      />
     </Card>
   );
 }

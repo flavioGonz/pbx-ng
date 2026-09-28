@@ -1,10 +1,11 @@
 /* RoutesPanel.jsx - rutas estaticas del nucleo (Asterisk) con dropdown de interfaz + modal de edicion */
 'use client';
 import { useEffect, useState } from 'react';
-import { Card, Group, Text, Table, Button, ActionIcon, Tooltip, Modal, TextInput, Select, Stack, Badge, Code } from '@mantine/core';
+import { Card, Group, Text, Table, Button, ActionIcon, Tooltip, TextInput, Select, Stack, Badge, Code } from '@mantine/core';
 import { IconPlus, IconEdit, IconTrash, IconRoute, IconAlertTriangle, IconNetwork } from '@tabler/icons-react';
 import { toast } from './notify';
 import { apiPost, usePoll } from './api';
+import DrawerNG, { BloqueNG } from './DrawerNG';
 
 export default function RoutesPanel({ scope }) {
   const isAst = true;   // el borde (SBC-NG) es otro producto: sus rutas viven en su panel
@@ -49,15 +50,27 @@ export default function RoutesPanel({ scope }) {
           <Table.Tr key={r.id}><Table.Td ff="monospace" fz="sm">{r.dest}</Table.Td><Table.Td ff="monospace" fz="sm">{r.gw || '—'}</Table.Td><Table.Td ff="monospace" fz="sm">{r.dev || '—'}</Table.Td><Table.Td fz="sm">{r.note || ''}</Table.Td>
             <Table.Td ta="right"><Group gap={4} justify="flex-end" wrap="nowrap"><Tooltip label="Editar"><ActionIcon variant="subtle" color="gray" onClick={() => openEdit(r)}><IconEdit size={15} /></ActionIcon></Tooltip><Tooltip label="Quitar"><ActionIcon variant="subtle" color="red" onClick={() => del(r)}><IconTrash size={15} /></ActionIcon></Tooltip></Group></Table.Td></Table.Tr>))}</Table.Tbody></Table>
       <Group gap="xs" mt="sm"><IconAlertTriangle size={15} color="var(--mantine-color-orange-6)" /><Text size="xs" c="dimmed">Se aplican con <Code>ip route replace</Code> en {host}. Una ruta mal configurada puede afectar la conectividad; verificá gateway e interfaz.</Text></Group>
-      <Modal opened={open} onClose={() => setOpen(false)} centered radius="lg" title={<Group gap="sm"><IconRoute size={20} /><Text fw={800}>{editId ? 'Editar ruta' : 'Nueva ruta estática'} — {host}</Text></Group>}>
-        <Stack gap="md">
-          <TextInput label="Destino (red/host)" description="Ej 200.40.10.0/24 o 1.2.3.4" placeholder="0.0.0.0/0" value={f.dest} onChange={(e) => setF({ ...f, dest: e.target.value })} required leftSection={<IconRoute size={15} />} />
-          <TextInput label="Gateway (via)" description="IP del próximo salto (opcional si elegís interfaz)" placeholder="172.26.30.1" value={f.gw} onChange={(e) => setF({ ...f, gw: e.target.value })} />
-          <Select label="Interfaz de salida (dev)" description="Elegí la interfaz para evitar errores de tipeo" placeholder="(automática)" data={ifaces} value={f.dev || null} onChange={(v) => setF({ ...f, dev: v || '' })} clearable searchable leftSection={<IconNetwork size={15} />} />
-          <TextInput label="Nota (opcional)" placeholder="ej WAN troncal Antel" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
-          <Button onClick={save} loading={busy} color={col}>{editId ? 'Guardar cambios' : 'Agregar ruta'}</Button>
-        </Stack>
-      </Modal>
+      <DrawerNG
+        opened={open} onClose={() => setOpen(false)} ancho={520} color={col}
+        icono={<IconRoute size={24} />}
+        titulo={editId ? 'Editar ruta' : 'Nueva ruta estática'}
+        subtitulo={'Se aplica en ' + host}
+        solapas={[{ value: 'ruta', label: 'Ruta', contenido: (
+          <BloqueNG icon={<IconRoute size={16} />} titulo="Hacia dónde y por dónde"
+            ayuda="El destino es la red o el host al que se quiere llegar; el gateway o la interfaz, por dónde sale. Una ruta mal puesta puede dejar la central sin camino de vuelta: verificá el próximo salto antes de guardar.">
+            <TextInput label="Destino (red/host)" description="Ej 200.40.10.0/24 o 1.2.3.4" placeholder="0.0.0.0/0" value={f.dest} onChange={(e) => setF({ ...f, dest: e.target.value })} required leftSection={<IconRoute size={15} />} />
+            <TextInput label="Gateway (via)" description="IP del próximo salto (opcional si elegís interfaz)" placeholder="172.26.30.1" value={f.gw} onChange={(e) => setF({ ...f, gw: e.target.value })} />
+            <Select label="Interfaz de salida (dev)" description="Elegí la interfaz para evitar errores de tipeo" placeholder="(automática)" data={ifaces} value={f.dev || null} onChange={(v) => setF({ ...f, dev: v || '' })} clearable searchable leftSection={<IconNetwork size={15} />} />
+            <TextInput label="Nota (opcional)" placeholder="ej WAN troncal Antel" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+          </BloqueNG>
+        ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button onClick={save} loading={busy} color={col}>{editId ? 'Guardar cambios' : 'Agregar ruta'}</Button>
+          </Group>
+        }
+      />
     </Card>
   );
 }

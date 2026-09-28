@@ -5,7 +5,7 @@ import { useAuth, logout } from '../auth';
 import Softphone from '../Softphone';
 import Intercom from '../Intercom';
 import {
-  Card, Text, Group, Badge, Button, PasswordInput, Modal, ThemeIcon, Stack,
+  Card, Text, Group, Badge, Button, PasswordInput, ThemeIcon, Stack,
   ActionIcon, Tooltip, ScrollArea, useComputedColorScheme, SegmentedControl,
   Avatar, Loader, Select, Switch, Textarea, Rating, Table,
 } from '@mantine/core';
@@ -13,7 +13,7 @@ import {
   IconPhone, IconLogout, IconKey, IconPhoneIncoming, IconPhoneOutgoing, IconRefresh,
   IconHeadset, IconPlayerPlay, IconDeviceCctv, IconSparkles, IconUserCheck, IconBuilding,
   IconId, IconMapPin, IconClipboardCheck, IconPlayerPause, IconCircleDot, IconVideoOff,
-  IconUsers, IconVideo, IconArrowForward,
+  IconUsers, IconVideo, IconArrowForward, IconLock,
 } from '@tabler/icons-react';
 import { api, apiGet, apiPost, useApi, usePoll } from '../api';
 import { fmtFechaHora, fmtReloj } from '../fmt';
@@ -21,6 +21,7 @@ import { toast } from '../notify';
 /* Mismo componente que usa el administrador en /internos: el agente cambia los
  * suyos y ve exactamente los mismos textos y los mismos códigos de teléfono. */
 import DesviosPanel from '../DesviosPanel';
+import DrawerNG, { BloqueNG } from '../DrawerNG';
 
 const initials = (n) => (n || '?').split(/[\s.]+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 const enc = encodeURIComponent;
@@ -164,21 +165,30 @@ function SurveyModal({ opened, onClose, fields, ctx }) {
     toast('Encuesta registrada', 'ok'); onClose();
   }
   return (
-    <Modal opened={opened} onClose={onClose} title={<Group gap={8}><ThemeIcon variant="light" color="grape" radius="md"><IconClipboardCheck size={18} /></ThemeIcon><Text fw={800}>Encuesta de la llamada</Text></Group>} centered radius="lg" closeOnClickOutside={false}>
-      <Stack gap="sm">
-        {ctx.num && <Text fz="sm" c="dimmed">Llamada con {ctx.num}</Text>}
-        {fields.length === 0 ? <Text c="dimmed" fz="sm">No hay campos de encuesta configurados.</Text> : fields.map(f => (
-          <div key={f.id}>
-            <Text fz="sm" fw={600} mb={4}>{f.label}{f.required ? ' *' : ''}</Text>
-            {f.ftype === 'select' && <Select data={(f.options || []).map(o => ({ value: o, label: o }))} value={ans[f.id] || null} onChange={v => setA(f.id, v)} placeholder="Elegí…" />}
-            {f.ftype === 'text' && <Textarea autosize minRows={2} value={ans[f.id] || ''} onChange={e => setA(f.id, e.currentTarget.value)} />}
-            {f.ftype === 'rating' && <Rating value={ans[f.id] || 0} onChange={v => setA(f.id, v)} />}
-            {f.ftype === 'bool' && <Switch checked={!!ans[f.id]} onChange={e => setA(f.id, e.currentTarget.checked)} label={ans[f.id] ? 'Sí' : 'No'} />}
-          </div>
-        ))}
-        <Group justify="flex-end" mt="xs"><Button variant="default" onClick={onClose}>Omitir</Button><Button color="grape" loading={busy} onClick={submit}>Guardar</Button></Group>
-      </Stack>
-    </Modal>
+    <DrawerNG
+      opened={opened} onClose={onClose} ancho={460} color="grape"
+      icono={<IconClipboardCheck size={24} />} titulo="Encuesta de la llamada"
+      subtitulo={ctx.num ? 'Llamada con ' + ctx.num : 'Tipificación de lo que acaba de pasar'}
+      solapas={[{ value: 'encuesta', label: 'Encuesta', contenido: (
+        <Stack gap="sm">
+          {fields.length === 0 ? <Text c="dimmed" fz="sm">No hay campos de encuesta configurados.</Text> : fields.map(f => (
+            <div key={f.id}>
+              <Text fz="sm" fw={600} mb={4}>{f.label}{f.required ? ' *' : ''}</Text>
+              {f.ftype === 'select' && <Select data={(f.options || []).map(o => ({ value: o, label: o }))} value={ans[f.id] || null} onChange={v => setA(f.id, v)} placeholder="Elegí…" />}
+              {f.ftype === 'text' && <Textarea autosize minRows={2} value={ans[f.id] || ''} onChange={e => setA(f.id, e.currentTarget.value)} />}
+              {f.ftype === 'rating' && <Rating value={ans[f.id] || 0} onChange={v => setA(f.id, v)} />}
+              {f.ftype === 'bool' && <Switch checked={!!ans[f.id]} onChange={e => setA(f.id, e.currentTarget.checked)} label={ans[f.id] ? 'Sí' : 'No'} />}
+            </div>
+          ))}
+        </Stack>
+      ) }]}
+      pie={
+        <Group justify="space-between">
+          <Button variant="subtle" color="gray" onClick={onClose}>Omitir</Button>
+          <Button color="grape" loading={busy} onClick={submit}>Guardar</Button>
+        </Group>
+      }
+    />
   );
 }
 
@@ -391,14 +401,25 @@ export default function AgentePanel() {
       </div>
 
       <SurveyModal opened={surveyOpen} onClose={() => setSurveyOpen(false)} fields={surveyFields} ctx={surveyCtx} />
-      <Modal opened={pwOpen} onClose={() => setPwOpen(false)} title="Cambiar mi contraseña" centered radius="lg">
-        <Stack>
-          <PasswordInput label="Contraseña actual" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
-          <PasswordInput label="Nueva contraseña" description="Mínimo 8 caracteres" value={np} onChange={(e) => setNp(e.target.value)} autoComplete="new-password" />
-          <PasswordInput label="Repetir" value={np2} onChange={(e) => setNp2(e.target.value)} />
-          <Button color="teal" loading={pwBusy} onClick={changePw}>Guardar</Button>
-        </Stack>
-      </Modal>
+      <DrawerNG
+        opened={pwOpen} onClose={() => setPwOpen(false)} ancho={430} color="teal"
+        icono={<IconLock size={24} />} titulo="Cambiar mi contraseña"
+        subtitulo="La de tu cuenta del panel, no la del interno"
+        solapas={[{ value: 'clave', label: 'Contraseña', contenido: (
+          <BloqueNG icon={<IconLock size={16} />} titulo="Nueva contraseña"
+            ayuda="Hace falta la actual: así, si alguien se sienta en tu puesto con la sesión abierta, no puede dejarte afuera de tu propia cuenta.">
+            <PasswordInput label="Contraseña actual" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
+            <PasswordInput label="Nueva contraseña" description="Mínimo 8 caracteres" value={np} onChange={(e) => setNp(e.target.value)} autoComplete="new-password" />
+            <PasswordInput label="Repetir" value={np2} onChange={(e) => setNp2(e.target.value)} />
+          </BloqueNG>
+        ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={() => setPwOpen(false)}>Cancelar</Button>
+            <Button color="teal" loading={pwBusy} onClick={changePw}>Guardar</Button>
+          </Group>
+        }
+      />
     </div>
   );
 }

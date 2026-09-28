@@ -3,9 +3,10 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { ReactFlow, Background, Handle, Position, MarkerType, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper } from '@mantine/core';
-import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume, IconSparkles } from '@tabler/icons-react';
 import { toast } from './notify';
 import { api, apiGet, apiPost, apiPut, BASE } from './api';
+import DrawerNG, { BloqueNG } from './DrawerNG';
 
 const DEST = {
   extension: { label: 'Interno', color: '#0ea5e9', icon: IconPhoneCall },
@@ -214,14 +215,30 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
       {/* FAB añadir opción */}
       <Button pos="absolute" style={{ bottom: 20, left: 20, zIndex: 6, boxShadow: '0 10px 26px rgba(15,42,74,.30)' }} leftSection={<IconPlus size={16} />} onClick={addOption} radius="xl" size="md">Añadir opción</Button>
 
-      <Modal opened={genOpen} onClose={() => setGenOpen(false)} title="Generar audio del saludo con IA (TTS)" centered radius="lg" zIndex={3000}>
-        <Stack gap="sm">
-          <Textarea label="Texto del saludo" placeholder="Bienvenido a la empresa. Marque 1 para ventas, 2 para soporte." autosize minRows={3} value={genText} onChange={(e) => setGenText(e.currentTarget.value)} />
-          <Group grow><Select label="Voz" data={genVoices.map((v) => ({ value: v, label: v }))} value={genVoice} onChange={setGenVoice} searchable /><TextInput label="Nombre (opcional)" placeholder="saludo-principal" value={genName} onChange={(e) => setGenName(e.target.value)} /></Group>
-          <Group justify="space-between"><Button variant="default" leftSection={<IconPlayerPlay size={15} />} onClick={previewGen} disabled={!genText.trim()}>Previsualizar</Button><Button color="grape" loading={genBusy} leftSection={<IconDeviceFloppy size={15} />} onClick={genAudio} disabled={!genText.trim()}>Generar y usar</Button></Group>
-          <Text size="xs" c="dimmed">Se sintetiza con el contenedor de Voz y se despliega a Asterisk como audio del IVR.</Text>
-        </Stack>
-      </Modal>
+      {/* El diseñador entero sigue siendo una pantalla completa —es un lienzo, no un
+          formulario—, pero el generador de audio es un formulario y va en un cajón: así se
+          sigue viendo el árbol del IVR mientras se escribe el saludo. */}
+      <DrawerNG
+        opened={genOpen} onClose={() => setGenOpen(false)} ancho={520} color="grape"
+        icono={<IconSparkles size={24} />} titulo="Generar el saludo con IA"
+        subtitulo="Texto a voz con el motor propio de la central"
+        solapas={[{ value: 'tts', label: 'Audio', contenido: (
+          <BloqueNG icon={<IconSparkles size={16} />} titulo="Qué dice y con qué voz"
+            ayuda="Escribí el saludo como lo diría una persona: los números y las opciones se leen mejor separados («marque uno, para ventas»). Se sintetiza en el contenedor de Voz y se despliega a Asterisk como audio del IVR.">
+            <Textarea label="Texto del saludo" placeholder="Bienvenido a la empresa. Marque 1 para ventas, 2 para soporte." autosize minRows={3} value={genText} onChange={(e) => setGenText(e.currentTarget.value)} />
+            <Group grow>
+              <Select label="Voz" data={genVoices.map((v) => ({ value: v, label: v }))} value={genVoice} onChange={setGenVoice} searchable />
+              <TextInput label="Nombre (opcional)" placeholder="saludo-principal" value={genName} onChange={(e) => setGenName(e.target.value)} />
+            </Group>
+          </BloqueNG>
+        ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" leftSection={<IconPlayerPlay size={15} />} onClick={previewGen} disabled={!genText.trim()}>Previsualizar</Button>
+            <Button color="grape" loading={genBusy} leftSection={<IconDeviceFloppy size={15} />} onClick={genAudio} disabled={!genText.trim()}>Generar y usar</Button>
+          </Group>
+        }
+      />
       <audio ref={audioRef} style={{ display: 'none' }} />
     </div>
   );

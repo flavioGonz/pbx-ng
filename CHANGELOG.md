@@ -2,6 +2,32 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.28.0] - 2026-09-28
+### Changed
+- **Tercera tanda de cajones: quedan once modales menos en el panel.** Mismo criterio de
+  siempre — lo que se edita es una fila o un objeto de la pantalla de atrás, y el modal la
+  tapa entera.
+  - **Salas de reunión**: el alta/edición, la invitación y el PIN. **Buzones de voz**: el
+    alta, el cartel del PIN recién generado y el PIN de un buzón existente. En los dos
+    casos el PIN vive en un cajón angosto, como el QR del interno: es un dato para leer y
+    copiar, no un formulario.
+  - **Click-to-Call**: el enlace público (partido en «qué ve el cliente» y «opciones», con
+    la advertencia de que cada dato que se le pide al visitante es un paso más antes de
+    hablar) y su QR.
+  - **Panel del agente**: la encuesta al terminar la llamada y el cambio de contraseña
+    propia.
+  - **Red**: la IP de una placa, las rutas estáticas, la lista de comandos que se van a
+    ejecutar al cambiar el modo de red, y la captura de paquetes.
+  - **Supervisión**: el cajón para entrar a una llamada dice ahora, en el momento de
+    elegir, que escuchar es invisible, que susurrar lo oye sólo el agente y que irrumpir lo
+    escuchan todos — es una decisión sobre alguien que no sabe que hay un tercero.
+  - **IVR**: el generador del saludo por TTS. El diseñador entero sigue siendo una pantalla
+    completa, que es lo que corresponde a un lienzo.
+- Se mantienen como modales, a propósito, las **confirmaciones de una línea**: cortar una
+  llamada, activar o desactivar una placa, aplicar el cambio de modo de red, banear una IP
+  y restaurar un respaldo. Un cajón lateral para una pregunta de sí o no hace viajar la
+  mirada más lejos y tarda más en aparecer.
+
 ## [1.27.0] - 2026-09-28
 ### Changed
 - **Siguen cayendo las ventanas modales: ahora las pantallas CRUD, colas, usuarios y

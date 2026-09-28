@@ -1,10 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, Tooltip, CopyButton } from '@mantine/core';
+import { Stack, Card, Group, Text, Button, Table, Badge, ActionIcon, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Divider, Tooltip, CopyButton } from '@mantine/core';
 import { IconWorldShare, IconPlus, IconEdit, IconTrash, IconQrcode, IconCopy, IconCheck, IconHash, IconBolt, IconDeviceFloppy, IconExternalLink, IconPhoneCall } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
+import DrawerNG, { BloqueNG } from '../DrawerNG';
+import { IcoQr, IcoConexion } from '../IconosNG';
 
 const DTYPES = [{ value: 'extension', label: 'Extensión' }, { value: 'queue', label: 'Cola' }, { value: 'ringgroup', label: 'Ring Group' }, { value: 'ivr', label: 'IVR' }, { value: 'ai', label: 'Agente IA' }];
 const DLABEL = Object.fromEntries(DTYPES.map(d => [d.value, d.label]));
@@ -64,38 +66,59 @@ export default function Click2Call() {
           </Table.ScrollContainer>}
       </Card>
 
-      <Modal opened={opened} onClose={() => setOpened(false)} size="lg" radius="lg" centered
-        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color="teal"><IconWorldShare size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>{form.id ? 'Editar enlace' : 'Nuevo enlace Click-to-Call'}</Text><Text size="xs" c="dimmed">Llamada WebRTC pública</Text></div></Group>}>
-        <Stack gap="md">
-          <TextInput label="Nombre del enlace" description="Lo ve el cliente como título. Ej: Hablá con Ventas" value={form.name} onChange={e => up('name', e.currentTarget.value)} required />
-          <SimpleGrid cols={2}>
-            <Select label="Tipo de destino" data={DTYPES} value={form.dest_type} onChange={v => up('dest_type', v)} />
-            <TextInput label="Destino" description="Número dla extensión/cola/IVR/agente. Ej: 1001" value={form.dest_value} onChange={e => up('dest_value', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
-          </SimpleGrid>
-          <Textarea label="Texto de bienvenida" description="Subtítulo que ve el cliente en la página. Ej: Te respondemos al instante." value={form.intro} onChange={e => up('intro', e.currentTarget.value)} autosize minRows={2} />
-          <Divider label="Opciones" labelPosition="center" />
-          <SimpleGrid cols={2}>
-            <Switch label="Pedir nombre del cliente" checked={form.require_name !== false} onChange={e => up('require_name', e.currentTarget.checked)} />
-            <Switch label="Solicitar geolocalización" checked={!!form.collect_geo} onChange={e => up('collect_geo', e.currentTarget.checked)} />
-            <Switch label="Habilitar video" checked={!!form.video} onChange={e => up('video', e.currentTarget.checked)} />
-            <Switch label="Enlace activo" checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />
-          </SimpleGrid>
-          <Divider />
-          <Group justify="flex-end"><Button variant="default" onClick={() => setOpened(false)}>Cancelar</Button><Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Crear enlace'}</Button></Group>
-        </Stack>
-      </Modal>
-
-      <Modal opened={!!qr} onClose={() => setQr(null)} size="sm" radius="lg" centered title={<Text fw={800}>QR · {qr && qr.name}</Text>}>
-        {qr && <Stack align="center" gap="md">
-          <div style={{ background: '#fff', padding: 16, borderRadius: 16, border: '1px solid #e5eaf3' }}><QRCodeSVG value={urlOf(qr.token)} size={208} level="M" /></div>
-          <Text size="sm" c="dimmed" ta="center">El cliente escanea o abre el enlace y llama con un toque, desde el navegador.</Text>
-          <Group gap="xs" w="100%">
-            <TextInput readOnly value={urlOf(qr.token)} style={{ flex: 1 }} ff="monospace" size="xs" />
-            <CopyButton value={urlOf(qr.token)}>{({ copied, copy }) => <Button size="xs" variant="light" color={copied ? 'teal' : 'blue'} leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />} onClick={copy}>{copied ? 'Copiado' : 'Copiar'}</Button>}</CopyButton>
+      <DrawerNG
+        opened={opened} onClose={() => setOpened(false)} ancho={620} color="teal"
+        icono={<IconWorldShare size={24} />}
+        titulo={form.id ? 'Editar enlace' : 'Nuevo enlace Click-to-Call'}
+        subtitulo="Una página pública desde la que un visitante llama por el navegador"
+        solapas={[{ value: 'enlace', label: 'Enlace', contenido: (
+          <>
+            <BloqueNG icon={<IcoConexion s={16} />} titulo="Qué ve el cliente y dónde entra la llamada"
+              ayuda="El nombre y el texto son lo que aparece en la página pública. El destino es el interno, cola o IVR al que entra la llamada cuando el visitante aprieta el botón.">
+              <TextInput label="Nombre del enlace" description="Lo ve el cliente como título. Ej: Hablá con Ventas" value={form.name} onChange={e => up('name', e.currentTarget.value)} required />
+              <SimpleGrid cols={2}>
+                <Select label="Tipo de destino" data={DTYPES} value={form.dest_type} onChange={v => up('dest_type', v)} />
+                <TextInput label="Destino" description="Número de la extensión/cola/IVR/agente. Ej: 1001" value={form.dest_value} onChange={e => up('dest_value', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
+              </SimpleGrid>
+              <Textarea label="Texto de bienvenida" description="Subtítulo que ve el cliente en la página. Ej: Te respondemos al instante." value={form.intro} onChange={e => up('intro', e.currentTarget.value)} autosize minRows={2} />
+            </BloqueNG>
+            <BloqueNG icon={<IconDeviceFloppy size={16} />} titulo="Opciones"
+              ayuda="Cada dato que se le pide al visitante es un paso más antes de hablar: pedí sólo lo que vas a usar. La geolocalización la tiene que aceptar él en el navegador.">
+              <SimpleGrid cols={2}>
+                <Switch label="Pedir nombre del cliente" checked={form.require_name !== false} onChange={e => up('require_name', e.currentTarget.checked)} />
+                <Switch label="Solicitar geolocalización" checked={!!form.collect_geo} onChange={e => up('collect_geo', e.currentTarget.checked)} />
+                <Switch label="Habilitar video" checked={!!form.video} onChange={e => up('video', e.currentTarget.checked)} />
+                <Switch label="Enlace activo" checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />
+              </SimpleGrid>
+            </BloqueNG>
+          </>
+        ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={() => setOpened(false)}>Cancelar</Button>
+            <Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Crear enlace'}</Button>
           </Group>
-          <Button component="a" href={urlOf(qr.token)} target="_blank" variant="subtle" leftSection={<IconExternalLink size={15} />} size="xs">Abrir página de llamada</Button>
-        </Stack>}
-      </Modal>
+        }
+      />
+
+      <DrawerNG
+        opened={!!qr} onClose={() => setQr(null)} ancho={460} color="teal"
+        icono={<IcoQr s={24} />} titulo={qr ? 'QR · ' + qr.name : ''}
+        subtitulo="Para imprimir, pegar en la web o mandar por mensaje"
+        solapas={[{ value: 'qr', label: 'Código', contenido: (
+          qr ? (
+            <Stack align="center" gap="md">
+              <div style={{ background: '#fff', padding: 16, borderRadius: 16, border: '1px solid #e5eaf3' }}><QRCodeSVG value={urlOf(qr.token)} size={208} level="M" /></div>
+              <Text size="sm" c="dimmed" ta="center">El cliente escanea o abre el enlace y llama con un toque, desde el navegador.</Text>
+              <Group gap="xs" w="100%">
+                <TextInput readOnly value={urlOf(qr.token)} style={{ flex: 1 }} ff="monospace" size="xs" />
+                <CopyButton value={urlOf(qr.token)}>{({ copied, copy }) => <Button size="xs" variant="light" color={copied ? 'teal' : 'blue'} leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />} onClick={copy}>{copied ? 'Copiado' : 'Copiar'}</Button>}</CopyButton>
+              </Group>
+              <Button component="a" href={urlOf(qr.token)} target="_blank" variant="subtle" leftSection={<IconExternalLink size={15} />} size="xs">Abrir página de llamada</Button>
+            </Stack>
+          ) : null
+        ) }]}
+      />
     </Stack>
   );
 }
