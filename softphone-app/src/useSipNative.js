@@ -116,7 +116,10 @@ export function useSipNative() {
       if (!evt) return;
       if (evt.type === 'stats') { setQuality({ score: evt.score, loss: evt.loss, jitter: evt.jitter, rtt: evt.rtt || null, codec: evt.codec || null, candType: evt.candType || null }); return; }
       if (evt.type === 'reg') { setReg(evt.state); }
-      else if (evt.type === 'video') { if (evt.state === 'on') startVideoEngine(); }
+      else if (evt.type === 'video') {
+        if (evt.state === 'on') { setVideoOn(true); startVideoEngine(); }
+        else { setVideoOn(false); stopVideo(); if (evt.error === 'srtp') setNote('La cámara no se puede encender en una llamada cifrada'); else if (evt.error === 'rechazado') setNote('El otro lado no aceptó video'); }
+      }
       else if (evt.type === 'video-keyframe') { try { veng.current && veng.current.forceKeyframe(); } catch {} }
       else if (evt.type === 'call') {
         if (evt.state === 'calling') { const ci = { dir: 'out', number: evt.number, since: 0 }; infoRef.current = ci; setCallInfo(ci); setCall('calling'); setNote('Llamando…'); setIncoming(null); }
@@ -165,6 +168,12 @@ export function useSipNative() {
   const toggleMute = useCallback(() => { setMuted(m => { const n = !m; try { window.sphone && window.sphone.sipMute(n); } catch {} return n; }); }, []);
   const setVolume = useCallback((v) => { const val = Math.max(0, Math.min(1, v)); setVol(val); audio.current.vol = val; try { localStorage.setItem('sp_volume', String(val)); } catch {} }, []);
   const sendDtmf = useCallback((k) => { playLocalTone(String(k)); try { window.sphone && window.sphone.sipDtmf && window.sphone.sipDtmf(String(k)); } catch {} }, []);
+  /* Igual que la espera: se le PIDE a la central y el estado lo mueve su respuesta. Si
+   * dice que no —llamada cifrada, el otro lado no quiere video— el botón no tiene que
+   * haber quedado encendido mintiendo. */
+  const toggleVideo = useCallback(() => {
+    setVideoOn((v) => { try { window.sphone && window.sphone.sipSetVideo && window.sphone.sipSetVideo(!v); } catch {} return v; });
+  }, []);
   /* El estado NO se cambia acá: se pide la espera a la central y se espera su respuesta.
    * Si contesta que no, el botón no debe haber quedado encendido mintiendo. */
   const toggleHold = useCallback(() => {
@@ -202,7 +211,7 @@ export function useSipNative() {
     reg, registered, call, inCall, incoming, incomingVideo, muted, held, speaker, videoOn,
     callInfo, quality, hist, volume, note, usingRelay: null,
     connect, disconnect, placeCall, accept, reject, hangup, toggleMute,
-    toggleHold, toggleVideo: noop, toggleSpeaker, applySpeaker, setVolume, transfer: (t) => { try { window.sphone && window.sphone.sipTransfer && window.sphone.sipTransfer(t); } catch {} }, sendDtmf, clearHist,
+    toggleHold, toggleVideo, toggleSpeaker, applySpeaker, setVolume, transfer: (t) => { try { window.sphone && window.sphone.sipTransfer && window.sphone.sipTransfer(t); } catch {} }, sendDtmf, clearHist,
     attended: null, attendedCall: noop, completeAttended: noop, cancelAttended: noop,
     heldInfo: null, switchLine: noop, conf: false, conference: noop,
     audioRef, remoteVideoRef, localVideoRef,

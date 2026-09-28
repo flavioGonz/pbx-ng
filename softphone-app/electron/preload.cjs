@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('sphone', {
   sipDtmf: (d) => ipcRenderer.invoke('sipnat-dtmf', d),
   sipTransfer: (t) => ipcRenderer.invoke('sipnat-transfer', t),
   sipHold: (on) => ipcRenderer.invoke('sipnat-hold', !!on),
+  sipSetVideo: (on) => ipcRenderer.invoke('sipnat-setvideo', !!on),
   sipAudioOut: (b64) => ipcRenderer.send('sipnat-audio-out', b64),
   sipVideoOut: (b64, ts) => ipcRenderer.send('sipnat-video-out', b64, ts),        // Annex-B (base64) → main
   sipVideoKeyframe: () => ipcRenderer.invoke('sipnat-video-keyframe'),             // pedir IDR al otro lado

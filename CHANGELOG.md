@@ -2,6 +2,29 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.22.0] - 2026-09-28
+### Added
+- **«Qué hicieron»: el registro de acciones de los agentes IA tiene pantalla.** La tabla
+  `pbxng_ia_acciones` se llenaba desde hace versiones y no se veía desde ningún lado, que
+  es lo mismo que no tenerla: existe para contestar *«¿quién abrió el portón a las tres de
+  la mañana?»*. Está en *IA & Voz › Agentes*, debajo de la tabla —quien mira quién atiende
+  es el mismo que mira qué hicieron—, con la fecha, quién llamó, la herramienta, el
+  resultado y **la razón del rechazo primero**, que es lo que se viene a leer. Un botón
+  aísla **sólo los rechazos** de un clic: una ráfaga de rechazos es justo lo que hay que
+  poder ver. Se refresca sola cada 30 s. (`dashboard/app/ai-agents/page.jsx`)
+
+### Softphone 0.15.0
+- **La cámara ya se enciende en medio de una llamada en modo SIP nativo.** Antes sólo se
+  podía arrancar con video desde el primer INVITE. Ahora es un re-INVITE con la línea
+  `m=video` agregada —y apagarla, uno sin ella—, sobre el mismo mecanismo de renegociación
+  que ya usaba la espera. Dos cosas se dicen en voz alta en vez de fallar calladas: sobre
+  una llamada **cifrada** no se enciende (el video todavía va en claro, y mezclarlo sería
+  mentir sobre qué está protegido), y si el otro lado contesta con puerto 0 —que es una
+  forma válida de decir que no— el botón vuelve solo a apagado.
+- El re-INVITE tiene reloj de seguridad: si la central no contesta, a los 12 s se libera.
+  Sin eso, un re-INVITE perdido dejaba la espera y la cámara trabadas por el resto de la
+  llamada.
+
 ## [1.21.7] - 2026-09-28
 ### Changed
 - **El log de la IA dice ahora POR QUÉ se cerró la sesión del modelo.** El código y el motivo

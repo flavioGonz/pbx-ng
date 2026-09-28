@@ -1391,7 +1391,6 @@ export default function App() {
                 videoNodes={nodosVideo}
                 getRemoteStream={sp.getRemoteStream}
                 getAudioStream={sp.getRemoteAudioStream || sp.getRemoteStream}
-                notaVideo={sipMode ? 'En modo SIP nativo la cámara sólo se enciende al iniciar la llamada' : ''}
                 ventana={<WinCtl dark />}
                 flags={{ muted: sp.muted, held: sp.held, videoOn: sp.videoOn, pad, masAbierto: mas, altavoz: !!sp.speaker, transfiriendo: !!sp.attended || xfer, grabando: recording }}
                 extra={contexto}
@@ -1407,7 +1406,7 @@ export default function App() {
                      elige la salida del audio. Antes estaban apagados en nativo y por eso
                      faltaban dos botones en la barra. */
                   hold: sp.toggleHold,
-                  video: sipMode ? null : sp.toggleVideo,
+                  video: sp.toggleVideo,
                   altavoz: sp.toggleSpeaker,
                   transferir: () => { setMas(false); if (sp.attended) return; setXferNum(''); setXfer(true); },
                   teclado: () => { setMas(false); setPad(v => !v); },

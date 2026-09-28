@@ -73,6 +73,7 @@ ipcMain.on('sipnat-audio-out', (_e, b64) => { try { if (!sipNat) return; const b
 ipcMain.handle('sipnat-dtmf', (_e, d) => { try { sipNat && sipNat.dtmf(d); } catch (_) {} return { ok: true }; });
 ipcMain.handle('sipnat-transfer', (_e, t) => { try { sipNat && sipNat.transfer(t); } catch (_) {} return { ok: true }; });
 ipcMain.handle('sipnat-hold', (_e, on) => { try { sipNat && sipNat.hold(!!on); } catch (_) {} return { ok: true }; });
+ipcMain.handle('sipnat-setvideo', (_e, on) => { try { sipNat && sipNat.setVideo(!!on); } catch (_) {} return { ok: true }; });
 
 // ---- proxy WebSocket para go2rtc (MSE) — evita el bloqueo por Origin/auth desde file:// ----
 let WS = null; try { WS = require('ws'); } catch (_) {}

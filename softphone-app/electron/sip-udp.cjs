@@ -249,7 +249,7 @@ function start(cfg, onEvent) {
         if (rem.ip && rem.port) {
           engine.call.neg = { pt: pickAudioPt(rem), dtmf: findDtmfPt(rem), master: localMaster, ip: rem.ip, port: rem.port };
           startRtp(rem.ip, rem.port, rtpPort, pickAudioPt(rem), findDtmfPt(rem), sctx); engine.call.established = true; emit({ type: 'call', state: 'answered', number: n });
-          if (engine.call.video && engine.call.video.wanted && rem.vport) startVideo(rem.ip, rem.vport, engine.call.video.localPort, rem.vpt);
+          if (engine.call.video && engine.call.video.wanted && rem.vport) { engine.call.videoActivo = true; engine.call.video.pt = rem.vpt || 96; startVideo(rem.ip, rem.vport, engine.call.video.localPort, rem.vpt); }
         }
         else emit({ type: 'call', state: 'ended', reason: 'sin SDP remoto' });
       } else if (rs.status >= 300) { emit({ type: 'call', state: 'ended', reason: rs.status + ' ' + (rs.reason || '') }); engine.call = null; }
@@ -280,7 +280,7 @@ function start(cfg, onEvent) {
           const neg = c0.neg || {};
           const rs2 = sip.makeResponse(rq, 200, 'OK');
           rs2.headers.contact = [{ uri: mkContact() }]; rs2.headers['content-type'] = 'application/sdp';
-          rs2.content = buildSdp(c0.rtpPort, (neg.pt != null ? { pt: neg.pt, dtmf: neg.dtmf } : null), neg.master || null, null, c0.held ? 'sendonly' : 'sendrecv');
+          rs2.content = buildSdp(c0.rtpPort, (neg.pt != null ? { pt: neg.pt, dtmf: neg.dtmf } : null), neg.master || null, (c0.videoActivo && c0.video) ? { port: c0.video.localPort, pt: c0.video.pt || 96 } : null, c0.held ? 'sendonly' : 'sendrecv');
           try { sip.send(rs2); } catch (_) {}
           if (rem2.ip && rem2.port && engine.rtp && (rem2.ip !== engine.rtp.remoteIp || rem2.port !== engine.rtp.remotePort)) {
             engine.rtp.remoteIp = rem2.ip; engine.rtp.remotePort = rem2.port;
@@ -320,7 +320,7 @@ function start(cfg, onEvent) {
     if (rem.ip && rem.port) {
       c.neg = { pt: txPt, dtmf: dtmfPt, master: ourMaster, ip: rem.ip, port: rem.port };
       startRtp(rem.ip, rem.port, c.rtpPort, txPt, dtmfPt, sctx); c.established = true; emit({ type: 'call', state: 'answered', number: c.number });
-      if (ansVid && rem.vport) startVideo(rem.ip, rem.vport, c.video.localPort, rem.vpt);
+      if (ansVid && rem.vport) { c.videoActivo = true; c.video.pt = rem.vpt || 96; startVideo(rem.ip, rem.vport, c.video.localPort, rem.vpt); }
     }
     else emit({ type: 'call', state: 'ended', reason: 'sin SDP remoto' });
   }
@@ -348,13 +348,17 @@ function start(cfg, onEvent) {
    * El 401/407 se reintenta una sola vez, como en la llamada: hay centrales que desafian
    * cada peticion del dialogo.
    */
-  function hold(on) {
+  /* Un solo re-INVITE para las dos renegociaciones que sabemos hacer: la espera y el
+   * video. `dir` es la dirección del audio (sendonly para esperar) y `vopts` la línea de
+   * video, o null para no ofrecerla. El 401/407 se reintenta una vez, como en la llamada:
+   * hay centrales que desafían cada petición del diálogo. */
+  function reofrecer({ dir, vopts }, alOk) {
     const c = engine && engine.call;
-    if (!c || !c.dialog || !c.established) return;
-    const d = c.dialog, quiero = !!on;
-    if (c.held === quiero) { emit({ type: 'call', state: 'hold', held: quiero }); return; }
-    const neg = c.neg || {};
-    const mkReq = () => ({
+    if (!c || !c.dialog || !c.established) return false;
+    const d = c.dialog, neg = c.neg || {};
+    if (c.renegociando) { log('info', 're-INVITE: ya hay uno en curso, se ignora'); return false; }
+    c.renegociando = true;
+    const rq = {
       method: 'INVITE', uri: d.remoteTarget,
       headers: {
         to: { uri: d.remoteUri, params: { tag: d.remoteTag } },
@@ -363,39 +367,97 @@ function start(cfg, onEvent) {
         contact: [{ uri: mkContact() }], 'content-type': 'application/sdp',
         'user-agent': 'PBX-NG Softphone', via: [],
       },
-      content: buildSdp(c.rtpPort, (neg.pt != null ? { pt: neg.pt, dtmf: neg.dtmf } : null), neg.master || null, null, quiero ? 'sendonly' : 'sendrecv'),
-    });
-    let rq = mkReq(), authed = false;
+      content: buildSdp(c.rtpPort, (neg.pt != null ? { pt: neg.pt, dtmf: neg.dtmf } : null), neg.master || null, vopts || null, dir || 'sendrecv'),
+    };
+    let authed = false, listo = false;
+    /* Reloj de seguridad: si la respuesta no llega nunca —un re-INVITE perdido, una
+     * central que no contesta— la bandera `renegociando` quedaría puesta y el botón de
+     * espera o de cámara no volvería a funcionar en toda la llamada. */
+    const reloj = setTimeout(() => {
+      if (listo) return;
+      listo = true; c.renegociando = false;
+      log('info', 're-INVITE sin respuesta: se libera');
+      try { alOk(null, 'timeout'); } catch (_) {}
+    }, 12000);
     const cb = (rs) => {
       if (!engine || !engine.call || engine.call.callId !== c.callId) return;
       if (rs.status === 401 || rs.status === 407) {
-        if (authed) { emit({ type: 'call', state: 'hold', held: c.held === true, error: 'auth' }); return; }
+        if (authed) { if (listo) return; listo = true; clearTimeout(reloj); c.renegociando = false; alOk(null, 'auth'); return; }
         authed = true;
-        try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = (d.cseq = d.cseq + 1); rq.headers.via = []; sip.send(rq, cb); } catch (e) { log('info', 'hold auth: ' + e.message); }
+        try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = (d.cseq = d.cseq + 1); rq.headers.via = []; sip.send(rq, cb); }
+        catch (e) { if (listo) return; listo = true; clearTimeout(reloj); c.renegociando = false; log('info', 're-INVITE auth: ' + e.message); alOk(null, 'auth'); }
         return;
       }
       if (rs.status >= 100 && rs.status < 200) return;
+      if (listo) return;
+      listo = true; clearTimeout(reloj);
+      c.renegociando = false;
       if (rs.status >= 200 && rs.status < 300) {
         try { sip.send({ method: 'ACK', uri: d.remoteTarget, headers: { to: rs.headers.to, from: rs.headers.from, 'call-id': d.callId, cseq: { method: 'ACK', seq: rs.headers.cseq.seq }, via: [] } }); } catch (_) {}
-        c.held = quiero;
-        if (engine.rtp) engine.rtp.held = quiero;
-        /* Al retomar, la central puede contestar con otro puerto/IP de media (venia de la
-           musica de espera): si cambio, hay que re-apuntar el RTP o no vuelve el audio. */
-        try {
-          const rem = parseSdp(rs.content);
-          if (!quiero && rem.ip && rem.port && engine.rtp && (rem.ip !== engine.rtp.remoteIp || rem.port !== engine.rtp.remotePort)) {
-            engine.rtp.remoteIp = rem.ip; engine.rtp.remotePort = rem.port;
-            log('info', 'retomar: la media volvio por ' + rem.ip + ':' + rem.port);
-          }
-        } catch (_) {}
-        log('info', quiero ? 'en espera' : 'retomada');
-        emit({ type: 'call', state: 'hold', held: quiero });
+        alOk(parseSdp(rs.content), null);
       } else {
-        log('info', 'hold → ' + rs.status + ' ' + (rs.reason || ''));
-        emit({ type: 'call', state: 'hold', held: c.held === true, error: String(rs.status) });
+        log('info', 're-INVITE → ' + rs.status + ' ' + (rs.reason || ''));
+        alOk(null, String(rs.status));
       }
     };
-    try { sip.send(rq, cb); } catch (e) { log('info', 'hold err: ' + e.message); }
+    try { sip.send(rq, cb); } catch (e) { listo = true; clearTimeout(reloj); c.renegociando = false; log('info', 're-INVITE err: ' + e.message); return false; }
+    return true;
+  }
+
+  /* ---------- EN ESPERA (RFC 3264) ----------
+   * Poner en espera NO es silenciar el micrófono: hay que avisarle a la central, porque es
+   * ella la que pone la música y la que sabe que la llamada está aparcada. Se re-ofrece el
+   * mismo SDP con `a=sendonly` y se vuelve a `sendrecv` para retomar; mientras dura, el
+   * RTP no transmite ni entrega audio, así que no se cuela media por debajo. */
+  function hold(on) {
+    const c = engine && engine.call;
+    if (!c || !c.dialog || !c.established) return;
+    const quiero = !!on;
+    if (c.held === quiero) { emit({ type: 'call', state: 'hold', held: quiero }); return; }
+    const vopts = c.videoActivo ? { port: c.video.localPort, pt: c.video.pt || 96 } : null;
+    reofrecer({ dir: quiero ? 'sendonly' : 'sendrecv', vopts }, (rem, err) => {
+      if (err) { emit({ type: 'call', state: 'hold', held: c.held === true, error: err }); return; }
+      c.held = quiero;
+      if (engine.rtp) engine.rtp.held = quiero;
+      /* Al retomar, la central puede contestar con otro puerto/IP de media (venía de la
+         música de espera): si cambió, hay que re-apuntar el RTP o no vuelve el audio. */
+      try {
+        if (!quiero && rem && rem.ip && rem.port && engine.rtp && (rem.ip !== engine.rtp.remoteIp || rem.port !== engine.rtp.remotePort)) {
+          engine.rtp.remoteIp = rem.ip; engine.rtp.remotePort = rem.port;
+          log('info', 'retomar: la media volvió por ' + rem.ip + ':' + rem.port);
+        }
+      } catch (_) {}
+      log('info', quiero ? 'en espera' : 'retomada');
+      emit({ type: 'call', state: 'hold', held: quiero });
+    });
+  }
+
+  /* ---------- CÁMARA EN MEDIO DE LA LLAMADA ----------
+   * Encender la cámara con la llamada ya establecida es agregarle una línea `m=video` al
+   * SDP y re-ofrecerlo. Apagarla es re-ofrecer sin ella. Lo único que NO se puede es
+   * hacerlo sobre una llamada cifrada: el video todavía va en claro (RTP/AVP), y mezclar
+   * audio SRTP con video sin cifrar sería mentirle al usuario sobre lo que está protegido.
+   */
+  function video(on) {
+    const c = engine && engine.call;
+    if (!c || !c.dialog || !c.established) return;
+    const quiero = !!on;
+    if (!!c.videoActivo === quiero) { emit({ type: 'video', state: quiero ? 'on' : 'off' }); return; }
+    if (quiero && secure) { log('info', 'video: no se puede encender en una llamada con SRTP'); emit({ type: 'video', state: 'off', error: 'srtp' }); return; }
+    if (quiero && !createVideoRtp) { log('info', 'video: módulo rtp-video no disponible'); emit({ type: 'video', state: 'off', error: 'sin-modulo' }); return; }
+    if (!c.video) c.video = { localPort: 0, pt: 96 };
+    if (quiero && !c.video.localPort) c.video.localPort = freeRtpPort();
+    const vopts = quiero ? { port: c.video.localPort, pt: c.video.pt || 96 } : null;
+    reofrecer({ dir: c.held ? 'sendonly' : 'sendrecv', vopts }, (rem, err) => {
+      if (err) { log('info', 'video: la central rechazó el re-INVITE (' + err + ')'); emit({ type: 'video', state: c.videoActivo ? 'on' : 'off', error: err }); return; }
+      if (!quiero) { stopVideo(); c.videoActivo = false; log('info', 'video OFF'); emit({ type: 'video', state: 'off' }); return; }
+      /* Puerto 0 en la respuesta = «no quiero video». Es una respuesta válida y hay que
+         tratarla como un no, no como un error. */
+      if (!rem || !rem.vport) { c.videoActivo = false; log('info', 'video: el otro lado no aceptó video'); emit({ type: 'video', state: 'off', error: 'rechazado' }); return; }
+      c.videoActivo = true;
+      c.video.pt = rem.vpt || 96;
+      startVideo(rem.ip || (engine.rtp && engine.rtp.remoteIp), rem.vport, c.video.localPort, rem.vpt);
+    });
   }
 
   // ---------- REFER (RFC 3515, transferencia ciega) ----------
@@ -410,7 +472,7 @@ function start(cfg, onEvent) {
     const rq = { method: 'SUBSCRIBE', uri: 'sip:' + cfg.ext + '@' + server + ':' + port + tparam, headers: { to: { uri: 'sip:' + cfg.ext + '@' + cfg.domain }, from: { uri: 'sip:' + cfg.ext + '@' + cfg.domain, params: { tag: rstr() } }, 'call-id': cid, cseq: { method: 'SUBSCRIBE', seq: ++engine.cseq }, contact: [{ uri: mkContact() }], event: 'message-summary', accept: 'application/simple-message-summary', expires: 3600, 'user-agent': 'PBX-NG Softphone', via: [] }, content: '' };
     try { sip.send(rq, (rs) => { if (!engine) return; if ((rs.status === 401 || rs.status === 407) && !auth) { try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = ++engine.cseq; rq.headers.via = []; sip.send(rq, () => {}); } catch (_) {} } log('in', 'SUBSCRIBE(mwi) → ' + rs.status); }); } catch (_) {}
   }
-  engine.hold = hold; engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf; engine.sendVideoFrame = sendVideoFrame; engine.reqKeyframe = reqKeyframe;
+  engine.hold = hold; engine.video = video; engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf; engine.sendVideoFrame = sendVideoFrame; engine.reqKeyframe = reqKeyframe;
   function kick() { setTimeout(doRegister, 120); }
   if (wantSrv && !/^[0-9.]+$/.test(server)) {
     try { require('dns').resolveSrv('_sip._' + transport + '.' + server, (err, recs) => { if (!err && recs && recs.length) { recs.sort((a, b) => (a.priority - b.priority) || (b.weight - a.weight)); server = recs[0].name; port = recs[0].port; log('info', 'SRV → ' + server + ':' + port); } kick(); }); }
@@ -428,6 +490,7 @@ function setMuted(m) { engine && engine.setMuted && engine.setMuted(m); }
 function dtmf(d) { engine && engine.dtmf && engine.dtmf(d); }
 function transfer(t) { engine && engine.transfer && engine.transfer(t); }
 function hold(on) { engine && engine.hold && engine.hold(on); }
+function setVideo(on) { engine && engine.video && engine.video(on); }
 function videoOut(b64, ts90) { engine && engine.sendVideoFrame && engine.sendVideoFrame(b64, ts90); }
 function reqKeyframe() { engine && engine.reqKeyframe && engine.reqKeyframe(); }
-module.exports = { start, stop, call, accept, reject, hangup, audioOut, setMuted, dtmf, transfer, hold, videoOut, reqKeyframe };
+module.exports = { start, stop, call, accept, reject, hangup, audioOut, setMuted, dtmf, transfer, hold, setVideo, videoOut, reqKeyframe };

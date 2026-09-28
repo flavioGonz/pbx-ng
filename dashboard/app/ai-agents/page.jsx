@@ -14,7 +14,7 @@
  * ==========================================================================*/
 import { useEffect, useState, useRef } from 'react';
 import { Stack, Card, Group, Divider, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box, NumberInput, Collapse } from '@mantine/core';
-import { IconBuildingStore, IconTool, IconDoorEnter, IconShieldLock, IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
+import { IconRefresh, IconBuildingStore, IconTool, IconDoorEnter, IconShieldLock, IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
 import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
 import { toast } from '../notify';
 
@@ -74,6 +74,16 @@ export default function AiAgents() {
   async function cargarCatalogo() {
     try { setCatalogo(await fetch('/backend/api/ai-agents/herramientas').then(r => r.json())); } catch (_) {}
   }
+  /* El registro de acciones. No es un log de depuración: es la respuesta a «¿quién abrió
+   * el portón a las 3 de la mañana?». Por eso vive en la misma pantalla que los agentes
+   * —quien mira quién atiende es el mismo que mira qué hicieron— y por eso los RECHAZOS
+   * se pueden aislar de un clic: una ráfaga de rechazos es lo que hay que poder ver. */
+  const [acciones, setAcciones] = useState(null);
+  const [soloRechazos, setSoloRechazos] = useState(false);
+  const [herrFiltro, setHerrFiltro] = useState('');
+  async function cargarAcciones() {
+    try { setAcciones(await fetch('/backend/api/ai-agents/acciones?limite=200').then(r => r.json())); } catch (_) { setAcciones([]); }
+  }
   const previewRef = useRef(null);
 
   async function load() {
@@ -91,7 +101,7 @@ export default function AiAgents() {
   async function cargarModelos() {
     try { setRtModelos(await fetch('/backend/api/ai-agents/modelos').then(r => r.json())); } catch (_) { setRtModelos({ ok: false }); }
   }
-  useEffect(() => { load(); loadVozList(); cargarCatalogo(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); loadVozList(); cargarCatalogo(); cargarAcciones(); const t = setInterval(() => { if (!document.hidden) { load(); cargarAcciones(); } }, 30000); return () => clearInterval(t); }, []);
 
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   const herr = (id) => (form.herramientas || {})[id] || {};
@@ -160,6 +170,12 @@ export default function AiAgents() {
     || a.name.toLowerCase().includes(filtro.toLowerCase())
     || String(a.exten).includes(filtro)
     || String(a.model || '').toLowerCase().includes(filtro.toLowerCase()));
+  const accLista = acciones || [];
+  const esRechazo = (a) => /rechaz|error|deneg|fall/i.test(String(a.resultado || ''));
+  const accFiltradas = accLista.filter(a => (!soloRechazos || esRechazo(a)) && (!herrFiltro || a.herramienta === herrFiltro));
+  const rechazos = accLista.filter(esRechazo).length;
+  const aperturas = accLista.filter(a => /abiert|abrió|abrio/i.test(String(a.resultado || ''))).length;
+  const herramientasVistas = Array.from(new Set(accLista.map(a => a.herramienta).filter(Boolean)));
   const activos = (list || []).filter(a => a.enabled !== false).length;
   const enNube = (list || []).filter(a => enLaNube(a.provider)).length;
 
@@ -254,6 +270,84 @@ export default function AiAgents() {
           la solapa «Agente IA» del editor de colas.
         </Text>
       ) : null}
+
+      {/* ── Registro de acciones ──────────────────────────────────────────
+          Lo que los agentes HICIERON: aperturas, rechazos, transferencias, mensajes. Se
+          escribe en la base y no en la salida del contenedor —que se rota y se pierde—
+          justo para que esta pregunta se pueda contestar mañana. */}
+      <Card withBorder radius="lg" padding={0} style={{ overflow: 'hidden' }}>
+        <Group justify="space-between" wrap="nowrap" p="md" pb="sm">
+          <Group gap="sm" wrap="nowrap">
+            <ThemeIcon variant="light" color={rechazos > 0 ? 'red' : 'teal'} size={42} radius="md"><IconShieldLock size={22} /></ThemeIcon>
+            <div>
+              <Text fw={800} fz="lg" lh={1.15}>Qué hicieron</Text>
+              <Text size="xs" c="dimmed">
+                {acciones === null ? 'Cargando…'
+                  : !acciones.length ? 'Todavía no hay acciones registradas'
+                    : `${acciones.length} última${acciones.length === 1 ? '' : 's'} · ${aperturas} apertura${aperturas === 1 ? '' : 's'}${rechazos ? ` · ${rechazos} rechazada${rechazos === 1 ? '' : 's'}` : ''}`}
+              </Text>
+            </div>
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            {herramientasVistas.length > 1 && (
+              <Select placeholder="Toda herramienta" data={[{ value: '', label: 'Toda herramienta' }, ...herramientasVistas.map(h => ({ value: h, label: h }))]}
+                value={herrFiltro} onChange={(v) => setHerrFiltro(v || '')} w={190} size="xs" allowDeselect={false} />
+            )}
+            <Tooltip label="Sólo lo que se rechazó" withArrow>
+              <Button size="xs" variant={soloRechazos ? 'filled' : 'light'} color="red" onClick={() => setSoloRechazos(v => !v)}>Rechazos</Button>
+            </Tooltip>
+            <ActionIcon variant="light" size="lg" onClick={cargarAcciones} title="Actualizar"><IconRefresh size={16} /></ActionIcon>
+          </Group>
+        </Group>
+
+        {acciones === null ? <Text c="dimmed" ta="center" py="xl" size="sm">Cargando…</Text>
+          : !accFiltradas.length ? (
+            <Stack align="center" gap={6} py={40} px="md">
+              <ThemeIcon variant="light" color="gray" size={48} radius="xl"><IconShieldLock size={24} /></ThemeIcon>
+              <Text fw={600}>{soloRechazos ? 'Ningún rechazo' : 'Sin acciones todavía'}</Text>
+              <Text size="sm" c="dimmed" ta="center" maw={460}>
+                {soloRechazos
+                  ? 'No hay aperturas ni pedidos rechazados en las últimas acciones.'
+                  : 'Acá quedan las aperturas de portón, las transferencias y los mensajes que tomó un agente — y también los pedidos que rechazó.'}
+              </Text>
+            </Stack>
+          ) : (
+            <Table.ScrollContainer minWidth={820}>
+              <Table striped highlightOnHover verticalSpacing="xs" fz="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th w={150}>Cuándo</Table.Th>
+                    <Table.Th w={120}>Quién llamó</Table.Th>
+                    <Table.Th w={150}>Herramienta</Table.Th>
+                    <Table.Th w={140}>Resultado</Table.Th>
+                    <Table.Th>Por qué</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>{accFiltradas.map(a => {
+                  const r = String(a.resultado || '');
+                  const malo = /rechaz|error|deneg|fall/i.test(r);
+                  const abrio = /abiert|abrió|abrio/i.test(r);
+                  return (
+                    <Table.Tr key={a.id}>
+                      <Table.Td><Text size="xs" c="dimmed">{new Date(a.ts).toLocaleString('es-UY')}</Text></Table.Td>
+                      <Table.Td>{a.llamante ? <Code fz="xs">{a.llamante}</Code> : <Text size="xs" c="dimmed">—</Text>}</Table.Td>
+                      <Table.Td><Text size="xs">{a.herramienta}</Text></Table.Td>
+                      <Table.Td>
+                        <Badge size="sm" variant={malo || abrio ? 'filled' : 'light'} color={malo ? 'red' : abrio ? 'green' : 'gray'}>{r || '—'}</Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        {/* La razón del rechazo primero: es lo que se viene a leer. */}
+                        {a.razon ? <Text size="xs" c="red.6">{a.razon}</Text> : null}
+                        {a.motivo ? <Text size="xs" c="dimmed">{a.motivo}</Text> : null}
+                        {!a.razon && !a.motivo ? <Text size="xs" c="dimmed">—</Text> : null}
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}</Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          )}
+      </Card>
 
       {/* ── Alta / edición ────────────────────────────────────────────────── */}
       <Drawer opened={opened} onClose={() => setOpened(false)} position="right" size={620} padding={0}
