@@ -396,7 +396,16 @@ function abrir(opts) {
     setTimeout(() => { if (!ev.handshake) avisar(); }, 2000).unref?.();
   });
   ws.on('error', (e) => { if (!ev.handshake) ev.emit('error', String((e && e.message) || e)); });
-  ws.on('close', () => ev.emit('cerrado'));
+  /* El CÓDIGO y el motivo del cierre se tiraban. Eran justo lo que faltaba cuando la
+   * sesión se caía sola y la llamada quedaba muda: 1000 es un cierre limpio, 1006 es que
+   * se cortó la red por abajo, 1008/1011 y los 4xxx del proveedor traen el motivo escrito.
+   * Sin esto, «sesión cerrada por el proveedor» era todo lo que quedaba en el log. */
+  ws.on('close', (code, reason) => {
+    const motivo = (() => {
+      try { return Buffer.isBuffer(reason) ? reason.toString('utf8') : String(reason || ''); } catch (_) { return ''; }
+    })();
+    ev.emit('cerrado', { code: code || 0, motivo: motivo.slice(0, 200) });
+  });
 
   const enviar = (obj) => {
     if (!obj) return;

@@ -2,6 +2,15 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.7] - 2026-09-28
+### Changed
+- **El log de la IA dice ahora POR QUÉ se cerró la sesión del modelo.** El código y el motivo
+  del WebSocket se tiraban: quedaba «sesión cerrada por el proveedor» y nada más, que es
+  justo lo que no alcanza cuando la llamada se cae sola. Ahora se anota el código —1000 es
+  un cierre limpio, 1006 es que se cortó por abajo, los 4xxx del proveedor traen el motivo
+  escrito— y, si no fue limpio, queda registrado como problema del proveedor.
+  (`control-plane/realtime.js`, `control-plane/ai-pipeline.js`)
+
 ## [1.21.6] - 2026-09-28
 ### Softphone 0.14.0
 - **El widget decía «Sin dispositivos» con el micrófono ahí funcionando.** La lista de

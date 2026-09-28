@@ -728,9 +728,17 @@ function arrancarRealtime(session) {
    * ocurriera colgar del otro lado —se vio un canal arriba 15 minutos así—. Si el modelo
    * ya no está, la llamada no tiene con quién hablar: se corta. (`endSession` no hace nada
    * si la sesión ya estaba cerrada, que es el caso normal del cierre ordenado.) */
-  puente.on('cerrado', () => {
-    if (session.closed) return;
-    session.log('realtime: sesión cerrada por el proveedor — se corta la llamada');
+  puente.on('cerrado', (info) => {
+    /* Se deja escrito el código y el motivo: es la diferencia entre «se cayó» y saber si
+     * fue cuota, un corte de red o un cierre limpio del modelo. */
+    const c = (info && info.code) || 0;
+    const porQue = (info && info.motivo) ? ' · ' + info.motivo
+      : c === 1006 ? ' · se cortó la conexión sin aviso (red o corte del otro lado)'
+        : c === 1000 ? ' · cierre limpio' : '';
+    const detalle = 'cierre ' + (c || 'sin código') + porQue;
+    if (session.closed) { session.log('realtime: ' + detalle + ' (la llamada ya había terminado)'); return; }
+    session.log('realtime: sesión cerrada por el proveedor (' + detalle + ') — se corta la llamada');
+    if (c && c !== 1000) anotarProblemaProveedor(detalle);
     endSession(session, 'proveedor-cerro');
   });
 
