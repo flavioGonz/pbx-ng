@@ -33,7 +33,7 @@ export const SUP_OK = ['/cdr', '/reportes', '/wallboard', '/monitor', '/salas'];
  * SUP_OK ya no lo rebota. También se lo deja en /phone y /call, que son el softphone y
  * el click-to-call y no dependen del rol. */
 const supervisorPuede = (path) => !!path && (
-  path.startsWith('/supervisor') || path.startsWith('/phone') || path.startsWith('/call') ||
+  path.startsWith('/supervisor') || path.startsWith('/phone') || (path.startsWith('/call') || path.startsWith('/sala/')) ||
   SUP_OK.some((r) => path === r || path.startsWith(r + '/'))
 );
 /* Una pantalla suele disparar varios fetch a la vez (polling, listas, módulos): sin
@@ -65,7 +65,7 @@ function patchFetch() {
       }
     } catch (_) {}
     return orig(url, opts).then(r => {
-      if (r.status === 401 && !location.pathname.startsWith('/login') && !location.pathname.startsWith('/phone') && !location.pathname.startsWith('/enroll') && !location.pathname.startsWith('/call')) {
+      if (r.status === 401 && !location.pathname.startsWith('/login') && !location.pathname.startsWith('/phone') && !location.pathname.startsWith('/enroll') && !(location.pathname.startsWith('/call') || location.pathname.startsWith('/sala/'))) {
         localStorage.removeItem('pbxng_jwt'); location.href = '/login';
       }
       /* 403 = sesión válida pero sin permiso (RBAC desde 1.4.0). No se redirige: el
@@ -84,11 +84,11 @@ export function AuthProvider({ children }) {
   const path = usePathname(); const router = useRouter();
   useEffect(() => { patchFetch(); }, []);
   useEffect(() => {
-    if (isPhone(path) || path === '/login' || (path && path.startsWith('/enroll')) || (path && path.startsWith('/call'))) { setUser(null); return; }
+    if (isPhone(path) || path === '/login' || (path && path.startsWith('/enroll')) || (path && (path.startsWith('/call') || path.startsWith('/sala/')))) { setUser(null); return; }
     const t = typeof window !== 'undefined' ? localStorage.getItem('pbxng_jwt') : null;
     if (!t) { setUser(null); router.replace('/login'); return; }
     fetch('/backend/api/auth/me').then(r => r.ok ? r.json() : Promise.reject()).then(d => { setUser(d.user); const rl = d.user && d.user.role;
-        if (rl === 'agente' && !path.startsWith('/agente') && !path.startsWith('/phone') && !path.startsWith('/call')) router.replace('/agente');
+        if (rl === 'agente' && !path.startsWith('/agente') && !path.startsWith('/phone') && !(path.startsWith('/call') || path.startsWith('/sala/'))) router.replace('/agente');
         else if (rl === 'supervisor' && !supervisorPuede(path)) router.replace('/supervisor');
         else if (rl === 'admin' && (path.startsWith('/agente') || path.startsWith('/supervisor'))) router.replace('/'); })
       .catch(() => { localStorage.removeItem('pbxng_jwt'); setUser(null); router.replace('/login'); });

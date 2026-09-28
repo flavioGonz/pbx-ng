@@ -174,6 +174,11 @@ module.exports = function init(deps) {
     ['GET',  /^\/api\/c2c\/public\/[^/]+$/],
     ['GET',  /^\/api\/softphone\/latest$/],       // el login muestra la version descargable sin sesion
     ['POST', /^\/api\/c2c\/public\/[^/]+\/session$/],
+    /* La sala de reunión abierta por enlace. Mismo criterio que el click-to-call: el token
+     * es la credencial, y lo público es lo mínimo —el nombre de la sala y si tiene video—.
+     * Ni el número de la sala ni los PIN salen por acá. */
+    ['GET',  /^\/api\/salas\/web\/[^/]+$/],
+    ['POST', /^\/api\/salas\/web\/[^/]+\/session$/],
     ['POST', /^\/api\/geo\/report$/],
     // Las capturas de los manuales se piden con <img src>, que NO manda el token.
     // Sólo la LECTURA es pública (subir y borrar siguen pidiendo sesión).

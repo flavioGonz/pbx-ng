@@ -40,6 +40,19 @@
  * ==========================================================================*/
 'use strict';
 
+/* La prioridad del bloque de PARTICIPANTE dentro del dialplan de una sala. Vive acá y no
+ * adentro de salaDialplan porque el invitado que entra por la web salta directo a ella,
+ * salteando el PIN: si el numero cambia en un lado y no en el otro, el invitado cae en
+ * medio del `Read` del PIN y escucha silencio. */
+const PRIO_PARTICIPANTE = 20;
+/* Por dónde entra el invitado que llega con el enlace web. NO puede saltar directo al
+ * bloque de PARTICIPANTE: ahí ya pasó el perfil del bridge —tope de participantes,
+ * grabación, modo SFU del video— que lo fija EL PRIMERO que entra a la sala. Si el
+ * primero en llegar era un invitado web, la reunión se armaba sin nada de eso: sin video
+ * aunque la sala lo tuviera, y sin grabar aunque estuviera marcada. Este bloque repite el
+ * perfil y recién ahí cae en PARTICIPANTE. */
+const PRIO_INVITADO = 30;
+
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const emails = require('./emails');
@@ -60,7 +73,7 @@ const emails = require('./emails');
  * poder forzarlo).
  */
 module.exports = function init(deps) {
-  const { app, pool, amiAction, setDialplan, smtpHint, errorHttp, broadcastSoon, logger } = deps;
+  const { app, pool, amiAction, setDialplan, smtpHint, errorHttp, broadcastSoon, logger , createWebrtcEndpoint, rateLimit } = deps;
   const log = logger ? logger('salas') : { info() {}, warn() {}, error() {} };
 
   const err = (status, msg) => Object.assign(new Error(msg), { status });
@@ -236,7 +249,7 @@ module.exports = function init(deps) {
     /* Prioridades fijas para los tres destinos, así el salto no depende de cuántas
      * opciones tenga la sala: 4 = fuera de la ventana, 6 = entrada, 20 = participante,
      * 40 = moderador. Del 6 en adelante nunca hay más de diez prioridades. */
-    const CERRADA = 4, ENTRADA = 6, PARTICIPANTE = 20, MODERADOR = 40;
+    const CERRADA = 4, ENTRADA = 6, PARTICIPANTE = PRIO_PARTICIPANTE, MODERADOR = 40;
     rows.push([1, 'NoOp', 'Sala de reunion ' + nom + ' (' + (etiqueta(s.label) || nom) + ')']);
     rows.push([2, 'Answer', '']);
     // La agenda la resuelve la API y la deja en DB(sala/<nombre>); acá sólo se pregunta.
@@ -244,15 +257,24 @@ module.exports = function init(deps) {
     rows.push([CERRADA, 'Playback', s.aviso_cerrada || 'conf-locked']);
     rows.push([CERRADA + 1, 'Hangup', '']);
     let p = ENTRADA;
-    // Perfil del bridge: lo fija el primero que entra y vale para toda la sala.
-    if (Number(s.max_part) > 0) rows.push([p++, 'Set', 'CONFBRIDGE(bridge,max_members)=' + parseInt(s.max_part, 10)]);
+    /* Perfil del bridge: lo fija el primero que entra y vale para toda la sala. Se arma
+     * una vez y se emite en DOS lugares —la entrada normal y la del invitado web—, porque
+     * los dos pueden ser el primero en llegar. */
+    const perfil = [];
+    if (Number(s.max_part) > 0) perfil.push(['Set', 'CONFBRIDGE(bridge,max_members)=' + parseInt(s.max_part, 10)]);
+    /* SFU: cada participante manda su video UNA vez y Asterisk lo reparte a los demás sin
+     * recodificar. Es la única forma de que una sala con video no le cueste a la central lo
+     * que cuesta un mezclador de imagen. El que entra por teléfono sin cámara no se entera:
+     * sigue escuchando el audio igual. */
+    if (s.video) perfil.push(['Set', 'CONFBRIDGE(bridge,video_mode)=sfu']);
     if (s.grabar) {
-      rows.push([p++, 'Set', 'CONFBRIDGE(bridge,record_conference)=yes']);
+      perfil.push(['Set', 'CONFBRIDGE(bridge,record_conference)=yes']);
       /* Nombre `pbxng-sala<numero>-<epoch>.wav` a propósito: es el patrón que ya indexa
        * recordings.js (`pbxng-<alnum>-<epoch>.wav`), así la reunión aparece en Grabaciones
        * como cualquier otra llamada en vez de quedar suelta en el volumen. */
-      rows.push([p++, 'Set', 'CONFBRIDGE(bridge,record_file)=/var/spool/asterisk/monitor/pbxng-sala' + s.access_exten + '-${EPOCH}.wav']);
+      perfil.push(['Set', 'CONFBRIDGE(bridge,record_file)=/var/spool/asterisk/monitor/pbxng-sala' + s.access_exten + '-${EPOCH}.wav']);
     }
+    for (const [a, d] of perfil) rows.push([p++, a, d]);
     if (!pin && !pinMod) {
       /* Sala sin ningún PIN: se entra derecho, igual que con el dialplan viejo de
        * `conferences` (Answer · ConfBridge). Lo que cambia es todo lo demás —tope,
@@ -307,6 +329,15 @@ module.exports = function init(deps) {
       out.push(['Hangup', '']);
       return out;
     };
+    /* La puerta del enlace web: mismo perfil de bridge que la entrada normal y adentro
+     * como participante, sin pasar por el `Read` del PIN —el token del enlace ya lo
+     * reemplazó—. Nunca cae acá quien marcó el número: a esta prioridad sólo se llega
+     * desde el dialplan que arma la sesión del invitado. */
+    let w = PRIO_INVITADO;
+    rows.push([w++, 'NoOp', 'Invitado web de ' + nom]);
+    for (const [a, d] of perfil) rows.push([w++, a, d]);
+    rows.push([w, 'Goto', String(PARTICIPANTE)]);
+
     let q = PARTICIPANTE;
     rows.push([q++, 'NoOp', 'Participante de ' + nom]);
     for (const [a, d] of comunes(false)) rows.push([q++, a, d]);
@@ -322,7 +353,7 @@ module.exports = function init(deps) {
   }
 
   // ── Validación y guardado ─────────────────────────────────────────────────
-  const CAMPOS = 'id, name, label, access_exten, pin, pin_mod, max_part, moh_hasta_moderador, anunciar, grabar, agenda_inicio, agenda_min, aviso_cerrada, invitados, invitado_at, tenant_id';
+  const CAMPOS = 'id, name, label, access_exten, pin, pin_mod, max_part, moh_hasta_moderador, anunciar, grabar, agenda_inicio, agenda_min, aviso_cerrada, invitados, invitado_at, tenant_id, video, web_token';
 
   function normalizar(b, previa) {
     const s = {};
@@ -350,6 +381,9 @@ module.exports = function init(deps) {
     s.moh_hasta_moderador = bool(b.moh_hasta_moderador, previa && previa.moh_hasta_moderador, true);
     s.anunciar = bool(b.anunciar, previa && previa.anunciar, true);
     s.grabar = bool(b.grabar, previa && previa.grabar, false);
+    /* Video por sala y no global: una reunión de cuatro cámaras mueve varias veces el
+     * tráfico de una de audio, y la mayoría de las salas de una central no lo necesita. */
+    s.video = bool(b.video, previa && previa.video, false);
     s.aviso_cerrada = String((b.aviso_cerrada !== undefined ? b.aviso_cerrada : (previa && previa.aviso_cerrada)) || 'conf-locked').trim();
     if (!PROMPT.test(s.aviso_cerrada)) throw err(400, 'el aviso de sala cerrada tiene que ser el nombre de un audio de Asterisk');
 
@@ -384,17 +418,17 @@ module.exports = function init(deps) {
       await c.query('BEGIN');
       if (creando) {
         await c.query(`INSERT INTO pbxng_conferences
-            (name,label,access_exten,pin,pin_mod,max_part,moh_hasta_moderador,anunciar,grabar,agenda_inicio,agenda_min,aviso_cerrada,tenant_id)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            (name,label,access_exten,pin,pin_mod,max_part,moh_hasta_moderador,anunciar,grabar,agenda_inicio,agenda_min,aviso_cerrada,tenant_id,video)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [s.name, s.label, s.access_exten, s.pin, s.pin_mod, s.max_part, s.moh_hasta_moderador, s.anunciar, s.grabar,
-          s.agenda_inicio, s.agenda_min, s.aviso_cerrada, b.tenant_id || 1]);
+          s.agenda_inicio, s.agenda_min, s.aviso_cerrada, b.tenant_id || 1, s.video]);
       } else {
         await c.query(`UPDATE pbxng_conferences SET
             name=$2, label=$3, access_exten=$4, pin=$5, pin_mod=$6, max_part=$7, moh_hasta_moderador=$8,
-            anunciar=$9, grabar=$10, agenda_inicio=$11, agenda_min=$12, aviso_cerrada=$13
+            anunciar=$9, grabar=$10, agenda_inicio=$11, agenda_min=$12, aviso_cerrada=$13, video=$14
           WHERE name=$1`,
         [previa.name, s.name, s.label, s.access_exten, s.pin, s.pin_mod, s.max_part, s.moh_hasta_moderador,
-          s.anunciar, s.grabar, s.agenda_inicio, s.agenda_min, s.aviso_cerrada]);
+          s.anunciar, s.grabar, s.agenda_inicio, s.agenda_min, s.aviso_cerrada, s.video]);
         /* Si cambió el número, la extensión vieja queda apuntando a la sala: hay que
          * borrarla o el número anterior sigue entrando a la reunión sin pedir nada. */
         if (previa.access_exten !== s.access_exten) {
@@ -505,9 +539,12 @@ module.exports = function init(deps) {
    * Son DOS banderas y no una: una sala heredada de 1.9.x puede tener PIN de participante
    * y no de moderador, y decirle «Sin PIN» a esa sala es mentirle al administrador. El
    * panel las distingue y nombra arriba de la tabla las que no piden nada. */
+  /* El token del enlace web es una credencial como los PIN: quien lo tiene entra a la
+   * reunión. En la LISTA —que ve también el supervisor— sólo viaja si existe o no; el
+   * token en sí sale por el detalle, que es admin, igual que los dos PIN. */
   const sinPin = (s) => {
-    const o = { ...s, tiene_pin: !!String(s.pin || '').trim(), tiene_pin_mod: !!String(s.pin_mod || '').trim() };
-    delete o.pin; delete o.pin_mod; return o;
+    const o = { ...s, tiene_pin: !!String(s.pin || '').trim(), tiene_pin_mod: !!String(s.pin_mod || '').trim(), web: !!s.web_token };
+    delete o.pin; delete o.pin_mod; delete o.web_token; return o;
   };
 
   app.get('/api/salas', async (req, res) => {
@@ -586,20 +623,26 @@ module.exports = function init(deps) {
       const cuando = sala.agenda_inicio
         ? new Date(sala.agenda_inicio).toLocaleString('es-UY', { timeZone: process.env.TZ || 'America/Montevideo' })
         : null;
+      /* El enlace web va al correo sólo si la sala lo tiene. Al moderador NO se le manda:
+       * el enlace entra siempre como participante, y el que dirige la reunión necesita su
+       * PIN para abrirla, silenciar y expulsar. Mandarle los dos sería decirle «entrá por
+       * acá» a quien justamente no tiene que entrar por ahí. */
+      const webUrl = (!comoModerador && sala.web_token && dom) ? ('https://' + dom + '/sala/' + sala.web_token) : '';
       const html = emails.meetingEmail({
         brand, sala: sala.label || sala.name, numero: sala.access_exten, externo,
         pin: comoModerador ? sala.pin_mod : sala.pin, moderador: comoModerador,
         cuando, duracion: sala.agenda_min, nota: etiqueta(b.mensaje),
-        panelUrl: dom ? 'https://' + dom + '/salas' : '',
+        panelUrl: dom ? 'https://' + dom + '/salas' : '', webUrl,
       });
       const asunto = 'Reunión: ' + (sala.label || sala.name) + (cuando ? ' · ' + cuando : '');
       const tx = nodemailer.createTransport({ host: smtp.host, port: smtp.port || 587, secure: !!smtp.secure, auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined });
       const texto = [
         'Te invitaron a la reunión «' + (sala.label || sala.name) + '».',
+        webUrl ? 'Entrá desde el navegador: ' + webUrl : '',
         'Marcá: ' + sala.access_exten + (externo ? ' (desde afuera: ' + externo + ')' : ''),
         'PIN' + (comoModerador ? ' de moderador' : '') + ': ' + (comoModerador ? sala.pin_mod : sala.pin),
         cuando ? 'Cuándo: ' + cuando + (sala.agenda_min ? ' (' + sala.agenda_min + ' minutos)' : '') : 'La sala está siempre disponible.',
-      ].join('\n');
+      ].filter(Boolean).join('\n');
 
       /* Un correo por destinatario y no un `to` con los 20: así el PIN de uno no viaja con
        * la lista de direcciones de todos, y un rebote no tumba el resto del envío. */
@@ -617,6 +660,108 @@ module.exports = function init(deps) {
       }
       res.status(fallados.length && !enviados.length ? 502 : 200).json({ enviados, fallados });
     } catch (e) { errorHttp(res, e); }
+  });
+
+  /* ══════════════════════════════════════════════════════════════════════════
+   *  LA SALA DESDE EL NAVEGADOR
+   *
+   *  El problema que resuelve: hasta acá, a una sala se entraba MARCANDO su número desde
+   *  un interno de la central. El invitado que no es interno —un cliente, un proveedor,
+   *  alguien con el celular en la calle— no tenía puerta, y el correo de invitación le
+   *  mandaba un número de cuatro dígitos que no sabía desde dónde marcar.
+   *
+   *  El enlace es esa puerta, y usa la misma máquina que el click-to-call: un endpoint
+   *  WebRTC descartable en el contexto `c2c`, una fila de dialplan que salta a la sala, y
+   *  el mismo janitor que los borra a los dos cuando vence la sesión. No hay un segundo
+   *  camino de invitados que mantener.
+   *
+   *  AL INVITADO NO SE LE PIDE EL PIN, a propósito: el salto va directo a la prioridad de
+   *  PARTICIPANTE, salteando el `Read` del PIN. El token ES la credencial, y es mejor que
+   *  el PIN — se revoca de un clic, no se lo puede adivinar, y no sirve para entrar de
+   *  moderador. El PIN de moderador sigue siendo la única forma de abrir, silenciar y
+   *  expulsar, y ese no viaja nunca en un enlace.
+   * ══════════════════════════════════════════════════════════════════════════ */
+  const enlaceLimite = rateLimit
+    ? rateLimit({
+      windowMs: 5 * 60 * 1000, limit: 10,
+      standardHeaders: 'draft-7', legacyHeaders: false,
+      handler: (req, res) => res.status(429).json({ error: 'Demasiados intentos, probá en unos minutos.' }),
+    })
+    : (req, res, next) => next();
+
+  const urlSala = (token, dom) => (dom ? 'https://' + dom : '') + '/sala/' + token;
+
+  app.post('/api/salas/:name/enlace', async (req, res) => {
+    try {
+      const sala = await leerSala(req.params.name);
+      if (!sala) return res.status(404).json({ error: 'no existe esa sala' });
+      const token = crypto.randomBytes(12).toString('base64url');
+      await pool.query('UPDATE pbxng_conferences SET web_token=$2 WHERE name=$1', [sala.name, token]);
+      const dom = await setting('domain', process.env.DOMAIN || '');
+      res.json({ token, url: urlSala(token, dom) });
+    } catch (e) { errorHttp(res, e); }
+  });
+
+  app.delete('/api/salas/:name/enlace', async (req, res) => {
+    try {
+      const { rowCount } = await pool.query('UPDATE pbxng_conferences SET web_token=NULL WHERE name=$1', [req.params.name]);
+      if (!rowCount) return res.status(404).json({ error: 'no existe esa sala' });
+      res.json({ ok: true });
+    } catch (e) { errorHttp(res, e); }
+  });
+
+  /* Lo público: lo mínimo para dibujar la pantalla de entrada. NO viaja el número de la
+   * sala ni ninguno de los dos PIN: quien tiene el enlace no los necesita, y quien tenga
+   * el enlace de otra sala tampoco tiene por qué aprenderlos. */
+  app.get('/api/salas/web/:token', async (req, res) => {
+    try {
+      const { rows } = await pool.query('SELECT name,label,video,agenda_inicio,agenda_min FROM pbxng_conferences WHERE web_token=$1', [req.params.token]);
+      const s = rows[0];
+      if (!s) return res.status(404).json({ error: 'enlace no disponible' });
+      res.json({ sala: s.label || s.name, video: !!s.video, abierta: ventanaAbierta(s), agenda_inicio: s.agenda_inicio, agenda_min: s.agenda_min });
+    } catch (e) { errorHttp(res, e); }
+  });
+
+  app.post('/api/salas/web/:token/session', enlaceLimite, async (req, res) => {
+    const b = req.body || {};
+    const c = await pool.connect();
+    try {
+      const { rows } = await c.query('SELECT ' + CAMPOS + ' FROM pbxng_conferences WHERE web_token=$1', [req.params.token]);
+      const sala = rows[0];
+      if (!sala) { c.release(); return res.status(404).json({ error: 'enlace no disponible' }); }
+      /* La agenda vale también para el que entra por la web: si la sala está cerrada, se
+       * lo dice acá y no se le crea un interno descartable para escuchar un aviso. */
+      if (!ventanaAbierta(sala)) { c.release(); return res.status(409).json({ error: 'La reunión todavía no está abierta.' }); }
+
+      const sid = crypto.randomBytes(8).toString('hex');
+      const guestExt = 'c2c' + crypto.randomBytes(3).toString('hex');
+      const password = 'Web' + crypto.randomBytes(5).toString('hex') + '#7';
+      const dialExten = '8' + (100000 + Math.floor(Math.random() * 899999));
+      const quien = (String(b.name || '').slice(0, 40).replace(/[^\w\s.\-áéíóúñÁÉÍÓÚÑ]/g, '') || 'Invitado');
+
+      await c.query('BEGIN');
+      await createWebrtcEndpoint(c, guestExt, password, 'c2c', sala.tenant_id || 1, !!sala.video, 1);
+      /* El salto va a PARTICIPANTE (prioridad 20), no a la 1: la 1 arranca el `Read` del
+       * PIN, que el invitado no tiene. El nombre viaja como CALLERID para que se vea en la
+       * vista en vivo de la sala y en el CDR. */
+      const dp = [
+        ['c2c', dialExten, 1, 'NoOp', 'Sala web ' + sala.name],
+        ['c2c', dialExten, 2, 'Set', 'CALLERID(name)=' + quien],
+        ['c2c', dialExten, 3, 'Set', '__C2C_LINK=sala:' + sala.name],
+        ['c2c', dialExten, 4, 'Set', '__C2C_VISITOR=' + quien],
+        ['c2c', dialExten, 5, 'Goto', 'ivr,' + sala.access_exten + ',' + PRIO_INVITADO],
+      ];
+      await c.query("DELETE FROM extensions WHERE context='c2c' AND exten=$1", [dialExten]);
+      for (const r of dp) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
+      /* Misma tabla y mismo janitor que el click-to-call (`link_id` va en NULL porque esto
+       * no sale de un enlace de click-to-call). Cuatro horas y no cuarenta minutos: una
+       * reunión dura lo que dura, y el que se queda adentro pierde el endpoint si vence. */
+      await c.query("INSERT INTO pbxng_c2c_sessions (id,link_id,guest_ext,dial_exten,visitor_name,meta,expires_at) VALUES ($1,NULL,$2,$3,$4,$5, now() + interval '4 hours')",
+        [sid, guestExt, dialExten, quien, JSON.stringify({ sala: sala.name }).slice(0, 400)]);
+      await c.query('COMMIT');
+      res.json({ session: sid, ext: guestExt, pass: password, dial: dialExten, video: !!sala.video, sala: sala.label || sala.name });
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); }
+    finally { c.release(); }
   });
 
   app.post('/api/salas', async (req, res) => {

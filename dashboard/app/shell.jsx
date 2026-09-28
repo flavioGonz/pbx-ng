@@ -204,7 +204,7 @@ export default function Shell({ children }) {
   const scheme = montado ? schemeReal : 'dark';
   const toggleScheme = () => setColorScheme(schemeReal === 'dark' ? 'light' : 'dark');
 
-  if (path && (path.startsWith('/phone') || path.startsWith('/enroll') || path.startsWith('/call') || path.startsWith('/agente') || path.startsWith('/supervisor') || path === '/login')) return children;
+  if (path && (path.startsWith('/phone') || path.startsWith('/enroll') || path.startsWith('/call') || path.startsWith('/sala/') || path.startsWith('/agente') || path.startsWith('/supervisor') || path === '/login')) return children;
 
   const navItem = (it) => {
     const active = isActive(it); const Icon = it.icon;

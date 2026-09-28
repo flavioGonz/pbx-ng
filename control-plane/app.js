@@ -1525,6 +1525,9 @@ resincronizar.push(syncAbreviados);
 const { syncSalas } = require('./salas')({
   app, pool, amiAction, setDialplan, smtpHint, errorHttp,
   broadcastSoon: (...a) => broadcastSoon(...a), logger,
+  /* Para el enlace web de la sala: el invitado entra con un endpoint WebRTC descartable,
+   * el mismo que fabrica el click-to-call (y que limpia el mismo janitor). */
+  createWebrtcEndpoint: (...a) => createWebrtcEndpoint(...a), rateLimit,
 });
 resincronizar.push(syncSalas);
 

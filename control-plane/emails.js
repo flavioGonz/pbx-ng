@@ -256,7 +256,7 @@ function enrollEmail({ brand, ext, url }) {
  *  El PIN que llega acá es el del ROL del invitado (salas.js nunca manda el de
  *  moderador a un participante): este layout sólo lo muestra grande, porque es el
  *  dato que el invitado va a buscar con el teléfono ya marcando. */
-function meetingEmail({ brand, sala, numero, externo = '', pin, moderador = false, cuando = null, duracion = null, nota = '', panelUrl = '' }) {
+function meetingEmail({ brand, sala, numero, externo = '', pin, moderador = false, cuando = null, duracion = null, nota = '', panelUrl = '', webUrl = '' }) {
   const t = themeFor('meeting');
   const filas = [['Sala', sala], ['Marcá', numero]];
   if (externo) filas.push(['Desde afuera', externo]);
@@ -277,14 +277,32 @@ function meetingEmail({ brand, sala, numero, externo = '', pin, moderador = fals
     ${moderador
       ? callout('Sos <b>moderador</b>: este PIN silencia, expulsa y abre la sala. No lo reenvíes a los demás participantes, que tienen el suyo.', 'meeting')
       : callout('La música de espera suena hasta que entra el moderador. Si la reunión está agendada, la sala <b>sólo abre en esa franja</b>.', 'meeting')}`;
+  /* EL ENLACE VA PRIMERO cuando existe. El que recibe esto casi nunca es interno de la
+   * central: darle un número de cuatro dígitos y un PIN es pedirle que adivine desde dónde
+   * marcarlo. Con enlace, entra de un clic y el número queda como alternativa para el que
+   * prefiere el teléfono. El botón de abajo deja de llevar al panel de administración
+   * —que para un invitado no es más que una pantalla de login— y pasa a ser la puerta de
+   * la sala. */
+  const cuerpo = webUrl
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eef1f7;border-radius:14px;">
+         <tr><td align="center" style="padding:20px 18px 16px;">
+           <div style="font-size:12px;color:#64748b;">Entrá desde el navegador</div>
+           <div style="font-size:15px;font-weight:700;color:${t.accent};word-break:break-all;margin-top:6px;">${esc(webUrl)}</div>
+           <div style="font-size:12px;color:#64748b;margin-top:10px;">Sin instalar nada y sin PIN: el enlace es tu llave.</div>
+         </td></tr>
+       </table>
+       <div style="height:14px;"></div>` + body
+    : body;
   return shell({
     brand, kind: 'meeting',
     title: 'Reunión: ' + sala,
     subtitle: cuando ? ('Te esperamos el ' + cuando + '.') : 'Podés entrar cuando quieras.',
-    preheader: 'Marcá ' + numero + ' · PIN ' + pin,
-    body,
-    cta: panelUrl ? { url: panelUrl, label: 'Ver la sala en el panel' } : null,
-    foot: 'Tu PIN es personal: con él entrás a la reunión sin que nadie te abra la puerta.',
+    preheader: webUrl ? ('Entrá desde el navegador · o marcá ' + numero) : ('Marcá ' + numero + ' · PIN ' + pin),
+    body: cuerpo,
+    cta: webUrl ? { url: webUrl, label: 'Entrar a la reunión' } : (panelUrl ? { url: panelUrl, label: 'Ver la sala en el panel' } : null),
+    foot: webUrl
+      ? 'El enlace es personal de esta reunión y se puede revocar desde el panel. Si preferís el teléfono, marcá el número con tu PIN.'
+      : 'Tu PIN es personal: con él entrás a la reunión sin que nadie te abra la puerta.',
   });
 }
 

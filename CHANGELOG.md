@@ -2,6 +2,46 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.29.0] - 2026-09-28
+### Added
+- **La sala de reunión se abre desde el navegador, y puede tener video.** Hasta acá, a una
+  sala se entraba de una sola manera: **marcando su número desde un interno de la central**.
+  El correo de invitación mandaba ese número y un PIN — y el único enlace que llevaba, al
+  panel de administración, que para un invitado no es más que una pantalla de login. Quien
+  no era interno (un cliente, un proveedor, alguien con el celular en la calle) no tenía
+  puerta.
+  - **Enlace público por sala**, con QR, que se **revoca o se cambia de un clic**. El
+    invitado lo abre, escribe su nombre y entra: sin instalar nada, sin ser interno y **sin
+    marcar ningún PIN** — el enlace *es* la credencial, y es mejor que un número de cuatro
+    dígitos que no caduca. (`dashboard/app/sala/[token]/page.jsx`)
+  - **Siempre entra como participante.** Abrir la sala, silenciar y expulsar siguen pidiendo
+    el PIN de moderador, que no viaja en ningún enlace: al moderador el correo le manda su
+    PIN, no el enlace.
+  - **Video por sala, en modo SFU** (`CONFBRIDGE(bridge,video_mode)=sfu`): cada uno manda su
+    imagen una vez y Asterisk la reparte sin recodificar. El que entra por teléfono no se
+    entera: sigue escuchando el audio igual. Se enciende por sala y no para toda la central,
+    porque una reunión con cámaras mueve varias veces el tráfico de una de audio.
+  - El correo de invitación ahora lleva **el enlace primero** y el número como alternativa
+    para quien prefiere el teléfono.
+  - Reusa la máquina del click-to-call —endpoint WebRTC descartable, contexto `c2c` y el
+    mismo janitor que los borra—, así que no hay un segundo camino de invitados que
+    mantener. La sesión de una sala dura **cuatro horas**, no cuarenta minutos: una reunión
+    dura lo que dura.
+  - El cajón del enlace avisa, donde se decide, que con **«música hasta que entre el
+    moderador»** encendida los invitados esperan con música hasta que alguien entre con el
+    PIN de moderador: en una reunión que es sólo de invitados por enlace, eso significa que
+    no arranca nunca.
+
+### Fixed
+- **El invitado web se salteaba el perfil del bridge.** El salto entraba directo al bloque
+  de participante, que es *después* de donde se fijan el tope de participantes, la grabación
+  y el modo de video — y ese perfil lo fija **el primero que entra**. Si el primero era un
+  invitado por enlace, la reunión se armaba sin nada de eso: sin video aunque la sala lo
+  tuviera, y sin grabar aunque estuviera marcada. Ahora el invitado entra por su propio
+  bloque, que repite el perfil y recién ahí cae en participante. (`control-plane/salas.js`)
+- El **token del enlace no viaja en el listado de salas** —que ve también el supervisor—,
+  igual que los dos PIN: sale por el detalle, que es admin.
+
 ## [1.28.0] - 2026-09-28
 ### Changed
 - **Tercera tanda de cajones: quedan once modales menos en el panel.** Mismo criterio de

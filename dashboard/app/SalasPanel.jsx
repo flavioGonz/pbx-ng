@@ -34,7 +34,7 @@ import {
   IconUsers, IconPlus, IconTrash, IconPencil, IconEye, IconMail, IconLock, IconHash,
   IconTag, IconMicrophoneOff, IconMicrophone, IconDoorExit, IconInfoCircle, IconDice,
   IconCalendarEvent, IconPlayerRecord, IconCopy, IconCheck, IconRefresh, IconKey,
-  IconAlertTriangle, IconUsersGroup, IconUserPlus,
+  IconAlertTriangle, IconUsersGroup, IconUserPlus, IconWorldShare, IconLink,
 } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import { TableSkeleton } from './Skeletons';
@@ -43,10 +43,11 @@ import { useEsAdmin } from './auth';
 import { fmtFechaHora, fmtInputFechaHora } from './fmt';
 import { toast } from './notify';
 import DrawerNG from './DrawerNG';
+import { QRCodeSVG } from 'qrcode.react';
 
 const VACIA = {
   name: '', label: '', access_exten: '', pin: '', pin_mod: '', max_part: 0,
-  moh_hasta_moderador: true, anunciar: true, grabar: false, agenda_inicio: '', agenda_min: 60,
+  moh_hasta_moderador: true, anunciar: true, grabar: false, video: false, agenda_inicio: '', agenda_min: 60,
 };
 
 /* Un PIN sugerido desde el panel para que el operador pueda verlo antes de guardar.
@@ -126,6 +127,9 @@ function SalaForm({ sala, onListo, onCancelar }) {
       <Switch label="Grabar la reunión"
         description="La grabación queda en Grabaciones, como cualquier llamada."
         checked={f.grabar === true} onChange={(e) => up('grabar', e.currentTarget.checked)} />
+      <Switch label="Video en la sala"
+        description="Los que entran con cámara se ven entre todos. El que entra por teléfono sigue escuchando el audio igual. Encendelo sólo si hace falta: una reunión con cámaras mueve varias veces el tráfico de una de audio."
+        checked={f.video === true} onChange={(e) => up('video', e.currentTarget.checked)} />
 
       <Divider label="Agenda (opcional)" labelPosition="left" />
       <Text fz="xs" c="dimmed">
@@ -194,6 +198,105 @@ function Invitar({ sala, onCerrar }) {
           Enviar invitación
         </Button>
       </Group>
+    </Stack>
+  );
+}
+
+/* ── El enlace público de la sala ───────────────────────────────────────────
+ * El token ES la llave: quien lo tiene entra sin PIN, siempre como participante. Por eso
+ * el cajón deja rotarlo y revocarlo de un clic — es lo que un PIN de cuatro dígitos nunca
+ * pudo darte— y lo dice con todas las letras en vez de dejarlo a la intuición. */
+function EnlaceWeb({ sala, onCerrar, onCambio }) {
+  const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState('');
+  const [cargando, setCargando] = useState(true);
+  const [esperaMod, setEsperaMod] = useState(false);
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  /* El token no viaja en el listado (es una credencial): se pide al detalle, que es admin. */
+  useEffect(() => {
+    let vivo = true;
+    apiGet('/salas/' + sala.name)
+      .then((d) => { if (vivo) { setUrl(d && d.web_token ? base + '/sala/' + d.web_token : ''); setEsperaMod(!!(d && d.moh_hasta_moderador)); setCargando(false); } })
+      .catch(() => { if (vivo) setCargando(false); });
+    return () => { vivo = false; };
+  }, [sala.name, base]);
+  const completo = url ? (url.startsWith('http') ? url : base + url) : '';
+
+  async function generar() {
+    setBusy(true);
+    try {
+      const r = await apiPost('/salas/' + sala.name + '/enlace', {});
+      setUrl(r.url && r.url.startsWith('http') ? r.url : (base + '/sala/' + r.token));
+      toast(url ? 'Enlace nuevo: el anterior dejó de servir' : 'Enlace creado', 'ok');
+      onCambio && onCambio();
+    } catch (e) { toast(e.message, 'bad'); }
+    setBusy(false);
+  }
+  async function revocar() {
+    if (!confirm('¿Revocar el enlace? Quien lo tenga deja de poder entrar por la web.')) return;
+    setBusy(true);
+    try { await apiDel('/salas/' + sala.name + '/enlace'); setUrl(''); toast('Enlace revocado', 'info'); onCambio && onCambio(); }
+    catch (e) { toast(e.message, 'bad'); }
+    setBusy(false);
+  }
+
+  if (cargando) return <Group gap={8}><Loader size="xs" /><Text fz="sm" c="dimmed">Buscando el enlace…</Text></Group>;
+  return (
+    <Stack gap="md">
+      {!completo ? (
+        <>
+          <Alert variant="light" color="cyan" icon={<IconInfoCircle size={18} />}>
+            Esta sala todavía <b>no se puede abrir desde el navegador</b>: sólo se entra marcando
+            su número desde un interno de la central.
+          </Alert>
+          <Text fz="sm" c="dimmed">
+            Con un enlace, cualquiera lo abre en el navegador —sin instalar nada, sin ser interno
+            y sin marcar el PIN— y entra a la reunión como participante. El enlace se puede
+            revocar o cambiar cuando quieras, cosa que un PIN de cuatro dígitos no permite.
+          </Text>
+          <Button loading={busy} onClick={generar} leftSection={<IconWorldShare size={16} />}>Crear el enlace</Button>
+        </>
+      ) : (
+        <>
+          <Stack align="center" gap="sm">
+            <div style={{ background: '#fff', padding: 14, borderRadius: 16, border: '1px solid #e5eaf3' }}>
+              <QRCodeSVG value={completo} size={188} level="M" />
+            </div>
+            <Text fz="xs" c="dimmed" ta="center">Escanealo con el celular o mandá el enlace de abajo.</Text>
+          </Stack>
+          <Group gap="xs" wrap="nowrap">
+            <TextInput readOnly value={completo} style={{ flex: 1 }} ff="monospace" size="xs" />
+            <CopyButton value={completo}>{({ copied, copy }) => (
+              <Button size="xs" variant="light" color={copied ? 'teal' : 'blue'} onClick={copy}
+                leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}>{copied ? 'Copiado' : 'Copiar'}</Button>
+            )}</CopyButton>
+          </Group>
+          <Alert variant="light" color="orange" icon={<IconAlertTriangle size={18} />}>
+            Quien tenga este enlace entra a la reunión <b>sin PIN</b>, siempre como participante.
+            Nunca como moderador: abrir la sala, silenciar y expulsar sigue pidiendo el PIN de
+            moderador, que no viaja en ningún enlace.
+          </Alert>
+          <Text fz="xs" c="dimmed">
+            La invitación por correo manda este enlace a los participantes. Al moderador se le
+            sigue mandando su PIN, no el enlace.
+          </Text>
+          {esperaMod && (
+            <Alert variant="light" color="orange" icon={<IconAlertTriangle size={18} />}>
+              <Text fz="sm">
+                Esta sala tiene <b>«música en espera hasta que entre el moderador»</b>. Los que
+                entren por el enlace van a escuchar música —sin oírse entre ellos— hasta que
+                alguien entre marcando el <b>PIN de moderador</b> desde un teléfono o el softphone.
+                Si esta reunión es sólo de invitados por enlace, apagá esa opción al editar la
+                sala o la reunión no arranca nunca.
+              </Text>
+            </Alert>
+          )}
+          <Group justify="space-between">
+            <Button variant="subtle" color="red" loading={busy} onClick={revocar} leftSection={<IconTrash size={15} />}>Revocar</Button>
+            <Button variant="light" loading={busy} onClick={generar} leftSection={<IconRefresh size={15} />}>Cambiarlo por uno nuevo</Button>
+          </Group>
+        </>
+      )}
     </Stack>
   );
 }
@@ -351,6 +454,7 @@ export default function SalasPanel({ conEncabezado = true }) {
   const [enVivo, setEnVivo] = useState(null);
   const [invitar, setInvitar] = useState(null);
   const [verPin, setVerPin] = useState(null);
+  const [enlace, setEnlace] = useState(null);
   const [abriendo, setAbriendo] = useState('');     // nombre de la sala que se está trayendo
   const [form, { open: abrirForm, close: cerrarForm }] = useDisclosure(false);
   useEffect(() => { if (error) toast(error.message, 'bad'); }, [error]);
@@ -473,6 +577,11 @@ export default function SalasPanel({ conEncabezado = true }) {
                         <Group gap={4} justify="flex-end" wrap="nowrap">
                           <Tooltip label="Ver quién está adentro"><ActionIcon variant="subtle" color="teal" onClick={() => setEnVivo(s)}><IconEye size={17} /></ActionIcon></Tooltip>
                           {esAdmin && <Tooltip label="Invitar por correo"><ActionIcon variant="subtle" color="cyan" onClick={() => setInvitar(s)}><IconMail size={17} /></ActionIcon></Tooltip>}
+                          {esAdmin && (
+                            <Tooltip label={s.web ? 'Enlace para entrar desde el navegador' : 'Todavía no se puede entrar desde el navegador'}>
+                              <ActionIcon variant="subtle" color={s.web ? 'blue' : 'gray'} onClick={() => setEnlace(s)}><IconLink size={17} /></ActionIcon>
+                            </Tooltip>
+                          )}
                           {esAdmin && <Tooltip label="Editar"><ActionIcon variant="subtle" loading={abriendo === s.name} onClick={() => editarSala(s)}><IconPencil size={17} /></ActionIcon></Tooltip>}
                           {esAdmin && <Tooltip label="Borrar"><ActionIcon variant="subtle" color="red" onClick={() => borrar(s)}><IconTrash size={17} /></ActionIcon></Tooltip>}
                         </Group>
@@ -505,6 +614,16 @@ export default function SalasPanel({ conEncabezado = true }) {
         subtitulo="El enlace y el PIN que se le pasan a quien va a entrar"
         solapas={[{ value: 'invitar', label: 'Invitación', contenido: (
           invitar ? <Invitar sala={invitar} onCerrar={() => setInvitar(null)} /> : null
+        ) }]}
+      />
+
+      <DrawerNG
+        opened={!!enlace} onClose={() => setEnlace(null)} ancho={480} color="blue"
+        icono={<IconWorldShare size={24} />}
+        titulo={enlace ? 'Enlace de «' + (enlace.label || enlace.name) + '»' : ''}
+        subtitulo="Para entrar a la reunión desde el navegador, sin ser interno"
+        solapas={[{ value: 'enlace', label: 'Enlace', contenido: (
+          enlace ? <EnlaceWeb sala={enlace} onCerrar={() => setEnlace(null)} onCambio={recargar} /> : null
         ) }]}
       />
 
