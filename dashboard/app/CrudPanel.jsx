@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Card, Group, Title, Text, Button, Table, Modal, TextInput, PasswordInput, Select, Textarea, Switch, Stack, ActionIcon, ThemeIcon, Divider } from '@mantine/core';
+import { Card, Group, Title, Text, Button, Table, TextInput, PasswordInput, Select, Textarea, Switch, Stack, ActionIcon, ThemeIcon } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconSearch, IconPencil } from '@tabler/icons-react';
 import { toast } from './notify';
 import { apiDel, apiPost, apiPut, usePoll } from './api';
 import { TableSkeleton } from './Skeletons';
+import DrawerNG, { BloqueNG } from './DrawerNG';
 
 function Field({ f, value, up }) {
   const common = { label: f.label, description: f.description, required: f.required, leftSection: f.icon, value: value ?? '', onChange: (e) => up(f.name, e.currentTarget.value) };
@@ -24,12 +25,23 @@ function Field({ f, value, up }) {
    todo lo que usa este panel era crear-y-borrar, que para una ruta entrante con
    horario significaba borrarla y rehacerla (y perder el DID unos segundos).
    `rowToForm(row)` adapta la fila al formulario (por ejemplo un id numérico que el
-   Select necesita como texto). */
-export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, createUrl, idKey, deleteUrl, editUrl, rowToForm, emptyText = 'Sin registros.', icon, color = 'pbx' }) {
+   Select necesita como texto).
+
+   EL FORMULARIO ES UN CAJÓN LATERAL, no un modal centrado: esta pantalla es una tabla y
+   lo que se está editando es una de sus filas — taparla entera para cambiar un campo
+   obliga a cerrar para volver a mirar. Además el pie con «Guardar» queda fijo abajo en
+   vez de irse con el scroll cuando el formulario crece.
+
+   `grupos` es OPCIONAL: [{ value, label, icon, ayuda }]. Si está, cada campo elige su
+   grupo con `f.grupo` y el cajón los reparte en solapas; si no, va todo en una sola. Un
+   formulario de cuatro campos NO necesita solapas y no las lleva: partir en pestañas algo
+   que entra en una pantalla es esconder la mitad por nada. */
+export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, createUrl, idKey, deleteUrl, editUrl, rowToForm, emptyText = 'Sin registros.', icon, color = 'pbx', grupos = null, ancho = 620 }) {
   const [opened, { open, close }] = useDisclosure(false);
   const [form, setForm] = useState({}); const [saving, setSaving] = useState(false);
   const [editRow, setEditRow] = useState(null);
   const [q, setQ] = useState('');
+  const [solapa, setSolapa] = useState(null);
   /* Esta tabla es siempre CONFIGURACIÓN (ring groups, rutas, códigos…): la cambia una
    * persona desde este mismo panel, y cuando la cambia acá se llama a `load()` a mano.
    * El poll es sólo por si la tocó otro operador en otra pestaña, así que 30 s sobra;
@@ -38,11 +50,14 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
   const list = Array.isArray(data) ? data : [];
   useEffect(() => { if (error) toast(error.message, 'bad'); }, [error]);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
+  function abrirNuevo() { setForm({}); setEditRow(null); setSolapa(null); open(); }
   function openEdit(row) {
     setEditRow(row);
     setForm(rowToForm ? rowToForm(row) : { ...row });
+    setSolapa(null);
     open();
   }
+  function cerrar() { setEditRow(null); close(); }
   async function submit() {
     setSaving(true);
     try {
@@ -64,6 +79,17 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
     catch (e) { toast(e.message, 'bad'); }
   }
   const fl = list.filter(row => !q || columns.some(c => String(row[c.key] ?? '').toLowerCase().includes(q.toLowerCase())));
+
+  const campos = (g) => fields.filter(f => !g || f.grupo === g.value);
+  const solapas = (grupos && grupos.length)
+    ? grupos.map(g => ({
+      value: g.value, label: g.label, icon: g.icon,
+      contenido: g.ayuda
+        ? <BloqueNG icon={g.icon} titulo={g.label} ayuda={g.ayuda}>{campos(g).map(f => <Field key={f.name} f={f} value={form[f.name]} up={up} />)}</BloqueNG>
+        : <>{campos(g).map(f => <Field key={f.name} f={f} value={form[f.name]} up={up} />)}</>,
+    }))
+    : [{ value: 'todo', label: title || 'Datos', contenido: <>{fields.map(f => <Field key={f.name} f={f} value={form[f.name]} up={up} />)}</> }];
+
   return (
     <Card withBorder radius="lg" padding="lg">
       <Group justify="space-between" mb="md">
@@ -73,7 +99,7 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
         </Group>
         <Group gap="sm">
           <TextInput placeholder="Buscar" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={200} />
-          <Button leftSection={<IconPlus size={16} />} onClick={() => { setForm({}); setEditRow(null); open(); }}>Nuevo</Button>
+          <Button leftSection={<IconPlus size={16} />} onClick={abrirNuevo}>Nuevo</Button>
         </Group>
       </Group>
       {loading ? <TableSkeleton rows={5} cols={columns.length + 1} /> :
@@ -96,14 +122,23 @@ export default function CrudPanel({ title, subtitle, fetchUrl, columns, fields, 
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>}
-      <Modal opened={opened} onClose={() => { setEditRow(null); close(); }} centered radius="lg" size="lg"
-        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color={color}>{icon || <IconPlus size={20} />}</ThemeIcon><div><Text fw={800} lh={1.1}>{editRow ? 'Editar' : 'Nuevo'} · {title || ''}</Text>{subtitle && <Text size="xs" c="dimmed">{subtitle}</Text>}</div></Group>}>
-        <Stack gap="md">
-          {fields.map(f => <Field key={f.name} f={f} value={form[f.name]} up={up} />)}
-          <Divider />
-          <Group justify="flex-end"><Button variant="default" onClick={() => { setEditRow(null); close(); }}>Cancelar</Button><Button onClick={submit} loading={saving} leftSection={editRow ? <IconPencil size={16} /> : <IconPlus size={16} />}>{editRow ? 'Guardar cambios' : 'Crear'}</Button></Group>
-        </Stack>
-      </Modal>
+
+      <DrawerNG
+        opened={opened} onClose={cerrar} ancho={ancho} color={color}
+        icono={icon || (editRow ? <IconPencil size={22} /> : <IconPlus size={22} />)}
+        titulo={(editRow ? 'Editar' : 'Nuevo') + (title ? ' · ' + title : '')}
+        subtitulo={subtitle}
+        solapa={solapa || solapas[0].value} onSolapa={setSolapa}
+        solapas={solapas}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={cerrar}>Cancelar</Button>
+            <Button onClick={submit} loading={saving} leftSection={editRow ? <IconPencil size={16} /> : <IconPlus size={16} />}>
+              {editRow ? 'Guardar cambios' : 'Crear'}
+            </Button>
+          </Group>
+        }
+      />
     </Card>
   );
 }

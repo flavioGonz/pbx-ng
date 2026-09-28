@@ -1,12 +1,14 @@
 'use client';
 import { useState } from 'react';
-import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Select, ActionIcon, Tooltip, ThemeIcon } from '@mantine/core';
+import { Stack, Title, Text, Card, Group, Button, Table, Badge, TextInput, PasswordInput, Select, ActionIcon, Tooltip, ThemeIcon, Alert } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconTrash, IconKey, IconSearch, IconUser, IconId, IconShieldCheck, IconCalendar } from '@tabler/icons-react';
 import { toast } from '../notify';
 import { TableSkeleton } from '../Skeletons';
 import { apiPost, apiDel, useApi } from '../api';
 import { fmtFecha } from '../fmt';
+import DrawerNG, { BloqueNG } from '../DrawerNG';
+import { IcoPersona, IcoLlave } from '../IconosNG';
 /* Mismos roles que control-plane/rbac.js (docs/CONTRATOS.md §2). Los viejos 'operator' y
  * 'viewer' ya no existen en la API: un usuario con ese rol guardado se muestra con la
  * etiqueta cruda (roleLabel) para que el admin lo vea y lo corrija. */
@@ -75,21 +77,62 @@ export default function Usuarios() {
               </Table>
             </Table.ScrollContainer>}
       </Card>
-      <Modal opened={opened} onClose={close} title="Nuevo usuario" centered radius="lg">
-        <Stack>
-          <TextInput label="Usuario" placeholder="operador1" value={f.username || ''} onChange={e => up('username', e.target.value)} required />
-          <TextInput label="Nombre completo" value={f.name || ''} onChange={e => up('name', e.target.value)} />
-          <PasswordInput label="Contraseña" description={`Mínimo ${PASS_MIN} caracteres`} value={f.password || ''} onChange={e => up('password', e.target.value)} required />
-          <Select label="Rol" data={ROLES} value={f.role} onChange={v => up('role', v)} />
-          <Button onClick={create} mt="xs">Crear usuario</Button>
-        </Stack>
-      </Modal>
-      <Modal opened={pwOpen} onClose={closePw} title={`Cambiar contraseña · ${pwTarget?.username || ''}`} centered radius="lg">
-        <Stack>
-          <PasswordInput label="Nueva contraseña" description={`Mínimo ${PASS_MIN} caracteres`} value={pw} onChange={e => setPw(e.target.value)} required />
-          <Button onClick={resetPw} mt="xs">Actualizar</Button>
-        </Stack>
-      </Modal>
+      {/* Alta de usuario y cambio de contraseña: dos cajones, no dos modales. La lista de
+          cuentas queda a la izquierda mientras se crea una —que es donde uno mira si el
+          nombre de usuario ya existe— y el botón de guardar no se va con el scroll. */}
+      <DrawerNG
+        opened={opened} onClose={close} ancho={480}
+        icono={<IcoPersona s={24} />} titulo="Nuevo usuario"
+        subtitulo="Una cuenta para entrar al panel de administración"
+        solapas={[{
+          value: 'cuenta', label: 'Cuenta',
+          contenido: (
+            <>
+              <BloqueNG icon={<IconUser size={16} />} titulo="Quién es"
+                ayuda="El usuario es con lo que entra al panel y lo que queda registrado en la auditoría: conviene que sea una persona, no un puesto compartido.">
+                <TextInput label="Usuario" placeholder="operador1" value={f.username || ''} onChange={e => up('username', e.target.value)} required />
+                <TextInput label="Nombre completo" value={f.name || ''} onChange={e => up('name', e.target.value)} />
+              </BloqueNG>
+              <BloqueNG icon={<IcoLlave s={16} />} titulo="Acceso"
+                ayuda="El rol decide qué puede tocar. Por defecto se crea como agente —el menos privilegiado—: dar administrador tiene que ser una decisión, no un descuido.">
+                <PasswordInput label="Contraseña" description={`Mínimo ${PASS_MIN} caracteres`} value={f.password || ''} onChange={e => up('password', e.target.value)} required />
+                <Select label="Rol" data={ROLES} value={f.role} onChange={v => up('role', v)} />
+                {f.role === 'admin' && (
+                  <Alert variant="light" color="orange" icon={<IconShieldCheck size={15} />} py={8}>
+                    <Text size="xs">Un administrador puede cambiar troncales, internos y la configuración de la central, y crear otros administradores.</Text>
+                  </Alert>
+                )}
+              </BloqueNG>
+            </>
+          ),
+        }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={close}>Cancelar</Button>
+            <Button onClick={create} leftSection={<IconPlus size={16} />}>Crear usuario</Button>
+          </Group>
+        }
+      />
+      <DrawerNG
+        opened={pwOpen} onClose={closePw} ancho={440} color="gray"
+        icono={<IcoLlave s={24} />} titulo="Cambiar contraseña"
+        subtitulo={pwTarget ? 'Cuenta ' + pwTarget.username : ''}
+        solapas={[{
+          value: 'clave', label: 'Contraseña',
+          contenido: (
+            <BloqueNG icon={<IcoLlave s={16} />} titulo="Nueva contraseña"
+              ayuda="La contraseña anterior no se muestra ni se recupera: se reemplaza. La sesión abierta de esa persona sigue viva hasta que venza.">
+              <PasswordInput label="Nueva contraseña" description={`Mínimo ${PASS_MIN} caracteres`} value={pw} onChange={e => setPw(e.target.value)} required />
+            </BloqueNG>
+          ),
+        }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={closePw}>Cancelar</Button>
+            <Button onClick={resetPw} leftSection={<IconKey size={16} />}>Actualizar</Button>
+          </Group>
+        }
+      />
     </Stack>
   );
 }

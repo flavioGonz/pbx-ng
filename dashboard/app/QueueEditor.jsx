@@ -1,8 +1,9 @@
 /* QueueEditor.jsx — editor completo de una cola (campos nativos de app_queue + anuncios por TTS) */
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Tabs, Stack, Group, TextInput, NumberInput, Select, Switch, Textarea, Button, Text, Divider, Loader, ActionIcon, Tooltip } from '@mantine/core';
-import { IconDeviceFloppy, IconPlayerPlay, IconSparkles, IconVolume, IconRobot, IconAlertTriangle } from '@tabler/icons-react';
+import { Stack, Group, TextInput, NumberInput, Select, Switch, Textarea, Button, Text, Divider, Loader, ActionIcon, Tooltip } from '@mantine/core';
+import DrawerNG from './DrawerNG';
+import { IconDeviceFloppy, IconPlayerPlay, IconSparkles, IconVolume, IconRobot, IconAlertTriangle, IconUsersGroup, IconSettings, IconAdjustments } from '@tabler/icons-react';
 import { toast } from './notify';
 import { api, apiPost, apiPut } from './api';
 
@@ -27,6 +28,7 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
   const [f, setF] = useState({});
   const [busy, setBusy] = useState(false);
   const [play, setPlay] = useState('');
+  const [solapa, setSolapa] = useState('basico');
   const [agentes, setAgentes] = useState(null);       // null = todavía no se cargaron
   const audioRef = useRef(null);
   const up = (k, v) => setF(s => ({ ...s, [k]: v }));
@@ -80,18 +82,21 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
   );
 
   return (
-    <Modal opened={opened} onClose={onClose} size="xl" radius="lg" centered
-      title={<Text fw={700}>{creating ? 'Nueva cola' : 'Cola ' + (f.label || f.name)}</Text>}>
-      <audio ref={audioRef} style={{ display: 'none' }} />
-      <Tabs defaultValue="basico" variant="pills" radius="md" keepMounted={false}>
-        <Tabs.List mb="md">
-          <Tabs.Tab value="basico">Básico</Tabs.Tab>
-          <Tabs.Tab value="anuncios" leftSection={<IconSparkles size={14} />}>Anuncios</Tabs.Tab>
-          <Tabs.Tab value="avanzado">Avanzado</Tabs.Tab>
-          <Tabs.Tab value="ia" leftSection={<IconRobot size={14} />}>Agente IA</Tabs.Tab>
-        </Tabs.List>
-
-        <Tabs.Panel value="basico">
+    <DrawerNG
+      opened={opened} onClose={onClose} ancho={860}
+      icono={<IconUsersGroup size={24} />}
+      titulo={creating ? 'Nueva cola' : 'Cola ' + (f.label || f.name || '')}
+      subtitulo={creating ? 'Un número que reparte las llamadas entre varios agentes' : 'Reparto, anuncios y agente de IA'}
+      solapa={solapa} onSolapa={setSolapa}
+      pie={
+        <Group justify="space-between">
+          <Button variant="subtle" color="gray" onClick={onClose}>Cancelar</Button>
+          <Button leftSection={<IconDeviceFloppy size={16} />} loading={busy} onClick={save}>{creating ? 'Crear cola' : 'Guardar cambios'}</Button>
+        </Group>
+      }
+      solapas={[
+        { value: 'basico', label: 'Básico', icon: <IconSettings size={15} />, contenido: (
+          <><audio ref={audioRef} style={{ display: 'none' }} />
           <Stack gap="sm">
             <Group grow>
               <TextInput label="Nombre" description="Identificador interno, sin espacios. Ej: ventas." value={f.name || ''} disabled={!creating} onChange={e => up('name', e.target.value)} required />
@@ -117,10 +122,9 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
               {sel('Destino', 'timeout_dest', DEST)}
               <TextInput label="Valor del destino" description="Extensión, buzón, nombre de cola o número de IVR" disabled={f.timeout_dest === 'hangup'} value={f.timeout_value || ''} onChange={e => up('timeout_value', e.target.value)} />
             </Group>
-          </Stack>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="anuncios">
+          </Stack></>
+        ) },
+        { value: 'anuncios', label: 'Anuncios', icon: <IconSparkles size={15} />, contenido: (
           <Stack gap="sm">
             <Group justify="space-between">
               <Text size="sm" c="dimmed">Escribí el texto: lo sintetiza el motor de voz propio. No hace falta subir ningún WAV.</Text>
@@ -152,9 +156,8 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
               {num('Frecuencia de los anuncios (s)', 'announce_frequency', '0 = no anunciar posición/espera', 0)}
             </Group>
           </Stack>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="avanzado">
+        ) },
+        { value: 'avanzado', label: 'Avanzado', icon: <IconAdjustments size={15} />, contenido: (
           <Stack gap="sm">
             <Group grow>
               {sel('Entrar a la cola cuando no hay agentes', 'joinempty', JOIN)}
@@ -174,9 +177,8 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
               {sel('Informar al agente el tiempo que esperó el cliente', 'reportholdtime', YN)}
             </Group>
           </Stack>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="ia">
+        ) },
+        { value: 'ia', label: 'Agente IA', icon: <IconRobot size={15} />, contenido: (
           <Stack gap="sm">
             {agentes === null ? <Group gap="xs"><Loader size="xs" /><Text size="sm" c="dimmed">Buscando agentes…</Text></Group>
               : agentes.length === 0 ? (
@@ -218,13 +220,8 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
                 </>
               )}
           </Stack>
-        </Tabs.Panel>
-      </Tabs>
-
-      <Group justify="flex-end" mt="lg">
-        <Button variant="default" onClick={onClose}>Cancelar</Button>
-        <Button leftSection={<IconDeviceFloppy size={16} />} loading={busy} onClick={save}>{creating ? 'Crear cola' : 'Guardar cambios'}</Button>
-      </Group>
-    </Modal>
+        ) },
+      ]}
+    />
   );
 }

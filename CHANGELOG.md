@@ -2,6 +2,29 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.27.0] - 2026-09-28
+### Changed
+- **Siguen cayendo las ventanas modales: ahora las pantallas CRUD, colas, usuarios y
+  teléfonos.** El mismo criterio de las dos versiones anteriores — lo que se edita es una
+  fila de la tabla que estás mirando, y un modal centrado la tapa entera para cambiar un
+  campo.
+  - **El panel CRUD genérico** (`dashboard/app/CrudPanel.jsx`) pasó a cajón, y con él las
+    cinco pantallas que lo usan de una sola vez: *Rutas* (entrantes y salientes), *Grupos
+    de timbrado* y el resto de *Aplicaciones*, el *failover* de salida y los *buzones*.
+    Acepta además solapas opcionales: un formulario de cuatro campos **no** las lleva, que
+    partir en pestañas algo que entra en una pantalla es esconder la mitad por nada.
+  - **El editor de colas** ya tenía cuatro solapas metidas adentro de un modal, con el
+    scroll de la caja peleando contra el de la página. Ahora son las solapas del cajón, con
+    el alto de la ventana y el botón de guardar fijo abajo. (`QueueEditor.jsx`)
+  - **Usuarios**: el alta y el cambio de contraseña. El alta avisa, en el momento, qué
+    puede hacer un administrador — antes se elegía el rol de una lista sin una palabra
+    sobre qué significaba.
+  - **Teléfonos**: el alta por MAC, partida en «qué aparato es» y «qué línea atiende», cada
+    bloque con la línea que explica por qué importa (una MAC mal cargada le cambia la
+    configuración a otro teléfono).
+- Las **confirmaciones** —cortar una llamada, capturar tráfico, borrar un registro— siguen
+  siendo modales a propósito: son una pregunta de una línea y ahí un cajón lateral es peor.
+
 ## [1.26.0] - 2026-09-28
 ### Added
 - **En una llamada, las cámaras del cliente se ven junto al video — y lo reemplazan cuando

@@ -1,9 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Stack, Switch, Card, Group, Text, Button, Table, Badge, ActionIcon, Modal, TextInput, Select, ThemeIcon, SimpleGrid, Divider, Tooltip, CopyButton, Alert, Code, List } from '@mantine/core';
+import { Stack, Switch, Card, Group, Text, Button, Table, Badge, ActionIcon, TextInput, Select, ThemeIcon, SimpleGrid, Divider, Tooltip, CopyButton, Alert, Code, List } from '@mantine/core';
 import { IconAddressBook, IconDeviceLandlinePhone, IconPlus, IconEdit, IconTrash, IconCopy, IconCheck, IconHash, IconBolt, IconDeviceFloppy, IconInfoCircle, IconServer2, IconRouter, IconWifi } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
+import DrawerNG, { BloqueNG } from '../DrawerNG';
+import { IcoConexion, IcoPersona } from '../IconosNG';
 
 const VENDORS = [{ value: 'yealink', label: 'Yealink' }, { value: 'grandstream', label: 'Grandstream' }];
 const fileFor = (v, mac) => v === 'grandstream' ? 'cfg' + mac + '.xml' : mac + '.cfg';
@@ -209,26 +211,44 @@ export default function Telefonos() {
           </Table.ScrollContainer>}
       </Card>
 
-      <Modal opened={opened} onClose={() => setOpened(false)} size="lg" radius="lg" centered
-        title={<Group gap="sm"><ThemeIcon size={38} radius="md" variant="light" color="blue"><IconDeviceLandlinePhone size={20} /></ThemeIcon><div><Text fw={800} lh={1.1}>{form.id ? 'Editar teléfono' : 'Nuevo teléfono físico'}</Text><Text size="xs" c="dimmed">Auto-provisioning por MAC</Text></div></Group>}>
-        <Stack gap="md">
-          <SimpleGrid cols={2}>
-            <TextInput label="Dirección MAC" description="Sin separadores o con : / -. Ej: 805ec0aabbcc" value={form.mac} onChange={e => up('mac', e.currentTarget.value)} ff="monospace" required leftSection={<IconRouter size={15} />} disabled={!!form.id} />
-            <Select label="Fabricante" data={VENDORS} value={form.vendor} onChange={v => up('vendor', v)} />
-          </SimpleGrid>
-          <SimpleGrid cols={2}>
-            <TextInput label="Modelo (opcional)" value={form.model} onChange={e => up('model', e.currentTarget.value)} placeholder="T31P / GRP2601" />
-            <TextInput label="Extensión" description="Extensión SIP que usará el teléfono" value={form.ext} onChange={e => up('ext', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
-          </SimpleGrid>
-          <SimpleGrid cols={2}>
-            <TextInput label="Nombre a mostrar" value={form.label} onChange={e => up('label', e.currentTarget.value)} placeholder="Recepción" />
-            <TextInput label="Etiqueta de línea" description="Texto en la tecla de línea" value={form.line_label} onChange={e => up('line_label', e.currentTarget.value)} placeholder="Recepción IES" />
-          </SimpleGrid>
-          <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />}>Se crea/actualiza la extensión SIP (UDP) con su contraseña. El teléfono lo toma al pedir <Code>{fileFor(form.vendor, form.mac || '<mac>')}</Code>.</Alert>
-          <Divider />
-          <Group justify="flex-end"><Button variant="default" onClick={() => setOpened(false)}>Cancelar</Button><Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Aprovisionar'}</Button></Group>
-        </Stack>
-      </Modal>
+      {/* El alta de un teléfono físico es un cajón: la lista de teléfonos detectados queda
+          a la izquierda mientras se carga la MAC, que es de donde se la copia. */}
+      <DrawerNG
+        opened={opened} onClose={() => setOpened(false)} ancho={600} color="blue"
+        icono={<IconDeviceLandlinePhone size={24} />}
+        titulo={form.id ? 'Editar teléfono' : 'Nuevo teléfono físico'}
+        subtitulo="Auto-provisioning por MAC"
+        solapas={[{
+          value: 'aparato', label: 'Aparato',
+          contenido: (
+            <>
+              <BloqueNG icon={<IconRouter size={16} />} titulo="Qué aparato es"
+                ayuda="La MAC es lo único que el teléfono manda para pedir su configuración: si está mal, se la lleva otro aparato. El fabricante decide el dialecto del archivo que se le sirve.">
+                <SimpleGrid cols={2}>
+                  <TextInput label="Dirección MAC" description="Sin separadores o con : / -. Ej: 805ec0aabbcc" value={form.mac} onChange={e => up('mac', e.currentTarget.value)} ff="monospace" required leftSection={<IconRouter size={15} />} disabled={!!form.id} />
+                  <Select label="Fabricante" data={VENDORS} value={form.vendor} onChange={v => up('vendor', v)} />
+                </SimpleGrid>
+                <TextInput label="Modelo (opcional)" value={form.model} onChange={e => up('model', e.currentTarget.value)} placeholder="T31P / GRP2601" />
+              </BloqueNG>
+              <BloqueNG icon={<IcoPersona s={16} />} titulo="Qué línea atiende"
+                ayuda="El interno que va a registrar el teléfono, y los textos que se ven en su pantalla: el nombre a mostrar sale en las llamadas y la etiqueta, en la tecla de línea.">
+                <SimpleGrid cols={2}>
+                  <TextInput label="Extensión" description="Extensión SIP que usará el teléfono" value={form.ext} onChange={e => up('ext', e.currentTarget.value)} ff="monospace" required leftSection={<IconHash size={15} />} />
+                  <TextInput label="Nombre a mostrar" value={form.label} onChange={e => up('label', e.currentTarget.value)} placeholder="Recepción" />
+                </SimpleGrid>
+                <TextInput label="Etiqueta de línea" description="Texto en la tecla de línea" value={form.line_label} onChange={e => up('line_label', e.currentTarget.value)} placeholder="Recepción IES" />
+              </BloqueNG>
+              <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />}>Se crea/actualiza la extensión SIP (UDP) con su contraseña. El teléfono lo toma al pedir <Code>{fileFor(form.vendor, form.mac || '<mac>')}</Code>.</Alert>
+            </>
+          ),
+        }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={() => setOpened(false)}>Cancelar</Button>
+            <Button onClick={save} loading={saving} leftSection={<IconDeviceFloppy size={16} />}>{form.id ? 'Guardar' : 'Aprovisionar'}</Button>
+          </Group>
+        }
+      />
     </Stack>
   );
 }
