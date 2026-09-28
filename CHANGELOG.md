@@ -2,6 +2,34 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.24.0] - 2026-09-28
+### Added
+- **Las ventanas modales empiezan a ser cajones laterales.** Arranca por *Internos*, que es
+  donde más duele: un modal centrado tapa la lista que uno estaba mirando y, cuando el
+  formulario crece, se vuelve una caja con scroll propio en el medio de la nada — hay que
+  cerrarlo para volver a ver qué se estaba editando, y el botón de guardar se va con el
+  scroll. El cajón entra por el costado, deja la tabla a la izquierda, tiene el alto de la
+  ventana y **el pie con las acciones queda fijo**. (`dashboard/app/DrawerNG.jsx`)
+  - **Iconografía propia que se anima por dentro** (`dashboard/app/IconosNG.jsx`): la antena
+    emite ondas **sólo** si el interno está registrado, el punto de grabación late **sólo**
+    si está grabando. La regla es que el movimiento diga algo o no esté: cuando todo late,
+    nada llama la atención. Todo se detiene con `prefers-reduced-motion`.
+  - Cada bloque lleva una línea que explica para qué sirve. No es decoración: es la
+    diferencia entre un campo que alguien se anima a tocar y uno que queda como estaba
+    «por las dudas».
+- **El cajón del interno dice si está vivo.** En el encabezado, registrado / en llamada /
+  sin registrar, y la **latencia que mide Asterisk** contra ese aparato (el RTT de su propio
+  OPTIONS). Es la primera pregunta de cualquiera que abre a editar un interno —«¿este
+  aparato está andando?»— y hasta ahora había que cerrar y buscarlo en la tabla. Se dice lo
+  que es: mide la señalización, no el audio.
+- **El acceso QR tiene su propio cajón**, y además es una solapa dentro del interno.
+
+### Changed
+- **Al editar, el tipo de interno ya no se puede cambiar — y ahora se explica por qué.**
+  WebRTC y SIP no son una opción del mismo interno: son dos endpoints distintos en Asterisk,
+  con otro transporte, otro cifrado y otros medios. El control queda bloqueado y en su lugar
+  hay un botón que **crea el otro** con un clic; los dos pueden convivir.
+
 ## [1.23.3] - 2026-09-28
 ### Fixed
 - **Los invitados de las llamadas desde la web aparecían en la lista de internos.** Cada

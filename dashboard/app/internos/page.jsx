@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader, Alert, Select, Tabs } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconPlus, IconTrash, IconArrowForward, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
+import { IconInfoCircle, IconPlus, IconTrash, IconArrowForward, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useLive } from '../useLive';
 import { apiGet, apiPost, apiPut, apiDel, usePoll, useApi } from '../api';
@@ -14,6 +14,8 @@ import Slot from '../Slot';
 /* Los desvíos son los mismos campos que ve el agente en su propio panel, así que
  * viven en un componente compartido (app/DesviosPanel.jsx) y no acá adentro. */
 import DesviosPanel from '../DesviosPanel';
+import DrawerNG, { BloqueNG } from '../DrawerNG';
+import { IcoPersona, IcoConexion, IcoGrabar, IcoQr, IcoDesvio, IcoLlave, IcoRegistro, IcoLatencia } from '../IconosNG';
 
 const VIA = {
   direct: { label: 'Directo', color: 'blue', icon: <IconServer size={12} /> },
@@ -41,6 +43,38 @@ const DTMF_HELP = {
   inband: 'Último recurso: se degrada con G.729 y con pérdida de paquetes.',
 };
 const rttColor = (r) => r == null ? 'gray' : r < 80 ? 'teal' : r < 200 ? 'yellow' : 'red';
+/* El encabezado del cajón dice si el interno está REGISTRADO y con qué latencia, no si
+ * existe en la base. Es la primera pregunta de cualquiera que abre a editar un interno
+ * —«¿este aparato está vivo?»— y hasta ahora había que cerrarlo y buscarlo en la tabla.
+ *
+ * La latencia es la que mide Asterisk con su propio OPTIONS contra el aparato (el RTT de
+ * `pjsip show contacts`): no es una prueba de llamada, es el ida y vuelta de la
+ * señalización. Sirve para ver un enlace que se degradó; no dice nada del audio. */
+function EstadoInterno({ e }) {
+  if (!e) return null;
+  const reg = e.status === 'online' || e.status === 'in_call';
+  const rtt = e.rtt;
+  const nivel = rtt == null ? 0 : rtt < 80 ? 3 : rtt < 200 ? 2 : 1;
+  return (
+    <Group gap={8} wrap="nowrap" style={{ flex: 'none' }}>
+      {rtt != null && (
+        <Tooltip withArrow multiline w={250}
+          label={'Ida y vuelta de la señalización que mide la central contra el aparato (OPTIONS). Por debajo de 80 ms es sano; por encima de 200 ms el enlace está sufriendo. No mide el audio.'}>
+          <Badge variant="light" color={rttColor(rtt)} style={{ cursor: 'help' }}
+            leftSection={<IcoLatencia s={12} nivel={nivel} />}>
+            {Math.round(rtt)} ms
+          </Badge>
+        </Tooltip>
+      )}
+      <Tooltip withArrow label={reg ? (e.origin ? 'Registrado desde ' + e.origin : 'Registrado') : 'El aparato no está registrado en la central'}>
+        <Badge variant={reg ? 'light' : 'outline'} color={e.status === 'in_call' ? 'orange' : reg ? 'teal' : 'gray'} style={{ cursor: 'help' }}
+          leftSection={<IcoRegistro s={12} vivo={reg} />}>
+          {e.status === 'in_call' ? 'En llamada' : reg ? 'Registrado' : 'Sin registrar'}
+        </Badge>
+      </Tooltip>
+    </Group>
+  );
+}
 // Estado del acceso (QR / enlace) que se le mando a la persona: si lo activo, cuando y con que.
 function AccesoBadge({ a }) {
   if (!a) return <Text c="dimmed" size="sm">—</Text>;
@@ -69,6 +103,7 @@ const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style=
 export default function Extensiones() {
   const { snap } = useLive(); const list = snap?.extensions || [];
   const [opened, { open, close }] = useDisclosure(false);
+  const [solapa, setSolapa] = useState('identidad');
   const [qrOpen, { open: openQr, close: closeQr }] = useDisclosure(false);
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState(false);
@@ -77,6 +112,12 @@ export default function Extensiones() {
   const [qrExt, setQrExt] = useState(''); const [enroll, setEnroll] = useState(null); const [gen, setGen] = useState(false);
   const [emailTo, setEmailTo] = useState(''); const [sending, setSending] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  /* El interno tal como lo ve la central AHORA mismo (registrado, latencia, por dónde
+   * entra). Sale del estado en vivo que ya alimenta la tabla, así que no cuesta nada. */
+  const vivo = editing ? list.find(x => String(x.id) === String(form.id)) : null;
+  /* Pasar de WebRTC a SIP (o al revés) no es cambiar un campo: son dos endpoints distintos
+   * en Asterisk. Así que se abre el alta con el otro tipo ya elegido. */
+  function nuevoTipo(tipo) { setForm({ ...EMPTY, type: tipo }); setEditing(false); setSolapa('identidad'); open(); }
   // Bitacora del acceso enviado: si lo activaron, cuando y con que aparato.
   const { data: enrollments } = usePoll('/enrollments', 30000);
   const acc = useMemo(() => { const m = {}; (Array.isArray(enrollments) ? enrollments : []).forEach(x => { m[String(x.ext)] = x; }); return m; }, [enrollments]);
@@ -120,8 +161,8 @@ export default function Extensiones() {
     return () => { clearTimeout(t); ctrl.abort(); setNumBusy(false); };
   }, [form.id, editing, opened]);
 
-  function openNew() { loadPlan(); setForm(EMPTY); setEditing(false); setEnroll(null); setEmailTo(''); setNumChk(null); open(); }
-  function openEdit(e) { setForm({ id: e.id, name: e.name || '', pass: '', video: !!e.video, record: !!e.record, type: e.webrtc ? 'webrtc' : 'sip', max_contacts: 2, tenant_id: e.tenant_id || 1, dtmf_mode: e.dtmf_mode || 'rfc4733' }); setEditing(true); setEnroll(null); setEmailTo(''); open(); generate(e.id); }
+  function openNew() { loadPlan(); setForm(EMPTY); setEditing(false); setEnroll(null); setEmailTo(''); setNumChk(null); setSolapa('identidad'); open(); }
+  function openEdit(e) { setForm({ id: e.id, name: e.name || '', pass: '', video: !!e.video, record: !!e.record, type: e.webrtc ? 'webrtc' : 'sip', max_contacts: 2, tenant_id: e.tenant_id || 1, dtmf_mode: e.dtmf_mode || 'rfc4733' }); setEditing(true); setEnroll(null); setEmailTo(''); setSolapa('identidad'); open(); generate(e.id); }
   function openQrModal() { setEnroll(null); setQrExt(suggestExt()); openQr(); }
 
   async function save() {
@@ -211,139 +252,188 @@ export default function Extensiones() {
             </Table.ScrollContainer>}
       </Card>
 
-      <Modal opened={opened} onClose={close} centered radius="lg" size={editing ? 'xl' : 'lg'} overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
-        title={<Group gap="sm">
-          <ThemeIcon size={42} radius="md" variant="light" color={form.type === 'webrtc' ? 'pbx' : 'gray'}>{editing ? <IconPencil size={22} /> : <IconUserPlus size={22} />}</ThemeIcon>
-          <div><Text fw={800} size="lg" lh={1.1}>{editing ? 'Editar extensión ' + form.id : 'Nuevo extensión'}</Text><Text size="xs" c="dimmed">{form.type === 'webrtc' ? 'Softphone WebRTC (navegador / PWA)' : 'Teléfono SIP físico'}</Text></div>
-        </Group>}>
-        <Stack>
-          <Tabs defaultValue="datos" variant="pills" radius="md" keepMounted={false}>
-            {editing && (
-              <Tabs.List mb="md">
-                <Tabs.Tab value="datos" leftSection={<IconUser size={14} />}>Datos del interno</Tabs.Tab>
-                <Tabs.Tab value="desvios" leftSection={<IconArrowForward size={14} />}>Desvíos y no molestar</Tabs.Tab>
-              </Tabs.List>
-            )}
-            <Tabs.Panel value="datos">
-              <Stack gap="md">
-          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-            <Stack gap="sm">
-              <TextInput label="Número de extensión" placeholder={plan && plan.next ? plan.next : '1006'}
-                value={form.id} onChange={e => set('id', e.target.value.replace(/[^0-9*]/g, ''))} required disabled={editing}
-                description={!editing && plan && plan.principal
-                  ? `Estás usando el rango ${plan.principal.desde}–${plan.principal.hasta}. El próximo libre es ${plan.next || '—'}.`
-                  : undefined}
-                error={numChk && !numChk.ok ? numChk.mensaje : undefined}
-                rightSection={numBusy ? <Loader size={14} />
-                  : numChk && numChk.ok && !numChk.aviso ? <IconCircleCheck size={16} color="var(--mantine-color-teal-6)" />
-                  : numChk && numChk.aviso ? <IconAlertTriangle size={16} color="var(--mantine-color-orange-6)" />
-                  : null}
-                rightSectionPointerEvents="none" />
-              {!editing && plan && plan.next && !form.id && (
-                <Button size="compact-xs" variant="light" mt={-6} w="fit-content"
-                  leftSection={<IconHash size={13} />} onClick={() => set('id', plan.next)}>
-                  Usar el siguiente libre: {plan.next}
-                </Button>
-              )}
-              {!editing && numChk && numChk.ok && numChk.aviso && (
-                <Alert variant="light" color="orange" icon={<IconAlertTriangle size={15} />} py={6}>
-                  <Text size="xs">{numChk.mensaje}</Text>
-                </Alert>
-              )}
-              <PasswordInput label="Contraseña SIP" value={form.pass} onChange={e => set('pass', e.target.value)} required={!editing} placeholder={editing ? 'Sin cambios' : ''} />
-              <TextInput label="Nombre (libreta)" placeholder="Ej: Recepción, Juan Pérez" value={form.name} onChange={e => set('name', e.target.value)} description="Visible en la libreta de direcciones" />
-            </Stack>
-            <Stack gap="sm">
-              <div>
-                <Text size="sm" fw={500} mb={6}>Tipo de extensión</Text>
-                <SegmentedControl fullWidth value={form.type} onChange={v => set('type', v)} data={[
-                  { value: 'webrtc', label: (<Group gap={6} justify="center"><IconWorld size={15} /> WebRTC</Group>) },
-                  { value: 'sip', label: (<Group gap={6} justify="center"><IconDeviceLandlinePhone size={15} /> SIP físico</Group>) },
-                ]} />
-                <Text size="xs" c="dimmed" mt={6}>{form.type === 'webrtc' ? 'Para navegador / app (DTLS-SRTP, ICE, ulaw/g722).' : 'Para teléfonos físicos (Yealink, Grandstream) por UDP/TLS.'}</Text>
-              </div>
-              <Group grow align="flex-start">
-                <Switch label="Video (VP8/H264)" mt={6} checked={form.video} onChange={e => set('video', e.currentTarget.checked)} />
-                <NumberInput label="Dispositivos" description="Registros simultáneos" min={1} max={10} value={form.max_contacts} onChange={v => set('max_contacts', v || 1)} />
-              </Group>
-              <Select
-                label="Envío de tonos (DTMF)"
-                description={DTMF_HELP[form.dtmf_mode] || ''}
-                value={form.dtmf_mode}
-                onChange={v => set('dtmf_mode', v || 'rfc4733')}
-                allowDeselect={false}
-                data={DTMF_OPCIONES}
-              />
-            </Stack>
-          </SimpleGrid>
-          <Card withBorder radius="md" padding="sm" style={{ background: form.record ? 'rgba(225,29,72,.05)' : undefined }}>
-            <Group justify="space-between" wrap="nowrap">
-              <Group gap={10} wrap="nowrap"><ThemeIcon size={32} radius="md" variant="light" color={form.record ? 'red' : 'gray'}><IconMicrophone2 size={18} /></ThemeIcon>
-                <div><Text fw={600} fz="sm">Grabar las llamadas de esta extensión</Text><Text fz="xs" c="dimmed">Se guardan en Grabaciones y quedan enlazadas en el Historial</Text></div></Group>
-              <Switch checked={form.record} onChange={e => set('record', e.currentTarget.checked)} color="red" disabled={recAll} />
-            </Group>
-            {recAll && <Text fz="xs" c="dimmed" mt={6}>La grabación global está activa (Configuración → SIP): se graban TODAS las llamadas, sin importar este interruptor.</Text>}
-          </Card>
+      {/* ── Alta y edición del interno ────────────────────────────────────
+          Un cajón lateral, no un modal: la lista queda a la izquierda mientras se edita, y
+          el botón de guardar no se va con el scroll. */}
+      <DrawerNG
+        opened={opened} onClose={close} ancho={660}
+        color={form.type === 'webrtc' ? 'pbx' : 'gray'}
+        icono={editing ? <IcoPersona s={24} /> : <IconUserPlus size={24} />}
+        titulo={editing ? 'Interno ' + form.id : 'Nuevo interno'}
+        subtitulo={editing ? (vivo && vivo.name ? vivo.name : (form.type === 'webrtc' ? 'Navegador / app' : 'Teléfono físico'))
+          : 'Un número que suena en un aparato o en un navegador'}
+        estado={editing ? <EstadoInterno e={vivo} /> : null}
+        solapa={solapa} onSolapa={setSolapa}
+        solapas={[
+          {
+            value: 'identidad', label: 'Identidad', icon: <IcoPersona s={15} />,
+            contenido: (
+              <>
+                <BloqueNG icon={<IconHash size={16} />} titulo="Quién es"
+                  ayuda="El número que se marca y el nombre con el que aparece en la libreta y en el identificador de llamadas.">
+                  <TextInput label="Número de interno" placeholder={plan && plan.next ? plan.next : '1006'}
+                    value={form.id} onChange={e => set('id', e.target.value.replace(/[^0-9*]/g, ''))} required disabled={editing}
+                    description={!editing && plan && plan.principal
+                      ? `Estás usando el rango ${plan.principal.desde}–${plan.principal.hasta}. El próximo libre es ${plan.next || '—'}.`
+                      : (editing ? 'El número no se cambia: es la identidad del interno en toda la central.' : undefined)}
+                    error={numChk && !numChk.ok ? numChk.mensaje : undefined}
+                    rightSection={numBusy ? <Loader size={14} />
+                      : numChk && numChk.ok && !numChk.aviso ? <IconCircleCheck size={16} color="var(--mantine-color-teal-6)" />
+                        : numChk && numChk.aviso ? <IconAlertTriangle size={16} color="var(--mantine-color-orange-6)" />
+                          : null}
+                    rightSectionPointerEvents="none" />
+                  {!editing && plan && plan.next && !form.id && (
+                    <Button size="compact-xs" variant="light" w="fit-content"
+                      leftSection={<IconHash size={13} />} onClick={() => set('id', plan.next)}>
+                      Usar el siguiente libre: {plan.next}
+                    </Button>
+                  )}
+                  {!editing && numChk && numChk.ok && numChk.aviso && (
+                    <Alert variant="light" color="orange" icon={<IconAlertTriangle size={15} />} py={6}>
+                      <Text size="xs">{numChk.mensaje}</Text>
+                    </Alert>
+                  )}
+                  <TextInput label="Nombre" placeholder="Ej: Recepción, Juan Pérez" value={form.name} onChange={e => set('name', e.target.value)}
+                    description="Lo ve quien recibe la llamada y quien busca en la libreta" />
+                </BloqueNG>
 
-          {editing &&
-            <Card withBorder radius="md" padding="md">
-              <Group align="stretch" wrap="nowrap" gap="lg">
-                <Stack gap={8} align="center" style={{ flex: 'none', width: 172 }}>
-                  <div style={{ background: '#fff', padding: 12, borderRadius: 14, border: '1px solid rgba(120,130,150,.25)', lineHeight: 0 }}>
-                    {gen || !enroll ? <Skeleton height={148} width={148} /> : <QRCodeSVG value={enroll.url} size={148} level="M" />}
-                  </div>
-                  <Badge variant="light" color="pbx" leftSection={<IconQrcode size={12} />}>Extensión {form.id}</Badge>
-                </Stack>
-                <Stack gap="sm" style={{ flex: 1, minWidth: 0 }}>
-                  <div>
-                    <Text fw={700} size="sm">Acceso QR dla extensión</Text>
-                    <Text size="xs" c="dimmed">Escaneá con el celular para configurar el softphone. El enlace vence en 24 h.</Text>
-                  </div>
-                  {enroll &&
-                    <Group gap={8} wrap="nowrap">
-                      <Text size="xs" c="dimmed">Clave:</Text><Code>{enroll.password}</Code>
-                      <CopyButton value={enroll.url}>{({ copied, copy }) => <Button size="compact-xs" variant="light" color={copied ? 'teal' : 'pbx'} leftSection={copied ? <IconCheck size={13} /> : <IconCopy size={13} />} onClick={copy}>{copied ? 'Copiado' : 'Copiar enlace'}</Button>}</CopyButton>
-                    </Group>}
-                  <Divider label="Enviar por correo" labelPosition="left" />
-                  <Group gap={8} wrap="nowrap" align="flex-end">
-                    <TextInput style={{ flex: 1 }} size="sm" placeholder="usuario@empresa.com" leftSection={<IconMail size={15} />} value={emailTo} onChange={e => setEmailTo(e.target.value)} />
-                    <Button size="sm" loading={sending} disabled={!emailTo} onClick={sendEmail} leftSection={<IconSend size={15} />}>Enviar</Button>
+                <BloqueNG icon={<IcoLlave s={16} />} titulo="Contraseña SIP"
+                  ayuda={editing ? 'Se deja vacía para no cambiarla. Si la cambiás, el aparato va a dejar de registrarse hasta que se la vuelvas a cargar.'
+                    : 'La que se carga en el teléfono o en la app. No se vuelve a mostrar.'}>
+                  <PasswordInput value={form.pass} onChange={e => set('pass', e.target.value)} required={!editing}
+                    placeholder={editing ? 'Sin cambios' : 'Obligatoria'} />
+                </BloqueNG>
+              </>
+            ),
+          },
+          {
+            value: 'conexion', label: 'Conexión', icon: <IcoConexion s={15} />,
+            contenido: (
+              <>
+                <BloqueNG icon={<IcoConexion s={16} />} titulo="Cómo se conecta"
+                  ayuda={editing
+                    ? 'Esto no se cambia editando: WebRTC y SIP no son una opción del mismo interno, son dos endpoints distintos en Asterisk (transporte, cifrado y medios diferentes). Para pasar de uno a otro se crea uno nuevo.'
+                    : 'WebRTC para navegador y app; SIP para un teléfono de escritorio.'}>
+                  <SegmentedControl fullWidth value={form.type} onChange={v => set('type', v)} disabled={editing} data={[
+                    { value: 'webrtc', label: (<Group gap={6} justify="center"><IconWorld size={15} /> WebRTC</Group>) },
+                    { value: 'sip', label: (<Group gap={6} justify="center"><IconDeviceLandlinePhone size={15} /> SIP físico</Group>) },
+                  ]} />
+                  {editing
+                    ? (
+                      <Alert variant="light" color="blue" icon={<IconInfoCircle size={16} />} py={8}>
+                        <Text size="xs" mb={8}>
+                          Este interno es <b>{form.type === 'webrtc' ? 'WebRTC' : 'SIP físico'}</b>. Si necesitás el otro tipo, creá uno nuevo:
+                          los dos pueden convivir y el aparato viejo sigue andando hasta que lo apagues.
+                        </Text>
+                        <Button size="compact-xs" variant="light"
+                          leftSection={<IconPlus size={13} />}
+                          onClick={() => { close(); setTimeout(() => nuevoTipo(form.type === 'webrtc' ? 'sip' : 'webrtc'), 220); }}>
+                          Crear uno nuevo {form.type === 'webrtc' ? 'SIP físico' : 'WebRTC'}
+                        </Button>
+                      </Alert>
+                    )
+                    : <Text size="xs" c="dimmed">{form.type === 'webrtc' ? 'DTLS-SRTP, ICE, ulaw/g722. Se aprovisiona con el QR.' : 'Yealink, Grandstream, Fanvil, porteros SIP.'}</Text>}
+                </BloqueNG>
+
+                <BloqueNG icon={<IconVideo size={16} />} titulo="Qué puede hacer"
+                  ayuda="El video agrega VP8/H264 al interno. Los dispositivos son cuántos aparatos pueden registrarse a la vez con este mismo número.">
+                  <Group grow align="flex-start">
+                    <Switch label="Video (VP8/H264)" mt={6} checked={form.video} onChange={e => set('video', e.currentTarget.checked)} />
+                    <NumberInput label="Dispositivos" description="Registros simultáneos" min={1} max={10} value={form.max_contacts} onChange={v => set('max_contacts', v || 1)} />
                   </Group>
-                </Stack>
-              </Group>
-            </Card>}
-              </Stack>
-            </Tabs.Panel>
-            {editing && (
-              <Tabs.Panel value="desvios">
-                <DesviosPanel ext={form.id} codigos={codigosFeat} />
-              </Tabs.Panel>
-            )}
-          </Tabs>
+                </BloqueNG>
 
-          <Divider />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={close}>Cancelar</Button>
-            <Button onClick={save} loading={saving} leftSection={editing ? <IconPencil size={16} /> : <IconPlus size={16} />}>{editing ? 'Guardar cambios' : 'Crear extensión'}</Button>
+                <BloqueNG icon={<IconHash size={16} />} titulo="Envío de tonos (DTMF)"
+                  ayuda="Es el ajuste que más rompe porteros: casi todos los Dahua y Hikvision mandan la clave de apertura por SIP INFO y no por RTP. Si no coincide, la puerta no abre.">
+                  <Select description={DTMF_HELP[form.dtmf_mode] || ''} value={form.dtmf_mode}
+                    onChange={v => set('dtmf_mode', v || 'rfc4733')} allowDeselect={false} data={DTMF_OPCIONES} />
+                </BloqueNG>
+
+                <BloqueNG icon={<IcoGrabar s={16} vivo={form.record && !recAll} />} titulo="Grabación"
+                  ayuda="Las grabaciones se guardan en Grabaciones y quedan enlazadas en el Historial de cada llamada.">
+                  <Card withBorder radius="md" padding="sm" style={{ background: form.record ? 'rgba(225,29,72,.05)' : undefined }}>
+                    <Group justify="space-between" wrap="nowrap">
+                      <Group gap={10} wrap="nowrap">
+                        <ThemeIcon size={32} radius="md" variant="light" color={form.record ? 'red' : 'gray'}><IcoGrabar s={18} vivo={form.record && !recAll} /></ThemeIcon>
+                        <Text fw={600} fz="sm">Grabar las llamadas de este interno</Text>
+                      </Group>
+                      <Switch checked={form.record} onChange={e => set('record', e.currentTarget.checked)} color="red" disabled={recAll} />
+                    </Group>
+                    {recAll && <Text fz="xs" c="dimmed" mt={6}>La grabación global está activa (Configuración → SIP): se graban <b>todas</b> las llamadas, sin importar este interruptor.</Text>}
+                  </Card>
+                </BloqueNG>
+              </>
+            ),
+          },
+          ...(editing ? [{
+            value: 'acceso', label: 'Acceso QR', icon: <IcoQr s={15} vivo={gen} />,
+            contenido: (
+              <BloqueNG icon={<IcoQr s={16} vivo={gen} />} titulo="Configurar el teléfono con el QR"
+                ayuda="Se escanea con el celular y el softphone queda configurado solo. El enlace vence en 24 horas.">
+                <Group align="flex-start" wrap="nowrap" gap="lg">
+                  <Stack gap={8} align="center" style={{ flex: 'none', width: 172 }}>
+                    <div style={{ background: '#fff', padding: 12, borderRadius: 14, border: '1px solid rgba(120,130,150,.25)', lineHeight: 0 }}>
+                      {gen || !enroll ? <Skeleton height={148} width={148} /> : <QRCodeSVG value={enroll.url} size={148} level="M" />}
+                    </div>
+                    <Badge variant="light" color="pbx" leftSection={<IconQrcode size={12} />}>Interno {form.id}</Badge>
+                  </Stack>
+                  <Stack gap="sm" style={{ flex: 1, minWidth: 0 }}>
+                    {enroll &&
+                      <Group gap={8} wrap="nowrap">
+                        <Text size="xs" c="dimmed">Clave:</Text><Code>{enroll.password}</Code>
+                        <CopyButton value={enroll.url}>{({ copied, copy }) => <Button size="compact-xs" variant="light" color={copied ? 'teal' : 'pbx'} leftSection={copied ? <IconCheck size={13} /> : <IconCopy size={13} />} onClick={copy}>{copied ? 'Copiado' : 'Copiar enlace'}</Button>}</CopyButton>
+                      </Group>}
+                    <Divider label="Enviar por correo" labelPosition="left" />
+                    <Group gap={8} wrap="nowrap" align="flex-end">
+                      <TextInput style={{ flex: 1 }} size="sm" placeholder="usuario@empresa.com" leftSection={<IconMail size={15} />} value={emailTo} onChange={e => setEmailTo(e.target.value)} />
+                      <Button size="sm" loading={sending} disabled={!emailTo} onClick={sendEmail} leftSection={<IconSend size={15} />}>Enviar</Button>
+                    </Group>
+                  </Stack>
+                </Group>
+              </BloqueNG>
+            ),
+          }] : []),
+          ...(editing ? [{
+            value: 'desvios', label: 'Desvíos', icon: <IcoDesvio s={15} />,
+            contenido: <DesviosPanel ext={form.id} codigos={codigosFeat} />,
+          }] : []),
+        ]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={close}>Cancelar</Button>
+            <Button onClick={save} loading={saving} leftSection={editing ? <IconPencil size={16} /> : <IconPlus size={16} />}>
+              {editing ? 'Guardar cambios' : 'Crear interno'}
+            </Button>
           </Group>
-        </Stack>
-      </Modal>
+        }
+      />
 
-      <Modal opened={qrOpen} onClose={closeQr} centered radius="lg" size="sm" title={<Group gap="sm"><ThemeIcon size={40} radius="md" variant="light" color="pbx"><IconQrcode size={22} /></ThemeIcon><div><Text fw={800} lh={1.1}>Acceso rápido WebRTC</Text><Text size="xs" c="dimmed">Escaneá con el celular para instalar la PWA</Text></div></Group>}>
-        {!enroll ?
-          <Stack>
-            <Text size="sm" c="dimmed">Se crea una extensión WebRTC y un enlace con QR que auto-configura el teléfono. Válido 24 h.</Text>
-            <TextInput label="Número de extensión" value={qrExt} onChange={e => setQrExt(e.target.value)} />
-            <Button onClick={() => generate()} loading={gen} leftSection={<IconQrcode size={16} />}>Generar acceso</Button>
-          </Stack> :
-          <Stack align="center" gap="sm">
-            <div style={{ background: '#fff', padding: 14, borderRadius: 16, border: '1px solid #e5eaf3' }}><QRCodeSVG value={enroll.url} size={196} level="M" /></div>
-            <Text fw={700} size="lg">Extensión {enroll.ext}</Text>
-            <Group gap={6}><Text size="sm" c="dimmed">Contraseña:</Text><Code>{enroll.password}</Code></Group>
-            <CopyButton value={enroll.url}>{({ copied, copy }) => <Button fullWidth variant="light" color={copied ? 'teal' : 'pbx'} leftSection={copied ? <IconCheck size={16} /> : <IconCopy size={16} />} onClick={copy}>{copied ? 'Enlace copiado' : 'Copiar enlace'}</Button>}</CopyButton>
-            <Button variant="subtle" onClick={() => setEnroll(null)}>Generar otro</Button>
-          </Stack>}
-      </Modal>
+      {/* ── Acceso rápido por QR, sin pasar por el alta ───────────────────── */}
+      <DrawerNG
+        opened={qrOpen} onClose={closeQr} ancho={460}
+        icono={<IcoQr s={24} vivo={gen} />}
+        titulo="Acceso rápido WebRTC"
+        subtitulo="Crea el interno y el enlace que configura el teléfono solo"
+        solapas={[{
+          value: 'qr', label: 'QR', icon: <IcoQr s={15} />,
+          contenido: !enroll ? (
+            <BloqueNG icon={<IcoQr s={16} />} titulo="Generar el acceso"
+              ayuda="Se crea un interno WebRTC nuevo y un enlace con QR que auto-configura el teléfono. Vale 24 horas.">
+              <TextInput label="Número de interno" value={qrExt} onChange={e => setQrExt(e.target.value)}
+                placeholder={plan && plan.next ? plan.next : '1006'} />
+              <Button onClick={() => generate()} loading={gen} leftSection={<IconQrcode size={16} />}>Generar acceso</Button>
+            </BloqueNG>
+          ) : (
+            <Stack align="center" gap="sm">
+              <div style={{ background: '#fff', padding: 14, borderRadius: 16, border: '1px solid #e5eaf3', lineHeight: 0 }}><QRCodeSVG value={enroll.url} size={196} level="M" /></div>
+              <Text fw={700} size="lg">Interno {enroll.ext}</Text>
+              <Group gap={6}><Text size="sm" c="dimmed">Contraseña:</Text><Code>{enroll.password}</Code></Group>
+              <CopyButton value={enroll.url}>{({ copied, copy }) => <Button fullWidth variant="light" color={copied ? 'teal' : 'pbx'} leftSection={copied ? <IconCheck size={16} /> : <IconCopy size={16} />} onClick={copy}>{copied ? 'Copiado' : 'Copiar enlace'}</Button>}</CopyButton>
+              <Button variant="subtle" onClick={() => setEnroll(null)}>Generar otro</Button>
+            </Stack>
+          ),
+        }]}
+      />
     </Stack>
   );
 }

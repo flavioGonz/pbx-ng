@@ -140,3 +140,37 @@ body, .mantine-AppShell-navbar, .mantine-AppShell-header, .mantine-AppShell-main
 }
 @keyframes pbxFlota { 0%, 100% { transform: translateY(-6px); } 50% { transform: translateY(10px); } }
 @media (prefers-reduced-motion: reduce) { .pbx-login-float { animation: none; } }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  Paneles de configuración (drawers) e iconografía animada · IconosNG.jsx
+ *
+ *  La regla de todas estas animaciones: el movimiento DICE algo o no está. Las ondas de
+ *  la antena salen sólo si el interno está registrado; el punto de grabación late sólo si
+ *  está grabando. Cuando todo se mueve, nada llama la atención — y una pantalla de
+ *  configuración se mira para leer, no para mirar.
+ * ══════════════════════════════════════════════════════════════════════════ */
+@keyframes ngOnda { 0% { opacity: .15 } 45% { opacity: 1 } 100% { opacity: .15 } }
+.ng-onda { animation: ngOnda 1.9s ease-in-out infinite }
+.ng-onda-2 { animation-delay: .28s }
+@keyframes ngLate { 0%, 100% { opacity: 1; transform: scale(1) } 50% { opacity: .55; transform: scale(.82) } }
+.ng-late { animation: ngLate 1.5s ease-in-out infinite; transform-origin: 12px 12px }
+@keyframes ngBarrido { 0% { transform: translateY(-9px); opacity: 0 } 15%, 85% { opacity: .9 } 100% { transform: translateY(9px); opacity: 0 } }
+.ng-barrido { animation: ngBarrido 1.6s ease-in-out infinite }
+@keyframes ngFlujo { to { stroke-dashoffset: -10 } }
+.ng-flujo { animation: ngFlujo .9s linear infinite }
+
+/* El encabezado del drawer: se despega del contenido con una línea, no con una sombra —
+ * la sombra sobre un panel que ya flota se lee como un segundo panel. */
+.ng-drawer-head { border-bottom: 1px solid var(--mantine-color-default-border); }
+.ng-drawer-pie {
+  border-top: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+}
+/* Entrada del contenido de cada solapa: corta y hacia arriba. 160 ms es lo que separa
+ * «cambió» de «se movió». */
+@keyframes ngTab { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+.ng-tab { animation: ngTab .16s cubic-bezier(.4,0,.2,1) both }
+
+@media (prefers-reduced-motion: reduce) {
+  .ng-onda, .ng-late, .ng-barrido, .ng-flujo, .ng-tab { animation: none !important }
+}
