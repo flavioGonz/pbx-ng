@@ -428,7 +428,13 @@ app.use('/api/v1', apiV1.router);
 setTimeout(() => { sipConf.ensure().then(() => amiCommand('module reload res_pjsip.so').catch(() => {})).catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados antes de que el panel toque nada
 
 async function getExtensions() {
-  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record, dtmf_mode FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' ORDER BY id");
+  /* El contexto `c2c` queda AFUERA. Son los invitados de las llamadas desde la web: la
+   * central les crea un endpoint WebRTC descartable para cada visita, con un id como
+   * `c2c22d0f8`, y se borra solo a los 40 minutos. Mientras tanto aparecían en la lista de
+   * internos como un interno WebRTC desconocido registrado desde la IP del proxy — que es
+   * exactamente lo que parece un intruso, y costó un susto. No son internos de la central;
+   * las visitas web se miran en su propia pantalla. */
+  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record, dtmf_mode FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' AND COALESCE(context,'') <> 'c2c' ORDER BY id");
   const st = await endpointStates();
   const names = {};
   try { const { rows: nr } = await pool.query('SELECT ext,name FROM pbxng_directory'); nr.forEach(n => names[n.ext] = n.name); } catch (_) {}

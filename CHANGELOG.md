@@ -2,6 +2,18 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.23.3] - 2026-09-28
+### Fixed
+- **Los invitados de las llamadas desde la web aparecían en la lista de internos.** Cada
+  visita que usa un enlace de click-to-call recibe un endpoint WebRTC descartable —id como
+  `c2c22d0f8`, contexto `c2c`, que la central borra sola a los 40 minutos—. Ese endpoint se
+  colaba en *Internos* como **un interno WebRTC desconocido registrado desde la IP del
+  proxy**, que es exactamente lo que parece un intruso. No lo era, pero el susto es
+  legítimo: nada decía que fuera una visita web, ni de qué enlace, ni con qué nombre. Ahora
+  el contexto `c2c` queda fuera de la lista; las visitas se miran donde corresponde.
+  Una prueba fija la exclusión, que es una línea de SQL que cualquier refactor puede perder
+  sin que nada falle a la vista.
+
 ## [1.23.2] - 2026-09-28
 ### Fixed
 - **Internos (y todo el panel en vivo) tardaba hasta 15 segundos en mostrar la lista.** No
