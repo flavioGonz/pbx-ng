@@ -23,14 +23,33 @@ export function getSocket() {
   }
   return socket;
 }
+/* EL ÚLTIMO ESTADO QUE VIMOS, guardado en el módulo.
+ *
+ *  Sin esto, entrar a Internos desde otra pantalla del panel mostraba el spinner **hasta
+ *  quince segundos**. El motivo: el servidor manda un snapshot al CONECTAR y después sólo
+ *  cuando pasa algo (un canal, un registro) o cada 15 s por el reloj de reconciliación.
+ *  Pero el socket es uno solo para todo el panel y ya estaba conectado hace rato: la
+ *  pantalla nueva se suscribía tarde, se perdía el snapshot inicial, y se quedaba
+ *  esperando el siguiente. Con la central tranquila, eso son quince segundos de reloj
+ *  girando sobre datos que el navegador YA TENÍA.
+ *
+ *  Ahora se guarda el último y la pantalla nueva pinta al instante con él —como mucho está
+ *  15 s viejo, y es exactamente lo que estaba mostrando la pantalla anterior— y en paralelo
+ *  se le pide al servidor uno fresco, que llega en decenas de milisegundos. */
+let ultimoSnap = null;
+function recordarSnap(d) { ultimoSnap = d; }
+
 export function useLive() {
-  const [snap, setSnap] = useState(null);
+  const [snap, setSnap] = useState(ultimoSnap);
   const [connected, setConnected] = useState(false);
   useEffect(() => {
     const s = getSocket(); if (!s) return;
-    const onSnap = (d) => setSnap(d), onC = () => setConnected(true), onD = () => setConnected(false);
+    const onSnap = (d) => { recordarSnap(d); setSnap(d); }, onC = () => setConnected(true), onD = () => setConnected(false);
     s.on('snapshot', onSnap); s.on('connect', onC); s.on('disconnect', onD);
     setConnected(s.connected);
+    /* Y uno fresco ya: lo del cache sirve para pintar, no para quedarse. */
+    if (s.connected) s.emit('snapshot:pedir');
+    else s.once('connect', () => s.emit('snapshot:pedir'));
     return () => { s.off('snapshot', onSnap); s.off('connect', onC); s.off('disconnect', onD); };
   }, []);
   return { snap, connected };

@@ -2313,7 +2313,22 @@ io.use((socket, next) => {
   next();
 });
 io.on('connection', async (s) => {
-  if (!s.scratchOnly) { s.join('state'); try { s.emit('snapshot', await snapshot()); } catch (_) {} }
+  if (!s.scratchOnly) {
+    s.join('state');
+    try { s.emit('snapshot', await snapshot()); } catch (_) {}
+    /* Una pantalla que acaba de abrirse pide el estado AHORA en vez de esperar al próximo
+     * evento o al reloj de 15 s. El socket del panel es uno solo y vive mientras dura la
+     * sesión, así que sin esto cada navegación interna arrancaba mirando un spinner.
+     * El freno de un segundo es para que una pantalla con un bucle no ponga a la central a
+     * armar snapshots sin parar. */
+    let ultimoPedido = 0;
+    s.on('snapshot:pedir', async () => {
+      const ahora = Date.now();
+      if (ahora - ultimoPedido < 1000) return;
+      ultimoPedido = ahora;
+      try { s.emit('snapshot', await snapshot()); } catch (_) {}
+    });
+  }
   // Pizarra compartida en videollamada (relay por sala = par de internos)
   s.on('scratch:join', (room) => { if (room) s.join('scratch:' + room); });
   s.on('scratch:leave', (room) => { if (room) s.leave('scratch:' + room); });

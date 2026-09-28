@@ -2,6 +2,24 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.23.2] - 2026-09-28
+### Fixed
+- **Internos (y todo el panel en vivo) tardaba hasta 15 segundos en mostrar la lista.** No
+  era la consulta —la central contesta los internos en 35 ms, medido—: era **cuándo**
+  llegaban. El servidor manda el estado al CONECTAR y después sólo cuando pasa algo o cada
+  15 s por el reloj de reconciliación. Pero el socket es **uno solo para todo el panel** y
+  ya estaba conectado hacía rato: al entrar a una pantalla nueva se suscribía tarde, se
+  perdía el snapshot inicial y se quedaba esperando el siguiente. Con la central tranquila
+  eso son quince segundos de reloj girando **sobre datos que el navegador ya tenía**.
+  Entrar directo a la URL era instantáneo; navegar dentro del panel, no — de ahí que se
+  sintiera aleatorio.
+  - Ahora el último estado queda guardado y la pantalla nueva **pinta al instante** con él
+    (como mucho 15 s viejo: es exactamente lo que estaba mostrando la pantalla anterior),
+    y en paralelo le pide al servidor uno fresco, que llega en decenas de milisegundos.
+  - Alcanza a las nueve pantallas que viven del estado en vivo —Internos, Monitor,
+    Wallboard, Troncales, Seguridad, Sistema, Historial, el tablero y las colas—, no sólo a
+    Internos. (`dashboard/app/useLive.js`, `control-plane/app.js`)
+
 ## [1.23.1] - 2026-09-28
 ### Added
 - **«Teléfonos registrados»: el panel dice cuáles la central no conoce.** Un teléfono
