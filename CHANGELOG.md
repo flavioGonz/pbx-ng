@@ -2,6 +2,26 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.23.1] - 2026-09-28
+### Added
+- **«Teléfonos registrados»: el panel dice cuáles la central no conoce.** Un teléfono
+  configurado a mano se registra igual y anda perfecto para hablar — pero nunca le pidió
+  nada a la central, así que no recibió la libreta ni la configuración. Desde afuera se ve
+  **idéntico** a uno aprovisionado: registrado, verde, andando; la diferencia aparece
+  recién cuando alguien busca un contacto y la agenda está vacía, y ahí no hay una sola
+  pista de por qué. Ahora la central mira quién se registró, adivina la marca del
+  `User-Agent` —que el teléfono manda gratis en cada REGISTER— y marca los que están
+  **sin aprovisionar**, con un botón que los da de alta con lo que el propio teléfono
+  contó. (`control-plane/telefonos-detectados.js`, *Teléfonos*)
+  - Reconoce Yealink, Grandstream, Fanvil, **Akuvox** (que usa el dialecto de Fanvil),
+    Snom, Htek, Polycom, Cisco/Linksys y UniFi. Las marcas **sin libreta remota** —UniFi,
+    Polycom, Cisco— se dicen como tales en vez de ofrecer una URL que no van a usar nunca.
+  - Los softphones no se listan: no hay nada que aprovisionar en ellos.
+  - La **MAC** se lee del `User-Agent` cuando el teléfono la regala (Grandstream lo hace) y
+    **no se inventa** cuando no: aprovisionar la MAC equivocada le cambia la configuración
+    a otro aparato.
+  - 11 pruebas nuevas. 330 en total, todas en verde.
+
 ## [1.23.0] - 2026-09-28
 ### Added
 - **La libreta de la central, en los teléfonos de escritorio.** Un Yealink o un Grandstream

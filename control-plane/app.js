@@ -1059,6 +1059,20 @@ app.delete('/api/prompts/:id', async (req, res) => {
 app.get('/api/push/devices', async (req, res) => { try { const devices = await pushProviders.listDevices(); const { rows } = await pool.query('SELECT ext, count(*)::int AS n FROM pbxng_push_subs GROUP BY ext'); const status = await pushProviders.providerStatus(); res.json({ devices, webpush: rows, status, vapid: VAPID.pub }); } catch (e) { errorHttp(res, e); } });
 
 // Telefonos / Auto-provisioning (admin)
+/* Qué teléfonos se registraron y cuáles la central no conoce. Un teléfono configurado a
+ * mano anda perfecto para hablar y se ve idéntico a uno aprovisionado —registrado, verde—;
+ * la diferencia aparece recién cuando alguien busca un contacto y la agenda está vacía.
+ * Esto lo dice antes. */
+const telDetectados = require('./telefonos-detectados');
+app.get('/api/phones/detectados', async (req, res) => {
+  try {
+    const [{ rows: contactos }, { rows: altas }] = await Promise.all([
+      pool.query('SELECT endpoint, uri, user_agent FROM ps_contacts'),
+      pool.query('SELECT mac, vendor, ext FROM pbxng_phones'),
+    ]);
+    res.json(telDetectados.detectar(contactos, altas));
+  } catch (e) { res.json([]); }
+});
 app.get('/api/phones', async (req, res) => { try { const { rows } = await pool.query('SELECT id,mac,vendor,model,ext,label,line_label,last_seen,created_at FROM pbxng_phones ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
 app.post('/api/phones', async (req, res) => {
   const b = req.body || {}; const mac = normMac(b.mac);

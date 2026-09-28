@@ -17,9 +17,17 @@ export default function Telefonos() {
   /* La libreta: el título que ve el usuario en el teléfono y si van también los clientes
    * del CRM. Los teléfonos aprovisionados la reciben SOLOS —la URL va en su config—; las
    * URLs de acá abajo son para las marcas que no aprovisionamos o para cargarla a mano. */
+  /* Los que se registraron. Un teléfono configurado a mano anda para hablar y se ve igual
+   * que uno aprovisionado; lo que le falta —la libreta, los codecs— no se nota hasta que
+   * alguien lo busca. Acá se dice antes. */
+  const [detectados, setDetectados] = useState([]);
   const [agTitulo, setAgTitulo] = useState(''); const [agClientes, setAgClientes] = useState(true); const [agSaving, setAgSaving] = useState(false);
   const base = typeof window !== 'undefined' ? window.location.origin : '';
-  async function load() { try { setList(await fetch('/backend/api/phones').then(r => r.json())); } catch (_) {} }
+  const pendientes = detectados.filter(d => !d.aprovisionado && d.agenda);
+  async function load() {
+    try { setList(await fetch('/backend/api/phones').then(r => r.json())); } catch (_) {}
+    try { setDetectados(await fetch('/backend/api/phones/detectados').then(r => r.json())); } catch (_) {}
+  }
   async function loadSrv() {
     try {
       const s = await fetch('/backend/api/settings').then(r => r.json());
@@ -33,6 +41,14 @@ export default function Telefonos() {
   useEffect(() => { load(); loadSrv(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));
   function nuevo() { setForm(empty); setOpened(true); }
+  /* Dar de alta uno detectado: se precarga lo que el propio teléfono contó al registrarse.
+   * Lo único que suele faltar es la MAC —la mayoría no la manda— y es justamente lo que
+   * NO se puede inventar: aprovisionar la MAC equivocada le cambia la configuración a otro
+   * aparato. */
+  function altaDetectado(d) {
+    setForm({ ...empty, mac: d.mac || '', vendor: VENDORS.find(v => v.value === d.vendor) ? d.vendor : 'yealink', model: d.modelo || '', ext: d.ext, label: d.ext });
+    setOpened(true);
+  }
   function edit(p) { setForm({ ...empty, ...p }); setOpened(true); }
   async function save() {
     if (!form.mac || !form.ext) { toast('MAC e extensión son obligatorios', 'bad'); return; }
@@ -71,6 +87,59 @@ export default function Telefonos() {
           <Button variant="light" leftSection={<IconDeviceFloppy size={16} />} loading={srvSaving} onClick={saveSrv}>Guardar</Button>
         </Group>
       </Card>
+
+      {/* ── Detectados ────────────────────────────────────────────────────
+          Lo que contestó a un REGISTER. Es información que el teléfono manda gratis en
+          cada registro (el User-Agent), y alcanza para saber la marca y para decir si la
+          central lo conoce o no. */}
+      {detectados.length > 0 && (
+        <Card withBorder radius="lg" padding="md">
+          <Group gap="sm" wrap="nowrap" mb="xs">
+            <ThemeIcon variant="light" color={pendientes.length ? 'orange' : 'teal'} size={38} radius="md"><IconRouter size={20} /></ThemeIcon>
+            <div>
+              <Text fw={700}>Teléfonos registrados</Text>
+              <Text size="xs" c="dimmed">
+                {pendientes.length
+                  ? `${pendientes.length} sin aprovisionar · andan para hablar, pero no reciben la libreta ni la configuración de la central`
+                  : 'Todos los registrados están dados de alta en la central'}
+              </Text>
+            </div>
+          </Group>
+          <Table.ScrollContainer minWidth={700}>
+            <Table verticalSpacing="xs" fz="sm">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th w={90}>Interno</Table.Th>
+                  <Table.Th>Qué es</Table.Th>
+                  <Table.Th w={140}>IP</Table.Th>
+                  <Table.Th w={150}>MAC</Table.Th>
+                  <Table.Th w={210}>Estado</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>{detectados.map(d => (
+                <Table.Tr key={d.ext}>
+                  <Table.Td><Code>{d.ext}</Code></Table.Td>
+                  <Table.Td>
+                    <Text size="sm" fw={600}>{d.marca}{d.modelo ? ' ' + d.modelo : ''}</Text>
+                    <Text size="xs" c="dimmed">{d.ua}</Text>
+                  </Table.Td>
+                  <Table.Td><Text size="xs" c="dimmed">{d.ip || '—'}</Text></Table.Td>
+                  <Table.Td><Text size="xs" c="dimmed">{d.mac || '—'}</Text></Table.Td>
+                  <Table.Td>
+                    {d.aprovisionado
+                      ? <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>Aprovisionado</Badge>
+                      : d.agenda
+                        ? <Button size="compact-xs" variant="light" color="orange" leftSection={<IconPlus size={13} />} onClick={() => altaDetectado(d)}>Dar de alta</Button>
+                        : <Tooltip label="Esta marca no toma libreta remota: sus contactos los maneja su propio sistema" withArrow multiline w={250}>
+                            <Badge color="gray" variant="light">Sin libreta remota</Badge>
+                          </Tooltip>}
+                  </Table.Td>
+                </Table.Tr>
+              ))}</Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Card>
+      )}
 
       {/* ── La libreta ────────────────────────────────────────────────────
           Un teléfono de escritorio no sabe pedirle contactos a una API, pero todos saben
