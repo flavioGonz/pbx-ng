@@ -22,6 +22,28 @@ function streamFalso(texto, tono) {
   return cv.captureStream(25);
 }
 
+/* Una voz de mentira para poder VER si el orbe reacciona: un tono cuya intensidad sube y
+ * baja como una frase hablada. Sin esto, la reacción al audio sólo se puede juzgar
+ * llamando a alguien y pidiéndole que hable, que es exactamente lo que esta vista evita. */
+function vozFalsa() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const dst = ctx.createMediaStreamDestination();
+    const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = 160;
+    const g = ctx.createGain(); g.gain.value = 0;
+    osc.connect(g); g.connect(dst); osc.start();
+    /* Sílabas: golpes de 90 ms con silencios irregulares, no una onda constante. */
+    let t = 0;
+    setInterval(() => {
+      t += 1;
+      const habla = (t % 11) < 7;
+      const v = habla ? 0.25 + Math.abs(Math.sin(t * 1.7)) * 0.7 : 0;
+      try { g.gain.setTargetAtTime(v, ctx.currentTime, 0.04); } catch (_) {}
+    }, 90);
+    return dst.stream;
+  } catch (_) { return null; }
+}
+
 /* ============================================================================
  *  Vista de prueba de la pantalla de llamada (`?demo=call`).
  *
@@ -53,7 +75,7 @@ export default function DemoLlamada() {
    * parpadearía y no se podría juzgar nada. */
   const falsos = useRef(null);
   if (!falsos.current && typeof document !== 'undefined') {
-    falsos.current = { remoto: streamFalso('EL OTRO LADO', 210), yo: streamFalso('VOS', 140) };
+    falsos.current = { remoto: streamFalso('EL OTRO LADO', 210), yo: streamFalso('VOS', 140), voz: vozFalsa() };
   }
   const nodos = paso.video ? {
     remoto: <video autoPlay playsInline muted className="cs-video-remoto" ref={el => { if (el && falsos.current && el.srcObject !== falsos.current.remoto) { el.srcObject = falsos.current.remoto; el.play().catch(() => {}); } }} />,
@@ -73,6 +95,7 @@ export default function DemoLlamada() {
         video={!!paso.video}
         videoNodes={nodos}
         getRemoteStream={paso.video ? (() => falsos.current && falsos.current.remoto) : null}
+        getAudioStream={() => (falsos.current && falsos.current.voz) || null}
         viaTurn={false}
         flags={{ muted: false, held: paso.estado === 'espera', videoOn: !!paso.video, pad }}
         acciones={{

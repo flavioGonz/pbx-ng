@@ -1356,6 +1356,8 @@ export default function App() {
                 video={videoVivo}
                 videoNodes={nodosVideo}
                 getRemoteStream={sp.getRemoteStream}
+                getAudioStream={sp.getRemoteAudioStream || sp.getRemoteStream}
+                notaVideo={sipMode ? 'En modo SIP nativo la cámara sólo se enciende al iniciar la llamada' : ''}
                 ventana={<WinCtl dark />}
                 flags={{ muted: sp.muted, held: sp.held, videoOn: sp.videoOn, pad, masAbierto: mas, altavoz: !!sp.speaker, transfiriendo: !!sp.attended || xfer, grabando: recording }}
                 extra={contexto}
@@ -1365,9 +1367,13 @@ export default function App() {
                   atender: () => { sounds.uiClick(); sp.accept(false); },
                   atenderVideo: sipMode ? null : () => { sounds.uiClick(); sp.accept(true); },
                   mute: sp.toggleMute,
-                  hold: sipMode ? null : sp.toggleHold,
+                  /* En espera y altavoz YA funcionan en modo SIP nativo: la espera es un
+                     re-INVITE de verdad a la central (la que pone la música), y el altavoz
+                     elige la salida del audio. Antes estaban apagados en nativo y por eso
+                     faltaban dos botones en la barra. */
+                  hold: sp.toggleHold,
                   video: sipMode ? null : sp.toggleVideo,
-                  altavoz: sipMode ? null : sp.toggleSpeaker,
+                  altavoz: sp.toggleSpeaker,
                   transferir: () => { setMas(false); if (sp.attended) return; setXferNum(''); setXfer(true); },
                   teclado: () => { setMas(false); setPad(v => !v); },
                   mas: () => { setPad(false); setMas(v => !v); },

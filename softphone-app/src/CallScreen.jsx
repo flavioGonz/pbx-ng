@@ -274,11 +274,11 @@ function TarjetaCamara({ children, apagada, iniciales, color }) {
 }
 
 /* ── Un botón de la barra de abajo ─────────────────────────────────────────── */
-function Ctl({ icon, label, on, apagado, onClick, caret, onCaret, deshabilitado }) {
+function Ctl({ icon, label, on, apagado, onClick, caret, onCaret, deshabilitado, motivo }) {
   return (
     <div className="cs-ctl-caja" style={{ opacity: deshabilitado ? 0.4 : 1 }}>
       <div className="cs-ctl-fila">
-        <button className="cs-ctl" onClick={deshabilitado ? undefined : onClick} disabled={deshabilitado} title={label}
+        <button className="cs-ctl" onClick={deshabilitado ? undefined : onClick} disabled={deshabilitado} title={deshabilitado && motivo ? motivo : label}
           style={{ color: on ? T.azul : T.texto }}>
           {icon}
         </button>
@@ -330,6 +330,8 @@ export default function CallScreen(p) {
     viaTurn,             // true | false | null
     video,               // hay video activo
     getRemoteStream,
+    getAudioStream,       // el audio del otro lado, para el orbe y la onda (en nativo NO es el mismo que el video)
+    notaVideo = '',       // por qué la cámara no se puede encender, si no se puede
     acciones = {},       // { colgar, atender, atenderVideo, rechazar, mute, hold, video, teclado, transferir, grabar, altavoz, invitar, elegirMic, elegirCam }
     flags = {},          // { muted, held, videoOn, grabando, altavoz, pad, transfiriendo, masAbierto }
     extra = null,        // barras de estado (consulta en curso, conferencia, CRM…)
@@ -428,7 +430,7 @@ export default function CallScreen(p) {
           {!hayVideoRemoto && (
             <div className="cs-video-espera">
               <Orbe size={116} color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando}
-                getStream={hablando ? getRemoteStream : null} />
+                getStream={hablando ? (getAudioStream || getRemoteStream) : null} />
               <div className="cs-nombre">{nombre}</div>
               <div className="cs-estado">{hablando ? 'Esperando el video del otro lado…' : leyenda}</div>
             </div>
@@ -453,7 +455,7 @@ export default function CallScreen(p) {
             de las dos cosas —del otro lado suele haber un interno o un portero, no una
             persona con foto—. */}
         {!video && <Orbe size={132} color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando} quieto={estado === 'terminada'}
-          getStream={hablando ? getRemoteStream : null} />}
+          getStream={hablando ? (getAudioStream || getRemoteStream) : null} />}
 
         <div className="cs-nombre">{nombre}</div>
         {leyenda ? (
@@ -469,7 +471,7 @@ export default function CallScreen(p) {
           <div className="cs-onda"><OndaReposo /></div>
         )}
         {!video && hablando && getRemoteStream && (
-          <div className="cs-onda cs-onda-viva"><Onda getStream={getRemoteStream} activa /></div>
+          <div className="cs-onda cs-onda-viva"><Onda getStream={getAudioStream || getRemoteStream} activa /></div>
         )}
 
         {/* Los redondos de timbrado, debajo de la onda y centrados. */}
@@ -513,10 +515,13 @@ export default function CallScreen(p) {
           <div className="cs-barra-centro">
             <Ctl icon={<IcMic s={22} off={flags.muted} />} label="Micrófono" apagado={flags.muted} onClick={acciones.mute}
               caret={!!acciones.elegirMic} onCaret={acciones.elegirMic} />
-            {acciones.video ? (
-              <Ctl icon={<IcCam s={22} off={!flags.videoOn} />} label="Cámara web" apagado={!flags.videoOn} onClick={acciones.video}
-                caret={!!acciones.elegirCam} onCaret={acciones.elegirCam} />
-            ) : null}
+            {/* La cámara: si el modo de conexión no la soporta durante la llamada, el botón
+                se muestra APAGADO y explica por qué al pasar por encima. Hacerlo desaparecer
+                dejaba un hueco en la barra y la sensación de que faltaban botones. */}
+            <Ctl icon={<IcCam s={22} off={!flags.videoOn} />} label="Cámara web" apagado={!flags.videoOn}
+              onClick={acciones.video} deshabilitado={!acciones.video}
+              motivo={notaVideo || 'La cámara no está disponible en esta llamada'}
+              caret={!!acciones.elegirCam} onCaret={acciones.elegirCam} />
             {/* La misma raya que separa «lo mío» (micrófono, cámara) de «la llamada». */}
             <span className="cs-sep" />
             {/* Altavoz y transferir estaban escondidos dentro de «Más», y son de las tres

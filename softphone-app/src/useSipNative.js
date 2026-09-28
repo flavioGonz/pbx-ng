@@ -26,7 +26,7 @@ function b64ToI16(b64) { const bin = atob(b64); const u = new Uint8Array(bin.len
 const DTMF_F = { '1':[697,1209],'2':[697,1336],'3':[697,1477],'4':[770,1209],'5':[770,1336],'6':[770,1477],'7':[852,1209],'8':[852,1336],'9':[852,1477],'*':[941,1209],'0':[941,1336],'#':[941,1477] };
 let _tctx;
 function playLocalTone(k) { try { if (!_tctx) _tctx = new (window.AudioContext || window.webkitAudioContext)(); if (_tctx.state === 'suspended') _tctx.resume(); const f = DTMF_F[k]; if (!f) return; const g = _tctx.createGain(); g.connect(_tctx.destination); const now = _tctx.currentTime; g.gain.setValueAtTime(0.18, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.16); f.forEach(fr => { const o = _tctx.createOscillator(); o.type = 'sine'; o.frequency.value = fr; o.connect(g); o.start(now); o.stop(now + 0.16); }); } catch {} }
-const dummyRef = { current: null };
+
 
 export function useSipNative() {
   const [reg, setReg] = useState('idle');
@@ -38,8 +38,15 @@ export function useSipNative() {
   const [quality, setQuality] = useState(null);
   const [hist, setHist] = useState(loadHist);
   const [volume, setVol] = useState(() => { const v = parseFloat(localStorage.getItem('sp_volume')); return isNaN(v) ? 1 : v; });
-  const audio = useRef({ ctx: null, mic: null, cap: null, play: null, ring: [], vol: 1 });
+  const audio = useRef({ ctx: null, mic: null, cap: null, play: null, ring: [], vol: 1, msd: null });
   const infoRef = useRef(null);
+  /* El audio entrante ya no sale directo a la placa: pasa por un destino de MediaStream y
+   * de ahi a un <audio>. Dos cosas que antes no se podian hacer en modo nativo salen de
+   * ahi: elegir el altavoz (setSinkId solo existe en el elemento) y que el orbe REACCIONE
+   * al audio del otro lado, porque recien ahora hay un MediaStream que analizar. */
+  const audioRef = useRef(null);
+  const [held, setHeld] = useState(false);
+  const [speaker, setSpeaker] = useState(false);
 
   // --- video (Etapa 2, WebCodecs) ---
   const [videoOn, setVideoOn] = useState(false);
@@ -88,8 +95,18 @@ export function useSipNative() {
       const zero = ctx.createGain(); zero.gain.value = 0; src.connect(cap); cap.connect(zero); zero.connect(ctx.destination); // corre sin eco
       const play = ctx.createScriptProcessor(1024, 1, 1);
       play.onaudioprocess = (e) => { const out = e.outputBuffer.getChannelData(0); const r = audio.current.ring; for (let i = 0; i < out.length; i++) out[i] = r.length ? r.shift() : 0; };
-      play.connect(ctx.destination);
-      audio.current = { ctx, mic, cap, play, ring: [], vol: volume };
+      const msd = ctx.createMediaStreamDestination();
+      play.connect(msd);
+      const el = audioRef.current;
+      let porElemento = false;
+      if (el) {
+        try { el.srcObject = msd.stream; el.volume = 1; await el.play(); porElemento = true; } catch (_) { porElemento = false; }
+      }
+      /* Si el elemento no arranca —autoplay bloqueado, sin dispositivo— se vuelve a la
+       * salida directa: perder el altavoz elegido es molesto, quedarse sin audio es otra
+       * cosa. */
+      if (!porElemento) play.connect(ctx.destination);
+      audio.current = { ctx, mic, cap, play, ring: [], vol: volume, msd };
     } catch (e) { try { console.error('[sipnat] audio', e); } catch {} }
   }, [stopAudio, volume]);
 
@@ -104,13 +121,15 @@ export function useSipNative() {
       else if (evt.type === 'call') {
         if (evt.state === 'calling') { const ci = { dir: 'out', number: evt.number, since: 0 }; infoRef.current = ci; setCallInfo(ci); setCall('calling'); setNote('Llamando…'); setIncoming(null); }
         else if (evt.state === 'ringing') setNote('Timbrando…');
+        else if (evt.state === 'hold') { setHeld(!!evt.held); if (evt.error) setNote('No se pudo poner en espera (' + evt.error + ')'); }
+        else if (evt.state === 'reinvite') { if (evt.remoteHold != null) setNote(evt.remoteHold ? 'El otro lado te puso en espera' : ''); }
         else if (evt.state === 'incoming') { setIncoming({ number: evt.number, remoteIdentity: { uri: { user: evt.number } } }); setIncomingVideo(!!evt.video); infoRef.current = { dir: 'in', number: evt.number, since: 0 }; }
-        else if (evt.state === 'answered') { const ci = { ...(infoRef.current || { dir: 'out', number: evt.number }), since: Date.now() }; infoRef.current = ci; setCallInfo(ci); setCall('answered'); setNote(''); setIncoming(null); setMuted(false); startAudio(); }
+        else if (evt.state === 'answered') { const ci = { ...(infoRef.current || { dir: 'out', number: evt.number }), since: Date.now() }; infoRef.current = ci; setCallInfo(ci); setCall('answered'); setNote(''); setIncoming(null); setMuted(false); setHeld(false); startAudio(); }
         else if (evt.state === 'ended') { setQuality(null);
           stopAudio(); stopVideo(); setIncomingVideo(false);
           const ci = infoRef.current;
           if (ci) { const dur = ci.since ? Math.round((Date.now() - ci.since) / 1000) : 0; pushHist({ dir: ci.dir, number: ci.number, dur, missed: ci.dir === 'in' && !ci.since }); }
-          infoRef.current = null; setCall(null); setCallInfo(null); setIncoming(null); setNote(evt.reason || ''); setMuted(false);
+          infoRef.current = null; setCall(null); setCallInfo(null); setIncoming(null); setNote(evt.reason || ''); setMuted(false); setHeld(false);
         }
       }
     });
@@ -146,19 +165,50 @@ export function useSipNative() {
   const toggleMute = useCallback(() => { setMuted(m => { const n = !m; try { window.sphone && window.sphone.sipMute(n); } catch {} return n; }); }, []);
   const setVolume = useCallback((v) => { const val = Math.max(0, Math.min(1, v)); setVol(val); audio.current.vol = val; try { localStorage.setItem('sp_volume', String(val)); } catch {} }, []);
   const sendDtmf = useCallback((k) => { playLocalTone(String(k)); try { window.sphone && window.sphone.sipDtmf && window.sphone.sipDtmf(String(k)); } catch {} }, []);
+  /* El estado NO se cambia acá: se pide la espera a la central y se espera su respuesta.
+   * Si contesta que no, el botón no debe haber quedado encendido mintiendo. */
+  const toggleHold = useCallback(() => {
+    setHeld((h) => { try { window.sphone && window.sphone.sipHold && window.sphone.sipHold(!h); } catch {} return h; });
+  }, []);
+  /* El altavoz: mismo criterio que en WebRTC —si hay uno elegido en Ajustes se respeta, y
+   * si no se busca el que parezca parlante o, al apagarlo, el auricular—. */
+  const applySpeaker = useCallback(async (id) => {
+    const el = audioRef.current;
+    try { if (el && typeof el.setSinkId === 'function') await el.setSinkId(id || 'default'); } catch {}
+  }, []);
+  const toggleSpeaker = useCallback(async () => {
+    const el = audioRef.current; const next = !speaker;
+    try {
+      if (el && typeof el.setSinkId === 'function') {
+        const devs = await navigator.mediaDevices.enumerateDevices();
+        const outs = devs.filter(d => d.kind === 'audiooutput');
+        const pref = getDevPrefs().spk;
+        let target = '';
+        if (pref) target = pref;
+        else if (next) { const sp = outs.find(d => /speaker|altavoz|speakerphone/i.test(d.label || '')); target = sp ? sp.deviceId : ((outs.find(d => d.deviceId !== 'default' && d.deviceId !== 'communications') || {}).deviceId || ''); }
+        else { const ear = outs.find(d => /communications|earpiece|receiver|auricular/i.test(d.label || '')); target = ear ? ear.deviceId : 'default'; }
+        if (target) await el.setSinkId(target);
+      }
+      if (el) { el.muted = false; await el.play().catch(() => {}); }
+    } catch {}
+    setSpeaker(next);
+  }, [speaker]);
   const clearHist = useCallback(() => { saveHist([]); setHist([]); }, []);
   const noop = useCallback(() => {}, []);
 
   const inCall = !!callInfo;
   const registered = reg === 'registered';
   return {
-    reg, registered, call, inCall, incoming, incomingVideo, muted, held: false, speaker: false, videoOn,
+    reg, registered, call, inCall, incoming, incomingVideo, muted, held, speaker, videoOn,
     callInfo, quality, hist, volume, note, usingRelay: null,
     connect, disconnect, placeCall, accept, reject, hangup, toggleMute,
-    toggleHold: noop, toggleVideo: noop, toggleSpeaker: noop, applySpeaker: noop, setVolume, transfer: (t) => { try { window.sphone && window.sphone.sipTransfer && window.sphone.sipTransfer(t); } catch {} }, sendDtmf, clearHist,
+    toggleHold, toggleVideo: noop, toggleSpeaker, applySpeaker, setVolume, transfer: (t) => { try { window.sphone && window.sphone.sipTransfer && window.sphone.sipTransfer(t); } catch {} }, sendDtmf, clearHist,
     attended: null, attendedCall: noop, completeAttended: noop, cancelAttended: noop,
     heldInfo: null, switchLine: noop, conf: false, conference: noop,
-    audioRef: dummyRef, remoteVideoRef, localVideoRef,
+    audioRef, remoteVideoRef, localVideoRef,
+    /* Para el orbe: el audio del otro lado, que en modo nativo no vive en una llamada
+       WebRTC sino en esta cadena de AudioContext. */
+    getRemoteAudioStream: () => (audio.current.msd ? audio.current.msd.stream : null),
     getRemoteStream: () => (veng.current ? veng.current.getRemoteStream() : null),
     getLocalStream: () => (veng.current ? veng.current.getLocalStream() : null),
   };

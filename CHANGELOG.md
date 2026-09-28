@@ -2,6 +2,30 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.3] - 2026-09-28
+### Softphone 0.12.0
+- **Llamar con video en modo SIP nativo mostraba una «llamada entrante» de uno mismo.**
+  Marcabas al 7700 y el teléfono te anunciaba que el 7700 te estaba llamando. La causa:
+  el stack nativo trataba **cualquier** INVITE como llamada nueva, y la central manda un
+  re-INVITE dentro del diálogo cuando renegocia la media (que es justo lo que pasa al
+  agregar video). Ahora un INVITE con el Call-ID de la llamada en curso se reconoce como
+  lo que es: se contesta 200 con el mismo SDP, se re-apunta el RTP si la media cambió de
+  puerto, y si el otro lado ofrece `sendonly` se avisa que te pusieron en espera. Un
+  re-INVITE que llega antes de que la llamada esté establecida recibe 491.
+- **«En espera» y «Altavoz» ya existen en modo SIP nativo** — por eso faltaban dos botones
+  en la barra: no estaban escondidos, estaban apagados. La espera es un **re-INVITE de
+  verdad** (`a=sendonly`), así que la música la pone la central como corresponde y el RTP
+  deja de transmitir y de entregar audio mientras dura. El altavoz elige la salida real
+  (`setSinkId`), respetando el dispositivo elegido en Ajustes.
+- **El orbe ya reacciona al audio en modo nativo.** No estaba roto: ahí el audio del otro
+  lado no vive en una llamada WebRTC sino en una cadena de `AudioContext`, y no había
+  ningún `MediaStream` que analizar. Ahora la reproducción pasa por un destino de
+  MediaStream —que es además lo que habilita el altavoz— y de ahí lo toman el orbe y la
+  onda. La vista de prueba (`?demo=call`) trae una voz sintética para poder verlo sin
+  llamar a nadie.
+- La **cámara** en modo nativo ya no desaparece de la barra: se muestra apagada y explica
+  al pasar por encima que ahí sólo se enciende al iniciar la llamada.
+
 ## [1.21.2] - 2026-09-28
 ### Changed
 - **El login estrena fondo**: una grilla de puntos que se deforma sola y se abre donde pasa

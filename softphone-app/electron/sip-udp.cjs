@@ -81,7 +81,7 @@ function start(cfg, onEvent) {
     return [0, 8, 101];
   }
   // vopts = { port, pt } agrega una línea m=video H.264 (Etapa 1: solo RTP/AVP en claro).
-  function buildSdp(rtpPort, only, cryptoB64, vopts) {
+  function buildSdp(rtpPort, only, cryptoB64, vopts, dir) {
     const aip = advIp();
     const m = only ? [only.pt, only.dtmf] : offerPts();
     const proto = cryptoB64 ? 'RTP/SAVP' : 'RTP/AVP';
@@ -90,7 +90,7 @@ function start(cfg, onEvent) {
     if (m.indexOf(0) >= 0) lines.push('a=rtpmap:0 PCMU/8000');
     if (m.indexOf(8) >= 0) lines.push('a=rtpmap:8 PCMA/8000');
     const dtmfPt = only ? only.dtmf : 101;
-    lines.push('a=rtpmap:' + dtmfPt + ' telephone-event/8000', 'a=fmtp:' + dtmfPt + ' 0-15', 'a=ptime:20', 'a=sendrecv');
+    lines.push('a=rtpmap:' + dtmfPt + ' telephone-event/8000', 'a=fmtp:' + dtmfPt + ' 0-15', 'a=ptime:20', 'a=' + (dir || 'sendrecv'));
     if (vopts) {
       lines.push('m=video ' + vopts.port + ' RTP/AVP ' + vopts.pt,
         'a=rtpmap:' + vopts.pt + ' H264/90000',
@@ -145,7 +145,11 @@ function start(cfg, onEvent) {
         if (st.lastTransit != null) { const dv = Math.abs(transit - st.lastTransit); st.jitter += (dv - st.jitter) / 16; }
         st.lastTransit = transit;
       } catch (_) {}
-      if (pt === st.dtmfPt) return; const dec = decOf(pt); const pl = m.slice(12); const pcm = new Int16Array(pl.length); for (let i = 0; i < pl.length; i++) pcm[i] = dec(pl[i]); emit({ type: 'audio', pcm: Buffer.from(pcm.buffer).toString('base64') });
+      if (pt === st.dtmfPt) return;
+      /* En espera no se entrega el audio entrante: lo que suena del otro lado es la musica
+         de la central, y mezclarla con lo que igual llegue por el socket es ruido. */
+      if (st.held) return;
+      const dec = decOf(pt); const pl = m.slice(12); const pcm = new Int16Array(pl.length); for (let i = 0; i < pl.length; i++) pcm[i] = dec(pl[i]); emit({ type: 'audio', pcm: Buffer.from(pcm.buffer).toString('base64') });
     } catch (_) {} });
     try { sock.bind(rtpPort); } catch (_) {}
     st.sendInt = setInterval(() => {
@@ -153,7 +157,7 @@ function start(cfg, onEvent) {
         if (st.outBuf.length > 3200) st.outBuf.splice(0, st.outBuf.length - 1600);
         const pkt = Buffer.alloc(12 + 160); pkt[0] = 0x80; pkt[1] = st.txPt & 0x7f;
         pkt.writeUInt16BE(st.seq & 0xffff, 2); pkt.writeUInt32BE(st.ts >>> 0, 4); pkt.writeUInt32BE(st.ssrc >>> 0, 8);
-        for (let i = 0; i < 160; i++) pkt[12 + i] = st.enc((st.outBuf.length && !st.muted) ? st.outBuf.shift() : 0);
+        for (let i = 0; i < 160; i++) pkt[12 + i] = st.enc((st.outBuf.length && !st.muted && !st.held) ? st.outBuf.shift() : 0);
         st.seq = (st.seq + 1) & 0xffff; st.ts = (st.ts + 160) >>> 0;
         st.pktCount = (st.pktCount + 1) >>> 0; st.octetCount = (st.octetCount + 160) >>> 0;
         st.send(pkt);
@@ -243,6 +247,7 @@ function start(cfg, onEvent) {
         const rem = parseSdp(rs.content);
         let sctx = null; if (secure) { const rc = srtp.parseCrypto(rs.content); const txk = srtp.keysFromB64(localMaster), rxk = rc && srtp.keysFromB64(rc); if (txk && rxk) sctx = { tx: { keys: txk, ctx: { roc: 0 } }, rx: { keys: rxk, ctx: { roc: 0 } } }; else log('info', 'SRTP: el remoto no devolvió a=crypto — media podría fallar'); }
         if (rem.ip && rem.port) {
+          engine.call.neg = { pt: pickAudioPt(rem), dtmf: findDtmfPt(rem), master: localMaster, ip: rem.ip, port: rem.port };
           startRtp(rem.ip, rem.port, rtpPort, pickAudioPt(rem), findDtmfPt(rem), sctx); engine.call.established = true; emit({ type: 'call', state: 'answered', number: n });
           if (engine.call.video && engine.call.video.wanted && rem.vport) startVideo(rem.ip, rem.vport, engine.call.video.localPort, rem.vpt);
         }
@@ -257,6 +262,34 @@ function start(cfg, onEvent) {
     try {
       if (rq.method === 'OPTIONS') { sip.send(sip.makeResponse(rq, 200, 'OK')); return; }
       if (rq.method === 'INVITE') {
+        /* ¿Es un re-INVITE de la llamada que YA tenemos? Se reconoce por el Call-ID del
+           dialogo. Antes cualquier INVITE se tomaba como llamada nueva: la central nos ponia
+           en espera y el telefono mostraba una llamada entrante fantasma. Se contesta 200
+           con el mismo SDP y se anota si el otro lado nos dejo esperando. */
+        const c0 = engine && engine.call;
+        if (c0 && c0.callId && rq.headers['call-id'] === c0.callId && !(c0.dialog && c0.established)) {
+          /* Mismo Call-ID pero la llamada todavia no esta establecida: es una renegociacion
+             que llega a destiempo. Se contesta 491 y no se toca nada; inventar una llamada
+             entrante acá es lo que hacia que marcar a 7700 con video mostrara «llamada
+             entrante de 7700» estando uno mismo llamando. */
+          try { sip.send(sip.makeResponse(rq, 491, 'Request Pending')); } catch (_) {}
+          return;
+        }
+        if (c0 && c0.dialog && c0.established && rq.headers['call-id'] === c0.dialog.callId) {
+          const rem2 = parseSdp(rq.content);
+          const neg = c0.neg || {};
+          const rs2 = sip.makeResponse(rq, 200, 'OK');
+          rs2.headers.contact = [{ uri: mkContact() }]; rs2.headers['content-type'] = 'application/sdp';
+          rs2.content = buildSdp(c0.rtpPort, (neg.pt != null ? { pt: neg.pt, dtmf: neg.dtmf } : null), neg.master || null, null, c0.held ? 'sendonly' : 'sendrecv');
+          try { sip.send(rs2); } catch (_) {}
+          if (rem2.ip && rem2.port && engine.rtp && (rem2.ip !== engine.rtp.remoteIp || rem2.port !== engine.rtp.remotePort)) {
+            engine.rtp.remoteIp = rem2.ip; engine.rtp.remotePort = rem2.port;
+            log('info', 're-INVITE: la media ahora va a ' + rem2.ip + ':' + rem2.port);
+          }
+          const remotoEspera = /a=(sendonly|inactive)/i.test(String(rq.content || ''));
+          emit({ type: 'call', state: 'reinvite', remoteHold: remotoEspera });
+          return;
+        }
         const from = (rq.headers.from && rq.headers.from.uri && sip.parseUri(rq.headers.from.uri).user) || 'desconocido';
         const rem = parseSdp(rq.content);
         engine.call = { dir: 'in', number: from, callId: rq.headers['call-id'], rtpPort: freeRtpPort(), inviteRq: rq, established: false, remote: rem, video: { offered: !!rem.vport, localPort: freeRtpPort(), pt: 96 } };
@@ -285,6 +318,7 @@ function start(cfg, onEvent) {
     sip.send(rs);
     let sctx = null; if (ourMaster && rc) { const txk = srtp.keysFromB64(ourMaster), rxk = srtp.keysFromB64(rc); if (txk && rxk) sctx = { tx: { keys: txk, ctx: { roc: 0 } }, rx: { keys: rxk, ctx: { roc: 0 } } }; }
     if (rem.ip && rem.port) {
+      c.neg = { pt: txPt, dtmf: dtmfPt, master: ourMaster, ip: rem.ip, port: rem.port };
       startRtp(rem.ip, rem.port, c.rtpPort, txPt, dtmfPt, sctx); c.established = true; emit({ type: 'call', state: 'answered', number: c.number });
       if (ansVid && rem.vport) startVideo(rem.ip, rem.vport, c.video.localPort, rem.vpt);
     }
@@ -302,6 +336,68 @@ function start(cfg, onEvent) {
     stopRtp(); engine.call = null; emit({ type: 'call', state: 'ended', reason: 'colgaste' });
   }
 
+
+  /* ---------- EN ESPERA (re-INVITE dentro del dialogo, RFC 3264) ----------
+   *
+   * Poner en espera NO es silenciar el microfono: hay que avisarle a la central, porque es
+   * ella la que pone la musica de espera y la que sabe que la llamada esta aparcada. Eso se
+   * hace re-ofreciendo el mismo SDP con `a=sendonly` —seguimos mandando (nada), dejamos de
+   * recibir— y volviendo a `sendrecv` para retomar. Mientras tanto el RTP no transmite ni
+   * entrega audio, asi que no se cuela media por debajo de lo que la central cree.
+   *
+   * El 401/407 se reintenta una sola vez, como en la llamada: hay centrales que desafian
+   * cada peticion del dialogo.
+   */
+  function hold(on) {
+    const c = engine && engine.call;
+    if (!c || !c.dialog || !c.established) return;
+    const d = c.dialog, quiero = !!on;
+    if (c.held === quiero) { emit({ type: 'call', state: 'hold', held: quiero }); return; }
+    const neg = c.neg || {};
+    const mkReq = () => ({
+      method: 'INVITE', uri: d.remoteTarget,
+      headers: {
+        to: { uri: d.remoteUri, params: { tag: d.remoteTag } },
+        from: { uri: d.localUri, params: { tag: d.localTag } },
+        'call-id': d.callId, cseq: { method: 'INVITE', seq: (d.cseq = (d.cseq || 1) + 1) },
+        contact: [{ uri: mkContact() }], 'content-type': 'application/sdp',
+        'user-agent': 'PBX-NG Softphone', via: [],
+      },
+      content: buildSdp(c.rtpPort, (neg.pt != null ? { pt: neg.pt, dtmf: neg.dtmf } : null), neg.master || null, null, quiero ? 'sendonly' : 'sendrecv'),
+    });
+    let rq = mkReq(), authed = false;
+    const cb = (rs) => {
+      if (!engine || !engine.call || engine.call.callId !== c.callId) return;
+      if (rs.status === 401 || rs.status === 407) {
+        if (authed) { emit({ type: 'call', state: 'hold', held: c.held === true, error: 'auth' }); return; }
+        authed = true;
+        try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = (d.cseq = d.cseq + 1); rq.headers.via = []; sip.send(rq, cb); } catch (e) { log('info', 'hold auth: ' + e.message); }
+        return;
+      }
+      if (rs.status >= 100 && rs.status < 200) return;
+      if (rs.status >= 200 && rs.status < 300) {
+        try { sip.send({ method: 'ACK', uri: d.remoteTarget, headers: { to: rs.headers.to, from: rs.headers.from, 'call-id': d.callId, cseq: { method: 'ACK', seq: rs.headers.cseq.seq }, via: [] } }); } catch (_) {}
+        c.held = quiero;
+        if (engine.rtp) engine.rtp.held = quiero;
+        /* Al retomar, la central puede contestar con otro puerto/IP de media (venia de la
+           musica de espera): si cambio, hay que re-apuntar el RTP o no vuelve el audio. */
+        try {
+          const rem = parseSdp(rs.content);
+          if (!quiero && rem.ip && rem.port && engine.rtp && (rem.ip !== engine.rtp.remoteIp || rem.port !== engine.rtp.remotePort)) {
+            engine.rtp.remoteIp = rem.ip; engine.rtp.remotePort = rem.port;
+            log('info', 'retomar: la media volvio por ' + rem.ip + ':' + rem.port);
+          }
+        } catch (_) {}
+        log('info', quiero ? 'en espera' : 'retomada');
+        emit({ type: 'call', state: 'hold', held: quiero });
+      } else {
+        log('info', 'hold → ' + rs.status + ' ' + (rs.reason || ''));
+        emit({ type: 'call', state: 'hold', held: c.held === true, error: String(rs.status) });
+      }
+    };
+    try { sip.send(rq, cb); } catch (e) { log('info', 'hold err: ' + e.message); }
+  }
+
   // ---------- REFER (RFC 3515, transferencia ciega) ----------
   function transfer(target) {
     const t = String(target || '').replace(/[^\d*#+a-zA-Z]/g, ''); if (!t) return;
@@ -314,7 +410,7 @@ function start(cfg, onEvent) {
     const rq = { method: 'SUBSCRIBE', uri: 'sip:' + cfg.ext + '@' + server + ':' + port + tparam, headers: { to: { uri: 'sip:' + cfg.ext + '@' + cfg.domain }, from: { uri: 'sip:' + cfg.ext + '@' + cfg.domain, params: { tag: rstr() } }, 'call-id': cid, cseq: { method: 'SUBSCRIBE', seq: ++engine.cseq }, contact: [{ uri: mkContact() }], event: 'message-summary', accept: 'application/simple-message-summary', expires: 3600, 'user-agent': 'PBX-NG Softphone', via: [] }, content: '' };
     try { sip.send(rq, (rs) => { if (!engine) return; if ((rs.status === 401 || rs.status === 407) && !auth) { try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = ++engine.cseq; rq.headers.via = []; sip.send(rq, () => {}); } catch (_) {} } log('in', 'SUBSCRIBE(mwi) → ' + rs.status); }); } catch (_) {}
   }
-  engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf; engine.sendVideoFrame = sendVideoFrame; engine.reqKeyframe = reqKeyframe;
+  engine.hold = hold; engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf; engine.sendVideoFrame = sendVideoFrame; engine.reqKeyframe = reqKeyframe;
   function kick() { setTimeout(doRegister, 120); }
   if (wantSrv && !/^[0-9.]+$/.test(server)) {
     try { require('dns').resolveSrv('_sip._' + transport + '.' + server, (err, recs) => { if (!err && recs && recs.length) { recs.sort((a, b) => (a.priority - b.priority) || (b.weight - a.weight)); server = recs[0].name; port = recs[0].port; log('info', 'SRV → ' + server + ':' + port); } kick(); }); }
@@ -331,6 +427,7 @@ function audioOut(pcm) { engine && engine.pushOut && engine.pushOut(pcm); }
 function setMuted(m) { engine && engine.setMuted && engine.setMuted(m); }
 function dtmf(d) { engine && engine.dtmf && engine.dtmf(d); }
 function transfer(t) { engine && engine.transfer && engine.transfer(t); }
+function hold(on) { engine && engine.hold && engine.hold(on); }
 function videoOut(b64, ts90) { engine && engine.sendVideoFrame && engine.sendVideoFrame(b64, ts90); }
 function reqKeyframe() { engine && engine.reqKeyframe && engine.reqKeyframe(); }
-module.exports = { start, stop, call, accept, reject, hangup, audioOut, setMuted, dtmf, transfer, videoOut, reqKeyframe };
+module.exports = { start, stop, call, accept, reject, hangup, audioOut, setMuted, dtmf, transfer, hold, videoOut, reqKeyframe };

@@ -542,5 +542,8 @@ export function useSip() {
     heldInfo, switchLine, conf, conference,
     audioRef, remoteVideoRef, localVideoRef,
     getRemoteStream: () => remoteStreamRef.current, getLocalStream: () => localStreamRef.current,
+    /* Acá el audio y el video del otro lado viven en el mismo MediaStream; el modo nativo
+       los tiene separados, así que la pantalla de llamada pide este por su nombre. */
+    getRemoteAudioStream: () => remoteStreamRef.current,
   };
 }
