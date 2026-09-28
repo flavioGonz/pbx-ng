@@ -2,6 +2,36 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.26.0] - 2026-09-28
+### Added
+- **En una llamada, las cámaras del cliente se ven junto al video — y lo reemplazan cuando
+  no lo hay.** El caso real: llega (o se hace) una llamada a un portero. El portero es un
+  interno de **audio**, no manda imagen, y las cámaras del frente están cargadas en la ficha
+  del cliente, a dos pantallas de distancia: había que cortar, ir a *Intercom*, buscar el
+  cliente y abrir la cámara. Para cuando uno llegaba, la persona ya se había ido. Ahora la
+  central le dice al softphone qué canales tiene ese cliente y el softphone los muestra en
+  la misma pantalla de la llamada. (`softphone-app/src/MediosLlamada.jsx`, softphone 0.16.0)
+  - **Si el otro lado no manda video, la pantalla grande se la queda la primera cámara** en
+    vez de quedar en negro con un «esperando el video del otro lado» que nunca va a llegar.
+  - Las demás cámaras —y el video de la llamada, cuando existe— quedan de **miniatura**
+    debajo de la cámara propia. Un clic las pone en grande: es un cambio de lugar, no un
+    corte, así que el video **no se reconecta** (cada cámara es un WebSocket con go2rtc; si
+    se la cambiara de contenedor habría que esperar a que cargue de nuevo, justo cuando uno
+    la quiere mirar).
+  - Si el usuario elige una cámara a mano, su elección manda hasta que corte: no se la
+    cambia por debajo porque el otro lado encendió la cámara.
+
+### Fixed
+- **La ficha del cliente no aparecía cuando el otro lado era un interno.** El softphone
+  descartaba a propósito los números cortos «porque no matchean el CRM» — y justamente los
+  porteros están cargados como internos en la ficha del cliente, así que la ficha nunca
+  salía en el caso que más importa. Ahora se busca siempre: entrante o saliente, interno o
+  número largo.
+- **Las cámaras que devolvía `/api/clients/lookup` no se podían abrir.** Venían con la
+  `go2rtc_url` cruda del ajuste —vacía en el caso normal, porque el video sale por el proxy
+  de la propia central— así que el softphone mostraba «sin go2rtc_url · Sin señal». Ahora
+  usan la misma base efectiva que el resto del panel. (`control-plane/app.js`)
+
 ## [1.25.0] - 2026-09-28
 ### Changed
 - **La troncal deja de ser un asistente de 5 pasos y pasa a ser un cajón con solapas.**

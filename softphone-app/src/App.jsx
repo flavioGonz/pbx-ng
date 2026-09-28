@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import CallScreen, { colorAvatar } from './CallScreen';
+import EscenaMedios, { useVideoRemoto } from './MediosLlamada';
 import ShaderPuntos from './ShaderPuntos';
 import { flushSync } from 'react-dom';
 import { useSip, listDevices, getDevPrefs, setDevPref } from './useSip.js';
@@ -164,7 +165,7 @@ const fmtDate = (t) => {
 const fmtDur = (d) => d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : '—';
 
 // ---- Reproductor go2rtc por MSE (fMP4 sobre WebSocket, atraviesa el proxy sin UDP) ----
-function MseTile({ stream }) {
+function MseTile({ stream, fit = false }) {
   const videoRef = useRef(null);
   const [status, setStatus] = useState('connecting');
   const [muted, setMuted] = useState(true);
@@ -222,7 +223,9 @@ function MseTile({ stream }) {
   const Ic = stream && stream.type === 'intercom' ? IcBell : IcCam;
   function toggleMute() { const v = videoRef.current; if (v) { v.muted = !v.muted; setMuted(v.muted); if (!v.muted) v.play().catch(() => {}); } }
   return (
-    <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden', background: '#0b0f17' }}>
+    <div style={fit
+      ? { position: 'absolute', inset: 0, background: '#000', overflow: 'hidden' }
+      : { position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden', background: '#0b0f17' }}>
       <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', display: status === 'live' ? 'block' : 'none' }} />
       {status === 'connecting' && <div className="ic-skel" style={{ position: 'absolute', inset: 0 }} />}
       {status === 'error' && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#8b95a3' }}>{IcVideoOff({ c: '#8b95a3', s: 28 })}<span style={{ fontSize: 12 }}>Sin señal</span><span style={{ fontSize: 10, color: '#5a6a8f', maxWidth: 240, textAlign: 'center', wordBreak: 'break-all' }}>{(stream && stream.base) || 'sin go2rtc_url'} · {(stream && stream.src) || '?'}</span><button onClick={() => setGen(g => g + 1)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,.08)', color: '#cdd3db', border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>{IcReload({ c: '#cdd3db', s: 13 })} Reintentar</button></div>}
@@ -417,14 +420,39 @@ export default function App() {
     }
   }, [apiOn, tab, cfg.ext]); // eslint-disable-line
   useEffect(() => { if (!apiOn) return; let alive = true; const l = () => api.presence().then(d => alive && setPres(d || {})).catch(() => {}); l(); const iv = setInterval(l, 8000); return () => { alive = false; clearInterval(iv); }; }, [apiOn]);
+  /* ── La ficha del cliente durante la llamada ──────────────────────────────
+   * Se busca SIEMPRE que hay una llamada: entrante o saliente, y también cuando el número
+   * es un interno corto. Antes se buscaba sólo en las entrantes y se descartaban los
+   * internos «porque no matchean el CRM» — y justamente los porteros están cargados como
+   * internos en la ficha (`phones`), así que la ficha nunca aparecía en el caso que más
+   * importa: uno llama al portero y quiere ver la entrada. */
+  const numFicha = sp.incoming
+    ? ((sp.incoming.remoteIdentity && sp.incoming.remoteIdentity.uri && sp.incoming.remoteIdentity.uri.user) || '')
+    : ((sp.callInfo && sp.callInfo.number) || '');
   useEffect(() => {
-    if (!apiOn || !sp.incoming) return;
-    const from = (sp.incoming.remoteIdentity && sp.incoming.remoteIdentity.uri && sp.incoming.remoteIdentity.uri.user) || '';
-    if (!from || /^[0-9]{2,5}$/.test(from)) return; // internos cortos no matchean CRM
-    let alive = true; api.clientsLookup(from).then(c => { if (alive && c && c.id) setPopClient(c); }).catch(() => {});
+    if (!apiOn || !numFicha) return undefined;
+    let alive = true;
+    api.clientsLookup(numFicha).then(c => { if (alive && c && c.id) setPopClient(c); }).catch(() => {});
     return () => { alive = false; };
-  }, [sp.incoming, apiOn]);
+  }, [numFicha, apiOn]);
   useEffect(() => { if (!sp.incoming && !sp.inCall) setPopClient(null); }, [sp.incoming, sp.inCall]);
+
+  /* Las cámaras del cliente que está del otro lado de esta llamada. Son las mismas que se
+   * ven en Intercom: canales de go2rtc ya publicados, no URLs RTSP sueltas. */
+  const camaras = (popClient && Array.isArray(popClient.devices) ? popClient.devices : []).filter(d => d && d.src);
+  const [principal, setPrincipal] = useState('llamada');
+  const [principalManual, setPrincipalManual] = useState(false);
+  const remotoVivo = useVideoRemoto(!!sp.inCall, sp.getRemoteStream);
+  useEffect(() => { if (!sp.inCall && !sp.incoming) { setPrincipal('llamada'); setPrincipalManual(false); } }, [sp.inCall, sp.incoming]);
+  /* La regla: manda el video de la llamada mientras exista. Si el otro lado no manda imagen
+   * —un portero de audio, o el interno con la cámara apagada— la pantalla grande se la
+   * queda la primera cámara del cliente en vez de quedar en negro. Si el usuario eligió
+   * una a mano, no se le cambia por debajo: su elección gana hasta que corte. */
+  useEffect(() => {
+    if (principalManual) return;
+    if (remotoVivo) { setPrincipal('llamada'); return; }
+    if (camaras.length) setPrincipal('cam:' + camaras[0].id);
+  }, [principalManual, remotoVivo, camaras.length]); // eslint-disable-line
   useEffect(() => {
     if (!(window.sphone && window.sphone.miniState)) return;
     const ci = sp.callInfo || {};
@@ -1316,15 +1344,29 @@ export default function App() {
               : entrante ? 'entrante'
                 : sp.held ? 'espera'
                   : ci.since ? 'hablando' : 'marcando';
-            const videoVivo = !!sp.videoOn && !entrante;
+            /* Hay escena de video si la llamada trae imagen O si el cliente del otro lado
+               tiene cámaras: el portero sin video se suplanta con la cámara de la entrada,
+               que es lo que uno quería mirar desde el principio. */
+            const videoLlamada = !!sp.videoOn && !entrante;
+            const camsEnLlamada = (!entrante && !finCall) ? camaras : [];
+            const videoVivo = videoLlamada || camsEnLlamada.length > 0;
 
             /* Los dos videos se entregan SUELTOS (no una escena ya armada): la pantalla de
                llamada decide dónde va cada uno, porque es la que sabe si los controles están
                a la vista, si la cámara propia está encendida y si el otro lado ya mandó
                imagen. Antes venían con la posición escrita acá y la miniatura terminaba
                debajo de la barra en una ventana angosta. */
+            const nodoRemoto = videoLlamada
+              ? <video autoPlay playsInline muted className="cs-video-remoto" ref={el => { if (sp.remoteVideoRef) sp.remoteVideoRef.current = el; if (el) { const st = sp.getRemoteStream && sp.getRemoteStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} />
+              : null;
+            const fuentes = [];
+            if (nodoRemoto) fuentes.push({ id: 'llamada', label: nombre || numero, nodo: nodoRemoto });
+            camsEnLlamada.forEach(c => fuentes.push({ id: 'cam:' + c.id, label: c.label || 'Cámara', nodo: <MseTile fit stream={c} /> }));
+            const principalReal = fuentes.some(f => f.id === principal) ? principal : ((fuentes[0] && fuentes[0].id) || 'llamada');
             const nodosVideo = videoVivo ? {
-              remoto: <video autoPlay playsInline muted className="cs-video-remoto" ref={el => { if (sp.remoteVideoRef) sp.remoteVideoRef.current = el; if (el) { const st = sp.getRemoteStream && sp.getRemoteStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} />,
+              remoto: nodoRemoto,
+              medios: <EscenaMedios fuentes={fuentes} principal={principalReal}
+                onPrincipal={(id) => { setPrincipal(id); setPrincipalManual(true); }} />,
               yo: <video autoPlay playsInline muted className="cs-video-yo" ref={el => { if (sp.localVideoRef) sp.localVideoRef.current = el; if (el) { const st = sp.getLocalStream && sp.getLocalStream(); if (st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } } }} />,
             } : null;
 
@@ -1389,6 +1431,7 @@ export default function App() {
                 viaTurn={sp.usingRelay}
                 video={videoVivo}
                 videoNodes={nodosVideo}
+                principalEsCamara={String(principalReal || '').startsWith('cam:')}
                 getRemoteStream={sp.getRemoteStream}
                 getAudioStream={sp.getRemoteAudioStream || sp.getRemoteStream}
                 ventana={<WinCtl dark />}

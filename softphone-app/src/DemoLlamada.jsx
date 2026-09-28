@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import CallScreen from './CallScreen';
+import EscenaMedios from './MediosLlamada';
 
 /* Un video de mentira para poder mirar la videollamada sin levantar una: un lienzo que se
  * mueve, convertido en pista de video. Es lo único honesto que se puede hacer sin cámara y
@@ -59,6 +60,7 @@ const PASOS = [
   { estado: 'espera', corto: 'Espera', desc: 'En espera' },
   { estado: 'terminada', corto: 'Fin', desc: 'Terminó' },
   { estado: 'hablando', corto: 'Video', desc: 'Videollamada', video: true },
+  { estado: 'hablando', corto: 'Cámaras', desc: 'Portero sin video: manda la cámara del cliente', video: true, cams: true },
 ];
 
 export default function DemoLlamada() {
@@ -76,11 +78,26 @@ export default function DemoLlamada() {
    * parpadearía y no se podría juzgar nada. */
   const falsos = useRef(null);
   if (!falsos.current && typeof document !== 'undefined') {
-    falsos.current = { remoto: streamFalso('EL OTRO LADO', 210), yo: streamFalso('VOS', 140), voz: vozFalsa() };
+    falsos.current = { remoto: streamFalso('EL OTRO LADO', 210), yo: streamFalso('VOS', 140), voz: vozFalsa(),
+      cam1: streamFalso('FRENTE', 20), cam2: streamFalso('GARAJE', 100), cam3: streamFalso('PATIO', 300) };
   }
+  const vid = (st, cls) => <video autoPlay playsInline muted className={cls} ref={el => { if (el && st && el.srcObject !== st) { el.srcObject = st; el.play().catch(() => {}); } }} />;
+  const [princ, setPrinc] = useState('llamada');
+  useEffect(() => { setPrinc(paso.cams ? 'cam:1' : 'llamada'); }, [paso.cams]);
+  const f = falsos.current || {};
+  /* El paso «Cámaras» es el caso que motivó todo esto: el portero es un interno de audio,
+   * no manda imagen, y lo que uno quiere mirar son las cámaras de la entrada que ya están
+   * cargadas en la ficha del cliente. */
+  const fuentes = paso.cams
+    ? [{ id: 'cam:1', label: 'Frente', nodo: vid(f.cam1, 'cs-video-remoto') },
+       { id: 'cam:2', label: 'Garaje', nodo: vid(f.cam2, 'cs-video-remoto') },
+       { id: 'cam:3', label: 'Patio', nodo: vid(f.cam3, 'cs-video-remoto') }]
+    : [{ id: 'llamada', label: 'Carlos', nodo: vid(f.remoto, 'cs-video-remoto') },
+       { id: 'cam:1', label: 'Frente', nodo: vid(f.cam1, 'cs-video-remoto') },
+       { id: 'cam:2', label: 'Garaje', nodo: vid(f.cam2, 'cs-video-remoto') }];
   const nodos = paso.video ? {
-    remoto: <video autoPlay playsInline muted className="cs-video-remoto" ref={el => { if (el && falsos.current && el.srcObject !== falsos.current.remoto) { el.srcObject = falsos.current.remoto; el.play().catch(() => {}); } }} />,
-    yo: <video autoPlay playsInline muted className="cs-video-yo" ref={el => { if (el && falsos.current && el.srcObject !== falsos.current.yo) { el.srcObject = falsos.current.yo; el.play().catch(() => {}); } }} />,
+    medios: <EscenaMedios fuentes={fuentes} principal={princ} onPrincipal={setPrinc} />,
+    yo: vid(f.yo, 'cs-video-yo'),
   } : null;
   const desde = paso.estado === 'hablando' || paso.estado === 'espera' ? Date.now() - 134000 : 0;
 
@@ -95,6 +112,7 @@ export default function DemoLlamada() {
         calidad={3}
         video={!!paso.video}
         videoNodes={nodos}
+        principalEsCamara={princ.startsWith('cam:')}
         getRemoteStream={paso.video ? (() => falsos.current && falsos.current.remoto) : null}
         getAudioStream={() => (falsos.current && falsos.current.voz) || null}
         menuMas={<>

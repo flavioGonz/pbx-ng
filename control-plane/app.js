@@ -2665,7 +2665,7 @@ app.get('/api/clients/lookup', async (req,res)=>{ try{
   // ocho recuadros que nunca van a cargar. La ficha, en cambio, viaja igual.
   c.devices = (await moduleEnabled('intercom'))
     ? (await pool.query('SELECT id,label,type,go2rtc_src FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[c.id])).rows
-        .map(d=>({ id:d.id, label:d.label, type:d.type, base:CRMGO2RTC, src:d.go2rtc_src }))
+        .map(d=>({ id:d.id, label:d.label, type:d.type, base:baseVideo(req), src:d.go2rtc_src }))
     : [];
   res.json(c);
 }catch(e){errorHttp(res, e);} });

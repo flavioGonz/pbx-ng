@@ -346,3 +346,22 @@ button:disabled { cursor: default !important; }
 .dm-on:hover{background:#3b82f6;color:#fff}
 .dm-mando::-webkit-scrollbar{display:none}
 @media (max-width:560px){ .dm-tag{display:none} .dm-chip{padding:5px 6px;font-size:10px} }
+
+/* ── Los medios de la llamada: el otro lado y las cámaras del cliente ────────
+ * Todas las fuentes viven en el MISMO contenedor y sólo cambian de clase al intercambiarse:
+ * si cambiaran de padre, el video se cortaría y habría que esperar a que cargue de nuevo. */
+.cs-medios{position:absolute;inset:0}
+.cs-fuente-main{position:absolute;inset:0;background:#000}
+.cs-fuente-mini{position:absolute;right:16px;width:172px;height:98px;border-radius:12px;overflow:hidden;
+  z-index:6;cursor:pointer;background:#0b0f17;border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+  transition:transform .16s ease, box-shadow .16s ease, top .22s ease, border-color .16s ease}
+.cs-fuente-mini:hover{transform:translateY(-2px) scale(1.035);border-color:rgba(255,255,255,.4);
+  box-shadow:0 14px 32px rgba(0,0,0,.55)}
+.cs-fuente-mini video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cs-fuente-lab{position:absolute;left:0;right:0;bottom:0;padding:16px 8px 5px;pointer-events:none;
+  font-size:11px;font-weight:600;color:#fff;letter-spacing:.1px;
+  background:linear-gradient(0deg,rgba(0,0,0,.74),transparent);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:720px){ .cs-fuente-mini{width:124px;height:72px} }
+@media (prefers-reduced-motion: reduce){ .cs-fuente-mini{transition:none} .cs-fuente-mini:hover{transform:none} }

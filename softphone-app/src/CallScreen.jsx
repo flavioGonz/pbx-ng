@@ -420,15 +420,16 @@ export default function CallScreen(p) {
       {ventana ? <div style={{ position: 'absolute', top: 6, right: 8, zIndex: 8 }}>{ventana}</div> : null}
 
       {/* ── La escena de video ──────────────────────────────────────────────
-          El otro ocupa toda la ventana; encima, y sólo mientras los controles están a la
+          Lo que ocupa la ventana es la fuente elegida -el otro lado, o una cámara del
+          cliente si el otro no manda imagen-; encima, y sólo mientras los controles están a la
           vista, una franja arriba con el nombre y el reloj —porque en video el nombre no
           puede estar en el medio, ahí está la cara— y la barra de siempre abajo. */}
       {video && p.videoNodes ? (
         <div className="cs-video">
-          {p.videoNodes.remoto}
+          {p.videoNodes.medios || p.videoNodes.remoto}
           <div className="cs-video-velo" />
 
-          {!hayVideoRemoto && (
+          {!hayVideoRemoto && !p.principalEsCamara && (
             <div className="cs-video-espera">
               <Orbe size={116} color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando}
                 getStream={hablando ? (getAudioStream || getRemoteStream) : null} />
