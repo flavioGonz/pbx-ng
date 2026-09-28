@@ -167,7 +167,7 @@ function createMini() {
   let x, y;
   try { const { screen } = require('electron'); const wa = screen.getPrimaryDisplay().workAreaSize; x = wa.width - 320; y = wa.height - 168; } catch (_) {}
   mini = new BrowserWindow({
-    width: 300, height: 142, x, y, frame: false, transparent: true, resizable: false, alwaysOnTop: true,
+    width: 300, height: 128, x, y, frame: false, transparent: true, resizable: false, alwaysOnTop: true,
     skipTaskbar: true, show: false, backgroundColor: '#00000000', maximizable: false, minimizable: false, fullscreenable: false,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false },
   });
@@ -226,7 +226,7 @@ ipcMain.on('mini-data', (_e, d) => { try { mini && !mini.isDestroyed() && mini.w
 ipcMain.on('mini-size', (_e, alto) => {
   try {
     if (!mini || mini.isDestroyed()) return;
-    const h = Math.max(120, Math.min(560, Math.round(alto || 0)));
+    const h = Math.max(88, Math.min(560, Math.round(alto || 0)));
     const b = mini.getBounds();
     mini.setBounds({ x: b.x, y: b.y + (b.height - h), width: b.width, height: h });
   } catch (_) {}

@@ -335,6 +335,7 @@ export default function CallScreen(p) {
     acciones = {},       // { colgar, atender, atenderVideo, rechazar, mute, hold, video, teclado, transferir, grabar, altavoz, invitar, elegirMic, elegirCam }
     flags = {},          // { muted, held, videoOn, grabando, altavoz, pad, transfiriendo, masAbierto }
     extra = null,        // barras de estado (consulta en curso, conferencia, CRM…)
+    menuMas = null,      // lo que va adentro de «Más», anclado al propio botón
     ventana = null,      // controles de ventana del sistema
     saliendo = false,    // la pantalla se esta yendo: se anima la salida antes de desmontar
   } = p;
@@ -539,7 +540,21 @@ export default function CallScreen(p) {
               <Ctl icon={<IcSwap s={22} />} label="Transferir" on={flags.transfiriendo} onClick={acciones.transferir} />
             ) : null}
             <Ctl icon={<IcTeclado s={22} />} label="Teclado" on={flags.pad} onClick={acciones.teclado} />
-            <Ctl icon={<IcMas s={22} />} label="Más" on={flags.masAbierto} onClick={acciones.mas} />
+            {/* «Más» y su menú van JUNTOS: el menú cuelga del botón, hacia arriba, como
+                cualquier menú contextual. Antes flotaba centrado en el medio de la pantalla
+                —a media altura, sin relación visual con el botón que lo había abierto— y
+                con una sola opción adentro parecía una tarjeta suelta. */}
+            <div className="cs-mas-ancla">
+              <Ctl icon={<IcMas s={22} />} label="Más" on={flags.masAbierto} onClick={acciones.mas} />
+              {flags.masAbierto && menuMas ? (
+                <>
+                  {/* Atrapa el clic de afuera: un menú que sólo se cierra con el mismo
+                      botón que lo abrió se siente trabado. */}
+                  <div className="cs-mas-fuera" onClick={acciones.mas} />
+                  <div className="cs-mas-menu">{menuMas}</div>
+                </>
+              ) : null}
+            </div>
           </div>
 
           <div className="cs-barra-der">

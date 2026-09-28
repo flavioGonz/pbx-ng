@@ -65,6 +65,7 @@ export default function DemoLlamada() {
   const [i, setI] = useState(0);
   const [auto, setAuto] = useState(true);
   const [pad, setPad] = useState(false);
+  const [mas, setMas] = useState(false);
   useEffect(() => {
     if (!auto) return undefined;
     const t = setInterval(() => setI(x => (x + 1) % PASOS.length), 2600);
@@ -96,13 +97,18 @@ export default function DemoLlamada() {
         videoNodes={nodos}
         getRemoteStream={paso.video ? (() => falsos.current && falsos.current.remoto) : null}
         getAudioStream={() => (falsos.current && falsos.current.voz) || null}
+        menuMas={<>
+          {['Grabar la llamada', 'Invitar a la llamada'].map((l) => (
+            <button key={l} onClick={() => setMas(false)} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 10, background: 'none', border: 'none', color: '#e8ebf0', padding: '9px 10px', borderRadius: 10, cursor: 'pointer', font: '500 13.5px system-ui', textAlign: 'left' }}>{l}</button>
+          ))}
+        </>}
         viaTurn={false}
-        flags={{ muted: false, held: paso.estado === 'espera', videoOn: !!paso.video, pad }}
+        flags={{ muted: false, held: paso.estado === 'espera', videoOn: !!paso.video, pad, masAbierto: mas }}
         acciones={{
           colgar: () => {}, rechazar: () => {}, atender: () => {}, atenderVideo: () => {},
           mute: () => {}, hold: () => {}, video: () => {}, elegirMic: () => {}, elegirCam: () => {},
           altavoz: () => {}, transferir: () => {},
-          teclado: () => setPad(v => !v), mas: () => {}, tecla: () => {},
+          teclado: () => setPad(v => !v), mas: () => setMas(v => !v), tecla: () => {},
         }}
       />
       {/* Mando de la vista de prueba. Queda ESCONDIDO: se muestra al acercar el mouse al

@@ -119,18 +119,32 @@ function Timer({ since }) {
   if (!since) return <span>conectando…</span>;
   return <span>{Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}</span>;
 }
+/* El estado del TURN, en la barra de título.
+ *
+ * Era una pastilla de color con fondo, borde de 20 px y texto en negrita: al lado del
+ * nombre del interno y de los botones de ventana parecía una etiqueta pegada de otra
+ * aplicación —es información de fondo, no una alerta—. Ahora es lo que es: un punto del
+ * color del estado y una palabra en el gris del resto de la barra. Cuando el TURN está
+ * EN USO durante una llamada el punto late; eso sí merece que el ojo vaya.
+ */
 function TurnChip({ cfg, sp, t }) {
   const configured = !!(cfg.turn && cfg.turnUser && cfg.turnPass);
   const st = (t && t.state) || 'idle';
-  let bg = C.soft, fg = C.sub, label = 'Sin TURN', live = false;
-  if (sp.inCall && sp.usingRelay === true) { bg = 'rgba(43,217,90,.14)'; fg = '#4ade80'; label = 'TURN en uso'; live = true; }
-  else if (sp.inCall && sp.usingRelay === false) { bg = 'rgba(26,115,242,.12)'; fg = '#7cb0ff'; label = 'Medios directos'; }
-  else if (st === 'testing') { bg = C.soft; fg = C.sub; label = 'Probando TURN…'; }
-  else if (st === 'ok') { bg = 'rgba(43,217,90,.12)'; fg = '#4ade80'; label = 'TURN listo'; }
-  else if (st === 'turn-auth') { bg = 'rgba(239,68,68,.1)'; fg = '#b91c1c'; label = 'TURN: auth falló'; }
-  else if (st === 'turn-unreachable' || st === 'error') { bg = 'rgba(239,68,68,.1)'; fg = '#b91c1c'; label = 'TURN no responde'; }
-  else if (configured) { bg = 'rgba(26,115,242,.12)'; fg = '#7cb0ff'; label = 'TURN sin probar'; }
-  return <span className={live ? 'turn-live' : ''} style={S.chip(bg, fg)}>{IcShield({ c: fg, s: 14 })}{label}</span>;
+  let col = C.sub, label = 'Sin TURN', live = false;
+  if (sp.inCall && sp.usingRelay === true) { col = '#4ade80'; label = 'TURN en uso'; live = true; }
+  else if (sp.inCall && sp.usingRelay === false) { col = '#7cb0ff'; label = 'Medios directos'; }
+  else if (st === 'testing') { col = C.sub; label = 'Probando TURN…'; }
+  else if (st === 'ok') { col = '#4ade80'; label = 'TURN listo'; }
+  else if (st === 'turn-auth') { col = '#f87171'; label = 'TURN: auth falló'; }
+  else if (st === 'turn-unreachable' || st === 'error') { col = '#f87171'; label = 'TURN no responde'; }
+  else if (configured) { col = '#7cb0ff'; label = 'TURN sin probar'; }
+  return (
+    <span title={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5,
+      color: C.sub, letterSpacing: .1, whiteSpace: 'nowrap', paddingRight: 2 }}>
+      <i className={live ? 'turn-live' : ''} style={{ width: 7, height: 7, borderRadius: '50%', background: col, flex: 'none' }} />
+      {label}
+    </span>
+  );
 }
 function CtlBtn({ on, onClick, icon, iconOff, label }) {
   return <button className="ph-key" style={S.ctl(on)} onClick={onClick}>{(on && iconOff ? iconOff : icon)({ c: on ? '#000' : '#fff', s: 22 })}<span>{label}</span></button>;
@@ -1298,8 +1312,10 @@ export default function App() {
             /* Lo que no entra en la fila de botones: se agrupa en «Más», como en un
                teléfono de escritorio. Meterlo todo abajo convierte la barra en una
                botonera y se pierde lo importante. */
+            /* Sólo el CONTENIDO del menú: dónde se dibuja y con qué caja lo decide la
+               pantalla de llamada, que es la que sabe dónde está el botón «Más». */
             const masMenu = mas && !entrante ? (
-              <div className="menu-pop" style={{ position: 'absolute', bottom: 92, left: '50%', transform: 'translateX(-50%)', zIndex: 6, background: 'rgba(32,36,44,.96)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 14, padding: 8, minWidth: 210, boxShadow: '0 20px 44px rgba(0,0,0,.5)' }}>
+              <>
                 {[
                   { ok: apiOn, lbl: recording ? 'Grabando…' : 'Grabar la llamada', ic: IcRec, on: recording, fn: () => { setMas(false); toggleRecord(); } },
                   { ok: !sipMode, lbl: 'Invitar a la llamada', ic: IcUsers, on: !!sp.attended, fn: () => { setMas(false); if (sp.attended) return; const t = prompt('Invitar interno a la conferencia:'); if (t && t.trim()) sp.attendedCall(t.trim()); } },
@@ -1308,7 +1324,7 @@ export default function App() {
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.08)'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}>{x.ic ? x.ic({ s: 17, c: x.on ? '#3b82f6' : '#9fb0cc' }) : null}{x.lbl}</button>
                 ))}
-              </div>
+              </>
             ) : null;
 
             /* Las barras de contexto: la ficha del CRM cuando entra una llamada conocida,
@@ -1316,7 +1332,6 @@ export default function App() {
                y la conferencia. Van juntas bajo el nombre. */
             const contexto = (
               <>
-                {masMenu}
                 {entrante && popClient && (
                   <div className="menu-pop" style={{ marginTop: 18, background: 'rgba(255,255,255,.07)', border: '1px solid rgba(255,255,255,.14)', borderRadius: 14, padding: '12px 16px', maxWidth: 420, textAlign: 'left' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontWeight: 700, fontSize: 15 }}>{popClient.name}</span><span style={{ marginLeft: 'auto', fontSize: 10, background: 'rgba(159,208,255,.18)', color: '#cfe6ff', borderRadius: 8, padding: '2px 8px' }}>CRM</span></div>
@@ -1361,6 +1376,7 @@ export default function App() {
                 ventana={<WinCtl dark />}
                 flags={{ muted: sp.muted, held: sp.held, videoOn: sp.videoOn, pad, masAbierto: mas, altavoz: !!sp.speaker, transfiriendo: !!sp.attended || xfer, grabando: recording }}
                 extra={contexto}
+                menuMas={masMenu}
                 acciones={{
                   colgar: () => { sounds.uiClick(); sp.hangup(); },
                   rechazar: () => { sounds.uiClick(); sp.reject(); },

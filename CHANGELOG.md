@@ -2,6 +2,25 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.21.5] - 2026-09-28
+### Softphone 0.13.0
+- **«Más» es un menú de verdad, colgado de su botón.** Flotaba centrado a media altura de
+  la pantalla, sin ninguna relación visual con el botón que lo había abierto; con una sola
+  opción adentro parecía una tarjeta suelta en el medio de la llamada. Ahora sale hacia
+  arriba desde el propio botón, con la flechita que los une, y se cierra al hacer clic
+  afuera.
+- **El estado del TURN dejó de ser una pastilla de color.** En una barra de título de 40 px,
+  al lado del nombre del interno y de los botones de ventana, una etiqueta con fondo y
+  negrita se leía como una alerta de otra aplicación. Es información de fondo: ahora es un
+  punto del color del estado y una palabra en el gris del resto de la barra. El punto sólo
+  late cuando el TURN está **en uso** durante una llamada, que es lo único que merece que
+  el ojo vaya para allá.
+- **El widget flotante se mide solo.** El alto salía de una tabla de números fijos que se
+  desactualizaba cada vez que algo adentro cambiaba de tamaño, y quedaba una franja vacía
+  debajo de los botones. Ahora se mide la tarjeta después de dibujarla y la ventana se
+  ajusta: **98 px** en reposo (eran 142), **293** con el teclado abierto (eran 368) y
+  **226** eligiendo micrófono y altavoz (eran 296).
+
 ## [1.21.4] - 2026-09-28
 ### Fixed
 - **Las llamadas al agente de IA no se cortaban.** Encontrado en vivo en pbx01: un canal

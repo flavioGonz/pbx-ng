@@ -21,7 +21,10 @@
   }
   html,body{margin:0;height:100%;overflow:hidden;background:transparent;
     font-family:'Segoe UI',system-ui,-apple-system,sans-serif;-webkit-user-select:none;cursor:default}
-  .w{height:100vh;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;
+  /* `height:auto` y no `100vh`: el alto lo manda EL CONTENIDO, y la ventana se ajusta a
+     lo que mide (ver pedirAlto). Con 100vh, si la ventana era mas alta que lo que habia
+     adentro quedaba una franja vacia debajo de los botones. */
+  .w{height:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;
      padding:9px 11px 11px;background:var(--fondo);color:var(--texto);
      border:1px solid rgba(255,255,255,.10);border-radius:14px;box-shadow:0 14px 34px rgba(0,0,0,.55);
      position:relative;overflow:hidden}
@@ -119,9 +122,19 @@
   /* La vista actual del widget: la tira de siempre, el teclado, o los dispositivos.
      Cada una pide su alto a la ventana, que crece hacia arriba. */
   let vista = 'normal', sug = [], medios = null, escrito = '';
-  const ALTO = { normal: 142, teclado: 368, medios: 296 };
-  const pedirAlto = () => { try { window.sphone.miniSize(ALTO[vista] || 142); } catch (_) {} };
-  const irA = (v) => { vista = (vista === v ? 'normal' : v); if (vista === 'normal') { sug = []; escrito = ''; } pedirAlto(); render(); };
+  /* El alto ya no sale de una tabla de numeros fijos —que se desactualizaba cada vez que
+     algo adentro cambiaba de tamano— sino de MEDIR la tarjeta despues de dibujarla. */
+  let altoPedido = 0;
+  const pedirAlto = () => {
+    requestAnimationFrame(() => {
+      const w = $('w'); if (!w) return;
+      const h = Math.ceil(w.getBoundingClientRect().height);
+      if (!h || Math.abs(h - altoPedido) < 2) return;
+      altoPedido = h;
+      try { window.sphone.miniSize(h); } catch (_) {}
+    });
+  };
+  const irA = (v) => { vista = (vista === v ? 'normal' : v); if (vista === 'normal') { sug = []; escrito = ''; } renderYMedir(); };
   const fmt = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   const P = {
     mic: '<path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/>',
@@ -193,7 +206,7 @@
     pintarSug();
   }
   const pedir = (q) => { try { window.sphone.miniAction('buscar', q); } catch (_) {} };
-  const marcar = (n) => { const t = String(n || '').trim(); if (!t) return; try { window.sphone.miniAction('marcar', t); } catch (_) {} escrito = ''; sug = []; vista = 'normal'; pedirAlto(); render(); };
+  const marcar = (n) => { const t = String(n || '').trim(); if (!t) return; try { window.sphone.miniAction('marcar', t); } catch (_) {} escrito = ''; sug = []; vista = 'normal'; render(); pedirAlto(); };
   const iniciales = (t) => String(t || '?').replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
   function pintarSug() {
     const l = $('sug'); if (!l) return;
@@ -298,23 +311,26 @@
     row.appendChild(btn('rojo', 'phone', 'Terminar la llamada', 'hangup', true));
     row.appendChild(volCtl());
   }
+  /* Cada vez que cambia lo que se ve, se vuelve a medir: timbrado, teclado, medios,
+     llamada en curso. Sin esto la ventana se quedaba con el alto del estado anterior. */
+  const renderYMedir = () => { render(); pedirAlto(); };
   try {
     window.sphone.onMiniState((s) => {
       /* Si entra una llamada con el teclado o los dispositivos abiertos, el widget vuelve
          a ser una tira: lo urgente es atender, no lo que se estaba haciendo. */
       const entra = !!(s && s.active && s.incoming);
-      if (entra && vista !== 'normal') { vista = 'normal'; sug = []; escrito = ''; pedirAlto(); }
-      st = s; render();
+      if (entra && vista !== 'normal') { vista = 'normal'; sug = []; escrito = ''; }
+      st = s; renderYMedir();
       if (iv) { clearInterval(iv); iv = null; }
       if (st && st.since && !st.incoming) { tick(); iv = setInterval(tick, 500); }
     });
     window.sphone.onMiniData((d) => {
       if (!d) return;
-      if (d.tipo === 'sug') { sug = d.items || []; pintarSug(); }
-      if (d.tipo === 'medios') { medios = d; if (vista === 'medios') panelMedios(); }
+      if (d.tipo === 'sug') { sug = d.items || []; pintarSug(); pedirAlto(); }
+      if (d.tipo === 'medios') { medios = d; if (vista === 'medios') { panelMedios(); pedirAlto(); } }
     });
     window.sphone.miniReady();
   } catch (_) {}
-  render();
+  renderYMedir();
 </script>
 </body></html>
