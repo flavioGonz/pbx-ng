@@ -2,6 +2,34 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.33.0] - 2026-09-29
+### Security
+- **Un invitado web podía entrar donde no lo invitaron, y hasta como moderador.** Todas las
+  sesiones descartables —las del click-to-call y las de las salas— vivían en el **mismo
+  contexto** `c2c`, y ahí adentro convivían los números efímeros de **todas** las sesiones
+  vivas. El contexto es lo único que limita a dónde puede llamar un endpoint: cualquiera con
+  un enlace válido podía marcar el número de otra sesión —incluido el de una entrada de
+  **moderador**, que dura cuatro horas— y entrar como ese. Ahora **cada sesión tiene su
+  propio contexto** (`c2c_<sesión>`), con una sola extensión adentro: la suya. El janitor
+  borra el contexto entero al vencer. (`control-plane/app.js`, `control-plane/salas.js`)
+- **El SOC ahora ve los enlaces públicos.** El guardia miraba sólo los eventos de seguridad
+  SIP de Asterisk: quien probaba tokens de sala o de click-to-call contra la API era
+  invisible —no contaba, no aparecía en *Seguridad* y no se baneaba—. Se agregó la clase
+  `WebTokenInvalid`, que entra por el mismo contador, la misma lista blanca, el mismo
+  geo-bloqueo y el mismo baneo por nftables que un escáner SIP. (`control-plane/guard.js`)
+  - **Con tolerancia, y no al primer intento.** Un enlace vencido, un correo reenviado con
+    el token cortado o un copiar-pegar a medias son errores de gente invitada. Con
+    geo-bloqueo encendido, **una** señal desde un país vetado es ban permanente del
+    firewall: el invitado que se equivocó pierde la central entera, panel incluido. Recién
+    al **quinto** fallo en dos minutos desde la misma IP se le avisa al guardia.
+- **El freno del enlace de sala contaba por la IP equivocada.** Usaba la que sale del
+  X-Forwarded-For completo en vez de la que agrega nuestro proxy —la misma trampa que ya se
+  había arreglado en el click-to-call—: con un header distinto por pedido, el cupo por IP no
+  frenaba nada. Ahora usa `clientIp()`.
+- **Tope de invitados web vivos por sala** (40, `SALA_TOPE_INVITADOS`). Cada sesión es un
+  interno descartable de verdad —endpoint, AOR y dialplan—: sin tope, un enlace filtrado es
+  una fábrica de internos.
+
 ## [1.32.0] - 2026-09-29
 ### Added
 - **Historial de reuniones: qué pasó en cada sala, quién participó y cuánto estuvo.** La sala

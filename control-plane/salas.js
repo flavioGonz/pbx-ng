@@ -79,7 +79,7 @@ const emails = require('./emails');
  * poder forzarlo).
  */
 module.exports = function init(deps) {
-  const { app, pool, ami, amiAction, amiList, setDialplan, smtpHint, errorHttp, broadcastSoon, logger, createWebrtcEndpoint, rateLimit } = deps;
+  const { app, pool, ami, amiAction, amiList, setDialplan, smtpHint, errorHttp, broadcastSoon, logger, createWebrtcEndpoint, rateLimit, reportarWeb, clientIp } = deps;
   const log = logger ? logger('salas') : { info() {}, warn() {}, error() {} };
 
   const err = (status, msg) => Object.assign(new Error(msg), { status });
@@ -703,13 +703,48 @@ module.exports = function init(deps) {
    *  moderador. El PIN de moderador sigue siendo la única forma de abrir, silenciar y
    *  expulsar, y ese no viaja nunca en un enlace.
    * ══════════════════════════════════════════════════════════════════════════ */
+  /* El freno va por la IP que puso NUESTRO proxy (`clientIp`), no por el primer elemento de
+   * X-Forwarded-For, que lo escribe el cliente: con un header distinto por pedido, un cupo
+   * por IP no frena nada. Mismo criterio que el del click-to-call. */
   const enlaceLimite = rateLimit
     ? rateLimit({
       windowMs: 5 * 60 * 1000, limit: 10,
       standardHeaders: 'draft-7', legacyHeaders: false,
+      keyGenerator: (req) => String((clientIp && clientIp(req)) || req.ip || ''),
       handler: (req, res) => res.status(429).json({ error: 'Demasiados intentos, probá en unos minutos.' }),
     })
     : (req, res, next) => next();
+  /* ── Cuándo se le avisa al guardia ────────────────────────────────────────
+   * NO al primer intento fallido, a propósito. Un enlace vencido, un correo reenviado con
+   * el token cortado o un copiar-pegar a medias son errores honestos de gente invitada, y
+   * el guardia no distingue: con geo-bloqueo encendido, UNA señal desde un país vetado es
+   * ban permanente del firewall — o sea, el invitado que se equivocó pierde la central
+   * entera, panel incluido. (Lo descubrí probando: cuatro pedidos con tokens inventados
+   * desde afuera del país se llevaron tres baneos permanentes y cuatro correos de alerta.)
+   *
+   * Cinco fallos en dos minutos desde la misma IP ya no es un error: es alguien probando.
+   * Ahí sí entra al contador del guardia, que hace lo suyo. */
+  const TOLERANCIA = 5, VENTANA_TOL = 2 * 60 * 1000;
+  const fallosWeb = new Map();
+  const avisarGuardia = (req, cuenta) => {
+    try {
+      const ip = String((clientIp ? clientIp(req) : req.ip) || '');
+      if (!ip) return;
+      const t = Date.now();
+      const prev = (fallosWeb.get(ip) || []).filter((x) => t - x < VENTANA_TOL);
+      prev.push(t);
+      fallosWeb.set(ip, prev);
+      /* Poda: sin esto el Map crece con cada IP que pasa alguna vez. */
+      if (fallosWeb.size > 5000) for (const [k, v] of fallosWeb) if (!v.length || t - v[v.length - 1] > VENTANA_TOL) fallosWeb.delete(k);
+      if (prev.length < TOLERANCIA) return;
+      fallosWeb.delete(ip);
+      reportarWeb && reportarWeb(ip, cuenta);
+    } catch (_) {}
+  };
+  /* Tope de invitados web VIVOS por sala. Cada sesión es un interno descartable de verdad
+   * (endpoint + AOR + dialplan): sin tope, un enlace filtrado es una fábrica de internos.
+   * 40 es más gente de la que entra en una reunión y menos de lo que duele. */
+  const TOPE_INVITADOS = Number(process.env.SALA_TOPE_INVITADOS || 40);
 
   const urlSala = (token, dom) => (dom ? 'https://' + dom : '') + '/sala/' + token;
 
@@ -739,7 +774,9 @@ module.exports = function init(deps) {
     try {
       const { rows } = await pool.query('SELECT name,label,video,agenda_inicio,agenda_min FROM pbxng_conferences WHERE web_token=$1', [req.params.token]);
       const s = rows[0];
-      if (!s) return res.status(404).json({ error: 'enlace no disponible' });
+      /* Token que no existe: para el guardia es lo mismo que probar cuentas SIP a ver cuál
+       * pega, y se cuenta igual (tres en la ventana ya son un escáner). */
+      if (!s) { avisarGuardia(req, 'sala:' + String(req.params.token).slice(0, 24)); return res.status(404).json({ error: 'enlace no disponible' }); }
       res.json({ sala: s.label || s.name, video: !!s.video, abierta: ventanaAbierta(s), agenda_inicio: s.agenda_inicio, agenda_min: s.agenda_min });
     } catch (e) { errorHttp(res, e); }
   });
@@ -750,7 +787,9 @@ module.exports = function init(deps) {
     try {
       const { rows } = await c.query('SELECT ' + CAMPOS + ' FROM pbxng_conferences WHERE web_token=$1', [req.params.token]);
       const sala = rows[0];
-      if (!sala) { c.release(); return res.status(404).json({ error: 'enlace no disponible' }); }
+      if (!sala) { c.release(); avisarGuardia(req, 'sala:' + String(req.params.token).slice(0, 24)); return res.status(404).json({ error: 'enlace no disponible' }); }
+      const { rows: vivos } = await c.query("SELECT count(*)::int AS n FROM pbxng_c2c_sessions WHERE expires_at > now() AND meta LIKE '%\"sala\":\"' || $1 || '\"%'", [sala.name]);
+      if (vivos[0] && vivos[0].n >= TOPE_INVITADOS) { c.release(); return res.status(429).json({ error: 'La sala llegó al tope de invitados por enlace. Probá en unos minutos.' }); }
       /* La agenda vale también para el que entra por la web: si la sala está cerrada, se
        * lo dice acá y no se le crea un interno descartable para escuchar un aviso. */
       if (!ventanaAbierta(sala)) { c.release(); return res.status(409).json({ error: 'La reunión todavía no está abierta.' }); }
@@ -762,18 +801,22 @@ module.exports = function init(deps) {
       const quien = (String(b.name || '').slice(0, 40).replace(/[^\w\s.\-áéíóúñÁÉÍÓÚÑ]/g, '') || 'Invitado');
 
       await c.query('BEGIN');
-      await createWebrtcEndpoint(c, guestExt, password, 'c2c', sala.tenant_id || 1, !!sala.video, 1);
+      /* Contexto propio de esta sesion: adentro hay UNA sola extension, la suya. Con el
+       * contexto `c2c` compartido, un invitado podia marcar el numero efimero de otra
+       * sesion -el de otro invitado, o el del MODERADOR- y entrar como ese. */
+      const ctxSesion = 'c2c_' + sid;
+      await createWebrtcEndpoint(c, guestExt, password, ctxSesion, sala.tenant_id || 1, !!sala.video, 1);
       /* El salto va a PARTICIPANTE (prioridad 20), no a la 1: la 1 arranca el `Read` del
        * PIN, que el invitado no tiene. El nombre viaja como CALLERID para que se vea en la
        * vista en vivo de la sala y en el CDR. */
       const dp = [
-        ['c2c', dialExten, 1, 'NoOp', 'Sala web ' + sala.name],
-        ['c2c', dialExten, 2, 'Set', 'CALLERID(name)=' + quien],
-        ['c2c', dialExten, 3, 'Set', '__C2C_LINK=sala:' + sala.name],
-        ['c2c', dialExten, 4, 'Set', '__C2C_VISITOR=' + quien],
-        ['c2c', dialExten, 5, 'Goto', 'ivr,' + sala.access_exten + ',' + PRIO_INVITADO],
+        [ctxSesion, dialExten, 1, 'NoOp', 'Sala web ' + sala.name],
+        [ctxSesion, dialExten, 2, 'Set', 'CALLERID(name)=' + quien],
+        [ctxSesion, dialExten, 3, 'Set', '__C2C_LINK=sala:' + sala.name],
+        [ctxSesion, dialExten, 4, 'Set', '__C2C_VISITOR=' + quien],
+        [ctxSesion, dialExten, 5, 'Goto', 'ivr,' + sala.access_exten + ',' + PRIO_INVITADO],
       ];
-      await c.query("DELETE FROM extensions WHERE context='c2c' AND exten=$1", [dialExten]);
+      await c.query('DELETE FROM extensions WHERE context=$1', [ctxSesion]);
       for (const r of dp) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       /* Misma tabla y mismo janitor que el click-to-call (`link_id` va en NULL porque esto
        * no sale de un enlace de click-to-call). Cuatro horas y no cuarenta minutos: una
@@ -807,14 +850,15 @@ module.exports = function init(deps) {
       /* Sin enlace todavía: se crea uno acá mismo. La página del moderador es la misma que
        * la del invitado, y necesita un token de sala para existir. */
       if (!token) { token = crypto.randomBytes(12).toString('base64url'); await c.query('UPDATE pbxng_conferences SET web_token=$2 WHERE name=$1', [sala.name, token]); }
-      await createWebrtcEndpoint(c, guestExt, password, 'c2c', sala.tenant_id || 1, !!sala.video, 1);
+      const ctxSesion = 'c2c_' + sid;
+      await createWebrtcEndpoint(c, guestExt, password, ctxSesion, sala.tenant_id || 1, !!sala.video, 1);
       const dp = [
-        ['c2c', dialExten, 1, 'NoOp', 'Moderador web ' + sala.name],
-        ['c2c', dialExten, 2, 'Set', 'CALLERID(name)=' + quien],
-        ['c2c', dialExten, 3, 'Set', '__C2C_LINK=sala-mod:' + sala.name],
-        ['c2c', dialExten, 4, 'Goto', 'ivr,' + sala.access_exten + ',' + PRIO_MOD_WEB],
+        [ctxSesion, dialExten, 1, 'NoOp', 'Moderador web ' + sala.name],
+        [ctxSesion, dialExten, 2, 'Set', 'CALLERID(name)=' + quien],
+        [ctxSesion, dialExten, 3, 'Set', '__C2C_LINK=sala-mod:' + sala.name],
+        [ctxSesion, dialExten, 4, 'Goto', 'ivr,' + sala.access_exten + ',' + PRIO_MOD_WEB],
       ];
-      await c.query("DELETE FROM extensions WHERE context='c2c' AND exten=$1", [dialExten]);
+      await c.query('DELETE FROM extensions WHERE context=$1', [ctxSesion]);
       for (const r of dp) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query("INSERT INTO pbxng_c2c_sessions (id,link_id,guest_ext,dial_exten,visitor_name,meta,expires_at) VALUES ($1,NULL,$2,$3,$4,$5, now() + interval '4 hours')",
         [sid, guestExt, dialExten, quien, JSON.stringify({ sala: sala.name, moderar: true, pendiente: true })]);
@@ -833,7 +877,7 @@ module.exports = function init(deps) {
         "UPDATE pbxng_c2c_sessions SET meta = replace(meta, '\"pendiente\":true', '\"pendiente\":false') WHERE id=$1 AND meta LIKE '%\"pendiente\":true%' AND expires_at > now() RETURNING guest_ext, dial_exten, visitor_name, meta",
         [req.params.id]);
       const ses = rows[0];
-      if (!ses) return res.status(404).json({ error: 'esta entrada ya se usó o venció' });
+      if (!ses) { avisarGuardia(req, 'entrada:' + String(req.params.id).slice(0, 24)); return res.status(404).json({ error: 'esta entrada ya se usó o venció' }); }
       /* La contraseña del endpoint no se guarda en la sesión (no hace falta para nada más),
        * así que se rota acá: se la ponemos de nuevo y se la damos a quien la levanta. */
       const password = 'Web' + crypto.randomBytes(5).toString('hex') + '#7';

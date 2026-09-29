@@ -74,6 +74,11 @@ const CLASES = {
   MemoryLimit:             { tipo: 'flood',   sev: 'crit', fallo: true,  motivo: REASON_FLOOD, texto: 'límite de memoria' },
   LoadAverageLimit:        { tipo: 'flood',   sev: 'crit', fallo: true,  motivo: REASON_FLOOD, texto: 'límite de carga' },
   SuccessfulAuth:          { tipo: 'ok',      sev: 'info', fallo: false, texto: 'autenticación correcta' },
+  /* No viene de Asterisk: lo reporta la propia API cuando alguien prueba un token de enlace
+   * público (una sala, un click-to-call) que no existe. Es el mismo animal que el escáner
+   * SIP —enumerar a ver qué pega— y se cuenta con la misma vara, así que aparece en
+   * /seguridad y termina baneado por el mismo contador. */
+  WebTokenInvalid:         { tipo: 'escaner', sev: 'warn', fallo: true,  motivo: REASON_SCAN,  texto: 'enlace público inexistente' },
   // ChallengeSent es el desafío normal de cada REGISTER: ruido puro, se ignora.
 };
 const TIPOS_ATAQUE = ['auth', 'cuenta', 'acl', 'escaner', 'flood', 'ban', 'geo'];
@@ -763,8 +768,20 @@ module.exports = function initGuard(deps) {
   }
   function detener() { for (const t of timers) clearInterval(t); }
 
+  /* Puerta de entrada para lo que NO es SIP: la API le pasa los intentos contra enlaces
+   * públicos con la IP real del cliente (la que dejó nuestro proxy, no la del header que
+   * escribe cualquiera). Se arma el mismo sobre que traería Asterisk para reusar el
+   * contador, la lista blanca, el geo-bloqueo y el baneo tal cual están. */
+  function web(ip, cuenta) {
+    const dir = normalizarIp(ip);
+    if (!dir) return Promise.resolve(null);
+    const fam = esIpv6(dir) ? 'IPV6' : 'IPV4';
+    return procesar({ securityevent: 'WebTokenInvalid', remoteaddress: fam + '/TCP/' + dir + '/0', accountid: String(cuenta || '').slice(0, 80) })
+      .catch(() => null);
+  }
+
   return {
-    iniciar, detener, unirSocket, resumen, detectarAtaque, procesar, clasificar, banear, desbloquear, expirar, sincronizarFw, aplicarGeoblock,
+    iniciar, detener, unirSocket, resumen, detectarAtaque, procesar, clasificar, banear, desbloquear, expirar, sincronizarFw, aplicarGeoblock, web,
     recientes: historial, bus, bandera, esIpv4, esIpv6, esIp, normalizarIp, esPrivada, ipEn, parseRemote,
     enforcement: () => ({ ...enforcement }), settings: () => ({ ...settings }),
     _cargar: { settings: cargarSettings, whitelist: cargarWhitelist, geoblock: cargarGeoblock, bloqueadas: cargarBloqueadas },

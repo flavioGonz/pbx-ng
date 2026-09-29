@@ -479,7 +479,7 @@ async function getExtensions() {
    * internos como un interno WebRTC desconocido registrado desde la IP del proxy — que es
    * exactamente lo que parece un intruso, y costó un susto. No son internos de la central;
    * las visitas web se miran en su propia pantalla. */
-  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record, dtmf_mode FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' AND COALESCE(context,'') <> 'c2c' ORDER BY id");
+  const { rows } = await pool.query("SELECT id, context, allow, tenant_id, transport, pbxng_record, dtmf_mode FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension' AND COALESCE(context,'') NOT LIKE 'c2c%' ORDER BY id");
   const st = await endpointStates();
   const names = {};
   try { const { rows: nr } = await pool.query('SELECT ext,name FROM pbxng_directory'); nr.forEach(n => names[n.ext] = n.name); } catch (_) {}
@@ -766,9 +766,28 @@ const c2cLimite = rateLimit({
   keyGenerator: (req) => ipKeyGenerator(clientIp(req)),
   handler: (req, res) => res.status(429).json({ error: 'Demasiados intentos, probá en unos minutos.' }),
 });
+/* Igual que en salas.js: al guardia se le avisa recién al quinto intento fallido en dos
+ * minutos desde la misma IP. Un enlace vencido no puede costarle a un cliente un ban
+ * permanente del firewall (que con geo-bloqueo encendido es lo que pasa a la primera). */
+const TOL_WEB = 5, TOL_VENTANA = 2 * 60 * 1000;
+const fallosWeb = new Map();
+function avisarGuardiaWeb(req, cuenta) {
+  try {
+    const ip = String(clientIp(req) || ''); if (!ip) return;
+    const t = Date.now();
+    const prev = (fallosWeb.get(ip) || []).filter((x) => t - x < TOL_VENTANA);
+    prev.push(t); fallosWeb.set(ip, prev);
+    if (fallosWeb.size > 5000) for (const [k, v] of fallosWeb) if (!v.length || t - v[v.length - 1] > TOL_VENTANA) fallosWeb.delete(k);
+    if (prev.length < TOL_WEB) return;
+    fallosWeb.delete(ip);
+    guard.web(ip, cuenta);
+  } catch (_) {}
+}
 function c2cDestRoute(type, val) { if (type === 'extension') return ['internal', val]; return ['ivr', val]; }
 app.get('/api/c2c/public/:token', async (req, res) => {
-  try { const { rows } = await pool.query('SELECT name,intro,require_name,collect_geo,video,enabled FROM pbxng_click2call WHERE token=$1', [req.params.token]); if (!rows[0] || !rows[0].enabled) return res.status(404).json({ error: 'enlace no disponible' }); res.json(rows[0]); }
+  try { const { rows } = await pool.query('SELECT name,intro,require_name,collect_geo,video,enabled FROM pbxng_click2call WHERE token=$1', [req.params.token]);
+    if (!rows[0] || !rows[0].enabled) { avisarGuardiaWeb(req, 'c2c:' + String(req.params.token).slice(0, 24)); return res.status(404).json({ error: 'enlace no disponible' }); }
+    res.json(rows[0]); }
   catch (e) { errorHttp(res, e); }
 });
 app.post('/api/c2c/public/:token/session', c2cLimite, async (req, res) => {
@@ -783,12 +802,18 @@ app.post('/api/c2c/public/:token/session', c2cLimite, async (req, res) => {
     const vname = ((b.name || '').toString().slice(0, 40).replace(/[^\w\s.\-áéíóúñÁÉÍÓÚÑ]/g, '') || 'Visitante web');
     const [ctx, dst] = c2cDestRoute(link.dest_type, link.dest_value);
     await c.query('BEGIN');
-    await createWebrtcEndpoint(c, guestExt, password, 'c2c', link.tenant_id || 1, !!link.video, 1);
+    /* UN CONTEXTO POR SESIÓN, no el `c2c` compartido: el contexto es lo único que limita a
+     * dónde puede llamar este invitado descartable. Con todos en el mismo, el que tenía un
+     * enlace válido podía marcar el número efímero de OTRA sesión —que es público dentro
+     * del contexto— y meterse en la llamada o en la reunión de otro. Ahora en su contexto
+     * existe una sola extensión: la suya. */
+    const ctxSesion = 'c2c_' + sid;
+    await createWebrtcEndpoint(c, guestExt, password, ctxSesion, link.tenant_id || 1, !!link.video, 1);
     // El interno ve "Llamada Web" como identificador (CDR/historial), pero NO se pierde el
     // ID de la sesión web: queda como CALLERID(num) (el guestExt c2cXXXX) para referencia, y
     // el nombre real del visitante viaja en __C2C_VISITOR.
-    const dp = [['c2c', dialExten, 1, 'NoOp', 'C2C ' + link.name], ['c2c', dialExten, 2, 'Set', 'CALLERID(name)=Llamada Web'], ['c2c', dialExten, 3, 'Set', '__C2C_LINK=' + link.name], ['c2c', dialExten, 4, 'Set', '__C2C_VISITOR=' + vname], ['c2c', dialExten, 5, 'Goto', ctx + ',' + dst + ',1']];
-    await c.query("DELETE FROM extensions WHERE context='c2c' AND exten=$1", [dialExten]);
+    const dp = [[ctxSesion, dialExten, 1, 'NoOp', 'C2C ' + link.name], [ctxSesion, dialExten, 2, 'Set', 'CALLERID(name)=Llamada Web'], [ctxSesion, dialExten, 3, 'Set', '__C2C_LINK=' + link.name], [ctxSesion, dialExten, 4, 'Set', '__C2C_VISITOR=' + vname], [ctxSesion, dialExten, 5, 'Goto', ctx + ',' + dst + ',1']];
+    await c.query('DELETE FROM extensions WHERE context=$1', [ctxSesion]);
     for (const r of dp) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
     await c.query("INSERT INTO pbxng_c2c_sessions (id,link_id,guest_ext,dial_exten,visitor_name,geo,meta,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7, now() + interval '40 minutes')", [sid, link.id, guestExt, dialExten, vname, (b.geo ? JSON.stringify(b.geo).slice(0, 400) : null), (b.meta ? JSON.stringify(b.meta).slice(0, 400) : null)]);
     await c.query('COMMIT');
@@ -801,6 +826,10 @@ async function c2cCleanup() {
       await pool.query('DELETE FROM ps_endpoints WHERE id=$1', [s.guest_ext]).catch(() => {});
       await pool.query('DELETE FROM ps_auths WHERE id=$1', [s.guest_ext]).catch(() => {});
       await pool.query('DELETE FROM ps_aors WHERE id=$1', [s.guest_ext]).catch(() => {});
+      /* El contexto entero, no sólo la extensión: con un contexto por sesión, lo que queda
+       * colgado es el contexto. Se borra igual por número para las sesiones viejas, que
+       * vivían en el `c2c` compartido. */
+      await pool.query('DELETE FROM extensions WHERE context=$1', ['c2c_' + s.id]).catch(() => {});
       await pool.query("DELETE FROM extensions WHERE context='c2c' AND exten=$1", [s.dial_exten]).catch(() => {});
       await pool.query('DELETE FROM pbxng_c2c_sessions WHERE id=$1', [s.id]).catch(() => {});
     } } catch (_) {}
@@ -1573,6 +1602,10 @@ const { syncSalas } = require('./salas')({
   /* Para el enlace web de la sala: el invitado entra con un endpoint WebRTC descartable,
    * el mismo que fabrica el click-to-call (y que limpia el mismo janitor). */
   createWebrtcEndpoint: (...a) => createWebrtcEndpoint(...a), rateLimit,
+  /* Se pasa como lambda porque guard.js se inicializa más abajo: acá sólo se guarda la
+   * forma de llamarlo. */
+  reportarWeb: (ip, cuenta) => { try { return guard.web(ip, cuenta); } catch (_) { return null; } },
+  clientIp: (...a) => clientIp(...a),
 });
 resincronizar.push(syncSalas);
 
