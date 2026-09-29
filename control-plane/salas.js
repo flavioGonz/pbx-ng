@@ -52,6 +52,12 @@ const PRIO_PARTICIPANTE = 20;
  * aunque la sala lo tuviera, y sin grabar aunque estuviera marcada. Este bloque repite el
  * perfil y recién ahí cae en PARTICIPANTE. */
 const PRIO_INVITADO = 30;
+/* Y por dónde entra el MODERADOR desde el panel. Es la misma puerta que la del invitado
+ * —endpoint descartable, sin PIN— pero con `admin` y `marked`: abre la sala, silencia y
+ * expulsa. Existe porque la reunión no arrancaba nunca cuando todos entraban por enlace:
+ * alguien tenía que marcar el número desde un teléfono con el PIN de moderador, y el que
+ * administra la central muchas veces no tiene un interno a mano. */
+const PRIO_MOD_WEB = 50;
 
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
@@ -344,6 +350,11 @@ module.exports = function init(deps) {
     rows.push([w++, 'NoOp', 'Invitado web de ' + nom]);
     for (const [a, d] of perfil) rows.push([w++, a, d]);
     for (const [a, d] of comunes(false, true)) rows.push([w++, a, d]);
+
+    let m = PRIO_MOD_WEB;
+    rows.push([m++, 'NoOp', 'Moderador web de ' + nom]);
+    for (const [a, d] of perfil) rows.push([m++, a, d]);
+    for (const [a, d] of comunes(true, true)) rows.push([m++, a, d]);
 
     let q = PARTICIPANTE;
     rows.push([q++, 'NoOp', 'Participante de ' + nom]);
@@ -773,6 +784,65 @@ module.exports = function init(deps) {
       res.json({ session: sid, ext: guestExt, pass: password, dial: dialExten, video: !!sala.video, sala: sala.label || sala.name });
     } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); }
     finally { c.release(); }
+  });
+
+  /* «Entrar como moderador» desde el panel. Crea la misma sesión descartable que el
+   * enlace público, pero entrando por la puerta del moderador, y devuelve una URL de un
+   * solo uso. El id de entrada se quema al levantarlo: si alguien reenvía ese enlace, ya
+   * no sirve. Es admin porque entrar de moderador es exactamente lo que da el PIN de
+   * moderador —abrir, silenciar y expulsar—. */
+  app.post('/api/salas/:name/moderar', async (req, res) => {
+    const c = await pool.connect();
+    try {
+      const { rows } = await c.query('SELECT ' + CAMPOS + ' FROM pbxng_conferences WHERE name=$1', [req.params.name]);
+      const sala = rows[0];
+      if (!sala) { c.release(); return res.status(404).json({ error: 'no existe esa sala' }); }
+      let token = sala.web_token;
+      const sid = crypto.randomBytes(12).toString('hex');
+      const guestExt = 'c2c' + crypto.randomBytes(3).toString('hex');
+      const password = 'Web' + crypto.randomBytes(5).toString('hex') + '#7';
+      const dialExten = '8' + (100000 + Math.floor(Math.random() * 899999));
+      const quien = String((req.user && (req.user.name || req.user.username)) || 'Moderador').slice(0, 40);
+      await c.query('BEGIN');
+      /* Sin enlace todavía: se crea uno acá mismo. La página del moderador es la misma que
+       * la del invitado, y necesita un token de sala para existir. */
+      if (!token) { token = crypto.randomBytes(12).toString('base64url'); await c.query('UPDATE pbxng_conferences SET web_token=$2 WHERE name=$1', [sala.name, token]); }
+      await createWebrtcEndpoint(c, guestExt, password, 'c2c', sala.tenant_id || 1, !!sala.video, 1);
+      const dp = [
+        ['c2c', dialExten, 1, 'NoOp', 'Moderador web ' + sala.name],
+        ['c2c', dialExten, 2, 'Set', 'CALLERID(name)=' + quien],
+        ['c2c', dialExten, 3, 'Set', '__C2C_LINK=sala-mod:' + sala.name],
+        ['c2c', dialExten, 4, 'Goto', 'ivr,' + sala.access_exten + ',' + PRIO_MOD_WEB],
+      ];
+      await c.query("DELETE FROM extensions WHERE context='c2c' AND exten=$1", [dialExten]);
+      for (const r of dp) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
+      await c.query("INSERT INTO pbxng_c2c_sessions (id,link_id,guest_ext,dial_exten,visitor_name,meta,expires_at) VALUES ($1,NULL,$2,$3,$4,$5, now() + interval '4 hours')",
+        [sid, guestExt, dialExten, quien, JSON.stringify({ sala: sala.name, moderar: true, pendiente: true })]);
+      await c.query('COMMIT');
+      res.json({ url: '/sala/' + token + '?e=' + sid, sala: sala.label || sala.name });
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); }
+    finally { c.release(); }
+  });
+
+  /* El levantamiento de esa entrada: público porque lo pide la misma página del invitado,
+   * y de UN SOLO USO —se marca como levantada en el mismo UPDATE que la lee, así dos
+   * pestañas no se llevan la misma credencial—. */
+  app.post('/api/salas/entrada/:id', enlaceLimite, async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        "UPDATE pbxng_c2c_sessions SET meta = replace(meta, '\"pendiente\":true', '\"pendiente\":false') WHERE id=$1 AND meta LIKE '%\"pendiente\":true%' AND expires_at > now() RETURNING guest_ext, dial_exten, visitor_name, meta",
+        [req.params.id]);
+      const ses = rows[0];
+      if (!ses) return res.status(404).json({ error: 'esta entrada ya se usó o venció' });
+      /* La contraseña del endpoint no se guarda en la sesión (no hace falta para nada más),
+       * así que se rota acá: se la ponemos de nuevo y se la damos a quien la levanta. */
+      const password = 'Web' + crypto.randomBytes(5).toString('hex') + '#7';
+      await pool.query('UPDATE ps_auths SET password=$2 WHERE id=$1', [ses.guest_ext, password]);
+      let meta = {}; try { meta = JSON.parse(ses.meta || '{}'); } catch (_) {}
+      const { rows: sr } = await pool.query('SELECT label, name, video FROM pbxng_conferences WHERE name=$1', [meta.sala || '']);
+      res.json({ ext: ses.guest_ext, pass: password, dial: ses.dial_exten, moderador: !!meta.moderar,
+        video: !!(sr[0] && sr[0].video), sala: sr[0] ? (sr[0].label || sr[0].name) : '' });
+    } catch (e) { errorHttp(res, e); }
   });
 
   app.post('/api/salas', async (req, res) => {

@@ -34,7 +34,7 @@ import {
   IconUsers, IconPlus, IconTrash, IconPencil, IconEye, IconMail, IconLock, IconHash,
   IconTag, IconMicrophoneOff, IconMicrophone, IconDoorExit, IconInfoCircle, IconDice,
   IconCalendarEvent, IconPlayerRecord, IconCopy, IconCheck, IconRefresh, IconKey,
-  IconAlertTriangle, IconUsersGroup, IconUserPlus, IconWorldShare, IconLink, IconVideo, IconPhoneOutgoing,
+  IconAlertTriangle, IconUsersGroup, IconUserPlus, IconWorldShare, IconLink, IconVideo, IconPhoneOutgoing, IconDoorEnter,
 } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import { TableSkeleton } from './Skeletons';
@@ -425,6 +425,7 @@ function EnVivo({ sala, onCerrar }) {
           no se oyen entre {gente.length === 1 ? 'nadie' : 'ellos'}: la sala espera al moderador.
           Tiene que entrar alguien marcando <b>{sala.access_exten}</b> con el <b>PIN de moderador</b>,
           o hay que apagar «música en espera hasta que entre el moderador» al editar la sala.
+          {' '}Desde la lista, el botón <b>entrar como moderador</b> hace justo eso desde este navegador.
         </Alert>
       )}
 
@@ -581,6 +582,23 @@ export default function SalasPanel({ conEncabezado = true }) {
   }
   function listo() { cerrarForm(); setEditar(null); recargar(); }
 
+  /* Entrar a la reunión desde el panel, como moderador. Es lo que faltaba para que una
+   * reunión de puros invitados por enlace pueda arrancar: alguien tiene que entrar
+   * `marked`, y hasta ahora eso pedía un teléfono y el PIN de moderador a mano. Abre una
+   * pestaña nueva —la misma página del invitado, con una entrada de un solo uso— para no
+   * tirarte abajo el panel ni el softphone que puedas tener abierto acá. */
+  async function moderar(s) {
+    setAbriendo(s.name);
+    try {
+      const r = await apiPost('/salas/' + s.name + '/moderar', {});
+      const w = window.open(r.url, '_blank', 'noopener');
+      if (!w) toast('El navegador bloqueó la ventana nueva. Permitila y probá otra vez.', 'bad');
+      else toast('Abriendo la sala como moderador', 'ok');
+      recargar();
+    } catch (e) { toast(e.message, 'bad'); }
+    setAbriendo('');
+  }
+
   async function borrar(s) {
     if (!confirm('¿Borrar la sala «' + (s.label || s.name) + '»? El número ' + s.access_exten + ' deja de entrar a la reunión.')) return;
     try { await apiDel('/salas/' + s.name); toast('Sala borrada', 'info'); recargar(); }
@@ -689,6 +707,11 @@ export default function SalasPanel({ conEncabezado = true }) {
                       </Table.Td>
                       <Table.Td ta="right">
                         <Group gap={4} justify="flex-end" wrap="nowrap">
+                          {esAdmin && (
+                            <Tooltip label="Entrar a la reunión como moderador, desde este navegador">
+                              <ActionIcon variant="subtle" color="grape" loading={abriendo === s.name} onClick={() => moderar(s)}><IconDoorEnter size={17} /></ActionIcon>
+                            </Tooltip>
+                          )}
                           <Tooltip label="Ver quién está adentro"><ActionIcon variant="subtle" color="teal" onClick={() => setEnVivo(s)}><IconEye size={17} /></ActionIcon></Tooltip>
                           {esAdmin && <Tooltip label="Invitar por correo"><ActionIcon variant="subtle" color="cyan" onClick={() => setInvitar(s)}><IconMail size={17} /></ActionIcon></Tooltip>}
                           {esAdmin && (

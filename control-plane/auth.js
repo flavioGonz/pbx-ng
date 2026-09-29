@@ -179,6 +179,7 @@ module.exports = function init(deps) {
      * Ni el número de la sala ni los PIN salen por acá. */
     ['GET',  /^\/api\/salas\/web\/[^/]+$/],
     ['POST', /^\/api\/salas\/web\/[^/]+\/session$/],
+    ['POST', /^\/api\/salas\/entrada\/[^/]+$/],   // entrada de un solo uso que abre el panel para moderar
     ['POST', /^\/api\/geo\/report$/],
     // Las capturas de los manuales se piden con <img src>, que NO manda el token.
     // Sólo la LECTURA es pública (subir y borrar siguen pidiendo sesión).

@@ -15,7 +15,7 @@
  *  reparte en modo SFU); sin video, la misma pantalla con el audio y nada más.
  * ==========================================================================*/
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useSoftphone } from '../../useSoftphone';
 
 const fmt = (s) => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -31,6 +31,10 @@ const tarjeta = { width: 'min(440px, 94vw)', background: 'rgba(255,255,255,.98)'
 
 export default function SalaWeb() {
   const { token } = useParams();
+  /* `?e=<id>` es una ENTRADA de un solo uso que abrió el panel para moderar la reunión:
+   * entra como moderador (abre la sala, silencia y expulsa) y no pide nombre, porque ya
+   * sabe quién es. El id se quema en el servidor al levantarlo. */
+  const entrada = (useSearchParams() || new URLSearchParams()).get('e') || '';
   const sp = useSoftphone();
   const [sala, setSala] = useState(null); const [noHay, setNoHay] = useState(false);
   const [nombre, setNombre] = useState('');
@@ -51,17 +55,27 @@ export default function SalaWeb() {
   useEffect(() => { if (fase !== 'adentro') return; setSegs(0); const t = setInterval(() => setSegs(s => s + 1), 1000); return () => clearInterval(t); }, [fase]);
 
   async function entrar() {
-    if (!nombre.trim()) { setErr('Poné tu nombre: es el que ven los demás al entrar.'); return; }
+    if (!entrada && !nombre.trim()) { setErr('Poné tu nombre: es el que ven los demás al entrar.'); return; }
     setErr(''); setFase('entrando');
     try {
-      const r = await fetch('/backend/api/salas/web/' + token + '/session', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nombre.trim() }),
-      }).then(x => x.json());
+      const r = await (entrada
+        ? fetch('/backend/api/salas/entrada/' + entrada, { method: 'POST' }).then(x => x.json())
+        : fetch('/backend/api/salas/web/' + token + '/session', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nombre.trim() }),
+        }).then(x => x.json()));
       if (r.error) { setErr(r.error); setFase('error'); return; }
       marcarRef.current = r.dial; arrancadoRef.current = false;
       await sp.connect(r.ext, r.pass, !!(r.video && conVideo), false);
     } catch (e) { setErr('No se pudo entrar a la reunión.'); setFase('error'); }
   }
+  /* Con entrada de moderador no hay nada que preguntar: se entra al abrir la página. El
+   * que la abre ya decidió entrar cuando apretó el botón en el panel. */
+  const autoRef = useRef(false);
+  useEffect(() => {
+    if (!entrada || !sala || autoRef.current || fase !== 'idle') return;
+    autoRef.current = true; entrar();
+  }, [entrada, sala, fase]); // eslint-disable-line
+
   const salir = () => { sp.hangup(); setFase('afuera'); };
   const volver = () => { arrancadoRef.current = false; marcarRef.current = null; setFase('idle'); setErr(''); };
 
@@ -93,10 +107,10 @@ export default function SalaWeb() {
         <div style={{ width: 72, height: 72, margin: '0 auto 14px', borderRadius: '50%', background: 'linear-gradient(140deg,#2f74e6,#1747c0)', display: 'grid', placeItems: 'center', boxShadow: '0 12px 30px -8px rgba(47,116,230,.6)', color: '#fff' }}><Ico s={32} d={icoGente} /></div>
         <h2 style={{ margin: '0 0 4px', color: '#1b2233' }}>{sala.sala}</h2>
         <p style={{ color: '#6b7691', margin: '0 0 18px', fontSize: 15 }}>
-          {sala.video ? 'Reunión con video' : 'Reunión de audio'}{sala.abierta ? '' : ' · todavía no abrió'}
+          {entrada ? 'Entrás como moderador' : (sala.video ? 'Reunión con video' : 'Reunión de audio')}{sala.abierta ? '' : ' · todavía no abrió'}
         </p>
 
-        {fase === 'idle' && <>
+        {fase === 'idle' && !entrada && <>
           <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Tu nombre"
             style={{ width: '100%', padding: '13px 14px', borderRadius: 12, border: '1px solid #d7deea', fontSize: 15, marginBottom: 12, boxSizing: 'border-box', background: '#fff', color: '#1b2233' }} />
           {sala.video && (

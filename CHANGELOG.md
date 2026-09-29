@@ -2,6 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.31.0] - 2026-09-29
+### Added
+- **«Entrar como moderador» desde el panel, sin teléfono y sin marcar el PIN.** Faltaba la
+  pieza que hacía que una reunión de puros invitados por enlace no arrancara nunca: alguien
+  tiene que entrar como **moderador** —`marked`— para que la sala se abra, y hasta ahora eso
+  pedía un teléfono a mano y el PIN de moderador tecleado. Ahora es un botón en la lista:
+  abre una pestaña con la misma página del invitado y entra con `admin` + `marked`.
+  - La entrada es de **un solo uso**: se quema en el mismo UPDATE que la lee, así que
+    reenviar ese enlace no le da moderación a nadie. Y es **admin**, porque entrar de
+    moderador es exactamente lo que da el PIN de moderador.
+  - Si la sala todavía no tenía enlace web, se le crea uno en el mismo movimiento.
+  - Abre en pestaña nueva a propósito: no te tira abajo el panel ni el softphone que tengas
+    abierto ahí.
+  - El aviso de «todos esperando al moderador» ahora nombra ese botón, que es la salida más
+    corta de la situación que describe.
+
 ## [1.30.0] - 2026-09-29
 ### Fixed
 - **La vista «quién está adentro» de una sala mostraba siempre vacío, con la reunión llena.**
