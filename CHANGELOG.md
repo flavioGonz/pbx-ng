@@ -2,6 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.29.1] - 2026-09-29
+### Fixed
+- **El invitado web entraba a la sala y la llamada se cortaba a los pocos segundos.** No era
+  la red ni el enlace: era el **anuncio de entrada**. Con «anunciar entradas y salidas»
+  encendido, ConfBridge le pide a cada uno que **grabe su nombre** después de un tono y
+  recién ahí lo deja entrar. Al que marca el número eso tiene sentido —la sala no sabe quién
+  es—; al invitado por enlace **no**: ya escribió su nombre en la página. Lo que se
+  encontraba era un audio en español pidiéndole que hablara después del beep, una grabación
+  que nunca se llenaba, y la llamada cortada (el softphone corta solo cuando deja de llegar
+  audio, que es lo correcto: para él la llamada estaba muda). Ahora el invitado entra
+  directo y su nombre viaja en el CALLERID, que es lo que muestra la vista en vivo de la
+  sala. (`control-plane/salas.js`)
+- El bloque del invitado web pasó a tener su propio perfil de usuario en vez de saltar al de
+  participante, y el bloque de moderador se corrió a la prioridad 60 para que los dos no se
+  pisen con todas las opciones de la sala encendidas.
+
 ## [1.29.0] - 2026-09-28
 ### Added
 - **La sala de reunión se abre desde el navegador, y puede tener video.** Hasta acá, a una

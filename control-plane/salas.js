@@ -249,7 +249,7 @@ module.exports = function init(deps) {
     /* Prioridades fijas para los tres destinos, así el salto no depende de cuántas
      * opciones tenga la sala: 4 = fuera de la ventana, 6 = entrada, 20 = participante,
      * 40 = moderador. Del 6 en adelante nunca hay más de diez prioridades. */
-    const CERRADA = 4, ENTRADA = 6, PARTICIPANTE = PRIO_PARTICIPANTE, MODERADOR = 40;
+    const CERRADA = 4, ENTRADA = 6, PARTICIPANTE = PRIO_PARTICIPANTE, MODERADOR = 60;   /* 60 y no 40: el bloque del invitado web vive en 30 y con todo encendido llega a 38 */
     rows.push([1, 'NoOp', 'Sala de reunion ' + nom + ' (' + (etiqueta(s.label) || nom) + ')']);
     rows.push([2, 'Answer', '']);
     // La agenda la resuelve la API y la deja en DB(sala/<nombre>); acá sólo se pregunta.
@@ -306,9 +306,16 @@ module.exports = function init(deps) {
       rows.push([p, 'Hangup', '']);
     }
 
-    const comunes = (moderador) => {
+    /* `web` = el que entró por el enlace. La diferencia es el ANUNCIO: con
+     * `announce_join_leave`, ConfBridge le pide a cada uno que GRABE SU NOMBRE después de
+     * un tono, y recién ahí lo deja entrar. Al que marcó el número eso tiene sentido —la
+     * sala no sabe quién es—. Al invitado web NO: ya escribió su nombre en la página, y lo
+     * que se encontraba era un audio en español pidiéndole que hablara después del beep,
+     * una grabación que nunca llenaba, y la llamada cortada a los pocos segundos. Su
+     * nombre viaja en el CALLERID, que es lo que ve la vista en vivo de la sala. */
+    const comunes = (moderador, web) => {
       const out = [];
-      if (s.anunciar) out.push(['Set', 'CONFBRIDGE(user,announce_join_leave)=yes']);
+      if (s.anunciar && !web) out.push(['Set', 'CONFBRIDGE(user,announce_join_leave)=yes']);
       if (s.moh_hasta_moderador) {
         /* El que llega antes que el moderador escucha música, no silencio. `wait_marked`
          * lo deja fuera del mezclador hasta que entra un usuario `marked` (el moderador),
@@ -336,7 +343,7 @@ module.exports = function init(deps) {
     let w = PRIO_INVITADO;
     rows.push([w++, 'NoOp', 'Invitado web de ' + nom]);
     for (const [a, d] of perfil) rows.push([w++, a, d]);
-    rows.push([w, 'Goto', String(PARTICIPANTE)]);
+    for (const [a, d] of comunes(false, true)) rows.push([w++, a, d]);
 
     let q = PARTICIPANTE;
     rows.push([q++, 'NoOp', 'Participante de ' + nom]);
