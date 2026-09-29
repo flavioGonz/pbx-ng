@@ -73,7 +73,7 @@ const emails = require('./emails');
  * poder forzarlo).
  */
 module.exports = function init(deps) {
-  const { app, pool, amiAction, setDialplan, smtpHint, errorHttp, broadcastSoon, logger , createWebrtcEndpoint, rateLimit } = deps;
+  const { app, pool, amiAction, amiList, setDialplan, smtpHint, errorHttp, broadcastSoon, logger, createWebrtcEndpoint, rateLimit } = deps;
   const log = logger ? logger('salas') : { info() {}, warn() {}, error() {} };
 
   const err = (status, msg) => Object.assign(new Error(msg), { status });
@@ -484,15 +484,22 @@ module.exports = function init(deps) {
   const si = (v) => String(v || '').toLowerCase() === 'yes';
 
   async function participantes(name) {
-    const r = await amiAction({ Action: 'ConfbridgeList', Conference: name });
-    return evs(r)
-      .filter((e) => String(campo(e, 'Event')).toLowerCase() === 'confbridgelist')
+    /* `amiList` y no `amiAction`: la respuesta inmediata de ConfbridgeList no trae a nadie
+     * —dice «la lista sigue»— y las filas llegan como eventos aparte. Leyendo sólo la
+     * respuesta, esta pantalla mostraba una sala vacía con la reunión llena. */
+    const filas = await amiList({ Action: 'ConfbridgeList', Conference: name }, { evento: 'ConfbridgeList', fin: 'ConfbridgeListComplete' });
+    return filas
       .map((e) => ({
         canal: campo(e, 'Channel'),
         numero: campo(e, 'CallerIDNum'),
         nombre: campo(e, 'CallerIDName'),
         moderador: si(campo(e, 'Admin')),
-        mudo: si(campo(e, 'MuteStatus')),
+        mudo: si(campo(e, 'MuteStatus')) || si(campo(e, 'Muted')),
+        /* `Waiting` = está en la sala pero FUERA del mezclador, esperando a que entre el
+         * moderador (`wait_marked`). Escucha música y no oye a nadie. Sin esto, el panel
+         * mostraba «3 adentro» mientras los tres estaban en silencio esperando, y no había
+         * forma de saber por qué la reunión no arrancaba. */
+        esperando: si(campo(e, 'Waiting')) || si(campo(e, 'WaitMarked')),
         desde: campo(e, 'AnsweredTime'),
       }));
   }
@@ -502,11 +509,8 @@ module.exports = function init(deps) {
   async function conteos() {
     const out = {};
     try {
-      const r = await amiAction({ Action: 'ConfbridgeListRooms' });
-      for (const e of evs(r)) {
-        if (String(campo(e, 'Event')).toLowerCase() !== 'confbridgelistrooms') continue;
-        out[campo(e, 'Conference')] = parseInt(campo(e, 'Parties'), 10) || 0;
-      }
+      const filas = await amiList({ Action: 'ConfbridgeListRooms' }, { evento: 'ConfbridgeListRooms', fin: 'ConfbridgeListRoomsComplete' });
+      for (const e of filas) out[campo(e, 'Conference')] = parseInt(campo(e, 'Parties'), 10) || 0;
     } catch (_) {}
     return out;
   }

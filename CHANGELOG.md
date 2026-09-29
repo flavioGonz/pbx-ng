@@ -2,6 +2,41 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.30.0] - 2026-09-29
+### Fixed
+- **La vista «quién está adentro» de una sala mostraba siempre vacío, con la reunión llena.**
+  Y el contador de la lista marcaba 0. La causa estaba una capa más abajo: `ConfbridgeList`
+  —como todas las acciones AMI que contestan con una lista— responde de inmediato con un
+  «la lista sigue» **sin datos**, y las filas llegan después como eventos sueltos. El código
+  leía sólo esa primera respuesta, así que la lista era siempre vacía. Se agregó `amiList()`,
+  que junta los eventos hasta el de cierre, con tope de tiempo. (`control-plane/app.js`)
+  - Ojo con el ActionID: lo pone **la librería**, no nosotros —mandar uno propio no sirve,
+    lo pisa—, así que las filas se juntan por el ActionID que devuelve la respuesta.
+  - Alcanza a la vista en vivo, al conteo de la lista y a cualquier otra acción AMI de lista
+    que se agregue de acá en más.
+
+### Added
+- **La lista dice ahora quién está esperando al moderador.** Con «música en espera hasta que
+  entre el moderador», el que llega antes está en la sala pero **fuera de la conversación**:
+  escucha música y no oye a nadie. El panel mostraba «3 adentro» y no había forma de saber
+  por qué la reunión no arrancaba. Ahora cada participante lo dice, y si están **todos**
+  esperando, un aviso explica qué falta: que alguien entre con el PIN de moderador, o apagar
+  esa opción. Es exactamente lo que confunde a quien prueba una sala por primera vez.
+- **La invitación se puede copiar, no sólo mandar por correo.** El mismo texto —enlace,
+  número y PIN— listo para pegar en WhatsApp, que es por donde viaja la mitad de las
+  invitaciones reales. Avisa que lleva el PIN de participante.
+- **El número para entrar desde afuera ya se configura desde el panel.** La API lo usaba
+  desde siempre —lo anuncia en cada invitación— pero vivía sólo en `pbxng_settings`, sin
+  ningún campo donde cargarlo: un ajuste que la central usa y el panel no muestra es un
+  ajuste que no existe.
+- La tabla dice **cómo se entra** a cada sala —número, enlace web y video— en vez de sólo el
+  número: antes había que abrir la sala para saber si se podía entrar desde el navegador.
+
+### Changed
+- El formulario de la sala y la vista en vivo terminan de mudarse al cajón: **el botón de
+  guardar queda fijo abajo** en vez de irse con el scroll, que en un formulario con agenda,
+  PIN y cuatro interruptores obligaba a bajar hasta el fondo cada vez.
+
 ## [1.29.2] - 2026-09-29
 ### Fixed
 - **El diseñador de IVR era ilegible en modo oscuro.** Estaba pintado a mano en claro —el

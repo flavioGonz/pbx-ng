@@ -26,15 +26,15 @@
  * ==========================================================================*/
 import { useEffect, useState } from 'react';
 import {
-  Card, Group, Text, Title, Button, Table, Drawer, TextInput, NumberInput, Switch,
-  Stack, ActionIcon, ThemeIcon, Badge, Tooltip, Divider, Alert, Textarea, CopyButton, Loader,
+  Card, Group, Text, Title, Button, Table, TextInput, NumberInput, Switch,
+  Stack, ActionIcon, ThemeIcon, Badge, Tooltip, Divider, Alert, Textarea, CopyButton, Loader, Paper,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import {
   IconUsers, IconPlus, IconTrash, IconPencil, IconEye, IconMail, IconLock, IconHash,
   IconTag, IconMicrophoneOff, IconMicrophone, IconDoorExit, IconInfoCircle, IconDice,
   IconCalendarEvent, IconPlayerRecord, IconCopy, IconCheck, IconRefresh, IconKey,
-  IconAlertTriangle, IconUsersGroup, IconUserPlus, IconWorldShare, IconLink,
+  IconAlertTriangle, IconUsersGroup, IconUserPlus, IconWorldShare, IconLink, IconVideo, IconPhoneOutgoing,
 } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import { TableSkeleton } from './Skeletons';
@@ -55,13 +55,17 @@ const VACIA = {
  * no seguridad. */
 const pinAzar = () => String(Math.floor(Math.random() * 1000000)).padStart(6, '0');
 
-function SalaForm({ sala, onListo, onCancelar }) {
+/* `onEstado` le pasa al cajón lo que necesita para dibujar el pie fijo (guardando, y la
+ * función de guardar): el botón de guardar de un formulario largo no puede vivir al final
+ * del scroll —hay que bajar hasta el fondo cada vez para apretarlo—. */
+function SalaForm({ sala, onListo, onCancelar, onEstado }) {
   const editando = !!sala;
   const [f, setF] = useState(() => (sala
     ? { ...VACIA, ...sala, agenda_inicio: fmtInputFechaHora(sala.agenda_inicio), agenda_min: sala.agenda_min || 60 }
     : { ...VACIA }));
   const [guardando, setGuardando] = useState(false);
   const up = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  useEffect(() => { if (onEstado) onEstado({ guardando, guardar, editando }); }, [guardando, f]); // eslint-disable-line
 
   async function guardar() {
     const cuerpo = {
@@ -148,10 +152,6 @@ function SalaForm({ sala, onListo, onCancelar }) {
         </Button>
       )}
 
-      <Group justify="flex-end" mt="sm">
-        <Button variant="default" onClick={onCancelar}>Cancelar</Button>
-        <Button loading={guardando} onClick={guardar}>{editando ? 'Guardar' : 'Crear sala'}</Button>
-      </Group>
     </Stack>
   );
 }
@@ -176,11 +176,34 @@ function Invitar({ sala, onCerrar }) {
     setEnviando(false);
   }
 
+  /* El correo no es el único camino: la mitad de las invitaciones de verdad se mandan por
+   * WhatsApp. Se arma el mismo texto que va en el correo y se copia de un botón, en vez de
+   * obligar a abrir la sala, anotar el número, el PIN y el enlace, y rearmarlo a mano. */
+  const [detalle, setDetalle] = useState(null);
+  const [externo, setExterno] = useState('');
+  useEffect(() => {
+    let vivo = true;
+    apiGet('/salas/' + sala.name).then((d) => { if (vivo) setDetalle(d); }).catch(() => {});
+    apiGet('/settings').then((d) => { if (vivo) setExterno((d && d.sala_numero_externo) || ''); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [sala.name]);
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  const cuando = sala.agenda_inicio
+    ? fmtFechaHora(sala.agenda_inicio) + (sala.agenda_min ? ' · ' + sala.agenda_min + ' min' : '')
+    : '';
+  const texto = detalle ? [
+    'Te invito a la reunión «' + (sala.label || sala.name) + '».',
+    detalle.web_token ? 'Entrá desde el navegador: ' + base + '/sala/' + detalle.web_token : '',
+    'O marcá ' + sala.access_exten + (externo ? ' (desde afuera: ' + externo + ')' : '') + (detalle.pin ? ' y el PIN ' + detalle.pin : ''),
+    cuando ? 'Cuándo: ' + cuando : 'La sala está disponible en cualquier momento.',
+  ].filter(Boolean).join('\n') : '';
+
   return (
     <Stack gap="sm">
       <Alert variant="light" color="cyan" icon={<IconInfoCircle size={18} />}>
-        A cada invitado le llega el número a marcar, su PIN y la hora de la reunión. Se manda
-        <b> un correo por persona</b>: nadie ve la lista de los demás.
+        A cada invitado le llega el enlace de la sala (si lo tiene), el número a marcar, su PIN
+        y la hora de la reunión. Se manda <b>un correo por persona</b>: nadie ve la lista de los
+        demás.
       </Alert>
       <Textarea label="Direcciones" required autosize minRows={3}
         description="Separadas por coma, punto y coma o espacios."
@@ -192,6 +215,21 @@ function Invitar({ sala, onCerrar }) {
       <Switch color="orange" label="Invitar como moderador"
         description="Le manda el PIN de moderador, que silencia, expulsa y abre la sala. Mandáselo sólo a quien la dirige."
         checked={moderador} onChange={(e) => setModerador(e.currentTarget.checked)} />
+      <Divider label="O mandala vos" labelPosition="left" mt="xs" />
+      <Text fz="xs" c="dimmed">
+        El mismo texto, para pegar en WhatsApp o donde quieras. Ojo: lleva el PIN de
+        participante, así que no lo pegues en un grupo que no sea el de la reunión.
+      </Text>
+      <Paper withBorder radius="md" p="xs" style={{ background: 'var(--mantine-color-default-hover)' }}>
+        <Text fz="xs" ff="monospace" style={{ whiteSpace: 'pre-wrap' }}>{texto || 'Buscando los datos de la sala…'}</Text>
+      </Paper>
+      <CopyButton value={texto}>{({ copied, copy }) => (
+        <Button variant="light" color={copied ? 'teal' : 'blue'} disabled={!texto} onClick={copy} w="fit-content"
+          leftSection={copied ? <IconCheck size={15} /> : <IconCopy size={15} />}>
+          {copied ? 'Copiado' : 'Copiar la invitación'}
+        </Button>
+      )}</CopyButton>
+
       <Group justify="flex-end" mt="sm">
         <Button variant="default" onClick={onCerrar}>Cancelar</Button>
         <Button color={moderador ? 'orange' : undefined} loading={enviando} leftSection={<IconMail size={16} />} onClick={enviar}>
@@ -301,6 +339,53 @@ function EnlaceWeb({ sala, onCerrar, onCambio }) {
   );
 }
 
+/* El número por el que se entra a las salas DESDE AFUERA (un DID del operador ruteado a
+ * la sala). La API ya lo usaba —lo anuncia en cada invitación— pero no había dónde
+ * cargarlo: vivía sólo en `pbxng_settings`, invisible, y por eso el correo nunca lo
+ * nombraba. Un ajuste que la central usa y el panel no muestra es un ajuste que no existe.
+ */
+function NumeroExterno() {
+  const [valor, setValor] = useState('');
+  const [inicial, setInicial] = useState('');
+  const [listo, setListo] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    apiGet('/settings')
+      .then((d) => { if (vivo) { const v = (d && d.sala_numero_externo) || ''; setValor(v); setInicial(v); setListo(true); } })
+      .catch(() => { if (vivo) setListo(true); });
+    return () => { vivo = false; };
+  }, []);
+  async function guardar() {
+    setGuardando(true);
+    try { await apiPost('/settings', { sala_numero_externo: valor.trim() }); setInicial(valor.trim()); toast('Guardado', 'ok'); }
+    catch (e) { toast(e.message, 'bad'); }
+    setGuardando(false);
+  }
+  if (!listo) return null;
+  return (
+    <Card withBorder radius="lg" padding="md">
+      <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
+        <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
+          <ThemeIcon size={32} radius="md" variant="light" color="blue"><IconPhoneOutgoing size={18} /></ThemeIcon>
+          <div style={{ minWidth: 0 }}>
+            <Text fw={600} fz="sm">Número para entrar desde afuera</Text>
+            <Text fz="xs" c="dimmed">
+              El número público (un DID tuyo ruteado a la sala) que se le anuncia al invitado en la
+              invitación, para el que va a llamar desde un teléfono que no es interno de la central.
+              Vacío = la invitación sólo nombra el interno.
+            </Text>
+          </div>
+        </Group>
+        <Group gap="xs" wrap="nowrap">
+          <TextInput value={valor} onChange={(e) => setValor(e.currentTarget.value)} placeholder="099 123 456" w={190} ff="monospace" />
+          <Button variant="light" loading={guardando} disabled={valor.trim() === inicial} onClick={guardar}>Guardar</Button>
+        </Group>
+      </Group>
+    </Card>
+  );
+}
+
 function EnVivo({ sala, onCerrar }) {
   const { data, error, cargando, recargar } = usePoll('/salas/' + sala.name + '/live', 4000);
   const gente = (data && data.participantes) || [];
@@ -331,6 +416,18 @@ function EnVivo({ sala, onCerrar }) {
         <Tooltip label="Actualizar ahora"><ActionIcon variant="subtle" onClick={recargar}><IconRefresh size={17} /></ActionIcon></Tooltip>
       </Group>
 
+      {/* Todos esperando y ningún moderador: la reunión NO arrancó, por más que el contador
+          diga que hay gente adentro. Es el caso que más confunde —se ve gente, nadie se
+          escucha— y hasta ahora no lo decía nada. */}
+      {gente.length > 0 && gente.every((p) => p.esperando) && (
+        <Alert variant="light" color="yellow" icon={<IconAlertTriangle size={18} />}>
+          {gente.length === 1 ? 'La persona que está adentro escucha música' : 'Los ' + gente.length + ' que están adentro escuchan música'} y
+          no se oyen entre {gente.length === 1 ? 'nadie' : 'ellos'}: la sala espera al moderador.
+          Tiene que entrar alguien marcando <b>{sala.access_exten}</b> con el <b>PIN de moderador</b>,
+          o hay que apagar «música en espera hasta que entre el moderador» al editar la sala.
+        </Alert>
+      )}
+
       {data && data.ami === false && (
         <Alert variant="light" color="orange" icon={<IconInfoCircle size={18} />}>
           No hay conexión con Asterisk, así que no se puede saber quién está en la sala
@@ -352,6 +449,11 @@ function EnVivo({ sala, onCerrar }) {
                   <Table.Td>
                     <Group gap={6}>
                       {p.moderador && <Badge variant="light" color="orange">Moderador</Badge>}
+                      {p.esperando && (
+                        <Tooltip label="Está en la sala pero fuera de la conversación: escucha música hasta que entre el moderador">
+                          <Badge variant="light" color="yellow">Esperando al moderador</Badge>
+                        </Tooltip>
+                      )}
                       {p.mudo && <Badge variant="light" color="gray">Silenciado</Badge>}
                     </Group>
                   </Table.Td>
@@ -456,6 +558,7 @@ export default function SalasPanel({ conEncabezado = true }) {
   const [verPin, setVerPin] = useState(null);
   const [enlace, setEnlace] = useState(null);
   const [abriendo, setAbriendo] = useState('');     // nombre de la sala que se está trayendo
+  const [formEstado, setFormEstado] = useState(null);
   const [form, { open: abrirForm, close: cerrarForm }] = useDisclosure(false);
   useEffect(() => { if (error) toast(error.message, 'bad'); }, [error]);
 
@@ -498,6 +601,8 @@ export default function SalasPanel({ conEncabezado = true }) {
         franja</b>; el resto del tiempo el que marca escucha un aviso.
       </Alert>
 
+      {esAdmin && <NumeroExterno />}
+
       {/* Las salas que venían de antes de la actualización se dejan COMO ESTABAN: si alguien
           decidió que la sala de recepción no pide PIN, no se lo pone una migración a sus
           espaldas. Lo que sí hace falta es que el administrador las vea de una, con nombre y
@@ -527,7 +632,7 @@ export default function SalasPanel({ conEncabezado = true }) {
             <Table.ScrollContainer minWidth={720}>
               <Table striped highlightOnHover verticalSpacing="sm">
                 <Table.Thead><Table.Tr>
-                  <Table.Th>Sala</Table.Th><Table.Th>Número</Table.Th><Table.Th>PIN</Table.Th>
+                  <Table.Th>Sala</Table.Th><Table.Th>Cómo se entra</Table.Th><Table.Th>PIN</Table.Th>
                   <Table.Th>Agenda</Table.Th><Table.Th>Estado</Table.Th><Table.Th />
                 </Table.Tr></Table.Thead>
                 <Table.Tbody>
@@ -537,7 +642,16 @@ export default function SalasPanel({ conEncabezado = true }) {
                         <Text fw={600} fz="sm">{s.label || s.name}</Text>
                         <Text fz="xs" c="dimmed" ff="monospace">{s.name}</Text>
                       </Table.Td>
-                      <Table.Td><Badge variant="light" color="grape" ff="monospace">{s.access_exten}</Badge></Table.Td>
+                      <Table.Td>
+                        {/* Las tres puertas de la sala, juntas: el número que se marca, si hay
+                            enlace web y si la reunión tiene video. Antes había que abrir la sala
+                            para saber si se podía entrar desde el navegador. */}
+                        <Group gap={5} wrap="nowrap">
+                          <Badge variant="light" color="grape" ff="monospace">{s.access_exten}</Badge>
+                          {s.web && <Tooltip label="Se puede entrar desde el navegador con un enlace"><Badge variant="light" color="blue" leftSection={<IconWorldShare size={11} />}>Enlace</Badge></Tooltip>}
+                          {s.video && <Tooltip label="Los que entren con cámara se ven entre todos"><Badge variant="light" color="teal" leftSection={<IconVideo size={11} />}>Video</Badge></Tooltip>}
+                        </Group>
+                      </Table.Td>
                       <Table.Td>
                         {/* El listado sólo sabe SI hay PIN; verlos es pedir el detalle (admin).
                             Tres estados y no dos: una sala heredada puede tener PIN de
@@ -603,8 +717,17 @@ export default function SalasPanel({ conEncabezado = true }) {
         titulo={editar === 'nueva' ? 'Nueva sala de reunión' : 'Editar sala'}
         subtitulo="Un número al que entran varios y se escuchan entre todos"
         solapas={[{ value: 'sala', label: 'Sala', contenido: (
-          form ? <SalaForm sala={editar === 'nueva' ? null : editar} onListo={listo} onCancelar={() => { cerrarForm(); setEditar(null); }} /> : null
+          form ? <SalaForm sala={editar === 'nueva' ? null : editar} onListo={listo}
+            onCancelar={() => { cerrarForm(); setEditar(null); }} onEstado={setFormEstado} /> : null
         ) }]}
+        pie={
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" onClick={() => { cerrarForm(); setEditar(null); }}>Cancelar</Button>
+            <Button loading={!!(formEstado && formEstado.guardando)} onClick={() => formEstado && formEstado.guardar()}>
+              {editar === 'nueva' ? 'Crear sala' : 'Guardar'}
+            </Button>
+          </Group>
+        }
       />
 
       <DrawerNG
@@ -637,10 +760,17 @@ export default function SalasPanel({ conEncabezado = true }) {
         ) }]}
       />
 
-      <Drawer opened={!!enVivo} onClose={() => setEnVivo(null)} position="right" size="md"
-        title={enVivo ? 'En la sala «' + (enVivo.label || enVivo.name) + '»' : ''}>
-        {enVivo && <EnVivo sala={enVivo} onCerrar={() => setEnVivo(null)} />}
-      </Drawer>
+      {/* La vista en vivo tambien en cajon NG: mismo encabezado, mismo pie, misma familia
+          que el resto de la pantalla. */}
+      <DrawerNG
+        opened={!!enVivo} onClose={() => setEnVivo(null)} ancho={520} color="teal"
+        icono={<IconEye size={24} />}
+        titulo={enVivo ? 'En la sala «' + (enVivo.label || enVivo.name) + '»' : ''}
+        subtitulo="Quien esta adentro, en vivo: silenciar y sacar de la reunion"
+        solapas={[{ value: 'vivo', label: 'En vivo', contenido: (
+          enVivo ? <EnVivo sala={enVivo} onCerrar={() => setEnVivo(null)} /> : null
+        ) }]}
+      />
     </Stack>
   );
 }

@@ -350,6 +350,51 @@ function amiAction(action) {
     ami.action(action, (err, res) => err ? reject(err) : resolve(res));
   });
 }
+/* Acciones AMI que contestan con una LISTA (ConfbridgeList, ConfbridgeListRooms…).
+ *
+ * POR QUÉ HACE FALTA. `ami.action()` resuelve con la PRIMERA respuesta, que en estas
+ * acciones no trae datos: es un `{ response: 'Success', eventlist: 'start' }` y nada más.
+ * Las filas llegan después, como eventos sueltos con el mismo ActionID, y terminan con un
+ * evento de cierre. Quien leía `res.events` —que esta versión de la librería no arma—
+ * recibía siempre una lista vacía: por eso la vista en vivo de una sala de reunión decía
+ * «no hay nadie» con la reunión llena, y el contador de la lista marcaba 0.
+ *
+ * Se juntan los eventos propios (por ActionID, no por nombre: dos pedidos simultáneos se
+ * mezclarían) hasta el evento de cierre, con un tope de tiempo para no quedarse colgado si
+ * ese cierre no llega. */
+function amiList(action, { evento, fin, ms = 4000 }) {
+  return new Promise((resolve, reject) => {
+    if (!state.ami) return reject(new Error('AMI no conectado'));
+    /* El ActionID lo pone la LIBRERÍA, no nosotros: mandar uno propio no sirve, lo pisa. Así
+     * que se juntan las filas de TODOS los pedidos en vuelo, indexadas por su ActionID, y
+     * recién cuando la respuesta nos dice cuál nos tocó se mira ese cajón. Sin esto el
+     * filtro no coincidía nunca y la lista volvía vacía por tiempo agotado. */
+    const porId = new Map();
+    let miId = null, listo = false;
+    const nombre = (e) => String((e && (e.event || e.Event)) || '').toLowerCase();
+    const idDe = (e) => String((e && (e.actionid || e.ActionID)) || '');
+    const cerrar = (v) => { if (listo) return; listo = true; clearTimeout(reloj); try { ami.removeListener('managerevent', onEv); } catch (_) {} resolve(v); };
+    const onEv = (e) => {
+      const id = idDe(e); if (!id) return;
+      const n = nombre(e);
+      if (n === String(evento).toLowerCase()) {
+        if (!porId.has(id)) porId.set(id, []);
+        porId.get(id).push(e);
+      } else if (n === String(fin).toLowerCase() && miId && id === miId) {
+        cerrar(porId.get(id) || []);
+      }
+    };
+    const reloj = setTimeout(() => cerrar((miId && porId.get(miId)) || []), ms);
+    ami.on('managerevent', onEv);
+    ami.action(action, (err, res) => {
+      if (err) { clearTimeout(reloj); try { ami.removeListener('managerevent', onEv); } catch (_) {} if (!listo) { listo = true; reject(err); } return; }
+      miId = String((res && (res.actionid || res.ActionID)) || '');
+      /* El cierre puede haber llegado ANTES que esta respuesta (la librería contesta por
+       * callback, los eventos por el socket): si ya está completo, se resuelve acá. */
+      if (!miId) cerrar([]);
+    });
+  });
+}
 function amiCommand(command) {
   return new Promise((resolve, reject) => {
     if (!state.ami) return resolve('');
@@ -1523,7 +1568,7 @@ resincronizar.push(syncAbreviados);
  * telefonia.js: Postgres manda, el dialplan lee DB(sala|salapin|salamod/<nombre>), así que
  * su volcado también entra en `resincronizar`. */
 const { syncSalas } = require('./salas')({
-  app, pool, amiAction, setDialplan, smtpHint, errorHttp,
+  app, pool, amiAction, amiList, setDialplan, smtpHint, errorHttp,
   broadcastSoon: (...a) => broadcastSoon(...a), logger,
   /* Para el enlace web de la sala: el invitado entra con un endpoint WebRTC descartable,
    * el mismo que fabrica el click-to-call (y que limpia el mismo janitor). */
