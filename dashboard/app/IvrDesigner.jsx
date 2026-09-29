@@ -2,8 +2,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { ReactFlow, Background, Handle, Position, MarkerType, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper, useComputedColorScheme } from '@mantine/core';
-import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume, IconSparkles } from '@tabler/icons-react';
+import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper, Switch, useComputedColorScheme } from '@mantine/core';
+import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume, IconSparkles, IconMicrophone2 } from '@tabler/icons-react';
 import { toast } from './notify';
 import { api, apiGet, apiPost, apiPut, BASE } from './api';
 import DrawerNG, { BloqueNG } from './DrawerNG';
@@ -59,6 +59,7 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
   const [name, setName] = useState(ivr?.name || '');
   const [exten, setExten] = useState(ivr?.exten || '');
   const [greeting, setGreeting] = useState(ivr?.greeting || 'demo-congrats');
+  const [grabar, setGrabar] = useState(!!ivr?.record);
   const [ivrAudios, setIvrAudios] = useState([]);
   const [genOpen, setGenOpen] = useState(false); const [genText, setGenText] = useState(''); const [genName, setGenName] = useState(''); const [genVoice, setGenVoice] = useState(''); const [genVoices, setGenVoices] = useState([]); const [genBusy, setGenBusy] = useState(false);
   const cargarAudios = () => apiGet('/ivr/audios').then(d => Array.isArray(d) && setIvrAudios(d)).catch(e => toast(e.message, 'bad'));
@@ -131,7 +132,7 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
     if (!name || !exten) { toast('Nombre y numero de acceso son obligatorios', 'bad'); return; }
     const options = nodes.filter(n => n.type === 'option' && n.data.digit !== '').map(n => ({ digit: n.data.digit, dest_type: n.data.dest_type, dest_value: n.data.dest_value || '' }));
     const flow = { nodes, edges };
-    const body = { name, exten, greeting, timeout, options, flow };
+    const body = { name, exten, greeting, timeout, options, flow, record: grabar };
     try {
       if (ivr?.id) await apiPut('/ivr/' + ivr.id, body); else await apiPost('/ivr', body);
       toast(ivr?.id ? 'IVR actualizado' : 'IVR creado (acceso ' + exten + ')', 'ok');
@@ -186,6 +187,10 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
             <Badge size="lg" variant="gradient" gradient={{ from: '#0f2a4a', to: '#1e5aa8' }} leftSection={<IconArrowsSplit size={14} />}>Diseñador IVR</Badge>
             <TextInput placeholder="Nombre del IVR" value={name} onChange={e => setName(e.target.value)} w={190} size="sm" />
             <TextInput placeholder="Acceso (700)" value={exten} onChange={e => setExten(e.target.value)} w={120} ff="monospace" size="sm" />
+            <Tooltip label={grabar ? 'Se graba desde que contesta el menú' : 'Grabar las llamadas que pasen por este menú'} withArrow>
+              <Switch size="sm" checked={grabar} onChange={e => setGrabar(e.currentTarget.checked)}
+                thumbIcon={<IconMicrophone2 size={11} />} label="Grabar" />
+            </Tooltip>
           </Group>
           <Group gap="sm" wrap="nowrap">
             <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={onClose} size="sm">{embedded ? 'Volver' : 'Cancelar'}</Button>

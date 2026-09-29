@@ -319,8 +319,26 @@ module.exports = function init(deps) {
   app.delete('/api/ivr/audios/:id', async (req, res) => { try { await pool.query('DELETE FROM pbxng_ivr_audios WHERE id=$1', [req.params.id]); res.json({ ok: true }); } catch (e) { errorHttp(res, e); } });
 
   // ---------------- AI IVR (agentes) ----------------
-  function aiAgentDialplan(exten, id) {
-    return [['ivr', exten, 1, 'NoOp', 'AI IVR agente ' + id], ['ivr', exten, 2, 'Answer', ''], ['ivr', exten, 3, 'Stasis', 'pbxng,ai,' + id], ['ivr', exten, 4, 'Hangup', '']];
+  /* Nombre de grabacion: el indexador de recordings.js acepta
+   * `pbxng-<token>-<epoch|uniqueid>.wav`, y el TOKEN es lo que despues decide el origen
+   * (`cola`, `sala`, `ia`, `ivr`, o un interno). Se limpia a alfanumerico porque un nombre
+   * de cola como «Cola 8010» metia un ESPACIO en el nombre del archivo. */
+  const recTok = (x) => String(x == null ? '' : x).replace(/[^0-9A-Za-z]/g, '');
+
+  /* Grabacion del agente de IA: SIN la opcion `b`.
+   *
+   * `b` = «grabar solo mientras el canal este puenteado con otro canal», y es lo correcto
+   * para una cola (interesa la conversacion con la persona, no la espera). Pero una llamada
+   * con el agente de IA NUNCA se puentea con otro canal: el audio entra y sale por Stasis /
+   * AudioSocket sobre el mismo canal. Con `b` el archivo quedaba en 44 bytes (cabecera WAV
+   * sola) y el indexador lo descartaba por tamano: grabacion que existe y no se ve. */
+  function aiAgentDialplan(exten, id, record) {
+    const rows = [['ivr', exten, 1, 'NoOp', 'AI IVR agente ' + id], ['ivr', exten, 2, 'Answer', '']];
+    let p = 3;
+    if (record) rows.push(['ivr', exten, p++, 'MixMonitor', 'pbxng-ia' + recTok(id) + '-${UNIQUEID}.wav']);
+    rows.push(['ivr', exten, p++, 'Stasis', 'pbxng,ai,' + id]);
+    rows.push(['ivr', exten, p++, 'Hangup', '']);
+    return rows;
   }
 
   /* ── El agente de IA como MIEMBRO de una cola ────────────────────────────────
@@ -354,7 +372,7 @@ module.exports = function init(deps) {
     /* Sin agente, o apagado, o el agente está deshabilitado: se limpia todo y listo. */
     let agente = null;
     if (modo !== 'apagado' && q.ia_agente_id) {
-      const { rows } = await c.query('SELECT id, name, exten, enabled FROM pbxng_ai_agents WHERE id=$1', [q.ia_agente_id]);
+      const { rows } = await c.query('SELECT id, name, exten, enabled, record FROM pbxng_ai_agents WHERE id=$1', [q.ia_agente_id]);
       agente = rows[0] && rows[0].enabled ? rows[0] : null;
     }
     const activos = agente ? n : 0;
@@ -362,7 +380,7 @@ module.exports = function init(deps) {
     // 1) Extensiones Local de esta cola: se dejan exactamente las que hacen falta.
     await c.query("DELETE FROM extensions WHERE context='ivr' AND exten LIKE $1", [iaExten(cola, '') + '%']);
     for (let i = 1; i <= activos; i++) {
-      for (const r of aiAgentDialplan(iaExten(cola, i), agente.id)) {
+      for (const r of aiAgentDialplan(iaExten(cola, i), agente.id, agente.record)) {
         await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       }
     }
@@ -419,7 +437,7 @@ module.exports = function init(deps) {
   });
 
   app.get('/api/ai-agents', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
+    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,record,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   /* Proveedores que el pipeline entiende. La validación existe por un motivo concreto:
@@ -477,7 +495,7 @@ module.exports = function init(deps) {
   });
 
   app.post('/api/ai-agents', async (req, res) => {
-    const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
+    const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, record = false, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
     const ia = camposInact(req.body || {});
     const herr = camposHerr(req.body || {});
@@ -486,18 +504,18 @@ module.exports = function init(deps) {
     try {
       await c.query('BEGIN');
       const { rows } = await c.query(
-        'INSERT INTO pbxng_ai_agents (name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas)'
-        + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id',
+        'INSERT INTO pbxng_ai_agents (name,exten,greeting,system_prompt,voice,provider,model,enabled,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas,record)'
+        + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
-          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr)]);
+          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr), !!record]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-      for (const r of aiAgentDialplan(exten, rows[0].id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
+      for (const r of aiAgentDialplan(exten, rows[0].id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: rows[0].id, exten });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
   app.put('/api/ai-agents/:id', async (req, res) => {
     const { id } = req.params;
-    const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
+    const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, record = false, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!proveedorOk(provider, res)) return;
     const ia = camposInact(req.body || {});
     const herr = camposHerr(req.body || {});
@@ -509,12 +527,12 @@ module.exports = function init(deps) {
       await c.query(
         'UPDATE pbxng_ai_agents SET name=$1,exten=$2,greeting=$3,system_prompt=$4,voice=$5,provider=$6,model=$7,enabled=$8,'
         + 'sales_exten=$10,support_exten=$11,default_exten=$12,crm_webhook=$13,greeting_text=$14,'
-        + 'inact1_s=$15,inact2_s=$16,cierre_s=$17,inact1_text=$18,inact2_text=$19,despedida_text=$20,herramientas=$21 WHERE id=$9',
+        + 'inact1_s=$15,inact2_s=$16,cierre_s=$17,inact1_text=$18,inact2_text=$19,despedida_text=$20,herramientas=$21,record=$22 WHERE id=$9',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, id, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
-          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr)]);
+          ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr), !!record]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-      for (const r of aiAgentDialplan(exten, id)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
+      for (const r of aiAgentDialplan(exten, id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
@@ -530,13 +548,20 @@ module.exports = function init(deps) {
   });
 
   app.get('/api/ivr', async (req, res) => {
-    try { const { rows: ivrs } = await pool.query('SELECT id,name,exten,greeting,timeout,tenant_id,flow FROM pbxng_ivr ORDER BY id'); for (const iv of ivrs) { const { rows: o } = await pool.query('SELECT digit,dest_type,dest_value FROM pbxng_ivr_options WHERE ivr_id=$1 ORDER BY digit', [iv.id]); iv.options = o; } res.json(ivrs); }
+    try { const { rows: ivrs } = await pool.query('SELECT id,name,exten,greeting,timeout,tenant_id,flow,record FROM pbxng_ivr ORDER BY id'); for (const iv of ivrs) { const { rows: o } = await pool.query('SELECT digit,dest_type,dest_value FROM pbxng_ivr_options WHERE ivr_id=$1 ORDER BY digit', [iv.id]); iv.options = o; } res.json(ivrs); }
     catch (e) { errorHttp(res, e); }
   });
-  function buildIvrDialplan(exten, greeting, timeout, options) {
-    const rows = [['ivr', exten, 1, 'Answer', ''], ['ivr', exten, 2, 'Read', `SEL,${greeting},1,,1,${timeout}`]];
-    options.forEach((o, i) => rows.push(['ivr', exten, 3 + i, 'GotoIf', `$["\${SEL}"="${o.digit}"]?${100 + i * 10}`]));
-    rows.push(['ivr', exten, 3 + options.length, 'Goto', `${exten},2`]);
+  /* Igual que en la IA: sin `b`. El llamante escucha el menu sin estar puenteado con
+   * nadie, asi que con `b` se grababa el silencio. El reintento del menu vuelve a
+   * `pRead` y no al literal 2, porque el MixMonitor corre el numero de prioridad. */
+  function buildIvrDialplan(exten, greeting, timeout, options, record) {
+    const rows = [['ivr', exten, 1, 'Answer', '']];
+    let p = 2;
+    if (record) rows.push(['ivr', exten, p++, 'MixMonitor', 'pbxng-ivr' + recTok(exten) + '-${UNIQUEID}.wav']);
+    const pRead = p;
+    rows.push(['ivr', exten, p++, 'Read', `SEL,${greeting},1,,1,${timeout}`]);
+    options.forEach((o, i) => rows.push(['ivr', exten, p + i, 'GotoIf', `$["\${SEL}"="${o.digit}"]?${100 + i * 10}`]));
+    rows.push(['ivr', exten, p + options.length, 'Goto', `${exten},${pRead}`]);
     options.forEach((o, i) => {
       const b = 100 + i * 10; const v = o.dest_value;
       rows.push(['ivr', exten, b, 'NoOp', `Opcion ${o.digit} -> ${o.dest_type}:${v || ''}`]);
@@ -550,34 +575,34 @@ module.exports = function init(deps) {
     return rows;
   }
   app.post('/api/ivr', async (req, res) => {
-    const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], tenant_id = 1, flow = null } = req.body || {};
+    const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], tenant_id = 1, flow = null, record = false } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
-      const { rows } = await c.query('INSERT INTO pbxng_ivr (name,exten,greeting,timeout,tenant_id,flow) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [name, exten, greeting, timeout, tenant_id, flow]);
+      const { rows } = await c.query('INSERT INTO pbxng_ivr (name,exten,greeting,timeout,tenant_id,flow,record) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [name, exten, greeting, timeout, tenant_id, flow, !!record]);
       const id = rows[0].id;
       for (const o of options) await c.query('INSERT INTO pbxng_ivr_options (ivr_id,digit,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [id, o.digit, o.dest_type, o.dest_value]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-      for (const r of buildIvrDialplan(exten, greeting, timeout, options)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
+      for (const r of buildIvrDialplan(exten, greeting, timeout, options, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); res.status(201).json({ created: id, exten });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
   app.put('/api/ivr/:id', async (req, res) => {
     const { id } = req.params;
-    const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], flow = null } = req.body || {};
+    const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], flow = null, record = false } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
       const { rows: old } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]);
       if (!old[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'IVR no existe' }); }
-      await c.query('UPDATE pbxng_ivr SET name=$1,exten=$2,greeting=$3,timeout=$4,flow=$5 WHERE id=$6', [name, exten, greeting, timeout, flow, id]);
+      await c.query('UPDATE pbxng_ivr SET name=$1,exten=$2,greeting=$3,timeout=$4,flow=$5,record=$7 WHERE id=$6', [name, exten, greeting, timeout, flow, id, !!record]);
       await c.query('DELETE FROM pbxng_ivr_options WHERE ivr_id=$1', [id]);
       for (const o of options) await c.query('INSERT INTO pbxng_ivr_options (ivr_id,digit,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [id, o.digit, o.dest_type, o.dest_value]);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
-      for (const r of buildIvrDialplan(exten, greeting, timeout, options)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
+      for (const r of buildIvrDialplan(exten, greeting, timeout, options, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
@@ -609,7 +634,9 @@ module.exports = function init(deps) {
     let p = 1;
     rows.push([p++, 'NoOp', 'Cola ' + q.name + ' (' + (q.label || q.name) + ')']);
     rows.push([p++, 'Answer', '']);
-    if (q.record) rows.push([p++, 'MixMonitor', 'pbxng-q' + q.name + '-${UNIQUEID}.wav,b']);
+    /* Antes: 'pbxng-q' + q.name -> con «Cola 8010» quedaba `pbxng-qCola 8010-...wav`, con
+     * espacio, y el indexador no lo tomaba. Ahora el token va limpio y con prefijo `cola`. */
+    if (q.record) rows.push([p++, 'MixMonitor', 'pbxng-cola' + recTok(q.name) + '-${UNIQUEID}.wav,b']);
     if (q.welcome_ref) rows.push([p++, 'Playback', q.welcome_ref]);
     const maxw = Number(q.max_wait || 0) > 0 ? String(q.max_wait) : '';
     rows.push([p++, 'Queue', q.name + ',tT,,,' + maxw]);

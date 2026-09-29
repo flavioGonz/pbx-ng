@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, Fragment } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, TextInput, ActionIcon, Tooltip, Select, Switch, PasswordInput, SimpleGrid, ThemeIcon, Tabs, Divider, SegmentedControl, Code, Collapse, Loader, CopyButton } from '@mantine/core';
-import { IconRefresh, IconSearch, IconTrash, IconDownload, IconDeviceFloppy, IconCloud, IconServer, IconFolder, IconMicrophone2, IconWaveSine, IconDatabase, IconSettings, IconClock, IconUser, IconPlayerPlay, IconPlayerPause, IconBrandDebian, IconBrandAws, IconStethoscope, IconCircleCheck, IconCircleX, IconInfoCircle, IconCopy, IconCheck, IconHash } from '@tabler/icons-react';
+import { IconRefresh, IconSearch, IconTrash, IconDownload, IconDeviceFloppy, IconCloud, IconServer, IconFolder, IconMicrophone2, IconWaveSine, IconDatabase, IconSettings, IconClock, IconUser, IconPlayerPlay, IconPlayerPause, IconBrandDebian, IconBrandAws, IconStethoscope, IconCircleCheck, IconCircleX, IconInfoCircle, IconCopy, IconCheck, IconHash, IconUsersGroup, IconUsers, IconRobot, IconArrowsSplit } from '@tabler/icons-react';
 import { TableSkeleton } from '../Skeletons';
 import { api, apiDel, apiPost, useApi, usePoll } from '../api';
 import { fmtBytes, fmtReloj } from '../fmt';
@@ -11,6 +11,18 @@ import RecordingPlayer from '../RecordingPlayer';
 import MiniWave from '../MiniWave';
 
 const STG = { local: ['gray', 'Local', IconFolder], s3: ['blue', 'S3', IconCloud], nas: ['teal', 'NAS', IconServer] };
+/* De donde salio la grabacion. Lo decide el indexador (recordings.js) a partir del prefijo
+ * del nombre del archivo y queda guardado en la columna `origen`: interno, cola, sala, ia,
+ * ivr. Importa mostrarlo porque en una grabacion de cola o de sala la columna «Interno» no
+ * es un interno, es el nombre de la cola o el numero de la sala. */
+const ORIG = {
+  interno: ['pbx', 'Interno', IconUser],
+  cola: ['orange', 'Cola', IconUsersGroup],
+  sala: ['grape', 'Sala', IconUsers],
+  ia: ['pink', 'IA', IconRobot],
+  ivr: ['cyan', 'IVR', IconArrowsSplit],
+};
+const ORIG_FILTROS = [{ value: '', label: 'Todas' }, { value: 'interno', label: 'Internos' }, { value: 'cola', label: 'Colas' }, { value: 'sala', label: 'Salas' }, { value: 'ia', label: 'IA' }, { value: 'ivr', label: 'IVR' }];
 const pctColor = (p) => p >= 90 ? '#dc2626' : p >= 75 ? '#f59e0b' : p >= 50 ? '#eab308' : '#12b76a';
 
 /* Disco/cilindro que se llena según el % usado */
@@ -94,6 +106,7 @@ const Th = ({ icon, children, tip }) => <Table.Th><Tooltip label={tip} disabled=
 
 export default function Grabaciones({ embedded = false, section = 'list' }) {
   const [q, setQ] = useState('');
+  const [orig, setOrig] = useState('');
   const [cfg, setCfg] = useState(null); const [savingCfg, setSavingCfg] = useState(false); const [playId, setPlayId] = useState(null);
   /* El listado es SUP (el supervisor llega acá por la solapa «Grabaciones» de /cdr), pero
    * la ocupación del disco, la configuración de almacenamiento y el borrado son admin
@@ -141,7 +154,9 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
     catch (e) { toast('Error: ' + e.message, 'bad'); }
   }
   const setC = (k, v) => setCfg(c => ({ ...c, [k]: v }));
-  const fl = list.filter(r => !q || String(r.id).includes(q) || (r.ext || '').includes(q) || (r.filename || '').includes(q) || (r.src || '').includes(q) || (r.dst || '').includes(q));
+  const fl = list
+    .filter(r => !orig || (r.origen || 'interno') === orig)
+    .filter(r => !q || String(r.id).includes(q) || (r.ext || '').includes(q) || (r.filename || '').includes(q) || (r.src || '').includes(q) || (r.dst || '').includes(q));
   const totalBytes = list.reduce((a, r) => a + (r.bytes || 0), 0);
   const totalDur = list.reduce((a, r) => a + (r.duration || 0), 0);
   const onCloud = list.filter(r => r.storage !== 'local').length;
@@ -162,21 +177,26 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
     <Card withBorder radius="lg" padding="lg" shadow="sm">
       <Group justify="space-between" mb="md">
         <Text fw={600}>{fl.length} grabaciones</Text>
-        <TextInput placeholder="Buscar ID / interno / archivo" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={260} />
+        <Group gap="sm" wrap="wrap" justify="flex-end">
+          <SegmentedControl size="xs" value={orig} onChange={setOrig} data={ORIG_FILTROS.map(f => ({ value: f.value, label: f.label + (f.value ? ' (' + list.filter(r => (r.origen || 'interno') === f.value).length + ')' : '') }))} />
+          <TextInput placeholder="Buscar ID / interno / archivo" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={260} />
+        </Group>
       </Group>
-      {loading ? <TableSkeleton rows={6} cols={7} /> :
+      {loading ? <TableSkeleton rows={6} cols={8} /> :
         fl.length === 0 ? <Text c="dimmed" ta="center" py="xl">{list.length ? 'Sin resultados.' : 'Aún no hay grabaciones. Iniciá una desde el softphone (botón Grabar).'}</Text> :
-          <Table.ScrollContainer minWidth={820}>
+          <Table.ScrollContainer minWidth={900}>
             <Table striped highlightOnHover verticalSpacing="sm">
-              <Table.Thead><Table.Tr><Th icon={<IconHash size={13} />} tip="Identificador único de la grabación">ID</Th><Th icon={<IconClock size={13} />}>Fecha</Th><Th icon={<IconUser size={13} />}>Interno</Th><Th icon={<IconClock size={13} />}>Duración</Th><Th icon={<IconDatabase size={13} />}>Tamaño</Th><Th icon={<IconServer size={13} />} tip="Dónde está guardada: Local, NAS o S3">Almac.</Th><Th icon={<IconWaveSine size={13} />}>Audio</Th><Th icon={<IconWaveSine size={13} />}>Reproducir</Th><Table.Th /></Table.Tr></Table.Thead>
+              <Table.Thead><Table.Tr><Th icon={<IconHash size={13} />} tip="Identificador único de la grabación">ID</Th><Th icon={<IconClock size={13} />}>Fecha</Th><Th icon={<IconWaveSine size={13} />} tip="De dónde salió: un interno, una cola, una sala de reunión, un agente de IA o un menú de voz">Origen</Th><Th icon={<IconUser size={13} />} tip="El interno grabado; en una cola o sala es el nombre de la cola o el número de la sala">Interno / objeto</Th><Th icon={<IconClock size={13} />}>Duración</Th><Th icon={<IconDatabase size={13} />}>Tamaño</Th><Th icon={<IconServer size={13} />} tip="Dónde está guardada: Local, NAS o S3">Almac.</Th><Th icon={<IconWaveSine size={13} />}>Audio</Th><Th icon={<IconWaveSine size={13} />}>Reproducir</Th><Table.Th /></Table.Tr></Table.Thead>
               <Table.Tbody>{fl.map(r => {
                 const [col, lbl, Ic] = STG[r.storage] || STG.local;
+                const [ocol, olbl, OIc] = ORIG[r.origen || 'interno'] || ORIG.interno;
                 return (
                   <Fragment key={r.id}>
                   <Table.Tr>
                     <Table.Td><Badge size="sm" variant="light" color="gray" ff="monospace">#{r.id}</Badge></Table.Td>
                     <Table.Td><Text fz="xs">{r.started_at ? new Date(r.started_at).toLocaleString('es-UY') : '—'}</Text></Table.Td>
-                    <Table.Td><Group gap={6}><ThemeIcon size="sm" radius="xl" variant="light" color="pbx"><IconWaveSine size={13} /></ThemeIcon><Text ff="monospace" fw={600}>{r.ext || '—'}</Text></Group></Table.Td>
+                    <Table.Td><Badge variant="light" color={ocol} leftSection={<OIc size={12} />}>{olbl}</Badge></Table.Td>
+                    <Table.Td><Group gap={6}><ThemeIcon size="sm" radius="xl" variant="light" color={ocol}><OIc size={13} /></ThemeIcon><Text ff="monospace" fw={600}>{r.ext || '—'}</Text></Group></Table.Td>
                     <Table.Td><Badge variant="light" color="gray">{fmtReloj(r.duration)}</Badge></Table.Td>
                     <Table.Td>{fmtBytes(r.bytes)}</Table.Td>
                     <Table.Td><Tooltip label={'Guardada en ' + lbl} withArrow><Badge variant="light" color={col} leftSection={<Ic size={12} />}>{lbl}</Badge></Tooltip></Table.Td>
@@ -187,7 +207,7 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
                       {admin && <Tooltip label="Eliminar"><ActionIcon variant="subtle" color="red" onClick={() => del(r.id)}><IconTrash size={17} /></ActionIcon></Tooltip>}
                     </Group></Table.Td>
                   </Table.Tr>
-                  {playId === r.id && <Table.Tr><Table.Td colSpan={9} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Grabación #' + r.id + ' · Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
+                  {playId === r.id && <Table.Tr><Table.Td colSpan={10} style={{ background: 'var(--mantine-color-default-hover)' }}><RecordingPlayer recId={r.id} src={'/backend/api/recordings/' + r.id + '/audio'} label={'Grabación #' + r.id + ' · Interno ' + (r.ext || '?')} /></Table.Td></Table.Tr>}
                   </Fragment>
                 );
               })}</Table.Tbody>

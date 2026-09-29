@@ -199,7 +199,10 @@ module.exports = function init(deps) {
       }
       if (!name) return res.status(404).json({ error: (ari || state.ami) ? 'sin canal activo' : 'Asterisk no disponible (ARI/AMI desconectados)' });
       if (action === 'stop') { await amiAction({ Action: 'StopMixMonitor', Channel: name }); }
-      else { const file = 'pbxng-' + ext + '-' + Date.now() + '.wav'; await amiAction({ Action: 'MixMonitor', Channel: name, File: file }); }
+      /* Segundos, no milisegundos: el resto del sistema (dialplan `${EPOCH}`, indexador,
+       * `to_timestamp`) trabaja en segundos. Con `Date.now()` crudo la grabación quedaba
+       * fechada en el año 58707. */
+      else { const file = 'pbxng-' + ext + '-' + Math.floor(Date.now() / 1000) + '.wav'; await amiAction({ Action: 'MixMonitor', Channel: name, File: file }); }
       res.json({ ok: true });
     } catch (e) { errorHttp(res, e); }
   });
@@ -261,7 +264,7 @@ module.exports = function init(deps) {
   app.get('/api/recordings', async (req, res) => {
     /* `linkedid` sale como `call_id`: es lo que empareja una grabación con su llamada en
      * el CDR y con los eventos, sin tener que adivinar por número y hora. */
-    try { const { rows } = await pool.query('SELECT id, filename, ext, src, dst, started_at, bytes, duration, storage, remote_url, linkedid AS call_id FROM pbxng_recordings WHERE deleted=false ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 500'); res.json(rows); }
+    try { const { rows } = await pool.query("SELECT id, filename, ext, src, dst, started_at, bytes, duration, storage, remote_url, linkedid AS call_id, COALESCE(origen,'interno') AS origen FROM pbxng_recordings WHERE deleted=false ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 500"); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   app.delete('/api/recordings/:id', async (req, res) => {
@@ -303,15 +306,66 @@ module.exports = function init(deps) {
     try {
       const _fs = require('fs'); let files = [];
       try { files = _fs.readdirSync('/recordings').filter(f => f.endsWith('.wav')).map(f => { try { const st = _fs.statSync('/recordings/' + f); return { filename: f, bytes: st.size, mtime: Math.floor(st.mtimeMs / 1000) }; } catch (e) { return null; } }).filter(Boolean); } catch (e) { return; }
+      const ahora = Math.floor(Date.now() / 1000);
       for (const f of (Array.isArray(files) ? files : [])) {
         if (!f.filename || f.bytes == null || f.bytes < 1200) continue;
-        const m = /^pbxng-([0-9A-Za-z]+)-(\d+)\.wav$/.exec(f.filename);
+        /* Un archivo tocado hace menos de 20 s puede seguir creciendo: una reunión de sala o
+         * una llamada en cola se graban MIENTRAS pasan. Indexarlo ahí congelaba el tamaño y
+         * la duración del primer instante (una reunión de 16 minutos quedaba «4 s»), así que
+         * se espera a que deje de moverse. */
+        if (ahora - (f.mtime || 0) < 20) continue;
+        /* El patron viejo era /^pbxng-([0-9A-Za-z]+)-(\d+)\.wav$/ y dejaba afuera todo lo
+         * que no fuera un interno: las colas escriben `pbxng-cola<nombre>-${UNIQUEID}.wav`
+         * y el UNIQUEID trae un PUNTO (`1790204471.7`), y con nombres como «Cola 8010»
+         * tambien un ESPACIO. Resultado medido en la central: 252 WAV en el volumen contra
+         * 108 filas indexadas; ninguna grabacion de cola se veia en el panel desde que la
+         * funcion existe. Ahora el token del medio acepta cualquier caracter y el sello
+         * final acepta epoch (`1790204471`) o UNIQUEID (`1790204471.7`). */
+        const m = /^pbxng-(.+)-(\d{9,}(?:\.\d+)?)\.wav$/.exec(f.filename);
         if (!m) continue;
-        const rext = m[1]; const epoch = parseInt(m[2], 10);
-        const ex = await pool.query('SELECT 1 FROM pbxng_recordings WHERE filename=$1 LIMIT 1', [f.filename]);
-        if (ex.rows.length) continue;
-        let src = rext, dst = null, cq0 = null;
+        const rext = m[1]; const sello = m[2];
+        /* El sello viene en TRES formas y las tres tienen que dar la misma hora:
+         *   1790659704        epoch en segundos      (dialplan, ${EPOCH})
+         *   1790659704.242    UNIQUEID de Asterisk   (colas / IVR / IA)
+         *   1790453783519     epoch en MILISEGUNDOS  (grabar desde el panel / PWA)
+         * La tercera es un `Date.now()` que quedó sin dividir cuando se armó el nombre, y
+         * como el indexador hacía `to_timestamp(<eso>)` —que espera segundos— cada
+         * grabación empezada a mano quedaba fechada en el año 58707: salían primeras en el
+         * listado ordenado por fecha y ninguna emparejaba con su llamada en el CDR. El
+         * nombre nuevo ya va en segundos (más abajo); esto arregla las que ya existen. */
+        let epoch = Math.floor(parseFloat(sello));
+        if (sello.indexOf('.') < 0 && sello.length >= 12) epoch = Math.floor(epoch / 1000);
+        /* Si el sello tiene punto es un UNIQUEID de Asterisk, y entonces el CDR se empareja
+         * por identidad en vez de por «numero parecido a una hora parecida». */
+        const uid = sello.indexOf('.') >= 0 ? sello : null;
+        const origen = /^sala/.test(rext) ? 'sala'
+          : (/^cola/.test(rext) || /^q[^0-9]/.test(rext)) ? 'cola'
+            : /^ia[0-9]/.test(rext) ? 'ia'
+              : /^ivr/.test(rext) ? 'ivr' : 'interno';
+        const ex = await pool.query('SELECT id, bytes FROM pbxng_recordings WHERE filename=$1 LIMIT 1', [f.filename]);
+        if (ex.rows.length) {
+          /* Ya indexada pero el archivo crecio despues (se indexo antes de que la grabacion
+           * terminara, o el MixMonitor siguio): se corrige tamano y duracion, y se tiran las
+           * ondas cacheadas porque son de la version corta. */
+          if (Number(ex.rows[0].bytes || 0) !== Number(f.bytes)) {
+            const d2 = Math.max(0, Math.round((f.bytes - 44) / 16000));
+            try { await pool.query('UPDATE pbxng_recordings SET bytes=$1, duration=$2, peaks=NULL WHERE id=$3', [f.bytes, d2, ex.rows[0].id]); } catch (e) {}
+          }
+          continue;
+        }
+        let src = origen === 'interno' ? rext : null, dst = null, cq0 = null;
         try {
+          /* Emparejado por UNIQUEID: exacto, y es el unico que sirve para cola / IA / IVR,
+           * donde el token del nombre es el nombre del objeto y no un numero del CDR. */
+          if (uid) {
+            const uq = await pool.query('SELECT src, dst, linkedid FROM cdr WHERE uniqueid=$1 OR linkedid=$1 ORDER BY start ASC LIMIT 1', [uid]);
+            if (uq.rows[0]) { src = uq.rows[0].src; dst = uq.rows[0].dst; cq0 = uq.rows[0]; }
+          }
+        } catch (e) {}
+        /* El emparejado difuso (numero + ventana de 10 minutos) queda SOLO para internos y
+         * solo si el UNIQUEID no resolvio: para una cola el token es el nombre de la cola y
+         * jamas va a estar en `cdr.src`. */
+        if (!cq0 && origen === 'interno') try {
           /* El rango va sobre la COLUMNA, no sobre una función de la columna: con
            * `abs(extract(epoch from start) - $2) < 300` ningún índice servía y cada
            * grabación nueva costaba un Seq Scan del CDR entero (medido: 270× más lento
@@ -336,14 +390,14 @@ module.exports = function init(deps) {
         const callId = (cq0 && cq0.linkedid) || null;
         try {
           const ins = await pool.query(
-            "INSERT INTO pbxng_recordings (filename, ext, src, dst, started_at, bytes, duration, storage, deleted, linkedid) VALUES ($1,$2,$3,$4,to_timestamp($5),$6,$7,'local',false,$8) RETURNING id",
-            [f.filename, rext, src, dst, epoch, f.bytes, dur, callId]);
+            "INSERT INTO pbxng_recordings (filename, ext, src, dst, started_at, bytes, duration, storage, deleted, linkedid, origen) VALUES ($1,$2,$3,$4,to_timestamp($5),$6,$7,'local',false,$8,$9) RETURNING id",
+            [f.filename, rext, src, dst, epoch, f.bytes, dur, callId, origen]);
           /* El evento sale DESPUÉS de que la fila existe, no antes: un `grabacion.lista`
            * que llega y no tiene grabación detrás es peor que uno que llega tarde. */
           if (emitirEvento && ins.rows[0]) {
             emitirEvento('grabacion.lista', {
               call_id: callId, leg_id: null,
-              datos: { grabacion_id: ins.rows[0].id, interno: rext, desde: src, hacia: dst, duracion_s: dur, bytes: f.bytes },
+              datos: { grabacion_id: ins.rows[0].id, interno: rext, origen, desde: src, hacia: dst, duracion_s: dur, bytes: f.bytes },
             });
           }
         } catch (e) {}

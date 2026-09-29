@@ -16,6 +16,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Stack, Card, Group, Divider, Text, Button, Table, Badge, ActionIcon, Drawer, TextInput, Textarea, Select, Switch, ThemeIcon, SimpleGrid, Alert, Tooltip, Autocomplete, Code, Tabs, ScrollArea, Box, NumberInput, Collapse } from '@mantine/core';
 import { IconRefresh, IconBuildingStore, IconTool, IconDoorEnter, IconShieldLock, IconClockPause, IconPlus, IconEdit, IconTrash, IconHash, IconBolt, IconDeviceFloppy, IconPhoneCall, IconHeadset, IconUsers, IconInfoCircle, IconPlayerPlay, IconCircleCheck, IconPlugConnected, IconAlertTriangle, IconId, IconArrowRampRight, IconSearch, IconRobotOff } from '@tabler/icons-react';
 import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
+import { IconMicrophone2 } from '@tabler/icons-react';
 import { toast } from '../notify';
 
 /* Los proveedores, con la única diferencia que le importa a quien elige: dónde corre. */
@@ -35,7 +36,7 @@ const esRT = (p) => p === 'openai-realtime';
 const enLaNube = (p) => p === 'openai-realtime' || p === 'openai';
 const provMeta = (p) => PROVIDERS.find(x => x.value === p) || PROVIDERS[2];
 
-const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '', herramientas: {} };
+const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, record: false, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '', herramientas: {} };
 /* Los tiempos con los que se despliega la primera vez. Dos consultas antes de cortar, y
  * no una, porque la primera se pierde seguido: el visitante se dio vuelta, estaba hablando
  * con alguien, se le cayó el teléfono. */
@@ -386,6 +387,10 @@ export default function AiAgents() {
               <Bloque icon={<IconBolt size={18} />} titulo="Estado"
                 ayuda="Un agente apagado no timbra: si está puesto en una cola, esa cola deja de tener quien atienda por ese lado.">
                 <Switch label={form.enabled !== false ? 'Atiende llamadas' : 'Apagado'} checked={form.enabled !== false} onChange={e => up('enabled', e.currentTarget.checked)} />
+              </Bloque>
+              <Bloque icon={<IconMicrophone2 size={18} />} titulo="Grabación"
+                ayuda="Graba la llamada completa con el agente: lo que dice la persona y lo que contesta la IA. Queda en Grabaciones con origen «IA», se puede transcribir, y ocupa lugar en el disco igual que cualquier otra.">
+                <Switch label={form.record ? 'Se graba cada llamada con este agente' : 'Sin grabar'} checked={!!form.record} onChange={e => up('record', e.currentTarget.checked)} />
               </Bloque>
               <Group justify="flex-end"><Button variant="light" onClick={() => setPaso('cerebro')}>Siguiente: Cerebro →</Button></Group>
             </>}

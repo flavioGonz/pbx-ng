@@ -278,7 +278,12 @@ module.exports = function init(deps) {
       /* Nombre `pbxng-sala<numero>-<epoch>.wav` a propósito: es el patrón que ya indexa
        * recordings.js (`pbxng-<alnum>-<epoch>.wav`), así la reunión aparece en Grabaciones
        * como cualquier otra llamada en vez de quedar suelta en el volumen. */
-      perfil.push(['Set', 'CONFBRIDGE(bridge,record_file)=/var/spool/asterisk/monitor/pbxng-sala' + s.access_exten + '-${EPOCH}.wav']);
+      /* SIN `${EPOCH}` en el nombre: ConfBridge ya le agrega el sello de tiempo por su
+       * cuenta (`record_file_timestamp`, que se deja explícito acá al lado para que no
+       * dependa de confbridge.conf). Con las dos cosas el archivo salía
+       * `pbxng-sala50000-1790660054-1790660054.wav`, con el epoch repetido. */
+      perfil.push(['Set', 'CONFBRIDGE(bridge,record_file_timestamp)=yes']);
+      perfil.push(['Set', 'CONFBRIDGE(bridge,record_file)=/var/spool/asterisk/monitor/pbxng-sala' + s.access_exten + '.wav']);
     }
     for (const [a, d] of perfil) rows.push([p++, a, d]);
     if (!pin && !pinMod) {
