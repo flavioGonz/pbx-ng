@@ -2,6 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.29.2] - 2026-09-29
+### Fixed
+- **El diseñador de IVR era ilegible en modo oscuro.** Estaba pintado a mano en claro —el
+  lienzo `#eef2f7`, el panel de saludo y las tarjetas de cada opción en blanco fijo— mientras
+  el texto y los campos los pone Mantine según el tema. Con el panel en oscuro, eso daba
+  letras claras sobre superficies blancas: el número de destino de cada opción, las
+  etiquetas del panel de saludo y hasta el texto del botón «Subir audio nuevo» quedaban
+  invisibles. Ahora las superficies siguen al tema, como el resto del panel, y el lienzo y
+  la grilla de puntos también. (`dashboard/app/IvrDesigner.jsx`)
+  - Se revisó el resto del panel por el mismo patrón: los únicos blancos fijos que quedan
+    son los que **tienen que** serlo —el fondo de un QR, que no se lee en gris, y el
+    recuadro del logo de una troncal— más la pantalla `/phone`, que es un teléfono siempre
+    claro a propósito.
+
 ## [1.29.1] - 2026-09-29
 ### Fixed
 - **El invitado web entraba a la sala y la llamada se cortaba a los pocos segundos.** No era

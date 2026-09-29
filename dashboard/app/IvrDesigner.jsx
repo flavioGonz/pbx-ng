@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { ReactFlow, Background, Handle, Position, MarkerType, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper } from '@mantine/core';
+import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper, useComputedColorScheme } from '@mantine/core';
 import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume, IconSparkles } from '@tabler/icons-react';
 import { toast } from './notify';
 import { api, apiGet, apiPost, apiPut, BASE } from './api';
@@ -34,11 +34,16 @@ function EntryNode({ data }) {
     </div>
   );
 }
+/* Las tarjetas y el lienzo se pintaban SIEMPRE en claro (#fff, #eef2f7) mientras el texto
+ * y los campos los pone Mantine según el tema. En modo oscuro eso daba letras claras sobre
+ * tarjetas blancas: el número del destino, las etiquetas del panel y hasta el texto de un
+ * botón quedaban ilegibles. Ahora las superficies siguen al tema, como el resto del panel. */
 function OptionNode({ data, selected }) {
   const d = DEST[data.dest_type] || DEST.extension; const Icon = d.icon;
+  const oscuro = useComputedColorScheme('light') === 'dark';
   return (
-    <div style={{ width: 214, background: '#fff', borderRadius: 15, padding: 13, boxShadow: selected ? `0 0 0 3px ${d.color}, 0 12px 28px rgba(15,42,74,.18)` : '0 10px 24px rgba(15,42,74,.12)', border: `2px solid ${d.color}44`, transition: 'box-shadow .15s' }}>
-      <Handle type="target" position={Position.Left} style={{ background: d.color, width: 12, height: 12, border: '2px solid #fff' }} />
+    <div style={{ width: 214, background: oscuro ? 'var(--mantine-color-dark-6)' : '#fff', borderRadius: 15, padding: 13, boxShadow: selected ? `0 0 0 3px ${d.color}, 0 12px 28px rgba(15,42,74,.18)` : (oscuro ? '0 10px 24px rgba(0,0,0,.45)' : '0 10px 24px rgba(15,42,74,.12)'), border: `2px solid ${d.color}44`, transition: 'box-shadow .15s' }}>
+      <Handle type="target" position={Position.Left} style={{ background: d.color, width: 12, height: 12, border: '2px solid ' + (oscuro ? 'var(--mantine-color-dark-6)' : '#fff') }} />
       <Group justify="space-between" mb={7} wrap="nowrap">
         <Badge size="lg" radius="md" variant="filled" color="dark" ff="monospace" style={{ fontSize: 15 }}>{data.digit || '?'}</Badge>
         <Group gap={5} wrap="nowrap"><div style={{ width: 24, height: 24, borderRadius: 7, background: d.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon size={14} color={d.color} /></div><Text fz={11} c="dimmed">{d.label}</Text></Group>
@@ -160,13 +165,18 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
   }
 
   const promptData = [...new Set([greeting, ...prompts.map(p => p.name), ...ivrAudios.map(a => a.ref), 'demo-congrats', 'vm-goodbye', 'hello-world'])].filter(Boolean).map(n => ({ value: n, label: n }));
-  const glass = { background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(12px)', border: '1px solid rgba(15,23,42,.08)', boxShadow: '0 12px 34px rgba(15,42,74,.14)' };
+  const oscuro = useComputedColorScheme('light') === 'dark';
+  const glass = oscuro
+    ? { background: 'rgba(23,30,48,.94)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,.10)', boxShadow: '0 12px 34px rgba(0,0,0,.45)' }
+    : { background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(12px)', border: '1px solid rgba(15,23,42,.08)', boxShadow: '0 12px 34px rgba(15,42,74,.14)' };
 
   const inner = (
-    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'radial-gradient(900px 480px at 72% -12%, rgba(47,116,230,.06), transparent), #eef2f7' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: oscuro
+        ? 'radial-gradient(900px 480px at 72% -12%, rgba(47,116,230,.16), transparent), var(--mantine-color-dark-8)'
+        : 'radial-gradient(900px 480px at 72% -12%, rgba(47,116,230,.06), transparent), #eef2f7' }}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
         onNodeClick={(_, n) => n.type === 'option' && setSel(n.id)} onPaneClick={() => setSel(null)} fitView fitViewOptions={{ padding: 0.22 }} proOptions={{ hideAttribution: true }} defaultEdgeOptions={{ animated: true }} minZoom={0.3} maxZoom={1.7}>
-        <Background color="#cbd5e1" gap={24} size={1.4} />
+        <Background color={oscuro ? '#334155' : '#cbd5e1'} gap={24} size={1.4} />
       </ReactFlow>
 
       {/* barra superior flotante */}
