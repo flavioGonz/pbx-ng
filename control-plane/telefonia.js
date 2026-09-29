@@ -59,6 +59,9 @@ const vmpin = require('./vmpin');
  */
 module.exports = function init(deps) {
   const { app, pool, amiAction, setDialplan, exigirExt, clientIp, errorHttp, broadcastSoon, regenerarEntrantes, logger } = deps;
+  /* Avisa al carril rápido del estado en vivo (estados.js) que el DND o un desvío de un
+   * interno acaba de cambiar. Sin esto la insignia del panel esperaba al reconciliado. */
+  const estadoTocado = deps.estadoTocado || (() => {});
   const log = logger ? logger('telefonia') : { info() {}, warn() {}, error() {} };
 
   /* URL con la que ASTERISK ve a esta API. Asterisk corre en la red del host y la API
@@ -233,6 +236,7 @@ module.exports = function init(deps) {
        ON CONFLICT (ext) DO UPDATE SET dnd=$2, cfu=$3, cfb=$4, cfnr=$5, fm=$6, fm_seg=$7, updated_at=now()`,
       [ext, f.dnd, f.cfu || null, f.cfb || null, f.cfnr || null, f.fm || null, f.fm_seg]);
     if (!await aplicarFeat(ext, f)) { f.aviso = AVISO_ASTDB; log.warn('desvíos/DND guardados sin llegar a la AstDB', { ext }); }
+    estadoTocado(ext);
     return f;
   }
 

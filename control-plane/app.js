@@ -593,6 +593,9 @@ app.post('/api/agent/pause', auth, async (req,res)=>{ try{
   // Pausa por interface (todas las colas del agente); es por-agente => seguro con muchos agentes.
   try { await amiAction({ Action:'QueuePause', Interface:'PJSIP/'+ext, Paused: paused?'true':'false', Reason: reason }); } catch(_){}
   try { await pool.query('UPDATE queue_members SET paused=$2 WHERE interface=$1',['PJSIP/'+ext, paused?1:0]); } catch(_){}
+  /* Sin esto la pausa tardaba hasta 5 s en verse en el panel (el reconciliado): la escribe
+   * este mismo proceso, asi que se relee ya. */
+  try { if (typeof estados !== 'undefined' && estados) estados.releerMarcas(); } catch(_){}
   res.json({ ext, paused });
 }catch(e){ errorHttp(res, e); } });
 
@@ -1574,6 +1577,10 @@ const { sbcLink, invalidarSbcLink, trunkStatuses, regenerarEntrantes, failoverSt
 const { syncFeatures } = require('./telefonia')({
   app, pool, amiAction, setDialplan, exigirExt, clientIp, agentToken: AGENT_TOKEN,
   errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), regenerarEntrantes, logger,
+  /* El DND y los desvios se escriben desde acá (panel o código de función marcado en el
+   * teléfono): se avisa al carril rápido para que la insignia cambie en el acto y no en el
+   * próximo reconciliado. */
+  estadoTocado: () => { try { if (typeof estados !== 'undefined' && estados) estados.releerMarcas(); } catch (_) {} },
 });
 /* Desde acá el volcado Postgres → AstDB corre también en cada (re)conexión del AMI: ver
  * `resincronizar` más arriba. Es lo que devuelve a la astdb los desvíos, el DND, el sígueme,
@@ -2403,6 +2410,10 @@ io.on('connection', async (s) => {
   if (!s.scratchOnly) {
     s.join('state');
     try { s.emit('snapshot', await snapshot()); } catch (_) {}
+    /* El estado en vivo de los internos va aparte y COMPLETO al conectar: despues solo
+     * viajan las diferencias. */
+    try { s.emit('estados', estados.instantanea()); } catch (_) {}
+    s.on('estados:pedir', () => { try { s.emit('estados', estados.instantanea()); } catch (_) {} });
     /* Una pantalla que acaba de abrirse pide el estado AHORA en vez de esperar al próximo
      * evento o al reloj de 15 s. El socket del panel es uno solo y vive mientras dura la
      * sesión, así que sin esto cada navegación interna arrancaba mirando un spinner.
@@ -2430,6 +2441,12 @@ io.on('connection', async (s) => {
  * nftables vía el agente de Asterisk; rutas /api/security*, /api/ipgeo y sala 'security'. */
 const guard = require('./guard')({ app, pool, ami, io, astFwd, escribir: astconf.escribir, alerts, geoLookup, amiCommand, log: logger('guard') });
 guard.iniciar().catch((e) => logger('guard').error('arranque', e));
+/* Carril rapido del estado de los internos (estados.js): un evento `estados` con solo lo
+ * que cambio, empujado por `DeviceStateChange` del AMI. El `snapshot` de abajo sigue
+ * existiendo para la configuracion y la latencia; este no toca la base ni el AMI para
+ * armarse, por eso puede ir cada 60 ms sin costo. */
+const estados = require('./estados')({ pool, ami, io, amiList, logger });
+estados.iniciar();
 setInterval(broadcast, 15000);   // reconciliado: el refresco real llega por eventos ARI/AMI (broadcastSoon)
 ami.on('managerevent', (e) => { const t = e && e.event; if (['Newchannel', 'Hangup', 'Newstate', 'DeviceStateChange', 'ContactStatus', 'QueueMemberStatus', 'QueueCallerJoin', 'QueueCallerLeave', 'PeerStatus'].includes(t)) broadcastSoon(); });
 /* Dedup con vencimiento POR ENTRADA. Los tres dedup de este archivo hacían

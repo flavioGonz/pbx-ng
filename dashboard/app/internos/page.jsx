@@ -2,9 +2,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Stack, Title, Text, Card, Group, Button, Table, Badge, Modal, TextInput, PasswordInput, Switch, SegmentedControl, ActionIcon, ThemeIcon, NumberInput, Divider, Tooltip, CopyButton, Code, Skeleton, SimpleGrid, Loader, Alert, Select, Tabs } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconInfoCircle, IconPlus, IconTrash, IconArrowForward, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
+import { IconInfoCircle, IconPlus, IconTrash, IconArrowForward, IconVideo, IconWorld, IconDeviceLandlinePhone, IconPencil, IconUserPlus, IconQrcode, IconSearch, IconCopy, IconCheck, IconMail, IconSend, IconUsers, IconActivity, IconPhoneCall, IconHash, IconUser, IconClock, IconMicrophone2, IconRouteAltLeft, IconServer, IconShieldHalf, IconAlertTriangle, IconCircleCheck, IconPlayerPause, IconMoonOff } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { useLive } from '../useLive';
+import { useLive, useEstados } from '../useLive';
+import EstadoVivo, { EstiloLatido, resolverEstado } from '../EstadoVivo';
 import { apiGet, apiPost, apiPut, apiDel, usePoll, useApi } from '../api';
 import { fmtFechaHora } from '../fmt';
 import { toast } from '../notify';
@@ -50,7 +51,7 @@ const rttColor = (r) => r == null ? 'gray' : r < 80 ? 'teal' : r < 200 ? 'yellow
  * La latencia es la que mide Asterisk con su propio OPTIONS contra el aparato (el RTT de
  * `pjsip show contacts`): no es una prueba de llamada, es el ida y vuelta de la
  * señalización. Sirve para ver un enlace que se degradó; no dice nada del audio. */
-function EstadoInterno({ e }) {
+function EstadoInterno({ e, st }) {
   if (!e) return null;
   const reg = e.status === 'online' || e.status === 'in_call';
   const rtt = e.rtt;
@@ -66,12 +67,15 @@ function EstadoInterno({ e }) {
           </Badge>
         </Tooltip>
       )}
-      <Tooltip withArrow label={reg ? (e.origin ? 'Registrado desde ' + e.origin : 'Registrado') : 'El aparato no está registrado en la central'}>
-        <Badge variant={reg ? 'light' : 'outline'} color={e.status === 'in_call' ? 'orange' : reg ? 'teal' : 'gray'} style={{ cursor: 'help' }}
+      {/* El registro y lo que el interno está haciendo son dos preguntas distintas: la
+          primera es del snapshot, la segunda del carril rápido. Se muestran las dos. */}
+      <Tooltip withArrow label={reg ? (e.origin ? 'Registrado desde ' + e.origin : 'Registrado en la central') : 'El aparato no está registrado en la central'}>
+        <Badge variant={reg ? 'light' : 'outline'} color={reg ? 'teal' : 'gray'} style={{ cursor: 'help' }}
           leftSection={<IcoRegistro s={12} vivo={reg} />}>
-          {e.status === 'in_call' ? 'En llamada' : reg ? 'Registrado' : 'Sin registrar'}
+          {reg ? 'Registrado' : 'Sin registrar'}
         </Badge>
       </Tooltip>
+      {reg && <EstadoVivo e={e} st={st} />}
     </Group>
   );
 }
@@ -102,6 +106,11 @@ const Th = ({ icon, children }) => <Table.Th><Group gap={6} wrap="nowrap" style=
 
 export default function Extensiones() {
   const { snap } = useLive(); const list = snap?.extensions || [];
+  /* El estado de cada interno NO viene del snapshot: llega por el carril rápido del
+   * socket (useEstados), que sólo manda lo que cambió y por eso se ve en el acto. El
+   * snapshot sigue siendo el dueño de la configuración, el registro y la latencia. */
+  const estados = useEstados();
+  const [filtro, setFiltro] = useState('todos');
   const [opened, { open, close }] = useDisclosure(false);
   const [solapa, setSolapa] = useState('identidad');
   const [qrOpen, { open: openQr, close: closeQr }] = useDisclosure(false);
@@ -200,17 +209,49 @@ export default function Extensiones() {
     catch (e) { toast('Error: ' + e.message, 'bad'); }
   }
 
-  const online = list.filter(e => e.status === 'online').length;
-  const inCall = list.filter(e => e.channels > 0).length;
+  /* Un solo pase por la lista: cada interno con su estado ya resuelto, para que la tabla,
+   * los contadores y el filtro miren exactamente lo mismo. */
+  const conEstado = useMemo(() => list.map(e => ({ e, st: estados[String(e.id)] || null, r: resolverEstado(e, estados[String(e.id)] || null) })), [list, estados]);
+  const online = conEstado.filter(x => x.r.registrado).length;
+  const inCall = conEstado.filter(x => x.r.enLlamada).length;
+  const timbrando = conEstado.filter(x => x.r.timbrando).length;
+  const pausados = conEstado.filter(x => x.r.pausa).length;
+  const dnds = conEstado.filter(x => x.r.dnd).length;
+  const desviados = conEstado.filter(x => x.r.desvio).length;
   const wrtc = list.filter(e => e.webrtc).length;
-  const sip = list.length - wrtc;
-  const kpis = [{ k: 'Total', v: list.length, icon: IconUsers, c: 'pbx' }, { k: 'En línea', v: online, icon: IconActivity, c: 'teal' }, { k: 'En llamada', v: inCall, icon: IconPhoneCall, c: 'orange' }, { k: 'WebRTC', v: wrtc, icon: IconWorld, c: 'grape' }, { k: 'SIP físico', v: sip, icon: IconDeviceLandlinePhone, c: 'gray' }];
-  const fl = list.filter(e => !q || e.id.includes(q) || (e.name || '').toLowerCase().includes(q.toLowerCase()) || (e.ip || '').includes(q));
+  const kpis = [
+    { k: 'Total', v: list.length, icon: IconUsers, c: 'pbx' },
+    { k: 'En línea', v: online, icon: IconActivity, c: 'teal' },
+    /* «En llamada» cuenta conversaciones, no timbres: el que está timbrando todavía no
+     * atendió y tiene su propio contador al lado del título. */
+    { k: 'En llamada', v: inCall, icon: IconPhoneCall, c: 'orange' },
+    { k: 'Pausados', v: pausados, icon: IconPlayerPause, c: 'yellow' },
+    { k: 'No molestar', v: dnds, icon: IconMoonOff, c: 'red' },
+    { k: 'WebRTC', v: wrtc, icon: IconWorld, c: 'grape' },
+  ];
+  const FILTROS = [
+    { value: 'todos', label: 'Todos', n: list.length },
+    { value: 'llamada', label: 'En llamada', n: inCall + timbrando },
+    { value: 'libres', label: 'Libres', n: conEstado.filter(x => x.r.act === 'libre' && !x.r.dnd && !x.r.pausa).length },
+    { value: 'pausa', label: 'Pausa', n: pausados },
+    { value: 'dnd', label: 'DND', n: dnds },
+    { value: 'desvio', label: 'Desvío', n: desviados },
+    { value: 'off', label: 'Sin registrar', n: list.length - online },
+  ];
+  const pasaFiltro = (r) => filtro === 'todos' ? true
+    : filtro === 'llamada' ? (r.enLlamada || r.timbrando)
+      : filtro === 'libres' ? (r.act === 'libre' && !r.dnd && !r.pausa)
+        : filtro === 'pausa' ? r.pausa
+          : filtro === 'dnd' ? r.dnd
+            : filtro === 'desvio' ? !!r.desvio
+              : filtro === 'off' ? !r.registrado : true;
+  const fl = conEstado.filter(({ e, r }) => pasaFiltro(r) && (!q || e.id.includes(q) || (e.name || '').toLowerCase().includes(q.toLowerCase()) || (e.ip || '').includes(q)));
 
   return (
     <Stack gap="lg">
-      <PageHeader icon={<IconUsers size={24} />} title="Extensiones" subtitle="Aprovisionamiento y estado de registro en tiempo real" color="pbx" />
-      <SimpleGrid cols={{ base: 2, sm: 3, lg: 5 }} spacing="md">
+      <EstiloLatido />
+      <PageHeader icon={<IconUsers size={24} />} title="Extensiones" subtitle="Aprovisionamiento y estado en vivo: llamada, timbrado, pausa, DND y desvíos" color="pbx" />
+      <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} spacing="md">
         {kpis.map(x => (
           <Card key={x.k} withBorder radius="lg" padding="md" shadow="sm">
             <Group gap="sm" wrap="nowrap"><ThemeIcon size={40} radius="md" variant="light" color={x.c}><x.icon size={20} /></ThemeIcon><div><Text fw={800} fz={24} lh={1}><Slot value={x.v} /></Text><Text size="xs" c="dimmed">{x.k}</Text></div></Group>
@@ -219,8 +260,10 @@ export default function Extensiones() {
       </SimpleGrid>
       <Card withBorder radius="lg" padding="lg" shadow="sm">
         <Group justify="space-between" mb="md">
-          <Group gap="xs"><Text fw={600}>{list.length} extensiones</Text><Badge variant="light" color="teal">{online} en línea</Badge></Group>
-          <Group gap="sm">
+          <Group gap="xs"><Text fw={600}>{list.length} extensiones</Text><Badge variant="light" color="teal">{online} en línea</Badge>{timbrando > 0 && <Badge variant="light" color="blue">{timbrando} timbrando</Badge>}</Group>
+          <Group gap="sm" wrap="wrap" justify="flex-end">
+            <SegmentedControl size="xs" value={filtro} onChange={setFiltro}
+              data={FILTROS.map(f => ({ value: f.value, label: f.value === 'todos' ? f.label : f.label + ' (' + f.n + ')' }))} />
             <TextInput placeholder="Buscar extensión, nombre o IP" leftSection={<IconSearch size={15} />} value={q} onChange={e => setQ(e.target.value)} w={230} />
             <Button variant="light" leftSection={<IconQrcode size={16} />} onClick={openQrModal}>Acceso QR</Button>
             <Button leftSection={<IconPlus size={16} />} onClick={openNew}>Nuevo extensión</Button>
@@ -231,11 +274,11 @@ export default function Extensiones() {
             <Table.ScrollContainer minWidth={760}>
               <Table striped highlightOnHover verticalSpacing="sm">
                 <Table.Thead><Table.Tr><Th icon={<IconHash size={13} />}>Extensión</Th><Th icon={<IconUser size={13} />}>Nombre</Th><Th icon={<IconActivity size={13} />}>Estado</Th><Th icon={<IconRouteAltLeft size={13} />}>Vía</Th><Th icon={<IconWorld size={13} />}>IP</Th><Th icon={<IconClock size={13} />}>RTT</Th><Th icon={<IconDeviceLandlinePhone size={13} />}>Tipo</Th><Th icon={<IconVideo size={13} />}>Video</Th><Th icon={<IconQrcode size={13} />}>Acceso</Th><Table.Th /></Table.Tr></Table.Thead>
-                <Table.Tbody>{fl.map(e => (
+                <Table.Tbody>{fl.map(({ e, st }) => (
                   <Table.Tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => openEdit(e)}>
                     <Table.Td ff="monospace" fw={600}>{e.id}</Table.Td>
                     <Table.Td>{e.name || <Text c="dimmed" size="sm">—</Text>}</Table.Td>
-                    <Table.Td><Badge variant="light" color={e.channels > 0 ? 'orange' : e.status === 'online' ? 'teal' : 'gray'} leftSection={<span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: e.channels > 0 ? '#f59e0b' : e.status === 'online' ? '#22c55e' : '#9aa3b2' }} />}>{e.channels > 0 ? 'En llamada' : e.status === 'online' ? 'Registrado' : 'Desconectado'}</Badge></Table.Td><Table.Td><ViaBadge v={e.via} origin={e.origin} /></Table.Td>
+                    <Table.Td><EstadoVivo e={e} st={st} /></Table.Td><Table.Td><ViaBadge v={e.via} origin={e.origin} /></Table.Td>
                     <Table.Td>{(e.origin || e.ip) ? <Text ff="monospace" size="xs">{e.origin || e.ip}</Text> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
                     <Table.Td>{e.rtt != null ? <Badge size="sm" variant="dot" color={rttColor(e.rtt)}><Slot value={e.rtt.toFixed(0)} /> ms</Badge> : <Text c="dimmed" size="sm">—</Text>}</Table.Td>
                     <Table.Td><Badge variant="dot" color={e.webrtc ? 'pbx' : 'gray'}>{e.webrtc ? 'WebRTC' : 'SIP'}</Badge></Table.Td>
@@ -262,7 +305,7 @@ export default function Extensiones() {
         titulo={editing ? 'Interno ' + form.id : 'Nuevo interno'}
         subtitulo={editing ? (vivo && vivo.name ? vivo.name : (form.type === 'webrtc' ? 'Navegador / app' : 'Teléfono físico'))
           : 'Un número que suena en un aparato o en un navegador'}
-        estado={editing ? <EstadoInterno e={vivo} /> : null}
+        estado={editing ? <EstadoInterno e={vivo} st={estados[String(form.id)] || null} /> : null}
         solapa={solapa} onSolapa={setSolapa}
         solapas={[
           {

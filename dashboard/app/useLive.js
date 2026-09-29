@@ -17,9 +17,18 @@ export function getSocket() {
     // Siempre mismo origen: server.js proxya /socket.io a la API tanto en `npm run dev`
     // como en producción, y :3000 sólo escucha en loopback (CONTRATOS §2/§4), así que
     // saltar directo a la API rompería el tiempo real para quien entra por :3001.
-    // Polling-only: el upgrade a WebSocket no prospera detrás del proxy (h2) y el
-    // realtime ya llega por snapshots; evitamos el error de consola sin perder función.
-    socket = io({ path: '/socket.io', transports: ['polling'], upgrade: false, auth: { token } });
+    /* Se INTENTA el WebSocket, con long-polling como piso.
+     *
+     * Antes estaba forzado a polling para no ver el error de consola del upgrade fallido.
+     * El costo de eso no se veía hasta que el estado de los internos pasó a ser en vivo:
+     * medido contra la central, un evento que el servidor emitía 158 ms después de que el
+     * teléfono empezara a timbrar tardaba entre 100 ms y 1.3 s en llegar al navegador,
+     * porque con polling el mensaje espera a que el cliente vuelva a abrir el GET. Con
+     * WebSocket el mensaje sale por una conexión que ya está abierta.
+     *
+     * Si el proxy del cliente no deja pasar el upgrade, socket.io se queda en polling solo
+     * (eso es lo que hace de fábrica): se pierde velocidad, no función. */
+    socket = io({ path: '/socket.io', transports: ['polling', 'websocket'], upgrade: true, auth: { token } });
   }
   return socket;
 }
@@ -38,6 +47,38 @@ export function getSocket() {
  *  se le pide al servidor uno fresco, que llega en decenas de milisegundos. */
 let ultimoSnap = null;
 function recordarSnap(d) { ultimoSnap = d; }
+
+/* ── Carril rápido: el estado de los internos ──────────────────────────────────────
+ *
+ *  Va por un evento aparte del `snapshot` porque el snapshot es caro de armar del lado de
+ *  la central (lee la base y le pide `pjsip show contacts` al AMI) y por eso llega con
+ *  freno. Acá viajan SÓLO las diferencias —un objeto por interno que cambió—, así que
+ *  entre que un teléfono empieza a timbrar y que la insignia cambia en pantalla hay
+ *  décimas de segundo. Al conectar llega uno completo (`completo: true`) y a partir de ahí
+ *  cada mensaje se funde sobre lo que ya había.
+ *
+ *  Mismo truco de memoria que el snapshot: la pantalla que se abre pinta con lo último
+ *  que vimos y pide uno fresco en paralelo. */
+let ultimoEstados = {};
+export function useEstados() {
+  const [estados, setEstados] = useState(ultimoEstados);
+  useEffect(() => {
+    const s = getSocket(); if (!s) return;
+    const on = (d) => {
+      if (!d || !d.internos) return;
+      ultimoEstados = d.completo ? { ...d.internos } : { ...ultimoEstados, ...d.internos };
+      setEstados(ultimoEstados);
+    };
+    const pedir = () => s.emit('estados:pedir');
+    s.on('estados', on);
+    /* Y en cada reconexión, uno completo: mientras el socket estuvo caído pudo cambiar
+     * cualquier cosa y las diferencias que nos perdimos no vuelven solas. */
+    s.on('connect', pedir);
+    if (s.connected) pedir();
+    return () => { s.off('estados', on); s.off('connect', pedir); };
+  }, []);
+  return estados;
+}
 
 export function useLive() {
   const [snap, setSnap] = useState(ultimoSnap);
