@@ -27,14 +27,14 @@
 import { useEffect, useState } from 'react';
 import {
   Card, Group, Text, Title, Button, Table, TextInput, NumberInput, Switch,
-  Stack, ActionIcon, ThemeIcon, Badge, Tooltip, Divider, Alert, Textarea, CopyButton, Loader, Paper,
+  Stack, ActionIcon, ThemeIcon, Badge, Tooltip, Divider, Alert, Textarea, CopyButton, Loader, Paper, Accordion,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import {
   IconUsers, IconPlus, IconTrash, IconPencil, IconEye, IconMail, IconLock, IconHash,
   IconTag, IconMicrophoneOff, IconMicrophone, IconDoorExit, IconInfoCircle, IconDice,
   IconCalendarEvent, IconPlayerRecord, IconCopy, IconCheck, IconRefresh, IconKey,
-  IconAlertTriangle, IconUsersGroup, IconUserPlus, IconWorldShare, IconLink, IconVideo, IconPhoneOutgoing, IconDoorEnter,
+  IconAlertTriangle, IconUsersGroup, IconUserPlus, IconWorldShare, IconLink, IconVideo, IconPhoneOutgoing, IconDoorEnter, IconHistory,
 } from '@tabler/icons-react';
 import PageHeader from './PageHeader';
 import { TableSkeleton } from './Skeletons';
@@ -386,6 +386,96 @@ function NumeroExterno() {
   );
 }
 
+/* ── El historial de la sala ─────────────────────────────────────────────────
+ * La vista en vivo contesta «quién está ahora»; esta contesta «qué pasó». Son las dos
+ * preguntas que se hacen sobre una sala y hasta ahora sólo existía la primera: terminada
+ * la reunión no quedaba rastro de quién participó ni de cuánto duró.
+ *
+ * Cada reunión se muestra cerrada y se abre para ver la gente: en una sala que se usa
+ * todos los días, la lista importa más que el detalle, y el detalle importa de a una. */
+const durTexto = (s) => {
+  const n = Math.max(0, Math.round(Number(s) || 0));
+  if (n < 60) return n + ' s';
+  const m = Math.floor(n / 60), h = Math.floor(m / 60);
+  return h ? h + ' h ' + (m % 60) + ' min' : m + ' min';
+};
+
+function Historial({ sala }) {
+  const { data, error, cargando } = usePoll('/salas/' + sala.name + '/historial?limite=30', 60000);
+  const reuniones = Array.isArray(data) ? data : [];
+  useEffect(() => { if (error) toast(error.message, 'bad'); }, [error]);
+
+  if (cargando && !data) return <TableSkeleton rows={4} cols={3} />;
+  if (!reuniones.length) {
+    return (
+      <Alert variant="light" color="gray" icon={<IconInfoCircle size={18} />}>
+        Todavía no hay reuniones registradas en esta sala. El historial se escribe a medida que
+        la gente entra y sale, así que las reuniones anteriores a esta versión no aparecen.
+      </Alert>
+    );
+  }
+  return (
+    <Stack gap="sm">
+      <Text fz="xs" c="dimmed">
+        Las últimas {reuniones.length} reuniones. La duración de cada persona es el tiempo que
+        estuvo en la sala, no el de su llamada: el que esperó al moderador con música cuenta
+        desde que entró al mezclador.
+      </Text>
+      <Accordion variant="separated" radius="md">
+        {reuniones.map((r) => (
+          <Accordion.Item key={r.id} value={String(r.id)}>
+            <Accordion.Control>
+              <Group justify="space-between" wrap="nowrap" pr="sm">
+                <div style={{ minWidth: 0 }}>
+                  <Text fw={600} fz="sm">{fmtFechaHora(r.inicio)}</Text>
+                  <Text fz="xs" c="dimmed">
+                    {durTexto(r.segundos)}
+                    {r.fin_estimado ? ' · fin estimado' : ''}
+                    {' · '}{(r.participantes || []).length === 1 ? '1 participante' : (r.participantes || []).length + ' participantes'}
+                  </Text>
+                </div>
+                <Group gap={6} wrap="nowrap">
+                  {r.grabada && <Tooltip label="La reunión se grabó: está en Grabaciones"><ThemeIcon size={20} radius="xl" variant="light" color="red"><IconPlayerRecord size={12} /></ThemeIcon></Tooltip>}
+                  {!r.fin && <Badge variant="light" color="teal">En curso</Badge>}
+                  {r.pico > 0 && <Badge variant="light" color="gray">{r.pico} a la vez</Badge>}
+                </Group>
+              </Group>
+            </Accordion.Control>
+            <Accordion.Panel>
+              {/* `fin_estimado` no se esconde: si la central se reinició en el medio, la hora
+                  de salida es una suposición y decirlo cuesta una palabra. */}
+              {r.fin_estimado && (
+                <Alert variant="light" color="yellow" icon={<IconAlertTriangle size={16} />} mb="xs" py={6}>
+                  <Text fz="xs">La central se reinició con esta reunión abierta: la hora de fin es estimada.</Text>
+                </Alert>
+              )}
+              <Table verticalSpacing={6} fz="sm">
+                <Table.Thead><Table.Tr><Table.Th>Quién</Table.Th><Table.Th>Entró</Table.Th><Table.Th>Estuvo</Table.Th></Table.Tr></Table.Thead>
+                <Table.Tbody>
+                  {(r.participantes || []).map((p, i) => (
+                    <Table.Tr key={i}>
+                      <Table.Td>
+                        <Group gap={6} wrap="nowrap">
+                          <Text fz="sm">{p.quien || p.numero || '—'}</Text>
+                          {p.moderador && <Badge size="xs" variant="light" color="orange">Moderador</Badge>}
+                          {p.web && <Tooltip label="Entró desde el navegador con el enlace de la sala"><Badge size="xs" variant="light" color="blue">Web</Badge></Tooltip>}
+                        </Group>
+                        {p.numero && p.numero !== p.quien && <Text fz={11} c="dimmed" ff="monospace">{p.numero}</Text>}
+                      </Table.Td>
+                      <Table.Td><Text fz="xs">{fmtFechaHora(p.entro)}</Text></Table.Td>
+                      <Table.Td><Text fz="xs">{durTexto(p.segundos)}{p.fin_estimado ? ' (est.)' : ''}</Text></Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Accordion.Panel>
+          </Accordion.Item>
+        ))}
+      </Accordion>
+    </Stack>
+  );
+}
+
 function EnVivo({ sala, onCerrar }) {
   const { data, error, cargando, recargar } = usePoll('/salas/' + sala.name + '/live', 4000);
   const gente = (data && data.participantes) || [];
@@ -558,6 +648,7 @@ export default function SalasPanel({ conEncabezado = true }) {
   const [invitar, setInvitar] = useState(null);
   const [verPin, setVerPin] = useState(null);
   const [enlace, setEnlace] = useState(null);
+  const [historial, setHistorial] = useState(null);
   const [abriendo, setAbriendo] = useState('');     // nombre de la sala que se está trayendo
   const [formEstado, setFormEstado] = useState(null);
   const [form, { open: abrirForm, close: cerrarForm }] = useDisclosure(false);
@@ -713,6 +804,9 @@ export default function SalasPanel({ conEncabezado = true }) {
                             </Tooltip>
                           )}
                           <Tooltip label="Ver quién está adentro"><ActionIcon variant="subtle" color="teal" onClick={() => setEnVivo(s)}><IconEye size={17} /></ActionIcon></Tooltip>
+                          <Tooltip label="Historial: reuniones anteriores y quién participó">
+                            <ActionIcon variant="subtle" color="gray" onClick={() => setHistorial(s)}><IconHistory size={17} /></ActionIcon>
+                          </Tooltip>
                           {esAdmin && <Tooltip label="Invitar por correo"><ActionIcon variant="subtle" color="cyan" onClick={() => setInvitar(s)}><IconMail size={17} /></ActionIcon></Tooltip>}
                           {esAdmin && (
                             <Tooltip label={s.web ? 'Enlace para entrar desde el navegador' : 'Todavía no se puede entrar desde el navegador'}>
@@ -780,6 +874,16 @@ export default function SalasPanel({ conEncabezado = true }) {
         subtitulo="Se muestra sólo mientras este cajón está abierto"
         solapas={[{ value: 'pin', label: 'PIN', contenido: (
           verPin ? <VerPin sala={verPin} onCerrar={() => setVerPin(null)} /> : null
+        ) }]}
+      />
+
+      <DrawerNG
+        opened={!!historial} onClose={() => setHistorial(null)} ancho={620} color="gray"
+        icono={<IconHistory size={24} />}
+        titulo={historial ? 'Historial de «' + (historial.label || historial.name) + '»' : ''}
+        subtitulo="Reuniones anteriores, con quién participó y cuánto estuvo"
+        solapas={[{ value: 'hist', label: 'Reuniones', contenido: (
+          historial ? <Historial sala={historial} /> : null
         ) }]}
       />
 

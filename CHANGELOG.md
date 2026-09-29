@@ -2,6 +2,29 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.32.0] - 2026-09-29
+### Added
+- **Historial de reuniones: qué pasó en cada sala, quién participó y cuánto estuvo.** La sala
+  sabía contestar «quién está adentro **ahora**» y nada más: terminada la reunión no quedaba
+  rastro. Para una sala de directorio —o para justificarle a un cliente una reunión— eso es
+  justo lo que se pregunta al día siguiente. (`control-plane/salas.js`, migración
+  `0027_salas_historial.sql`)
+  - Se arma **escuchando a Asterisk** (`ConfbridgeJoin` / `ConfbridgeLeave` /
+    `ConfbridgeEnd`), no reconstruyéndolo del CDR: el CDR sabe que un canal llamó al número
+    de la sala, pero **no** cuándo entró de verdad al mezclador —pudo esperar al moderador
+    media hora—, ni si era moderador, ni cuándo se fue si la llamada siguió después.
+  - Dos tablas y no una: «qué reuniones hubo» y «quién estuvo en cada una» son dos preguntas
+    distintas. Con una sola habría que adivinar dónde empieza y termina cada reunión
+    agrupando por tiempo, que es la cuenta que sale mal el día que dos reuniones se tocan.
+  - Cada participante queda marcado como **moderador** o **web** (entró por el enlace), que
+    es lo que después se quiere saber y no se puede deducir del número.
+  - **`fin estimado`**: si la central se reinicia con una reunión abierta, el evento de
+    cierre no llega nunca. La fila se cierra igual —dejarla abierta para siempre es peor— y
+    queda marcada; el panel lo dice en vez de mostrar una duración inventada.
+  - En el panel es un cajón por sala: la lista de reuniones cerrada, y cada una se abre para
+    ver la gente. En una sala de uso diario la lista importa más que el detalle, y el detalle
+    importa de a uno.
+
 ## [1.31.0] - 2026-09-29
 ### Added
 - **«Entrar como moderador» desde el panel, sin teléfono y sin marcar el PIN.** Faltaba la

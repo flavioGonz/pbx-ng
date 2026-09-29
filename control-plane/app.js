@@ -1568,7 +1568,7 @@ resincronizar.push(syncAbreviados);
  * telefonia.js: Postgres manda, el dialplan lee DB(sala|salapin|salamod/<nombre>), así que
  * su volcado también entra en `resincronizar`. */
 const { syncSalas } = require('./salas')({
-  app, pool, amiAction, amiList, setDialplan, smtpHint, errorHttp,
+  app, pool, ami, amiAction, amiList, setDialplan, smtpHint, errorHttp,
   broadcastSoon: (...a) => broadcastSoon(...a), logger,
   /* Para el enlace web de la sala: el invitado entra con un endpoint WebRTC descartable,
    * el mismo que fabrica el click-to-call (y que limpia el mismo janitor). */

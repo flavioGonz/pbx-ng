@@ -79,7 +79,7 @@ const emails = require('./emails');
  * poder forzarlo).
  */
 module.exports = function init(deps) {
-  const { app, pool, amiAction, amiList, setDialplan, smtpHint, errorHttp, broadcastSoon, logger, createWebrtcEndpoint, rateLimit } = deps;
+  const { app, pool, ami, amiAction, amiList, setDialplan, smtpHint, errorHttp, broadcastSoon, logger, createWebrtcEndpoint, rateLimit } = deps;
   const log = logger ? logger('salas') : { info() {}, warn() {}, error() {} };
 
   const err = (status, msg) => Object.assign(new Error(msg), { status });
@@ -842,6 +842,110 @@ module.exports = function init(deps) {
       const { rows: sr } = await pool.query('SELECT label, name, video FROM pbxng_conferences WHERE name=$1', [meta.sala || '']);
       res.json({ ext: ses.guest_ext, pass: password, dial: ses.dial_exten, moderador: !!meta.moderar,
         video: !!(sr[0] && sr[0].video), sala: sr[0] ? (sr[0].label || sr[0].name) : '' });
+    } catch (e) { errorHttp(res, e); }
+  });
+
+  /* ══════════════════════════════════════════════════════════════════════════
+   *  EL HISTORIAL DE LAS REUNIONES
+   *
+   *  Se arma escuchando a Asterisk, no preguntándole: `ConfbridgeStart`, `ConfbridgeJoin`,
+   *  `ConfbridgeLeave` y `ConfbridgeEnd` cuentan la reunión en vivo, y cada uno se escribe
+   *  en el momento. Reconstruirlo después desde el CDR no alcanza: el CDR sabe que un canal
+   *  llamó al 50000, pero no cuándo entró de verdad al mezclador (puede haber esperado al
+   *  moderador media hora), ni si era moderador, ni cuándo se fue si la llamada siguió.
+   *
+   *  Si la central se reinicia con una reunión abierta, el evento de cierre no llega nunca.
+   *  Esas filas se cierran al arrancar y quedan MARCADAS (`fin_estimado`): el panel lo dice
+   *  en vez de mostrar una duración inventada.
+   * ══════════════════════════════════════════════════════════════════════════ */
+  const abiertas = new Map();   // sala -> id de la reunión en curso
+
+  async function reunionDe(sala, grabada) {
+    if (abiertas.has(sala)) return abiertas.get(sala);
+    /* Puede existir una reunión abierta en la base y no en memoria: la central se reinició
+     * en el medio. Se sigue la misma, en vez de partir la reunión en dos. */
+    const { rows } = await pool.query('SELECT id FROM pbxng_conf_reuniones WHERE sala=$1 AND fin IS NULL ORDER BY inicio DESC LIMIT 1', [sala]);
+    let id = rows[0] && rows[0].id;
+    if (!id) {
+      const r = await pool.query('INSERT INTO pbxng_conf_reuniones (sala, grabada) VALUES ($1,$2) RETURNING id', [sala, !!grabada]);
+      id = r.rows[0].id;
+    }
+    abiertas.set(sala, id);
+    return id;
+  }
+
+  async function alEntrar(e) {
+    const sala = campo(e, 'Conference'); const canal = campo(e, 'Channel');
+    if (!sala || !canal) return;
+    try {
+      const { rows: sr } = await pool.query('SELECT grabar FROM pbxng_conferences WHERE name=$1', [sala]);
+      if (!sr[0]) return;                       // no es una sala nuestra: no se guarda nada
+      const id = await reunionDe(sala, sr[0].grabar);
+      const numero = campo(e, 'CallerIDNum');
+      await pool.query(
+        `INSERT INTO pbxng_conf_presencias (reunion_id, sala, canal, quien, numero, moderador, web)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [id, sala, canal, campo(e, 'CallerIDName') || null, numero || null, si(campo(e, 'Admin')), /^c2c/i.test(String(numero || ''))]);
+      await pool.query(
+        `UPDATE pbxng_conf_reuniones SET pico = GREATEST(pico, (SELECT count(*) FROM pbxng_conf_presencias WHERE reunion_id=$1 AND salio IS NULL)) WHERE id=$1`, [id]);
+    } catch (err) { log.warn('historial: no se pudo anotar una entrada', err.message); }
+  }
+
+  async function alSalir(e) {
+    const canal = campo(e, 'Channel'); if (!canal) return;
+    try { await pool.query('UPDATE pbxng_conf_presencias SET salio=now() WHERE canal=$1 AND salio IS NULL', [canal]); }
+    catch (err) { log.warn('historial: no se pudo anotar una salida', err.message); }
+  }
+
+  async function alTerminar(e) {
+    const sala = campo(e, 'Conference'); if (!sala) return;
+    try {
+      const id = abiertas.get(sala);
+      abiertas.delete(sala);
+      await pool.query('UPDATE pbxng_conf_presencias SET salio=now() WHERE sala=$1 AND salio IS NULL', [sala]);
+      await pool.query('UPDATE pbxng_conf_reuniones SET fin=now() WHERE ' + (id ? 'id=$1' : 'sala=$1 AND fin IS NULL'), [id || sala]);
+    } catch (err) { log.warn('historial: no se pudo cerrar la reunión', err.message); }
+  }
+
+  if (ami && ami.on) {
+    ami.on('managerevent', (e) => {
+      const n = String((e && (e.event || e.Event)) || '').toLowerCase();
+      if (n === 'confbridgejoin') alEntrar(e);
+      else if (n === 'confbridgeleave') alSalir(e);
+      else if (n === 'confbridgeend') alTerminar(e);
+    });
+  }
+
+  /* Al arrancar: lo que quedó abierto de la corrida anterior se cierra y se marca. Una
+   * reunión «en curso» de hace tres días, con gente que nunca salió, es peor que decir
+   * «esto terminó, no sé exactamente cuándo». */
+  async function cerrarColgadas() {
+    try {
+      const a = await pool.query('UPDATE pbxng_conf_presencias SET salio=now(), fin_estimado=true WHERE salio IS NULL RETURNING id');
+      const b = await pool.query('UPDATE pbxng_conf_reuniones SET fin=now(), fin_estimado=true WHERE fin IS NULL RETURNING id');
+      if (a.rowCount || b.rowCount) log.info('historial: cerradas con fin estimado tras el reinicio', { reuniones: b.rowCount, presencias: a.rowCount });
+    } catch (err) { log.warn('historial: no se pudieron cerrar las colgadas', err.message); }
+  }
+  cerrarColgadas();
+
+  /* El historial de una sala. Operación (admin + supervisor): es lo mismo que ve quien
+   * modera, corrido en el tiempo. Los PIN no aparecen por ningún lado. */
+  app.get('/api/salas/:name/historial', async (req, res) => {
+    try {
+      const limite = Math.max(1, Math.min(100, parseInt(req.query.limite, 10) || 20));
+      const { rows: reuniones } = await pool.query(
+        `SELECT id, inicio, fin, fin_estimado, pico, grabada,
+                EXTRACT(EPOCH FROM (COALESCE(fin, now()) - inicio))::int AS segundos
+           FROM pbxng_conf_reuniones WHERE sala=$1 ORDER BY inicio DESC LIMIT $2`, [req.params.name, limite]);
+      if (!reuniones.length) return res.json([]);
+      const { rows: gente } = await pool.query(
+        `SELECT reunion_id, quien, numero, moderador, web, entro, salio, fin_estimado,
+                EXTRACT(EPOCH FROM (COALESCE(salio, now()) - entro))::int AS segundos
+           FROM pbxng_conf_presencias WHERE reunion_id = ANY($1::bigint[]) ORDER BY entro`,
+        [reuniones.map((r) => r.id)]);
+      const porReunion = new Map();
+      for (const p of gente) { if (!porReunion.has(p.reunion_id)) porReunion.set(p.reunion_id, []); porReunion.get(p.reunion_id).push(p); }
+      res.json(reuniones.map((r) => ({ ...r, participantes: porReunion.get(r.id) || [] })));
     } catch (e) { errorHttp(res, e); }
   });
 
