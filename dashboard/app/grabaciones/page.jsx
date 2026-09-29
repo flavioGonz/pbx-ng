@@ -157,7 +157,9 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
   const fl = list
     .filter(r => !orig || (r.origen || 'interno') === orig)
     .filter(r => !q || String(r.id).includes(q) || (r.ext || '').includes(q) || (r.filename || '').includes(q) || (r.src || '').includes(q) || (r.dst || '').includes(q));
-  const totalBytes = list.reduce((a, r) => a + (r.bytes || 0), 0);
+  /* `bytes` es bigint en Postgres y el driver lo devuelve como CADENA: sin Number() el
+   * reduce concatenaba texto y el KPI «Almacenado» mostraba «Infinity TB». */
+  const totalBytes = list.reduce((a, r) => a + (Number(r.bytes) || 0), 0);
   const totalDur = list.reduce((a, r) => a + (r.duration || 0), 0);
   const onCloud = list.filter(r => r.storage !== 'local').length;
   const kpis = [
