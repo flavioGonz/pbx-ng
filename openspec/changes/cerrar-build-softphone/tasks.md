@@ -14,9 +14,15 @@
 - [x] 1.3 El tag lo crea el paso de publicación desde la versión (`tag_name`), no una
       persona.
 - [ ] 1.4 Probar los tres casos del spec: versión nueva, versión repetida, build fallido.
-      Los dos primeros se verifican recién al mergear a `main` (el disparador es `main`).
-      El tercero por inspección: ningún paso tiene `continue-on-error`, así que un build
-      fallido corta el job antes del paso de publicación y no deja Release parcial.
+      - **Versión repetida: verificado.** El merge del grupo 1 a `main` disparó la
+        ejecución #10: `decidir` terminó en éxito y `build` quedó en *skipped*, porque ya
+        existe el Release `softphone-v0.17.0`. Es el caso «se commitea código sin tocar la
+        versión» del spec.
+      - **Build fallido: verificado por inspección.** Ningún paso tiene
+        `continue-on-error`, así que un build fallido corta el job antes del paso de
+        publicación y no deja Release parcial.
+      - **Versión nueva: pendiente.** Se verifica solo la próxima vez que suba la versión
+        del softphone por un cambio real; no se fuerza una versión para probar.
 
 ## 2. Entregar el instalador a la central
 
