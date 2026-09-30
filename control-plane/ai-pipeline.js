@@ -9,7 +9,11 @@ const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const log = require('./log')('AI');
-const realtime = require('./realtime');   // puente al modelo de voz realtime (audio in / audio out)
+const realtime = require('./realtime');
+const iaExterna = require('./ia-externa');   // IA externa: el backend del asistente conduce la llamada
+/* Los canales con el backend, la configuración bajada y las llamadas en curso de la IA
+ * externa. Se arma en `init` (hace falta la base). */
+let IAX = null;   // puente al modelo de voz realtime (audio in / audio out)
 const momento = require('./momento');     // la hora del cliente: el modelo no tiene reloj
 const inactividad = require('./inactividad');   // qué hacer cuando el visitante deja de hablar
 const herramientas = require('./herramientas'); // lo que el agente puede PEDIR (la central decide)
@@ -275,6 +279,19 @@ const TOOLS = [
 // ============================================================
 //  Transferencia y cierre
 // ============================================================
+/* TONO DE LLAMADA EN LA TRANSFERENCIA. La llamada que sale de la IA ya está atendida (el
+ * Answer() del ivr), así que no hay 180: el tono lo genera la central por audio, con la zona
+ * de indications.conf. Sin zonas (la imagen no las traía) no sonaba nada, quien llama creía
+ * que se había cortado y el softphone del panel cortaba solo a los ~8 s (29/09). Con las
+ * zonas ya suena el aviso de ringing del interno; DIAL_OPCIONES=r además lo asegura en los
+ * destinos que nunca avisan y enciende el Ringing() del despertar (extensions.conf) y el `r`
+ * de los grupos de timbre (apps.js). Va por variable del canal y no como `r` fijo en el
+ * dialplan para no tocar las llamadas comunes entre internos. Si no se puede poner, se
+ * transfiere igual: una derivación muda es mejor que no derivar. */
+async function pedirTonoDeLlamada(ch, anotar) {
+  try { await ch.setChannelVar({ variable: 'DIAL_OPCIONES', value: 'r' }); }
+  catch (e) { anotar('no se pudo pedir el tono de llamada (DIAL_OPCIONES): ' + (e && e.message) + '; se transfiere igual'); }
+}
 async function doTransfer(session, dest, label) {
   session.log('TRANSFER -> ' + dest + ' (' + (label || '') + ')');
   const ch = session.channel;
@@ -282,13 +299,21 @@ async function doTransfer(session, dest, label) {
   // y sin esto endSession() colgaria el canal deshaciendo la transferencia.
   session.transferring = true; session.closed = true;
   try { if (session.endpointTimer) clearInterval(session.endpointTimer); } catch (_) {}
+  /* El reloj del audio (20 ms) y la sesión con el modelo, que se paga por minuto: una
+   * llamada transferida no los necesita más, y quedaban vivos hasta reiniciar la API. */
+  try { if (session.rtReloj) clearInterval(session.rtReloj); } catch (_) {}
+  try { if (session.rt) session.rt.cerrar(); } catch (_) {}
   try { if (session.sttProc) session.sttProc.kill('SIGKILL'); } catch (_) {}
   try { if (session.em) ARI.channels.hangup({ channelId: session.em.id }).catch(() => {}); } catch (_) {}
   try { if (session.bridge) session.bridge.destroy().catch(() => {}); } catch (_) {}
+  let ok = true;
+  await pedirTonoDeLlamada(ch, (m) => session.log(m));
   try { await ch.continueInDialplan({ context: 'internal', extension: String(dest), priority: 1 }); }
-  catch (e) { session.log('transfer err ' + e.message); try { await ch.hangup(); } catch (_) {} }
+  catch (e) { ok = false; session.log('transfer err ' + e.message); try { await ch.hangup(); } catch (_) {} }
   if (session.socket) { try { session.socket.destroy(); } catch (_) {} }
   sessions.delete(session.uuid); pendingByUuid.delete(session.uuid);
+  /* La IA externa se lo cuenta al backend (resultado de la transferencia). */
+  return ok;
 }
 function cleanupMedia(session) {
   /* EL ORDEN IMPORTA, y se pagó caro descubrirlo: el canal AudioSocket de Asterisk está
@@ -318,6 +343,7 @@ function cleanupMedia(session) {
 async function endSession(session, why) {
   if (session.closed) return;
   session.log('END (' + why + ')');
+  if (session.modo === 'externo') cerrarExterno(session, why);
   cleanupMedia(session);
   try { await session.channel.hangup(); }
   catch (e) {
@@ -562,6 +588,8 @@ function startServer() {
           session.log('AudioSocket conectado');
           if (session.modo === 'realtime') {
             arrancarRealtime(session);
+          } else if (session.modo === 'externo') {
+            arrancarExterno(session);
           } else {
             attachStt(session);
             setTimeout(() => { if (!session.closed) speak(session, session.greetingText); }, 250);
@@ -603,6 +631,218 @@ function close() {
  *  canal. Es el mismo problema que ya resuelve `speak()` para el TTS, con una diferencia
  *  importante: acá el audio sigue llegando mientras se reproduce.
  */
+/* El audio del modelo hacia el canal, a su ritmo, y el barge-in. Es lo mismo para el modo
+ * realtime y para la IA externa: en los dos el modelo manda audio a ráfagas por el mismo
+ * puente (`realtime.js`) y el canal consume 20 ms cada 20 ms. La escalera de inactividad
+ * (`session.vigilante`) solo existe en realtime; acá se la avisa si está. */
+function conectarAudio(session, puente) {
+  /* El reloj del canal: 20 ms. Sale UN frame por vuelta, ni más ni menos, y si no hay
+   * nada en la cola no se escribe silencio —el canal ya reproduce silencio solo—. */
+  /* Cuántas vueltas seguidas sin audio se necesitan para dar por TERMINADA la frase. El
+   * modelo manda el audio a ráfagas y la cola se vacía por un instante entre dos deltas de
+   * la misma oración; sin esta ventana, «terminó de hablar» se dispararía a mitad de
+   * frase y el agente preguntaría «¿sigue ahí?» encima de sí mismo. */
+  const VUELTAS_FIN = 20;   // 20 × 20 ms = 400 ms de silencio real
+  session.rtVacio = 0;
+  session.rtReloj = setInterval(() => {
+    if (session.closed || !session.socket) return;
+    const f = session.rtCola.shift();
+    if (!f) {
+      if (session.speaking) {
+        session.rtVacio++;
+        if (session.rtVacio >= VUELTAS_FIN) {
+          session.speaking = false; session.rtVacio = 0;
+          if (session.vigilante) session.vigilante.callado();
+        }
+      }
+      return;
+    }
+    session.rtVacio = 0;
+    if (!session.speaking && session.vigilante) session.vigilante.hablando();
+    session.speaking = true;
+    const frame = Buffer.alloc(3 + f.length);
+    frame[0] = 0x10; frame.writeUInt16BE(f.length, 1); f.copy(frame, 3);
+    try { session.socket.write(frame); } catch (_) {}
+  }, 20);
+
+  puente.on('audio', (pcm8) => {
+    /* Se corta en frames de 20 ms exactos: el canal los quiere así, y partir a mano evita
+     * que un delta grande entre de una y se escuche adelantado. */
+    let off = 0;
+    while (off < pcm8.length) { session.rtCola.push(pcm8.slice(off, off + FRAME_BYTES)); off += FRAME_BYTES; }
+    /* Techo de cola: 5 s de audio. Si el modelo se desbocó o el canal se trabó, mejor
+     * perder el final de una frase que acumular minutos de audio que ya no viene al caso. */
+    if (session.rtCola.length > 250) session.rtCola.splice(0, session.rtCola.length - 250);
+  });
+  /* Barge-in: lo que queda por reproducir se TIRA. El puente ya le pidió al modelo que
+   * pare; sin esto el visitante seguiría escuchando la frase vieja unos segundos. */
+  puente.on('corte', () => {
+    session.rtCola.length = 0; session.speaking = false; session.rtVacio = 0;
+    session.log('barge-in (realtime)');
+    /* El visitante habló: se cancela la escalera de inactividad, incluido un corte ya
+     * agendado. Quien vuelve a hablar mientras el agente se despide no pierde la llamada. */
+    if (session.vigilante) session.vigilante.visitanteHabla();
+  });
+}
+
+/* ============================================================
+ *  Modo IA EXTERNA (la conversación la conduce el backend del asistente)
+ * ============================================================
+ *  La central abre la sesión de GPT-Live con la configuración que bajó del backend, TAL
+ *  CUAL, y le hace de relay: cada evento de la sesión va al backend y cada comando del
+ *  backend va a la sesión. No hay prompt, saludo, herramientas ni escalera de inactividad
+ *  nuestros: todo eso lo hace el backend. Lo que sí queda acá es lo de siempre: el ritmo
+ *  del audio, el barge-in y la ejecución de las órdenes (colgar, transferir, DTMF).
+ *  Contrato: docs/CONTRATOS.md §11 e ia-externa.js.
+ */
+/* Cuánto se espera la orden del backend cuando se cerró la sesión o el relay. Existe
+ * porque el backend primero cierra la sesión (se despide o anuncia la derivación) y
+ * recién después manda «colgar» o «transferir»: colgar al toque cortaría la derivación. */
+const ESPERA_ORDEN_MS = 5000;
+/* Tope de lo que se guarda para el relay mientras abre: unos 20 s de audio. */
+const TOPE_PENDIENTES_RELAY = 2000;
+/* Tope para esperar que termine de sonar lo que quedaba en la cola antes de colgar o
+ * transferir: el backend decide el final con los eventos, que llegan al ritmo en que el
+ * modelo GENERA, no al de reproducción; sin esperar, la despedida se cortaba. */
+const TOPE_COLA_MS = 5000;
+
+function esperarColaVacia(session) {
+  return new Promise((ok) => {
+    const desde = Date.now();
+    const mirar = () => {
+      if (session.closed || !session.rtCola || !session.rtCola.length || Date.now() - desde > TOPE_COLA_MS) return ok();
+      setTimeout(mirar, 50);
+    };
+    mirar();
+  });
+}
+
+function arrancarExterno(session) {
+  const agente = session.agent;
+  const cfg = IAX.configDe(agente.id);
+  const pbxCallId = session.uuid;
+  const puente = realtime.abrir({
+    key: session.keys.openai,
+    base: session.realtimeBase || '',
+    model: (cfg.session && cfg.session.model) || 'gpt-live-1',
+    sessionCruda: cfg.session,
+  });
+  session.rt = puente;
+  session.rtCola = [];
+  conectarAudio(session, puente);
+
+  /* Las órdenes del backend para ESTA llamada. Cualquiera de ellas cancela la espera de
+   * orden (ver `esperarOrden`). */
+  IAX.registrar(pbxCallId, {
+    colgar: async () => {
+      clearTimeout(session.esperaOrden);
+      await esperarColaVacia(session);
+      await endSession(session, 'orden del backend');
+    },
+    transferir: async (destino) => {
+      clearTimeout(session.esperaOrden);
+      if (!iaExterna.destinoPermitido(agente, destino)) throw new Error('destino no permitido para este agente: ' + destino);
+      await esperarColaVacia(session);
+      const ok = await doTransfer(session, destino, 'derivación del backend');
+      avisarBackend(session, { type: 'transferencia', pbxCallId, ok, detalle: ok ? null : 'no se pudo transferir a ' + destino });
+      cerrarExterno(session, 'transferida');
+      if (!ok) throw new Error('no se pudo transferir a ' + destino);
+    },
+    dtmf: async (digitos) => {
+      if (!iaExterna.DTMF.test(digitos)) throw new Error('DTMF inválido');
+      await ARI.channels.sendDTMF({ channelId: session.channel.id, dtmf: digitos, duration: 250, between: 100 });
+      /* La apertura la decide el backend, pero la respuesta a «¿quién abrió el portón?»
+       * sigue estando acá. */
+      auditarAccion(session, { herramienta: 'abrir_porton', resultado: 'DTMF ' + digitos + ' (orden del backend)', razon: 'ia-externa' });
+    },
+  }, agente.id);
+
+  /* El relay: lo que llega antes de que abra se guarda y sale al abrir, en orden. */
+  const relay = IAX.abrirRelay(agente, pbxCallId);
+  session.relay = relay;
+  const pendientes = [];
+  const alRelay = (msg) => {
+    if (relay.readyState === 1) { try { relay.send(JSON.stringify(msg)); } catch (_) {} return; }
+    if (pendientes.length < TOPE_PENDIENTES_RELAY) pendientes.push(msg);
+  };
+  relay.on('open', () => { while (pendientes.length && relay.readyState === 1) relay.send(JSON.stringify(pendientes.shift())); session.log('relay con el backend: abierto'); });
+  relay.on('message', (data) => {
+    let msg;
+    try { msg = JSON.parse(String(data)); } catch (_) { return; }
+    const cmd = iaExterna.comandoPermitido(msg);
+    if (cmd) puente.enviarCrudo(cmd);
+    else session.log('relay: se descarta un comando no permitido (' + String(msg && msg.type) + ')');
+  });
+  relay.on('error', (e) => session.log('relay: ' + ((e && e.message) || e)));
+  relay.on('close', () => { if (!session.closed) esperarOrden(session, 'se cerró el relay con el backend'); });
+  puente.on('crudo', alRelay);
+  puente.on('audio-salida', alRelay);
+  puente.on('error', (e) => { session.log('realtime: ' + e); anotarProblemaProveedor(e); });
+  puente.on('cerrado', (info) => {
+    if (session.closed) return;
+    session.log('realtime: sesión cerrada (' + ((info && info.code) || 'sin código') + '), se espera la orden del backend');
+    esperarOrden(session, 'se cerró la sesión sin orden del backend');
+    /* El backend se entera aunque OpenAI no haya mandado `session.closed` (un corte de
+     * red): se cierra el relay, un instante después para que salga lo último. */
+    setTimeout(() => { try { if (relay.readyState === 1) relay.close(1000, 'la sesión con el modelo terminó'); } catch (_) {} }, 200).unref?.();
+  });
+
+  /* Con la sesión abierta, se avisa la llamada al backend y se espera que tome el control. */
+  puente.cuandoListo(10000).then(async () => {
+    const avisada = avisarBackend(session, {
+      type: 'llamada_nueva', pbxCallId,
+      from: session.callerId || null,
+      to: agente.exten || null,
+      origen: session.identificacion ? 'portero' : 'telefono',
+      configVersion: cfg.version,
+      dtmfApertura: iaExterna.dtmfApertura(agente),
+      destinoAgentes: agente.agentes_exten || agente.default_exten || '',
+    });
+    if (!avisada) return respaldoExterno(session, 'el canal de control con el backend está caído');
+    const r = await IAX.esperarEnganche(pbxCallId, cfg.attachTimeoutMs || 5000);
+    if (!r.ok) return respaldoExterno(session, r.motivo);
+    session.log('el backend tomó el control de la llamada');
+  }).catch((e) => respaldoExterno(session, 'la sesión no abrió: ' + e.message));
+}
+
+function avisarBackend(session, hecho) {
+  const canal = IAX && IAX.canalDe(session.agent);
+  return !!(canal && canal.enviar(hecho));
+}
+
+/* Se cerró la sesión o el relay: se espera la orden del backend y, si no llega, respaldo. */
+function esperarOrden(session, motivo) {
+  if (session.closed || session.esperaOrden) return;
+  session.esperaOrden = setTimeout(() => { if (!session.closed) respaldoExterno(session, motivo); }, ESPERA_ORDEN_MS);
+  if (session.esperaOrden.unref) session.esperaOrden.unref();
+}
+
+/* Sin el backend, el visitante no se queda mudo: va al destino de respaldo del agente. */
+async function respaldoExterno(session, motivo) {
+  if (session.closed || session.externoCerrado) return;
+  session.log('IA externa: respaldo (' + motivo + ')');
+  cerrarExterno(session, 'respaldo');
+  const destino = session.agent && session.agent.default_exten;
+  if (destino) await doTransfer(session, destino, 'respaldo IA externa');
+  else await endSession(session, 'sin respaldo configurado');
+}
+
+/* Suelta todo lo de la IA externa de una llamada. Si colgó quien llama, se lo avisa. */
+function cerrarExterno(session, why) {
+  if (session.externoCerrado) return;
+  session.externoCerrado = true;
+  clearTimeout(session.esperaOrden);
+  /* Cualquier fin que no ordenó el backend (colgó quien llama, se cortó el audio, un tope,
+   * un apagado) se le avisa: si no, se enteraba recién al cerrarse el relay. */
+  if (!['orden del backend', 'transferida', 'respaldo'].includes(why)) avisarBackend(session, { type: 'colgo', pbxCallId: session.uuid });
+  /* `ari-client` guarda los listeners de instancia hasta que se sacan: sin esto, cada
+   * llamada dejaba retenida la sesión entera. */
+  try { if (session.alDtmf && session.channel.removeListener) session.channel.removeListener('ChannelDtmfReceived', session.alDtmf); } catch (_) {}
+  if (IAX) IAX.soltar(session.uuid);
+  try { if (session.relay) session.relay.close(1000, 'fin de la llamada'); } catch (_) {}
+  try { if (session.rt) session.rt.cerrar(); } catch (_) {}
+}
+
 function arrancarRealtime(session) {
   /* Las herramientas ENCENDIDAS de este agente. Si no hay ninguna, la sesión se abre en
    * modo cliente —el modelo conversa solo— y nada cambia respecto de antes. Con al menos
@@ -670,53 +910,7 @@ function arrancarRealtime(session) {
     log: (m) => session.log(m),
   });
 
-  /* El reloj del canal: 20 ms. Sale UN frame por vuelta, ni más ni menos, y si no hay
-   * nada en la cola no se escribe silencio —el canal ya reproduce silencio solo—. */
-  /* Cuántas vueltas seguidas sin audio se necesitan para dar por TERMINADA la frase. El
-   * modelo manda el audio a ráfagas y la cola se vacía por un instante entre dos deltas de
-   * la misma oración; sin esta ventana, «terminó de hablar» se dispararía a mitad de
-   * frase y el agente preguntaría «¿sigue ahí?» encima de sí mismo. */
-  const VUELTAS_FIN = 20;   // 20 × 20 ms = 400 ms de silencio real
-  session.rtVacio = 0;
-  session.rtReloj = setInterval(() => {
-    if (session.closed || !session.socket) return;
-    const f = session.rtCola.shift();
-    if (!f) {
-      if (session.speaking) {
-        session.rtVacio++;
-        if (session.rtVacio >= VUELTAS_FIN) {
-          session.speaking = false; session.rtVacio = 0;
-          if (session.vigilante) session.vigilante.callado();
-        }
-      }
-      return;
-    }
-    session.rtVacio = 0;
-    if (!session.speaking && session.vigilante) session.vigilante.hablando();
-    session.speaking = true;
-    const frame = Buffer.alloc(3 + f.length);
-    frame[0] = 0x10; frame.writeUInt16BE(f.length, 1); f.copy(frame, 3);
-    try { session.socket.write(frame); } catch (_) {}
-  }, 20);
-
-  puente.on('audio', (pcm8) => {
-    /* Se corta en frames de 20 ms exactos: el canal los quiere así, y partir a mano evita
-     * que un delta grande entre de una y se escuche adelantado. */
-    let off = 0;
-    while (off < pcm8.length) { session.rtCola.push(pcm8.slice(off, off + FRAME_BYTES)); off += FRAME_BYTES; }
-    /* Techo de cola: 5 s de audio. Si el modelo se desbocó o el canal se trabó, mejor
-     * perder el final de una frase que acumular minutos de audio que ya no viene al caso. */
-    if (session.rtCola.length > 250) session.rtCola.splice(0, session.rtCola.length - 250);
-  });
-  /* Barge-in: lo que queda por reproducir se TIRA. El puente ya le pidió al modelo que
-   * pare; sin esto el visitante seguiría escuchando la frase vieja unos segundos. */
-  puente.on('corte', () => {
-    session.rtCola.length = 0; session.speaking = false; session.rtVacio = 0;
-    session.log('barge-in (realtime)');
-    /* El visitante habló: se cancela la escalera de inactividad, incluido un corte ya
-     * agendado. Quien vuelve a hablar mientras el agente se despide no pierde la llamada. */
-    if (session.vigilante) session.vigilante.visitanteHabla();
-  });
+  conectarAudio(session, puente);
   puente.on('texto', (t) => {
     session.transcripcion = session.transcripcion || [];
     session.transcripcion.push(t);
@@ -879,6 +1073,23 @@ function resetStt(session) {
 function init(ari, pool, opts = {}) {
   ARI = ari; POOL = pool;
   if (opts.app) APP = opts.app;
+  /* La IA externa se arma una sola vez: `init` se vuelve a llamar en cada reconexión de
+   * ARI y los canales con el backend no dependen de ARI. */
+  if (!IAX) {
+    IAX = iaExterna.crear({
+      agentes: async () => (await POOL.query('SELECT id,provider,enabled,externo_url,externo_token FROM pbxng_ai_agents')).rows,
+      leerConfig: async (id) => {
+        const { rows } = await POOL.query('SELECT version,session,attach_timeout_ms FROM pbxng_ia_externa_config WHERE agente_id=$1', [id]);
+        return rows[0] ? { version: rows[0].version, session: rows[0].session, attachTimeoutMs: rows[0].attach_timeout_ms } : null;
+      },
+      guardarConfig: (id, cfg) => POOL.query(
+        'INSERT INTO pbxng_ia_externa_config (agente_id,version,session,attach_timeout_ms,bajada_at) VALUES ($1,$2,$3,$4,now())'
+        + ' ON CONFLICT (agente_id) DO UPDATE SET version=$2,session=$3,attach_timeout_ms=$4,bajada_at=now()',
+        [id, cfg.version, JSON.stringify(cfg.session), cfg.attachTimeoutMs]),
+      log: (m) => log.info(m),
+    });
+    IAX.recargar().catch((e) => log.warn('IA externa: no se pudieron abrir los canales', { err: e.message }));
+  }
   if (opts.mediaHost) MEDIA_HOST = opts.mediaHost;
   // Esquema (pbxng_settings, columnas de pbxng_ai_agents): migrations/0009_schema_runtime.sql
   startServer();
@@ -896,7 +1107,27 @@ async function startAiSession(channel, agent) {
   /* Tres caminos, y el agente elige: `realtime` (un socket con el modelo), `openai` (STT →
    * LLM → TTS) y el demo local. Sin clave, `realtime` no se intenta: la llamada iría a un
    * socket que va a fallar y el visitante escucharía silencio. */
-  const modo = (agent.provider === 'openai-realtime' && keys.openai) ? 'realtime' : (useOpenAI ? 'openai' : 'demo');
+  const modo = (agent.provider === 'openai-realtime' && keys.openai) ? 'realtime'
+    : (agent.provider === 'ia-externa' && keys.openai) ? 'externo'
+      : (useOpenAI ? 'openai' : 'demo');
+  /* IA externa sin configuración o sin el backend: la llamada va al respaldo SIN abrir una
+   * sesión. Atender sin nadie que conduzca la conversación es dejar al visitante mudo. */
+  if (agent.provider === 'ia-externa') {
+    const d = modo === 'externo' && IAX
+      ? iaExterna.decidirArranque({ config: IAX.configDe(agent.id), canalArriba: !!(IAX.canalDe(agent) && IAX.canalDe(agent).conectado) })
+      : { atender: false, motivo: keys.openai ? 'la IA externa no está inicializada' : 'no hay clave de OpenAI cargada' };
+    if (!d.atender) {
+      log.warn('IA externa: la llamada va al respaldo sin abrir sesión', { agente: agent.id, motivo: d.motivo });
+      try {
+        /* Ya pasó por el Answer() del ivr: sin el tono, el respaldo también sonaba mudo. */
+        if (agent.default_exten) {
+          await pedirTonoDeLlamada(channel, (m) => log.warn('IA externa: ' + m, { agente: agent.id }));
+          await channel.continueInDialplan({ context: 'internal', extension: String(agent.default_exten), priority: 1 });
+        } else await channel.hangup();
+      } catch (e) { log.warn('IA externa: no se pudo mandar al respaldo', { err: e.message }); }
+      return;
+    }
+  }
   /* La zona del cliente, no la del servidor: la central puede correr en UTC y el edificio
    * está en Montevideo. */
   const zona = (await getSetting('zona_horaria')) || momento.ZONA_DEF;
@@ -948,6 +1179,11 @@ async function startAiSession(channel, agent) {
     // watchdog: si el caller cuelga
     session.endpointTimer = setInterval(() => checkEndpoint(session), 250);
     channel.once('StasisEnd', () => endSession(session, 'caller-hangup'));
+    /* Lo que marca el visitante le llega al backend: la central no lo interpreta. */
+    if (modo === 'externo') {
+      session.alDtmf = (e) => avisarBackend(session, { type: 'dtmf', pbxCallId: uuid, digito: String((e && e.digit) || '') });
+      channel.on('ChannelDtmfReceived', session.alDtmf);
+    }
   } catch (e) {
     log.error('startAiSession', e);
     cleanupMedia(session); try { await channel.hangup(); } catch (_) {}
@@ -965,7 +1201,13 @@ function metricas() {
   return out;
 }
 
-module.exports = { init, startAiSession, close, metricas };
+/* Al guardar o borrar un agente (apps.js): abre o cierra sus canales con el backend. */
+function recargarIaExterna() {
+  if (!IAX) return;
+  IAX.recargar().catch((e) => log.warn('IA externa: no se pudieron recargar los canales', { err: e.message }));
+}
+
+module.exports = { init, startAiSession, close, metricas, recargarIaExterna };
 /* Sólo para la prueba del ORDEN de cierre (test/inactividad.test.js): lo que hay que fijar
  * es que el socket se suelte antes de tocar el canal, y eso no se ve desde afuera. */
 module.exports._sesiones = () => sessions;
@@ -977,3 +1219,8 @@ module.exports._barrer = barrerHuerfanos;
 module.exports._setAri = (x) => { ARI = x; };
 module.exports._crmLookup = crmLookup;
 module.exports._TOPE_CRM_MS = TOPE_CRM_MS;
+/* Para la prueba del tono de llamada en la transferencia (test/ia-externa.test.js): que el
+ * DIAL_OPCIONES se ponga ANTES de salir de Stasis no se ve desde afuera, y armar una sesión
+ * entera con su AudioSocket para llegar a la orden de derivar es probar otra cosa. */
+module.exports._doTransfer = doTransfer;
+module.exports._respaldoExterno = respaldoExterno;

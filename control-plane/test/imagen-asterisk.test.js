@@ -92,6 +92,120 @@ test('el guard de bucle de internal escribe __SALTOS (heredable por el canal Loc
   assert.ok(!/[^_]\bSet\(SALTOS=/.test(ext), 'quedo un Set(SALTOS=...) sin prefijo heredable');
 });
 
+/* El tono de llamada en las transferencias de la IA: ai-pipeline.js pone DIAL_OPCIONES=r en
+ * el canal antes de mandarlo a `internal`, y los dos Dial del interno (el directo y el del
+ * sigueme) la usan. Lo que se fija aca es lo que no se ve hasta que alguien llama:
+ *  · si un Dial pierde la variable, una derivacion a un destino que no avisa que suena
+ *    vuelve a quedar muda y el softphone del panel corta a los ~8 s (29/09);
+ *  · si alguien la pone fija en el dialplan (o heredable, con `_`), el `r` pasa a las
+ *    llamadas comunes entre internos, que hoy suenan con el 180 del telefono;
+ *  · con la variable vacia el Dial tiene que quedar EXACTAMENTE como era antes. */
+test('los Dial del interno usan ${DIAL_OPCIONES} y nada mas del dialplan la toca', () => {
+  const ext = leer('config/asterisk/extensions.conf');
+  const sinComentario = (l) => l.replace(/;.*$/, '').trim();
+  const ini = ext.indexOf('\n[internal]');
+  const fin = ext.indexOf('\n[', ini + 1);
+  assert.ok(ini >= 0 && fin > ini, 'no se encontro el contexto [internal]');
+  const internal = ext.slice(ini, fin).split('\n').map(sinComentario).filter(Boolean);
+
+  const dials = internal.filter((l) => /\bDial\(/.test(l));
+  assert.deepEqual(dials, [
+    'same => n(marcar),Dial(PJSIP/${EXTEN},${TIMBRE},${DIAL_OPCIONES})',
+    'same => n,Dial(Local/${DB(fm/${EXTEN})}@internal/n,45,${DIAL_OPCIONES})',
+  ], 'los dos Dial del interno tienen que pasar ${DIAL_OPCIONES} como opciones');
+  /* Con la variable vacia, lo que marca Asterisk es el Dial de siempre. */
+  assert.deepEqual(dials.map((l) => l.replace(',${DIAL_OPCIONES})', ')')), [
+    'same => n(marcar),Dial(PJSIP/${EXTEN},${TIMBRE})',
+    'same => n,Dial(Local/${DB(fm/${EXTEN})}@internal/n,45)',
+  ]);
+
+  const todas = ext.split('\n').map(sinComentario).filter((l) => /DIAL_OPCIONES/.test(l));
+  assert.deepEqual(todas, [RINGING_DESPERTAR, ...dials],
+    'DIAL_OPCIONES solo se lee en el Ringing() del despertar y en esos dos Dial: nadie la escribe en el dialplan');
+  assert.ok(!/_DIAL_OPCIONES/.test(ext), 'DIAL_OPCIONES no se hereda: el `r` no tiene que pasar a los canales que se marcan despues');
+});
+
+/* El tramo de despertar al interno (CURL + poll de contactos) puede durar ~14 s antes del
+ * Dial. En una derivacion de la IA el canal ya esta atendido: sin un Ringing() al empezar
+ * ese tramo, quien llama escucha silencio todo ese rato aunque el Dial despues de tono. Se
+ * fija que la linea este ANTES del tope y del CURL (con la etiqueta a la que salta el
+ * GotoIf) y que solo corra con la variable puesta: en una llamada comun no hace nada. */
+const RINGING_DESPERTAR = 'same => n(wake),ExecIf($["${DIAL_OPCIONES}"!=""]?Ringing())';
+test('el despertar del interno arranca con Ringing() solo cuando la IA deriva', () => {
+  const ext = leer('config/asterisk/extensions.conf');
+  const lineas = ext.slice(ext.indexOf('\n[internal]')).split('\n').map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
+  const i = lineas.indexOf(RINGING_DESPERTAR);
+  assert.ok(i >= 0, 'falta el Ringing() condicionado al principio del tramo (wake)');
+  const tope = lineas.findIndex((l) => /CURLOPT\(conntimeout\)/.test(l));
+  const curl = lineas.findIndex((l) => /CURL\(http:.*\/api\/internal\/wake/.test(l));
+  const poll = lineas.findIndex((l) => /^same => n\(poll\)/.test(l));
+  assert.ok(i === tope - 1 && tope < curl && curl < poll, 'el Ringing() tiene que ir justo antes del tope del CURL, y los dos antes del poll');
+  assert.equal(lineas.filter((l) => /\(wake\)/.test(l)).length, 1, 'la etiqueta (wake) tiene que estar en una sola linea: la del Ringing()');
+  assert.ok(!lineas.some((l) => /Ringing\(\)/.test(l) && l !== RINGING_DESPERTAR), 'hay un Ringing() sin condicion: cambiaria las llamadas comunes');
+
+  /* La condicion, evaluada como la evaluaria Asterisk con la variable vacia y con `r`. */
+  const m = /ExecIf\(\$\[(.*)\]\?Ringing\(\)\)/.exec(RINGING_DESPERTAR);
+  const corre = (valor) => {
+    const [izq, der] = m[1].replace('${DIAL_OPCIONES}', valor).split('!=');
+    return JSON.parse(izq) !== JSON.parse(der);
+  };
+  assert.equal(corre(''), false, 'en una llamada comun (sin la variable) no tiene que sonar nada nuevo');
+  assert.equal(corre('r'), true);
+});
+
+/* Las zonas de tono: sin indications.conf la tabla queda vacia y la central no genera
+ * NINGUN tono por audio. Sobre un canal ya atendido (una derivacion de la IA) eso es
+ * silencio mientras suena el interno, con `r`, con Ringing() y con el aviso de ringing del
+ * propio interno: la causa de fondo de los cortes del 29/09. Se fija el archivo, el tono de
+ * llamada del pais por defecto, que el Dockerfile lo copia y que los dos compose pasan el
+ * pais igual (el de release es el que corre el cliente). */
+test('la imagen trae las zonas de tono y el pais por defecto tiene tono de llamada', () => {
+  const ind = leer('config/asterisk/indications.conf');
+  const secciones = {};
+  let actual = null;
+  for (const linea of ind.split('\n')) {
+    const l = linea.replace(/;.*$/, '').trim();
+    if (!l) continue;
+    const s = /^\[([^\]]+)\]$/.exec(l);
+    if (s) { actual = s[1]; secciones[actual] = {}; continue; }
+    const kv = /^([a-z]+)\s*=\s*(.+)$/.exec(l);
+    if (kv && actual) secciones[actual][kv[1]] = kv[2];
+  }
+  const pais = secciones.general && secciones.general.country;
+  assert.ok(pais, 'indications.conf no tiene [general] country=');
+  for (const z of ['uy', 'ar']) {
+    for (const tono of ['ring', 'busy', 'congestion']) assert.ok(secciones[z] && secciones[z][tono], `falta ${tono} en la zona ${z}`);
+  }
+  assert.ok(secciones[pais] && secciones[pais].ring, `el pais por defecto (${pais}) no tiene zona con ring: la central quedaria muda`);
+  /* Los valores son los de la UIT (Anexo al Boletin de Explotacion 781, 1.II.2003), no los
+   * de dahdi-tools/zonedata.c, que para Argentina difieren. */
+  assert.deepEqual(
+    ['dial', 'ring', 'busy', 'congestion', 'ringcadence'].map((k) => secciones.uy[k]),
+    ['425', '425/1000,0/4000', '425/500,0/500', '425/250,0/250', '1000,4000'], 'Uruguay: UIT OB 781');
+  assert.deepEqual(
+    ['dial', 'ring', 'busy', 'congestion', 'ringcadence'].map((k) => secciones.ar[k]),
+    ['425', '425/1000,0/4000', '425/300,0/200', '425/300,0/400', '1000,4000'], 'Argentina: UIT OB 781');
+  assert.match(ind, /tones-0203\.pdf/, 'indications.conf tiene que citar la fuente de las zonas');
+
+  /* El Dockerfile copia el directorio entero: el archivo entra solo por estar ahi. */
+  assert.match(leer('images/asterisk/Dockerfile'), /^COPY config\/asterisk\/ \/etc\/asterisk\/$/m,
+    'el Dockerfile dejo de copiar config/asterisk/ entero: indications.conf no llegaria a la imagen');
+
+  /* Paridad: los dos compose pasan TONE_COUNTRY al servicio asterisk con el mismo default,
+   * que es el pais de fabrica del archivo. */
+  for (const f of ['docker-compose.yml', 'docker-compose.release.yml']) {
+    const txt = leer(f);
+    const ini = txt.indexOf('\n  asterisk:');
+    const ast = txt.slice(ini, txt.indexOf('\n    volumes:', ini));   // el environment del servicio
+    assert.ok(ast.includes('TONE_COUNTRY: ${TONE_COUNTRY:-' + pais + '}'), `${f}: el servicio asterisk no pasa TONE_COUNTRY con default ${pais}`);
+  }
+  assert.match(leer('.env.example'), new RegExp('^TONE_COUNTRY=' + pais + '$', 'm'), '.env.example no documenta TONE_COUNTRY');
+  /* El entrypoint lo aplica solo si la zona existe: un pais sin zona dejaria todo mudo. */
+  const ep = leer('images/asterisk/docker-entrypoint.sh');
+  assert.match(ep, /TONE_COUNTRY/, 'el entrypoint no aplica TONE_COUNTRY');
+  assert.match(ep, /grep -q "\^\\\[\$\{TONE_COUNTRY\}\\\]" \/etc\/asterisk\/indications\.conf/, 'el entrypoint tiene que verificar que la zona exista antes de usarla');
+});
+
 /* La astdb (astdb.sqlite3) es la que lee el dialplan en cada llamada: desvios, no-molestar,
  * modo noche y PIN de las salas. Vivia en la capa de escritura del contenedor, asi que
  * recrear Asterisk la vaciaba y quedaba una ventana —hasta el resync del AMI— en la que la

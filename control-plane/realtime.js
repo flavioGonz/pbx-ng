@@ -178,6 +178,10 @@ const LIVE = {
   url: (model, base) => (base ? String(base).replace(/\/+$/, '') : 'wss://api.openai.com/v1/live/sessions'),
   cabeceras: (key, base) => (base && /azure/i.test(String(base)) ? { 'api-key': key } : { Authorization: 'Bearer ' + key }),
   configurar: (o) => {
+    /* IA EXTERNA: la configuración la arma el backend del asistente y se manda TAL CUAL.
+     * La central no le agrega instrucciones, saludo ni herramientas: la lógica del
+     * agente es del backend, que controla la sesión por el relay (ia-externa.js). */
+    if (o.sessionCruda) return { type: 'session.start', session: o.sessionCruda };
     const session = {
       model: o.model || 'gpt-live-1',
       instructions: o.instrucciones || '',
@@ -348,6 +352,9 @@ function abrir(opts) {
     let msg;
     try { msg = JSON.parse(String(data)); } catch (_) { return; }
     anotar(String(msg.type || '?'));
+    /* Cada evento, tal cual llegó: el relay de la IA externa se lo reenvía al backend sin
+     * interpretarlo. Sale antes que nada para que el backend lo vea en el mismo orden. */
+    ev.emit('crudo', msg);
     const r = P.leer(msg);
     switch (r.clase) {
       case 'arranco': marcarListo(); break;
@@ -425,7 +432,17 @@ function abrir(opts) {
     o.herramientas = (o.herramientas || []).concat(lista);
     enviar(P.configurar(o));
   };
-  ev.enviarAudio = (pcm8) => { if (pcm8 && pcm8.length) enviar(P.audioEntra(subir(pcm8).toString('base64'))); };
+  ev.enviarAudio = (pcm8) => {
+    if (!pcm8 || !pcm8.length) return;
+    const msg = P.audioEntra(subir(pcm8).toString('base64'));
+    enviar(msg);
+    /* El audio que le manda la central al modelo: el backend lo necesita para grabar y
+     * para saber cuándo terminó de hablar quien llama (el sideband lo reflejaba solo). */
+    ev.emit('audio-salida', msg);
+  };
+  /* Un mensaje armado afuera (lo que manda el backend por el relay), sin tocarlo. Quien
+   * llama decide qué tipos deja pasar: acá no se filtra. */
+  ev.enviarCrudo = (obj) => enviar(obj);
   ev.saludar = (texto) => { esperandoDesde = Date.now(); enviar(P.saludar(texto)); };
   ev.responderHerramienta = (callId, salida) => { enviar(P.respuestaHerramienta(callId, salida)); enviar(P.pedirRespuesta()); };
   ev.metricas = () => {
