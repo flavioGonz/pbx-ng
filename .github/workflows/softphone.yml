@@ -1,20 +1,91 @@
 name: softphone-win
 
-# Construye el instalador del softphone (.exe NSIS + .msi) en un runner Windows, lo sube
-# como artifact y, si el disparo fue un tag softphone-vX.Y.Z, lo publica como GitHub
-# Release (exe + blockmap + latest.yml). Ese release es (a) el respaldo OTA de un softphone
-# todavia no aprovisionado y (b) lo que docker/fetch-softphone.sh mete en la imagen api
-# para que cada central sirva su propio instalador en /descargas/softphone/. Sin firmar.
+# Construye el instalador del softphone (.exe NSIS + .msi) en un runner Windows y lo publica
+# como GitHub Release (exe + blockmap + latest.yml). Ese release es (a) el respaldo OTA de un
+# softphone todavia no aprovisionado y (b) lo que docker/fetch-softphone.sh mete en la imagen
+# api para que cada central sirva su propio instalador en /descargas/softphone/. Sin firmar.
+#
+# QUE DISPARA ESTO, Y POR QUE ASI.
+#
+# Antes el unico disparador era un tag `softphone-v*` creado a mano. El 28/09 nadie lo creo:
+# dos commits quedaron sin compilar, la central siguio sirviendo 0.16.0 dos dias y el
+# actualizador informaba —con razon— que estaba al dia. El disparador manual es justamente el
+# paso que se olvida, asi que ahora lo decide la VERSION del package.json.
+#
+# El filtro es un job aparte (`decidir`) y no un `paths:` en el disparador. Un `paths:` parece
+# mas barato, pero se comporta distinto con merge commits, con force push y con tags, y este
+# cambio existe precisamente porque algo no corrio y nadie se entero: conviene que corra
+# siempre y decida en voz alta. `decidir` es un runner Linux de unos segundos.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: 'Recompilar aunque ya exista el Release de esa version'
+        type: boolean
+        default: false
   push:
+    branches: ['main']
     tags: ['softphone-v*']
 
 permissions:
   contents: write
 
+# Dos pushes seguidos a main no compilan la misma version dos veces en paralelo. No se cancela
+# el que ya empezo: si esa version termina, el Release queda, y el segundo va a ver que existe.
+concurrency:
+  group: softphone-win
+  cancel-in-progress: false
+
 jobs:
+  decidir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      compilar: ${{ steps.v.outputs.compilar }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Version del package.json contra los Releases publicados
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./softphone-app/package.json').version")
+          tag="softphone-v$version"
+          motivo=""
+          if [ "${{ inputs.forzar || 'false' }}" = "true" ]; then
+            compilar=true
+            motivo="forzado a mano"
+          elif gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Ya hay Release para esta version: no hay nada nuevo que compilar. Es el caso
+            # normal de cualquier push a main que no toca la version del softphone.
+            compilar=false
+            motivo="ya existe el Release $tag"
+          else
+            compilar=true
+            motivo="no hay Release para $tag"
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "compilar=$compilar"
+          } >> "$GITHUB_OUTPUT"
+          # Que la decision se lea sin abrir los logs: es la mitad del problema que se arregla.
+          {
+            echo "### Softphone $version"
+            echo ""
+            if [ "$compilar" = "true" ]; then
+              echo "Se compila: $motivo."
+            else
+              echo "No se compila: $motivo. Para publicar una version nueva, subí \`version\` en \`softphone-app/package.json\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
+    needs: decidir
+    if: needs.decidir.outputs.compilar == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -40,11 +111,13 @@ jobs:
             softphone-app/release/*.msi
             softphone-app/release/*.blockmap
             softphone-app/release/latest.yml
-      - name: Publicar GitHub Release (solo con tag softphone-v*)
-        if: startsWith(github.ref, 'refs/tags/softphone-v')
+      # El tag lo crea este paso a partir de la version, no una persona. Si el build falla, los
+      # pasos anteriores cortan el job y no se publica nada: la central sigue con la anterior.
+      - name: Publicar GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Softphone ${{ github.ref_name }}
+          tag_name: ${{ needs.decidir.outputs.tag }}
+          name: Softphone ${{ needs.decidir.outputs.tag }}
           body: "Softphone de escritorio PBX-NG para Windows. `latest.yml` + `.blockmap` son el feed OTA (electron-updater)."
           files: |
             softphone-app/release/*.exe

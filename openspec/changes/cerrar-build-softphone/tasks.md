@@ -2,13 +2,21 @@
 
 ## 1. Disparar la compilación por versión
 
-- [ ] 1.1 Agregar al workflow el disparo en `push` a `main` con filtro de ruta
-      `softphone-app/package.json`, manteniendo `workflow_dispatch` y el tag.
-- [ ] 1.2 Primer paso del job: leer la `version` del `package.json` y consultar si ya
-      existe el Release `softphone-v<version>`; si existe, terminar sin compilar.
-- [ ] 1.3 Crear el tag desde el workflow al publicar, para que el Release quede anclado a
-      un commit y el historial siga siendo legible.
+- [x] 1.1 Agregar al workflow el disparo en `push` a `main`, manteniendo `workflow_dispatch`
+      y el tag. **Sin filtro de ruta**: se evaluó `paths: ['softphone-app/**']` y se
+      descartó porque un `paths` se comporta distinto con merge commits, force push y
+      tags, y este cambio existe justamente porque algo no corrió y nadie se enteró. El
+      filtro pasa a ser un job `decidir` en Linux, de unos segundos, que además deja
+      escrito por qué compiló o por qué no.
+- [x] 1.2 Job `decidir`: lee la `version` del `package.json` y consulta si ya existe el
+      Release `softphone-v<version>`. El job `build` corre sólo si no existe.
+      `workflow_dispatch` acepta `forzar` para recompilar igual.
+- [x] 1.3 El tag lo crea el paso de publicación desde la versión (`tag_name`), no una
+      persona.
 - [ ] 1.4 Probar los tres casos del spec: versión nueva, versión repetida, build fallido.
+      Los dos primeros se verifican recién al mergear a `main` (el disparador es `main`).
+      El tercero por inspección: ningún paso tiene `continue-on-error`, así que un build
+      fallido corta el job antes del paso de publicación y no deja Release parcial.
 
 ## 2. Entregar el instalador a la central
 
