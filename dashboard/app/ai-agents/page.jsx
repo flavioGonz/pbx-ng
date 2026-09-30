@@ -24,6 +24,7 @@ const PROVIDERS = [
   { value: 'openai-realtime', label: 'OpenAI voz a voz (GPT-Live / Realtime)', donde: 'nube', pie: 'Una sola sesión con el modelo: la menor latencia' },
   { value: 'openai', label: 'OpenAI en tres pasos (Whisper → GPT → TTS)', donde: 'nube', pie: 'Más lento, pero permite elegir cada pieza' },
   { value: 'demo', label: 'Demo (offline · Vosk + voz local)', donde: 'local', pie: 'Sin clave ni internet, y sin costo. Para probar el recorrido' },
+  { value: 'ia-externa', label: 'IA externa (la conduce el backend del asistente)', donde: 'nube', pie: 'Otro sistema maneja la conversación; la central pone el audio y ejecuta sus órdenes' },
 ];
 const MODELS = [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini (rápido/económico)' }, { value: 'gpt-4o', label: 'gpt-4o (máxima calidad)' }];
 const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label: 'Alloy' }, { value: 'shimmer', label: 'Shimmer' }, { value: 'onyx', label: 'Onyx' }, { value: 'echo', label: 'Echo' }, { value: 'fable', label: 'Fable' }];
@@ -33,10 +34,13 @@ const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label
 const RT_MODELS = ['gpt-live-1', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini'];
 const RT_VOICES = ['marin', 'cedar', 'alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
 const esRT = (p) => p === 'openai-realtime';
-const enLaNube = (p) => p === 'openai-realtime' || p === 'openai';
+const enLaNube = (p) => p === 'openai-realtime' || p === 'openai' || p === 'ia-externa';
+/* IA externa: el modelo, la voz, el prompt y el saludo los pone el backend del asistente,
+ * que publica la configuración de la sesión; la central no los usa. */
+const esExterna = (p) => p === 'ia-externa';
 const provMeta = (p) => PROVIDERS.find(x => x.value === p) || PROVIDERS[2];
 
-const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, record: false, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '', herramientas: {} };
+const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, record: false, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '', herramientas: {}, externo_url: '', externo_token: '', agentes_exten: '' };
 /* Los tiempos con los que se despliega la primera vez. Dos consultas antes de cortar, y
  * no una, porque la primera se pierde seguido: el visitante se dio vuelta, estaba hablando
  * con alguien, se le cayó el teléfono. */
@@ -418,7 +422,20 @@ export default function AiAgents() {
                       <Text size="xs">Todo adentro del fierro: sin clave, sin internet y sin costo. Entiende poco, pero sirve para probar el recorrido de la llamada.</Text>
                     </Alert>}
 
-                {form.provider !== 'demo' && (
+                {esExterna(form.provider) && (
+                  <Stack gap="md">
+                    <Alert variant="light" color="blue" p="xs">
+                      <Text size="xs">La conversación la conduce el <b>backend del asistente</b>: el modelo, la voz, las instrucciones y el saludo vienen de su configuración, y la central solo pone el audio y ejecuta sus órdenes (colgar, transferir, DTMF). El prompt, el saludo, la inactividad y las herramientas de esta pantalla <b>no se usan</b> con este proveedor, salvo el tono de «Abrir el portón», que es el DTMF con el que se abre. Sin backend, la llamada va al destino <b>Por defecto</b>.</Text>
+                    </Alert>
+                    <TextInput label="URL del backend" placeholder="http://asistente.local:3100" description="http o https (se recomienda https si va por internet)"
+                      value={form.externo_url || ''} onChange={e => up('externo_url', e.currentTarget.value)} required />
+                    <TextInput label="Token compartido" placeholder="el PBX_TOKEN del backend" description="El mismo valor que PBX_TOKEN en el backend"
+                      value={form.externo_token || ''} onChange={e => up('externo_token', e.currentTarget.value)} required />
+                    <TextInput label="Destino de agentes" placeholder="600" description="Cola o interno al que se transfiere cuando el backend deriva a una persona"
+                      value={form.agentes_exten || ''} onChange={e => up('agentes_exten', e.currentTarget.value)} leftSection={<IconHeadset size={14} />} />
+                  </Stack>
+                )}
+                {form.provider !== 'demo' && !esExterna(form.provider) && (
                   <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
                     {esRT(form.provider)
                       ? <Autocomplete label="Modelo" placeholder="gpt-live-1"

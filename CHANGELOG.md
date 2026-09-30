@@ -2,6 +2,59 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [Unreleased]
+### Added
+- **Proveedor «IA externa»: el agente lo conduce el backend del asistente de voz.** La
+  central abre la sesión de GPT-Live por el mismo WebSocket de siempre, pero con la
+  configuración que publica el backend —sin prompt, saludo, herramientas ni inactividad
+  nuestros— y le hace de relay: cada evento de la sesión va al backend, y el backend
+  manda las frases y el cierre. Las órdenes de telefonía (colgar, transferir, el DTMF que
+  abre el portón) llegan por un canal de control y se confirman después de ejecutarse.
+  Sin backend o sin configuración, la llamada va al destino de respaldo del agente, sin
+  quedar muda. Contrato en `docs/CONTRATOS.md` §11. (`control-plane/ia-externa.js`,
+  `control-plane/ai-pipeline.js`, `control-plane/realtime.js`, `control-plane/apps.js`,
+  migración 0029, pantalla de Agentes IA)
+
+### Fixed
+- **La derivación de la IA se cortaba cuando el agente tardaba en atender.** Mientras
+  sonaba el interno, quien llama escuchaba silencio, y el softphone del panel colgaba solo
+  a los ~8 s por su vigilante de RTP: en la primera llamada real se cortaron dos
+  derivaciones a los 9 s.
+  - **La causa eran las zonas de tono, no el 180.** La llamada que sale de la IA ya está
+    atendida, y sobre un canal atendido el tono lo genera la central por audio, con la
+    zona de tono. La imagen de Asterisk no traía `indications.conf`, así que no sonaba nada.
+    Ahora trae las zonas `uy` y `ar` con los valores de la UIT (Anexo al Boletín de
+    Explotación 781, 1.II.2003). Uruguay: 425 Hz, llamada 1 s sonando y 4 s de silencio,
+    ocupado 0,5/0,5 s y congestión 0,25/0,25 s. El país sale de `TONE_COUNTRY` en
+    `docker/.env`, `uy` por defecto; para cambiarlo se recrea el contenedor de Asterisk
+    (`docker compose up -d asterisk`).
+  - **`DIAL_OPCIONES=r` en la derivación y en el respaldo.** La central la pone en el canal
+    antes de sacar la llamada de la IA. La leen el `Dial` del interno, el del sígueme, el de
+    los grupos de timbre y el de la opción de IVR que marca un interno. Las llamadas comunes
+    directas entre internos no cambian.
+  - **Tono mientras se despierta un interno dormido:** con la variable puesta, el tramo que
+    espera a que el teléfono se registre, de hasta unos 14 s, arranca con `Ringing()`. El
+    tono empieza cuando vuelve el `CURL` del despertar (hasta ~6 s), en el primer `Wait` del
+    poll: el `CURL` bloquea el canal y el generador no produce audio mientras tanto.
+  - **Qué cambia fuera de la IA, para bien:** las zonas valen para cualquier llamada ya
+    atendida, así que una llamada a un IVR que marca un interno y una transferencia ciega
+    hecha por una persona ahora también escuchan el tono. Las llamadas directas entre
+    internos no cambian: el tono lo sigue armando el teléfono que llama.
+  - **Efectos laterales aceptados:** con las zonas cargadas, `Busy()` y `Congestion()` sobre
+    canales atendidos pasan a sonar; en el sígueme de una derivación se pierde el audio
+    temprano del celular; la grabación de la transferencia incluye el tono.
+  - **Los grupos de timbre e IVR que ya existían** toman el cambio con la migración
+    `0030_tono_derivaciones.sql`, que les agrega `,${DIAL_OPCIONES}` a los `Dial` con la
+    forma que escribía el panel. Es idempotente y no toca otras filas.
+  - **`ring_time` de los grupos de timbre:** ahora tiene que ser un entero de 5 a 120 s
+    (400 si no). Entraba crudo al `Dial`, y una coma metía opciones propias.
+  - **Hay que reconstruir la imagen de Asterisk**, porque `indications.conf` y
+    `extensions.conf` van adentro.
+
+  (`docker/config/asterisk/indications.conf`, `docker/config/asterisk/extensions.conf`,
+  `docker/images/asterisk/docker-entrypoint.sh`, los dos compose, `docker/.env.example`,
+  `control-plane/ai-pipeline.js`, `control-plane/apps.js`, migración 0030)
+
 ## [1.37.0] - 2026-10-05
 
 Tanda del softphone de escritorio y de los porteros.

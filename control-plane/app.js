@@ -1045,6 +1045,7 @@ app.post('/api/geo/report', async (req, res) => {
 require('./apps')({   // devuelve { aiAgentDialplan, buildIvrDialplan, vmList }; app.js hoy no usa ninguno
   app, pool, amiAction, amiCommand, astFwd, vozBase, setDialplan, astconf, exigirExt, wavToPcm, analyzeText,
   smtpHint, errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), logger,
+  recargarIaExterna: () => aiPipeline.recargarIaExterna(),
 });
 
 // ---------------------------------------------------------------------------

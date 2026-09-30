@@ -49,6 +49,9 @@ const vmpin = require('./vmpin');
 module.exports = function init(deps) {
   const { app, pool, amiAction, amiCommand, astFwd, vozBase, setDialplan, astconf,
     exigirExt, wavToPcm, analyzeText, smtpHint, errorHttp, broadcastSoon, logger } = deps;
+  /* IA externa: al guardar o borrar un agente, se abren o cierran sus canales con el
+   * backend (ai-pipeline.js). Opcional: sin pipeline (pruebas), no hace nada. */
+  const recargarIaExterna = deps.recargarIaExterna || (() => {});
 
   // ---------------------------------------------------------------------------
   //  Buzon de voz: se lee DIRECTO del volumen compartido con Asterisk (/voicemail).
@@ -437,7 +440,7 @@ module.exports = function init(deps) {
   });
 
   app.get('/api/ai-agents', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,record,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
+    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,record,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas,externo_url,externo_token,agentes_exten FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   /* Proveedores que el pipeline entiende. La validación existe por un motivo concreto:
@@ -445,10 +448,35 @@ module.exports = function init(deps) {
    * guardaba sin chistar y la llamada caía al modo demo —el de reglas, sin IA— sin un
    * solo error. El agente «no funcionaba» y no había nada que mirar. */
   const PROVEEDORES = {
+    'ia-externa': 'la conversación la conduce el backend del asistente: la central pone el audio y ejecuta sus órdenes (colgar, transferir, DTMF)',
     'openai-realtime': 'un solo socket con el modelo (audio entra / audio sale): la opción de menor latencia',
     openai: 'STT → LLM → TTS en tres pasos (Whisper + chat + TTS)',
     demo: 'sin IA: Vosk local + reglas + espeak, para probar sin clave ni internet',
   };
+  /* Lo propio de la IA externa: sin la URL y el token del backend, el agente no tiene con
+   * quién hablar y cada llamada iría al respaldo sin que nadie entienda por qué. */
+  const camposExterno = (b) => ({
+    externo_url: String(b.externo_url || '').trim().slice(0, 500),
+    externo_token: String(b.externo_token || '').trim().slice(0, 200),
+    agentes_exten: String(b.agentes_exten || '').trim().slice(0, 40),
+  });
+  const externoOk = (provider, ext, body, res) => {
+    if (provider !== 'ia-externa') return true;
+    const iaExterna = require('./ia-externa');
+    const url = iaExterna.urlPermitida(ext.externo_url);
+    const fallas = [];
+    if (!url.ok) fallas.push(url.motivo);
+    if (!ext.externo_token) fallas.push('falta el token del backend');
+    /* Sin destino, el backend rechaza cada llamada y el visitante queda en silencio. */
+    if (!ext.agentes_exten && !String(body.default_exten || '').trim()) fallas.push('falta un destino: el de agentes o el Por defecto');
+    const porton = ((body.herramientas || {}).abrir_porton) || {};
+    if (porton.on && (porton.modo || 'dtmf') === 'dtmf' && porton.dtmf && !iaExterna.DTMF.test(String(porton.dtmf).trim())) fallas.push('el tono de apertura solo puede tener 0-9, *, # y A-D');
+    if (!fallas.length) return true;
+    res.status(400).json({ error: 'la IA externa no se puede guardar: ' + fallas.join('; ') });
+    return false;
+  };
+  const guardarExterno = (c, id, ext) =>
+    c.query('UPDATE pbxng_ai_agents SET externo_url=$1,externo_token=$2,agentes_exten=$3 WHERE id=$4', [ext.externo_url, ext.externo_token, ext.agentes_exten, id]);
   const proveedorOk = (p, res) => {
     if (Object.prototype.hasOwnProperty.call(PROVEEDORES, p)) return true;
     res.status(400).json({ error: 'proveedor desconocido: ' + p, proveedores: PROVEEDORES });
@@ -500,6 +528,8 @@ module.exports = function init(deps) {
     const ia = camposInact(req.body || {});
     const herr = camposHerr(req.body || {});
     if (!proveedorOk(provider, res)) return;
+    const ext = camposExterno(req.body || {});
+    if (!externoOk(provider, ext, req.body || {}, res)) return;
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
@@ -508,15 +538,18 @@ module.exports = function init(deps) {
         + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
           ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr), !!record]);
+      await guardarExterno(c, rows[0].id, ext);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, rows[0].id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-      await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: rows[0].id, exten });
+      await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.status(201).json({ created: rows[0].id, exten });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
   app.put('/api/ai-agents/:id', async (req, res) => {
     const { id } = req.params;
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, record = false, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!proveedorOk(provider, res)) return;
+    const ext = camposExterno(req.body || {});
+    if (!externoOk(provider, ext, req.body || {}, res)) return;
     const ia = camposInact(req.body || {});
     const herr = camposHerr(req.body || {});
     const c = await pool.connect();
@@ -530,10 +563,11 @@ module.exports = function init(deps) {
         + 'inact1_s=$15,inact2_s=$16,cierre_s=$17,inact1_text=$18,inact2_text=$19,despedida_text=$20,herramientas=$21,record=$22 WHERE id=$9',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, id, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
           ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr), !!record]);
+      await guardarExterno(c, id, ext);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-      await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
+      await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.json({ updated: id, exten });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
   app.delete('/api/ai-agents/:id', async (req, res) => {
@@ -543,7 +577,7 @@ module.exports = function init(deps) {
       const { rows } = await c.query('SELECT exten FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
       if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]);
       await c.query('DELETE FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
-      await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
+      await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.json({ deleted: req.params.id });
     } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
 
@@ -565,7 +599,11 @@ module.exports = function init(deps) {
     options.forEach((o, i) => {
       const b = 100 + i * 10; const v = o.dest_value;
       rows.push(['ivr', exten, b, 'NoOp', `Opcion ${o.digit} -> ${o.dest_type}:${v || ''}`]);
-      if (o.dest_type === 'extension') { rows.push(['ivr', exten, b + 1, 'Dial', `PJSIP/${v},30`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
+      /* ${DIAL_OPCIONES}: la pone ai-pipeline.js en `r` cuando la IA deriva, y la llamada
+       * puede caer en un IVR. Vacía (una llamada común), el Dial queda como siempre. Ver
+       * el Dial del interno en extensions.conf; los IVR guardados antes los actualiza la
+       * migración 0030. */
+      if (o.dest_type === 'extension') { rows.push(['ivr', exten, b + 1, 'Dial', `PJSIP/${v},30,\${DIAL_OPCIONES}`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
       else if (o.dest_type === 'ringgroup') rows.push(['ivr', exten, b + 1, 'Goto', `internal,${v},1`]);
       else if (o.dest_type === 'queue') { rows.push(['ivr', exten, b + 1, 'Queue', v]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
       else if (o.dest_type === 'voicemail') { rows.push(['ivr', exten, b + 1, 'VoiceMail', `${v}@default,u`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
@@ -773,11 +811,22 @@ module.exports = function init(deps) {
 
   app.get('/api/ringgroups', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members,strategy,ring_time FROM pbxng_ringgroups ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
   app.post('/api/ringgroups', async (req, res) => {
-    const { name, label, access_exten, members, strategy = 'ringall', ring_time = 25 } = req.body || {};
+    const { name, label, access_exten, members, strategy = 'ringall' } = req.body || {};
     if (!name || !access_exten || !members) return res.status(400).json({ error: 'name, access_exten y members son obligatorios' });
+    /* El timbre entra al appdata del Dial como segundo argumento: crudo, una coma metía
+     * opciones propias («20,m») y corría las nuestras (${DIAL_OPCIONES}) a un cuarto argumento
+     * que Dial no lee. Se exige un entero en el mismo rango que acota el dialplan al TIMBRE
+     * del interno (5 a 120 s). Vacío: los 25 s de siempre. */
+    const rt = req.body && req.body.ring_time;
+    const ring_time = (rt === undefined || rt === null || rt === '') ? 25 : (/^\d+$/.test(String(rt).trim()) ? parseInt(String(rt).trim(), 10) : NaN);
+    if (!(ring_time >= 5 && ring_time <= 120)) return res.status(400).json({ error: 'ring_time tiene que ser un número entero de segundos, de 5 a 120' });
     const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const dialStr = list.map(e => 'PJSIP/' + e).join('&');
+    /* ${DIAL_OPCIONES} como opciones del Dial: cuando la IA deriva a un grupo, la llamada ya
+     * está atendida y el tono lo tiene que generar la central (`r`, que pone ai-pipeline.js,
+     * con la zona de indications.conf). En una llamada común va vacía y el Dial queda como
+     * siempre. Los grupos creados antes los actualiza la migración 0030. */
     const c = await pool.connect();
-    try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_ringgroups (name,label,access_exten,members,strategy,ring_time) VALUES ($1,$2,$3,$4,$5,$6)', [name, label || name, access_exten, list.join(','), strategy, ring_time]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Ring group ' + name], [2, 'Dial', dialStr + ',' + ring_time], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
+    try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_ringgroups (name,label,access_exten,members,strategy,ring_time) VALUES ($1,$2,$3,$4,$5,$6)', [name, label || name, access_exten, list.join(','), strategy, ring_time]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Ring group ' + name], [2, 'Dial', dialStr + ',' + ring_time + ',${DIAL_OPCIONES}'], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
     catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
   });
   app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });

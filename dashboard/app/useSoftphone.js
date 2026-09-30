@@ -520,6 +520,12 @@ export function useSoftphone() {
         try { const cd = codec ? byId.get(codec) : null; if (cd && cd.mimeType) codec = String(cd.mimeType).split('/')[1]; else codec = null; } catch (_) { codec = null; }
         const dLost = Math.max(0, lost - lastLost), dRecv = Math.max(0, recv - lastRecv); lastLost = lost; lastRecv = recv;
         // Watchdog: si dejan de llegar paquetes (la otra punta colgo y el BYE no llego), colgar local
+        // Ojo con las transferencias de la IA: la llamada ya esta atendida y, mientras suena el
+        // interno destino, la central no manda nada salvo que genere el tono. Antes no lo generaba
+        // (la imagen de Asterisk no traia zonas de tono, indications.conf) y este vigilante cortaba
+        // la derivacion a los ~8 s (29/09). Ahora, con las zonas cargadas y DIAL_OPCIONES=r que
+        // pone ai-pipeline.js, la central manda el tono por audio: llegan paquetes, stall vuelve a
+        // 0 y el vigilante queda para lo que es, una punta que se fue.
         if (recv > 0) started = true;
         if (started && !heldRef.current && !consult.current) {
           if (dRecv === 0) { stall += 1; if (stall >= 4) return die('rtp-timeout'); } else { stall = 0; }
