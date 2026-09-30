@@ -1,7 +1,7 @@
 # Guía: OpenSpec + git en PBX-NG
 
-Para Mauricio y Fede. Explica cómo organizamos el trabajo ahora que somos más de uno en el
-repo, y el mínimo de git que hace falta para no pisarnos.
+Cómo organizamos el trabajo ahora que somos más de uno en el repo, y el mínimo de git que
+hace falta para no pisarnos.
 
 ---
 
