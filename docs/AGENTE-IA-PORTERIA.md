@@ -345,4 +345,6 @@ Qué se reusa y qué no:
 - **Se reusan** el ritmo del audio, el barge-in, el destino **Por defecto** como respaldo, el tono de **Abrir el portón** como DTMF de apertura y el registro de acciones (`pbxng_ia_acciones`).
 - **No se usan** el prompt, el saludo, las herramientas ni la escalera de inactividad del agente: los hace el backend.
 
+**El backend en varias instancias (contrato v2, 01/10):** cada llamada va entera por su relay (el aviso, los eventos, los hechos y las órdenes), así cualquier instancia del backend detrás de su balanceador puede conducirla. Si la instancia se cae o se apaga, la central reabre el relay en otra, que retoma la llamada sin cortarla y sin volver a saludar. El canal de control queda solo para bajar la configuración.
+
 Contrato: `docs/CONTRATOS.md` §11.

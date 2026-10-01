@@ -6,10 +6,12 @@
  *  control) o de GPT-Live, y un `fetch` de mentira para la configuración. Lo que importa
  *  fijar acá es lo que, si falla, deja a un visitante mudo o cortado:
  *
- *   · sin configuración o sin backend la llamada va al respaldo, sin abrir sesión;
+ *   · sin configuración la llamada va al respaldo, sin abrir sesión;
  *   · cada orden se confirma DESPUÉS de ejecutarse, y una repetida no se ejecuta dos veces
- *     (el backend reenvía las que no vio confirmadas);
+ *     (el backend reenvía las que no vio confirmadas), también por un relay reabierto;
  *   · por el relay solo pasan los tres comandos permitidos;
+ *   · el relay numera cada evento y hecho, y si se corta se reabre y reenvía desde donde
+ *     el backend diga (contrato v2: otra instancia retoma la llamada);
  *   · la sesión se abre con la configuración del backend TAL CUAL, sin nada nuestro.
  * ==========================================================================*/
 'use strict';
@@ -42,10 +44,9 @@ async function backendFalso() {
   };
 }
 
-test('decidirArranque: sin configuración o sin canal, respaldo; con las dos, se atiende', () => {
-  assert.deepEqual(iax.decidirArranque({ config: null, canalArriba: true }), { atender: false, motivo: 'no hay configuración bajada del backend' });
-  assert.deepEqual(iax.decidirArranque({ config: { session: {} }, canalArriba: false }), { atender: false, motivo: 'el canal de control con el backend está caído' });
-  assert.deepEqual(iax.decidirArranque({ config: { session: {} }, canalArriba: true }), { atender: true, motivo: '' });
+test('decidirArranque: sin configuración, respaldo; con ella se atiende, aunque el canal de control esté caído (v2)', () => {
+  assert.deepEqual(iax.decidirArranque({ config: null }), { atender: false, motivo: 'no hay configuración bajada del backend' });
+  assert.deepEqual(iax.decidirArranque({ config: { session: {} } }), { atender: true, motivo: '' });
 });
 
 test('por el relay solo pasan instructions, commentary y close', () => {
@@ -59,7 +60,7 @@ test('bajarConfig: pide con el token y la versión que tiene; 304 no cambia nada
   const fetchFalso = (respuesta) => async (url, opts) => { pedidos.push({ url, headers: opts.headers }); return respuesta; };
   const cfg = { version: 'abc123', session: { model: 'gpt-live-1', instructions: 'Sos el portero' }, attachTimeoutMs: 4000 };
   const nueva = await iax.bajarConfig({ url: 'http://backend:3100/', token: 't0k', version: null, fetchImpl: fetchFalso(new Response(JSON.stringify(cfg), { status: 200 })) });
-  assert.deepEqual(nueva, { cambio: true, config: { version: 'abc123', session: cfg.session, attachTimeoutMs: 4000 } });
+  assert.deepEqual(nueva, { cambio: true, config: { version: 'abc123', session: cfg.session, attachTimeoutMs: 4000, resumeWindowMs: 20000 } });
   assert.equal(pedidos[0].url, 'http://backend:3100/api/pbx/session-config');
   assert.equal(pedidos[0].headers.Authorization, 'Bearer t0k');
 
@@ -74,9 +75,10 @@ test('canal de control: ejecuta la orden, la confirma, y una repetida no se ejec
   const srv = await backendFalso();
   t.after(() => srv.cerrar());
   const ejecutadas = [];
+  let falla = false;
   const canal = new iax.CanalControl({
     url: srv.url(), token: 't0k',
-    alOrden: async (o) => { ejecutadas.push(o.type); if (o.type === 'enviar_dtmf') throw new Error('el portero no responde'); },
+    alOrden: async (o) => { ejecutadas.push(o.id); if (falla) throw new Error('el backend no contesta'); },
   });
   t.after(() => canal.parar());
   canal.iniciar();
@@ -85,31 +87,32 @@ test('canal de control: ejecuta la orden, la confirma, y una repetida no se ejec
   assert.equal(srv.headers[0].auth, 'Bearer t0k');
   assert.ok(canal.conectado);
 
-  srv.mandar({ id: 'o1', type: 'colgar', pbxCallId: 'c1' });
-  srv.mandar({ id: 'o1', type: 'colgar', pbxCallId: 'c1' });
-  srv.mandar({ id: 'o2', type: 'enviar_dtmf', pbxCallId: 'c1', digitos: '#' });
+  srv.mandar({ id: 'r1', type: 'refrescar_config' });
+  srv.mandar({ id: 'r1', type: 'refrescar_config' });
+  await esperar(60);
+  falla = true;
+  srv.mandar({ id: 'r2', type: 'refrescar_config' });
   await esperar(100);
-  assert.deepEqual(ejecutadas, ['colgar', 'enviar_dtmf']);
+  assert.deepEqual(ejecutadas, ['r1', 'r2']);
   assert.deepEqual(srv.recibido, [
-    { type: 'ack', id: 'o1' },
-    { type: 'orden_fallida', pbxCallId: 'c1', ordenId: 'o2', detalle: 'el portero no responde' },
+    { type: 'ack', id: 'r1' },
+    { type: 'orden_fallida', pbxCallId: null, ordenId: 'r2', detalle: 'el backend no contesta' },
   ]);
   /* Repetida después de terminar: se contesta lo mismo, sin volver a ejecutarla. */
-  srv.mandar({ id: 'o2', type: 'enviar_dtmf', pbxCallId: 'c1', digitos: '#' });
+  srv.mandar({ id: 'r2', type: 'refrescar_config' });
   await esperar(60);
-  assert.deepEqual(ejecutadas, ['colgar', 'enviar_dtmf']);
-  assert.deepEqual(srv.recibido.at(-1), { type: 'orden_fallida', pbxCallId: 'c1', ordenId: 'o2', detalle: 'el portero no responde' });
-  assert.equal(canal.enviar({ type: 'colgo', pbxCallId: 'c1' }), true);
+  assert.deepEqual(ejecutadas, ['r1', 'r2']);
+  assert.deepEqual(srv.recibido.at(-1), { type: 'orden_fallida', pbxCallId: null, ordenId: 'r2', detalle: 'el backend no contesta' });
   canal.parar();
   await esperar(50);
-  assert.equal(canal.enviar({ type: 'colgo', pbxCallId: 'c1' }), false, 'con el canal caído el hecho no se manda');
+  assert.equal(canal.enviar({ type: 'ack', id: 'x' }), false, 'con el canal caído no sale nada');
 });
 
-test('crear: un canal por backend de IA externa; refrescar baja la configuración; el enganche se espera', async (t) => {
+test('crear: un canal por backend de IA externa; refrescar baja la configuración; nada más va por el canal (v2)', async (t) => {
   const srv = await backendFalso();
   t.after(() => srv.cerrar());
   const guardadas = [];
-  const cfg = { version: 'v1', session: { model: 'gpt-live-1' }, attachTimeoutMs: 3000 };
+  const cfg = { version: 'v1', session: { model: 'gpt-live-1' }, attachTimeoutMs: 3000, resumeWindowMs: 15000 };
   const m = iax.crear({
     agentes: async () => [
       { id: 1, provider: 'ia-externa', enabled: true, externo_url: srv.url(), externo_token: 't0k' },
@@ -118,7 +121,7 @@ test('crear: un canal por backend de IA externa; refrescar baja la configuració
       { id: 4, provider: 'ia-externa', enabled: false, externo_url: srv.url(), externo_token: 't0k' },
     ],
     leerConfig: async () => null,
-    guardarConfig: async (id, c) => { guardadas.push([id, c.version]); },
+    guardarConfig: async (id, c) => { guardadas.push([id, c.version, c.resumeWindowMs]); },
     fetchImpl: async () => new Response(JSON.stringify(cfg), { status: 200 }),
   });
   t.after(() => m.parar());
@@ -129,36 +132,13 @@ test('crear: un canal por backend de IA externa; refrescar baja la configuració
 
   srv.mandar({ id: 'r1', type: 'refrescar_config' });
   await esperar(100);
-  assert.deepEqual(guardadas, [[1, 'v1'], [2, 'v1']]);
+  assert.deepEqual(guardadas, [[1, 'v1', 15000], [2, 'v1', 15000]]);
   assert.equal(m.configDe(1).version, 'v1');
 
-  const confirmado = m.esperarEnganche('c1', 1000);
-  srv.mandar({ id: 'e1', type: 'enganche_confirmado', pbxCallId: 'c1' });
-  assert.deepEqual(await confirmado, { ok: true });
-  const rechazado = m.esperarEnganche('c2', 1000);
-  srv.mandar({ id: 'e2', type: 'enganche_rechazado', pbxCallId: 'c2', motivo: 'tope de llamadas' });
-  assert.deepEqual(await rechazado, { ok: false, motivo: 'tope de llamadas' });
-  assert.deepEqual(await m.esperarEnganche('c3', 30), { ok: false, motivo: 'el backend no confirmó a tiempo' });
-});
-
-test('crear: las órdenes van a la llamada registrada; sin llamada, orden fallida', async (t) => {
-  const srv = await backendFalso();
-  t.after(() => srv.cerrar());
-  const m = iax.crear({
-    agentes: async () => [{ id: 1, provider: 'ia-externa', enabled: true, externo_url: srv.url(), externo_token: 't0k' }],
-    leerConfig: async () => null, guardarConfig: async () => {}, fetchImpl: async () => new Response(null, { status: 304 }),
-  });
-  t.after(() => m.parar());
-  await m.recargar();
-  await esperar(100);
-  const hechas = [];
-  m.registrar('c1', { colgar: async () => hechas.push('colgar'), transferir: async (d) => hechas.push('transferir ' + d), dtmf: async (d) => hechas.push('dtmf ' + d) }, 1);
-  srv.mandar({ id: 'o1', type: 'transferir', pbxCallId: 'c1', destino: '600' });
-  srv.mandar({ id: 'o2', type: 'enviar_dtmf', pbxCallId: 'c1', digitos: '#9' });
-  srv.mandar({ id: 'o3', type: 'colgar', pbxCallId: 'otra' });
-  await esperar(100);
-  assert.deepEqual(hechas, ['transferir 600', 'dtmf #9']);
-  assert.deepEqual(srv.recibido.filter((r) => r.type === 'orden_fallida').map((r) => r.ordenId), ['o3']);
+  /* Las órdenes de una llamada ya no van por el canal: van por su relay. */
+  srv.mandar({ id: 'o1', type: 'colgar', pbxCallId: 'c1' });
+  await esperar(80);
+  assert.deepEqual(srv.recibido.at(-1), { type: 'orden_fallida', pbxCallId: 'c1', ordenId: 'o1', detalle: 'orden desconocida en el canal de control: colgar' });
 });
 
 /* ── Lo que suma realtime.js ─────────────────────────────────────────────────── */
@@ -331,6 +311,17 @@ test('bajarConfig: rechaza un modelo que no es GPT-Live y acota la espera del ba
   assert.equal(apurada.config.attachTimeoutMs, 1000);
 });
 
+test('bajarConfig: la ventana para reabrir el relay se acota de 0 a 60 s, con 20 s por defecto (v2)', async () => {
+  const ventana = async (resumeWindowMs) => (await iax.bajarConfig({ url: 'http://b', token: 't', fetchImpl: async () => new Response(JSON.stringify({ version: 'v', session: { model: 'gpt-live-1' }, resumeWindowMs }), { status: 200 }) })).config.resumeWindowMs;
+  assert.equal(await ventana(undefined), 20000);
+  assert.equal(await ventana(null), 20000);
+  assert.equal(await ventana(25000), 25000);
+  assert.equal(await ventana(0), 0);
+  assert.equal(await ventana(-5), 0);
+  assert.equal(await ventana(600000), 60000);
+  assert.equal(await ventana('mucho'), 20000);
+});
+
 test('crear: si la configuración no baja, refrescar falla (el backend se entera)', async (t) => {
   const srv = await backendFalso();
   t.after(() => srv.cerrar());
@@ -362,24 +353,6 @@ test('crear: un agente que se suma a un canal ya conectado baja su configuració
   await esperar(100);
   assert.equal(srv.conexiones(), 1);
   assert.equal(m.configDe(2).version, 'v1', 'sin esto, cada llamada al agente nuevo iba al respaldo');
-});
-
-test('crear: un backend no manda sobre las llamadas de los agentes de otro', async (t) => {
-  const srv = await backendFalso();
-  t.after(() => srv.cerrar());
-  const m = iax.crear({
-    agentes: async () => [{ id: 1, provider: 'ia-externa', enabled: true, externo_url: srv.url(), externo_token: 't0k' }],
-    leerConfig: async () => null, guardarConfig: async () => {}, fetchImpl: async () => new Response(null, { status: 304 }),
-  });
-  t.after(() => m.parar());
-  await m.recargar();
-  await esperar(100);
-  const hechas = [];
-  m.registrar('ajena', { colgar: async () => hechas.push('colgar') }, 99);
-  srv.mandar({ id: 'o1', type: 'colgar', pbxCallId: 'ajena' });
-  await esperar(80);
-  assert.deepEqual(hechas, []);
-  assert.match(srv.recibido.at(-1).detalle, /no es de un agente de este backend/);
 });
 
 test('canal de control: con el token rechazado lo avisa y espacia los reintentos', async (t) => {

@@ -3,6 +3,24 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
 ## [Unreleased]
+### Changed
+- **BREAKING · IA externa, contrato v2: el backend del asistente en varias instancias, y
+  llamadas que se retoman.** Todo lo de una llamada va ahora por su relay: el aviso
+  (`llamada_nueva`, primer mensaje), los eventos de la sesión y los hechos numerados
+  (`seq`), y las órdenes del backend con sus acks. El canal de control queda solo para
+  `refrescar_config` y el latido, y sin él la llamada se atiende igual. Si el relay se
+  corta (la instancia del backend se cae, o se apaga y cierra con 4001 «reubicar»), la
+  central lo reabre enseguida y después cada 1 s durante `resumeWindowMs` (lo publica el
+  backend; 20 s por defecto), avisa que es una reanudación y reenvía desde donde el backend
+  diga; otra instancia retoma la llamada sin cortarla. Las órdenes ya ejecutadas se
+  recuerdan por llamada, así una repetida por un relay reabierto no se ejecuta dos veces.
+  Los hechos con el relay cerrado van por HTTP (`POST /api/pbx/llamadas/:id/hechos`, tres
+  intentos). **Incompatible con un backend v1:** se despliegan juntos. Verificado contra el
+  backend real con dos instancias: con `kill` de la instancia, retomada a los ~0,5 s; con
+  `SIGTERM`, a los ~0,4 s, sin repetir el saludo; y la orden final por el relay nuevo.
+  Contrato en `docs/CONTRATOS.md` §11. (`control-plane/ia-externa.js`,
+  `control-plane/ai-pipeline.js`, migración 0031, `test/ia-externa-relay.test.js`)
+
 ### Added
 - **Proveedor «IA externa»: el agente lo conduce el backend del asistente de voz.** La
   central abre la sesión de GPT-Live por el mismo WebSocket de siempre, pero con la
