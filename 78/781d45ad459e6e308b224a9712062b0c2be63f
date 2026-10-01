@@ -1,0 +1,46 @@
+openspec/changes/contrato-pbx-v2/specs/ia-externa/spec.md
+  s_cf45a22c4be6cc::t_0e3b2a70ee41ed 59-63
+control-plane/ai-pipeline.js
+  s_cf45a22c4be6cc::t_1eb8b651d657a8 693,698-701,733-735,746,750,757,759-780,782-784,786,791-794,798-806,810-821,824,846,848-849,853,1093-1094,1097-1099,1128
+  s_cf45a22c4be6cc::t_3a7042d603788e 1242-1247
+docs/CONTRATOS.md
+  s_cf45a22c4be6cc::t_97bfa3df3a867c 1871-1872,1874,1876-1893,1896-1905,1907,1910,1912-1913,1932,1936
+control-plane/ia-externa.js
+  s_cf45a22c4be6cc::t_ba83306d830a83 318-319
+  s_cf45a22c4be6cc::t_61dbaa6cdcbc43 7,11-22,32-33,37,39-40,43-49,57-60,94-96,106-110,128-130,135-167,270-317,320-475,483,508-509,511-512,547-548,553-554,559-563
+control-plane/test/ia-externa.test.js
+  s_cf45a22c4be6cc::t_4f8dc5320cbca1 9,11,13-14,47-49,63,78,81,90-94,96,98-99,102,104-105,108,111,115,124,135,138-141,314-322
+  s_cf45a22c4be6cc::t_93fe3f03b4da71 323-324
+control-plane/test/ia-externa-relay.test.js
+  s_cf45a22c4be6cc::t_3a7042d603788e 325-392
+  s_cf45a22c4be6cc::t_7da1e05058fe39 118,138-140
+  s_cf45a22c4be6cc::t_070a48c47aeaea 1-117,119-137,141-324
+CHANGELOG.md
+  s_cf45a22c4be6cc::t_5d2a57927fcdb7 6-23
+docs/AGENTE-IA-PORTERIA.md
+  s_cf45a22c4be6cc::t_0e3b2a70ee41ed 348-349
+openspec/changes/contrato-pbx-v2/tasks.md
+  s_cf45a22c4be6cc::t_031f9992a2df0a 62-66
+  s_cf45a22c4be6cc::t_dba9ec29dee7f8 15,19,23,29,34-35,39,41,43,47,60
+openspec/changes/contrato-pbx-v2/design.md
+  s_cf45a22c4be6cc::t_dba9ec29dee7f8 53
+  s_cf45a22c4be6cc::t_0e3b2a70ee41ed 40-42
+control-plane/migrations/0031_ia_externa_reanudar.sql
+  s_cf45a22c4be6cc::t_2aafaa531b4f07 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "78781d45ad459e6e308b224a9712062b0c2be63f",
+  "prompts": {},
+  "sessions": {
+    "s_cf45a22c4be6cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5d1aee9-7d54-4b6a-b1fa-1081b583776f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
