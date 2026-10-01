@@ -277,6 +277,202 @@ test('relay: al cerrar no se reabre, y lo último sale antes de cerrar el socket
   new iax.RelayLlamada({ abrir: () => null, aviso: AVISO }).cerrar();
 });
 
+/* ── Lo que encontró el revisor (01/10) ─────────────────────────────────────── */
+test('relay: si la llamada termina mientras se abre, no avisa nada ni revive', async (t) => {
+  const srv = await backendRelay();
+  t.after(() => srv.cerrar());
+  /* Primera apertura. */
+  const r = relayCon(srv);
+  r.relay.iniciar();
+  r.relay.cerrar();
+  await esperar(300);
+  assert.ok(srv.conexiones.every((c) => c.recibido.length === 0), 'no salió el aviso');
+  assert.ok(srv.conexiones.length <= 1);
+  /* Reanudación: la llamada termina mientras el relay reabierto se conecta. */
+  let aperturas = 0;
+  const r2 = relayCon(srv, {
+    abrir: () => {
+      aperturas++;
+      const ws = new WebSocket(srv.url + '/api/pbx/llamadas/c1/relay');
+      if (aperturas === 2) r2.relay.cerrar();
+      return ws;
+    },
+  });
+  const antes = srv.conexiones.length;
+  r2.relay.iniciar();
+  await hasta(() => srv.conexiones.length === antes + 1 && srv.ultima().recibido.length === 1);
+  srv.mandar({ type: 'enganche_confirmado', pbxCallId: 'c1' });
+  await esperar(30);
+  srv.cortar();
+  await esperar(500);
+  assert.equal(aperturas, 2);
+  assert.ok(srv.conexiones.slice(antes + 1).every((c) => c.recibido.length === 0), 'el relay reabierto no mandó el aviso');
+  assert.ok(r2.relay.terminado);
+});
+
+test('relay: con la llamada terminada, una orden nueva falla sin ejecutarse; una ya hecha repite su respuesta', async (t) => {
+  const srv = await backendRelay();
+  t.after(() => srv.cerrar());
+  const r = relayCon(srv, { topeCierreMs: 2000 });
+  r.relay.iniciar();
+  await hasta(() => srv.conexiones.length === 1 && srv.ultima().recibido.length === 1);
+  srv.mandar({ type: 'enganche_confirmado', pbxCallId: 'c1' });
+  srv.mandar({ type: 'enviar_dtmf', id: 'o1', pbxCallId: 'c1', digitos: '#9' });
+  await hasta(() => srv.ultima().recibido.some((m) => m.type === 'ack'));
+  r.relay.cerrar();
+  srv.mandar({ type: 'transferir', id: 'o2', pbxCallId: 'c1', destino: '1002' });
+  srv.mandar({ type: 'enviar_dtmf', id: 'o1', pbxCallId: 'c1', digitos: '#9' });
+  srv.mandar({ type: 'session.commentary.append', content: 'tarde' });
+  await hasta(() => srv.ultima().recibido.filter((m) => m.type === 'ack' || m.type === 'orden_fallida').length === 3);
+  assert.deepEqual(r.ordenes, ['enviar_dtmf'], 'el transferir tardío no se ejecutó');
+  assert.deepEqual(r.comandos, [], 'ni un comando a la sesión');
+  const respuestas = srv.ultima().recibido.filter((m) => m.type === 'ack' || m.type === 'orden_fallida');
+  assert.deepEqual(respuestas[1], { type: 'orden_fallida', pbxCallId: 'c1', ordenId: 'o2', detalle: 'la llamada ya no está en curso' });
+  assert.deepEqual(respuestas[2], { type: 'ack', id: 'o1' });
+});
+
+test('relay: el cierre espera la respuesta de la orden que terminó la llamada', async (t) => {
+  const srv = await backendRelay();
+  t.after(() => srv.cerrar());
+  const r = relayCon(srv, {
+    /* Como `colgar`: termina la llamada (cierra el relay) y recién después vuelve, cuando
+     * Asterisk colgó el canal. */
+    alOrden: async () => { r.relay.cerrar(); await esperar(400); },
+  });
+  r.relay.iniciar();
+  await hasta(() => srv.conexiones.length === 1 && srv.ultima().recibido.length === 1);
+  srv.mandar({ type: 'enganche_confirmado', pbxCallId: 'c1' });
+  srv.mandar({ type: 'colgar', id: 'o1', pbxCallId: 'c1' });
+  await hasta(() => srv.ultima().recibido.some((m) => m.type === 'ack'), 2000);
+  await hasta(() => srv.ultima().ws.readyState === WebSocket.CLOSED, 2000);
+  assert.equal(srv.conexiones.length, 1, 'y no se reabre');
+});
+
+test('relay: el cierre no espera para siempre una orden trabada', async (t) => {
+  const srv = await backendRelay();
+  t.after(() => srv.cerrar());
+  const r = relayCon(srv, { topeCierreMs: 200, alOrden: () => new Promise(() => {}) });
+  r.relay.iniciar();
+  await hasta(() => srv.conexiones.length === 1 && srv.ultima().recibido.length === 1);
+  srv.mandar({ type: 'transferir', id: 'o1', pbxCallId: 'c1', destino: '1002' });
+  await esperar(50);
+  r.relay.cerrar();
+  await hasta(() => srv.ultima().ws.readyState === WebSocket.CLOSED, 2000);
+});
+
+test('relay: con 4001 seguidos, solo el primer intento de cada corte sale sin esperar', async (t) => {
+  const conexiones = [];
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await new Promise((ok) => wss.once('listening', ok));
+  t.after(() => new Promise((ok) => { for (const c of wss.clients) c.terminate(); wss.close(ok); }));
+  let confirmar = true;
+  wss.on('connection', (ws) => {
+    conexiones.push(ws);
+    ws.on('message', () => {
+      if (confirmar) { confirmar = false; ws.send(JSON.stringify({ type: 'enganche_confirmado', pbxCallId: 'c1' })); setTimeout(() => ws.close(4001, 'reubicar'), 20); return; }
+      ws.close(4001, 'reubicar');   // una instancia que se drena: contesta 4001 a todo
+    });
+  });
+  const r = new iax.RelayLlamada({
+    abrir: () => new WebSocket('ws://127.0.0.1:' + wss.address().port + '/api/pbx/llamadas/c1/relay'),
+    aviso: AVISO, ventanaMs: 5000, reaperturaMs: 100, log: () => {},
+  });
+  t.after(() => r.cerrar());
+  r.iniciar();
+  await esperar(1000);
+  assert.ok(conexiones.length <= 13, 'sin bucle: ' + conexiones.length + ' conexiones en 1 s');
+  assert.ok(conexiones.length >= 5, 'sigue intentando: ' + conexiones.length);
+});
+
+test('relay: sin respuesta al latido, se da por cortado y se reabre', async (t) => {
+  const conexiones = [];
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1', autoPong: false });
+  await new Promise((ok) => wss.once('listening', ok));
+  t.after(() => new Promise((ok) => { for (const c of wss.clients) c.terminate(); wss.close(ok); }));
+  wss.on('connection', (ws) => {
+    const c = { ws, recibido: [] };
+    conexiones.push(c);
+    ws.on('message', (d) => {
+      const m = JSON.parse(String(d));
+      c.recibido.push(m);
+      if (m.type === 'llamada_nueva') ws.send(JSON.stringify({ type: 'enganche_confirmado', pbxCallId: 'c1', ...(m.reanudar ? { desde: m.ultimoSeq + 1 } : {}) }));
+    });
+  });
+  const logs = [];
+  const r = new iax.RelayLlamada({
+    abrir: () => new WebSocket('ws://127.0.0.1:' + wss.address().port + '/api/pbx/llamadas/c1/relay'),
+    aviso: AVISO, ventanaMs: 5000, latidoMs: 50, mudoMs: 200, log: (m) => logs.push(m),
+  });
+  t.after(() => r.cerrar());
+  r.iniciar();
+  await hasta(() => conexiones.length >= 2, 2000);
+  assert.equal(conexiones[1].recibido[0].reanudar, true);
+  assert.ok(logs.some((l) => /no contesta el latido en 200 ms/.test(l)), logs.join(' | '));
+});
+
+test('relay: con latido contestado, el relay sigue vivo', async (t) => {
+  const srv = await backendRelay();
+  t.after(() => srv.cerrar());
+  const r = relayCon(srv, { latidoMs: 50, mudoMs: 200 });
+  t.after(() => r.relay.cerrar());
+  r.relay.iniciar();
+  await hasta(() => srv.conexiones.length === 1 && srv.ultima().recibido.length === 1);
+  srv.mandar({ type: 'enganche_confirmado', pbxCallId: 'c1' });
+  await esperar(500);
+  assert.equal(srv.conexiones.length, 1);
+  assert.equal(r.relay.estado, 'vivo');
+});
+
+test('relay: una orden ajena no deja recordado su id', async (t) => {
+  const srv = await backendRelay();
+  t.after(() => srv.cerrar());
+  const r = relayCon(srv);
+  t.after(() => r.relay.cerrar());
+  r.relay.iniciar();
+  await hasta(() => srv.conexiones.length === 1 && srv.ultima().recibido.length === 1);
+  srv.mandar({ type: 'colgar', id: 'o9', pbxCallId: 'otra' });
+  await hasta(() => srv.ultima().recibido.length === 2);
+  srv.mandar({ type: 'enviar_dtmf', id: 'o9', pbxCallId: 'c1', digitos: '#9' });
+  await hasta(() => srv.ultima().recibido.length === 3);
+  assert.deepEqual(r.ordenes, ['enviar_dtmf']);
+  assert.deepEqual(srv.ultima().recibido[2], { type: 'ack', id: 'o9' });
+});
+
+test('relay: una apertura colgada (el balanceador la mandó a una instancia apagada) se corta y se reintenta (prueba con la central, 01/10)', async (t) => {
+  const { createServer } = require('node:net');
+  /* Acepta la conexión TCP y nunca contesta el handshake, como un contenedor parado
+   * detrás de un balanceador sin tope de conexión. */
+  const sockets = new Set();
+  const colgado = createServer((socket) => { sockets.add(socket); socket.on('error', () => {}); });
+  await new Promise((ok) => colgado.listen(0, '127.0.0.1', ok));
+  t.after(() => new Promise((ok) => { for (const socket of sockets) socket.destroy(); colgado.close(ok); }));
+  const srv = await backendRelay();
+  t.after(() => srv.cerrar());
+  let intentos = 0;
+  const r = new iax.RelayLlamada({
+    abrir: () => {
+      intentos++;
+      const url = intentos === 1 ? 'ws://127.0.0.1:' + colgado.address().port : srv.url;
+      return new WebSocket(url + '/api/pbx/llamadas/c1/relay', { handshakeTimeout: 200 });
+    },
+    aviso: AVISO, reaperturaMs: 50, log: () => {},
+  });
+  t.after(() => r.cerrar());
+  r.iniciar();
+  await hasta(() => srv.conexiones.length === 1 && srv.ultima().recibido.length === 1, 2000);
+  assert.equal(intentos, 2);
+  assert.deepEqual(srv.ultima().recibido[0], { ...AVISO, reanudar: false, ultimoSeq: null });
+});
+
+test('canal de control: abre con tope de handshake', () => {
+  const opciones = [];
+  function WSFalso(url, opts) { opciones.push(opts); this.on = () => {}; }
+  const canal = new iax.CanalControl({ url: 'http://b', token: 't', WebSocketImpl: WSFalso });
+  canal.conectar();
+  canal.parar();
+  assert.equal(opciones[0].handshakeTimeout, iax.HANDSHAKE_MS);
+});
+
 /* ── Hechos por HTTP, con el relay cerrado ───────────────────────────────────── */
 test('enviarHecho: POST con el token a /api/pbx/llamadas/:id/hechos; 4xx no se reintenta, 5xx y la red sí', async () => {
   const pedidos = [];
@@ -318,7 +514,7 @@ test('crear: abre el relay de la llamada con el token, y manda los hechos por HT
   });
   const agente = { externo_url: 'https://asistente.example.com/', externo_token: 't0k' };
   m.abrirRelay(agente, 'c/1');
-  assert.deepEqual(abiertos[0], { url: 'wss://asistente.example.com/api/pbx/llamadas/c%2F1/relay', opts: { headers: { Authorization: 'Bearer t0k' } } });
+  assert.deepEqual(abiertos[0], { url: 'wss://asistente.example.com/api/pbx/llamadas/c%2F1/relay', opts: { headers: { Authorization: 'Bearer t0k' }, handshakeTimeout: iax.HANDSHAKE_MS } });
   assert.deepEqual(await m.enviarHecho(agente, { type: 'colgo', pbxCallId: 'c1' }), { ok: true, motivo: '' });
   assert.equal(pedidos[0], 'https://asistente.example.com/api/pbx/llamadas/c1/hechos');
 });
@@ -331,8 +527,8 @@ function sesionExterna({ relay, logs }) {
     log: (m) => logs.push(m),
   };
 }
-function relayFalso({ vivo = true, terminado = false } = {}) {
-  return { mandados: [], cerrado: null, terminado, mandar(m) { this.mandados.push(m.type); return vivo; }, cerrar(c, m) { this.cerrado = [c, m]; } };
+function relayFalso({ vivo = true, terminado = false, avisoMandado = true } = {}) {
+  return { mandados: [], cerrado: null, terminado, avisoMandado, mandar(m) { this.mandados.push(m.type); return vivo; }, cerrar(c, m) { this.cerrado = [c, m]; } };
 }
 
 test('pipeline: un hecho va por el relay; con el relay cortado queda guardado; uno final, si no sale, va por HTTP', async () => {
@@ -346,7 +542,7 @@ test('pipeline: un hecho va por el relay; con el relay cortado queda guardado; u
   assert.equal(pipe._avisarBackend(sesionExterna({ relay: cortado, logs }), { type: 'dtmf', pbxCallId: 'c1', digito: '5' }), true, 'sale al reabrir');
   assert.deepEqual(http, []);
   assert.equal(pipe._avisarBackend(sesionExterna({ relay: cortado, logs }), { type: 'transferencia', pbxCallId: 'c1', ok: true, detalle: null }, { final: true }), false);
-  assert.equal(pipe._avisarBackend(sesionExterna({ relay: null, logs }), { type: 'colgo', pbxCallId: 'c1' }), false);
+  assert.equal(pipe._avisarBackend(sesionExterna({ relay: relayFalso({ vivo: false, terminado: true }), logs }), { type: 'colgo', pbxCallId: 'c1' }, { final: true }), false);
   await esperar(10);
   assert.deepEqual(http, ['transferencia', 'colgo']);
   assert.ok(logs.some((l) => /el hecho colgo no llegó al backend \(el backend contestó 503\)/.test(l)), logs.join(' | '));
@@ -355,7 +551,43 @@ test('pipeline: un hecho va por el relay; con el relay cortado queda guardado; u
   await esperar(10);
   assert.ok(logs.some((l) => /el hecho dtmf no llegó al backend \(sin red\)/.test(l)));
   pipe._setIax(null);
-  assert.equal(pipe._avisarBackend(sesionExterna({ relay: null, logs }), { type: 'colgo', pbxCallId: 'c1' }), false, 'sin IA externa armada, no hace nada');
+  assert.equal(pipe._avisarBackend(sesionExterna({ relay: relayFalso({ vivo: false, terminado: true }), logs }), { type: 'colgo', pbxCallId: 'c1' }, { final: true }), false, 'sin IA externa armada, no hace nada');
+});
+
+test('pipeline: si el backend nunca supo de la llamada, no se le manda nada, ni por HTTP (revisor, 01/10)', async () => {
+  const pipe = require('../ai-pipeline');
+  const http = [];
+  pipe._setIax({ enviarHecho: async (_a, h) => { http.push(h.type); return { ok: true }; } });
+  const logs = [];
+  /* Un DTMF antes de que exista el relay (antes del AudioSocket). */
+  assert.equal(pipe._avisarBackend(sesionExterna({ relay: null, logs }), { type: 'dtmf', pbxCallId: 'c1', digito: '5' }), false);
+  /* Colgó antes de que saliera el aviso. */
+  assert.equal(pipe._avisarBackend(sesionExterna({ relay: relayFalso({ vivo: false, terminado: true, avisoMandado: false }), logs }), { type: 'colgo', pbxCallId: 'c1' }, { final: true }), false);
+  await esperar(10);
+  assert.deepEqual(http, []);
+  pipe._setIax(null);
+});
+
+test('pipeline: ninguna orden se ejecuta con la llamada terminada o en el respaldo (revisor, 01/10)', async () => {
+  const pipe = require('../ai-pipeline');
+  for (const estado of [{ closed: true }, { externoCerrado: true }]) {
+    const sesion = Object.assign(sesionExterna({ relay: relayFalso(), logs: [] }), estado);
+    sesion.agent.agentes_exten = '1002';
+    const o = pipe._ordenesExternas(sesion);
+    await assert.rejects(o.colgar(), /ya no está en curso/);
+    await assert.rejects(o.transferir('1002'), /ya no está en curso/);
+    await assert.rejects(o.enviar_dtmf('#9'), /ya no está en curso/);
+  }
+});
+
+test('pipeline: un transferir a un destino no permitido no desarma la espera de la orden (revisor, 01/10)', async () => {
+  const pipe = require('../ai-pipeline');
+  const sesion = sesionExterna({ relay: relayFalso(), logs: [] });
+  sesion.esperaOrden = setTimeout(() => {}, 60000);
+  const armada = sesion.esperaOrden;
+  await assert.rejects(pipe._ordenesExternas(sesion).transferir('0991234567'), /destino no permitido/);
+  assert.equal(sesion.esperaOrden, armada, 'el respaldo sigue armado');
+  clearTimeout(armada);
 });
 
 test('pipeline: al cerrar, avisa «colgó» si no fue una orden del backend, y cierra el relay sin reabrirlo', () => {

@@ -1894,17 +1894,19 @@ Proveedor `ia-externa` de `pbxng_ai_agents` (migración 0029, `control-plane/ia-
 - **Restricciones:**
   - `transferir` solo acepta como `destino` el `agentes_exten` o el `default_exten` del agente, porque en el contexto `internal` también están las salidas por troncal y la DISA;
   - `colgar` y `transferir` esperan a que suene lo que quedaba en la cola de audio, hasta 5 s, para no cortar la despedida.
-- **El relay lo cierra la central**, cuando termina la llamada (después de ejecutar la orden final). Para la central, un cierre del backend significa «reabrí».
+- **El relay lo cierra la central**, cuando termina la llamada: espera que salga la respuesta de las órdenes en curso (el ack del `colgar` que la terminó; tope de 10 s) y un instante más para el hecho final. Para la central, un cierre del backend significa «reabrí». Con la llamada terminada, una orden nueva se contesta con `orden_fallida` («la llamada ya no está en curso») sin ejecutarse, y una ya hecha repite su respuesta.
+- **Tope para abrir:** el relay y el canal se abren con un tope de 3 s; si no hay respuesta, se corta y se reintenta. Un balanceador que manda la conexión a una instancia apagada la puede dejar colgada en vez de rechazarla.
+- **Latido:** la central manda un ping por el relay cada 2 s (el backend lo contesta solo, con su librería de WebSocket); sin respuesta en 6 s, lo da por cortado y lo reabre. Así una instancia congelada o una red cortada sin aviso no dejan la llamada sin conducir.
 - **Si la sesión de GPT-Live se corta sin `session.closed`** (un corte de red), la central manda un `session.closed { reason: "cortada_en_la_central" }` numerado, porque el cierre del relay ya no sirve para avisarlo.
 
 **Reanudar** (el relay se corta sin que la llamada haya terminado):
 - la central lo reabre **enseguida**, y después cada 1 s, durante `resumeWindowMs`. El balanceador lo manda a cualquier instancia;
 - el aviso va con `reanudar: true` y `ultimoSeq` (el último número que mandó). Lo que pasa mientras está cortado se sigue numerando y guardando;
 - el backend contesta `enganche_confirmado` con `desde` (el siguiente al último que tiene guardado), y la central reenvía desde ahí, en orden. Si `desde` es más viejo que lo guardado, manda lo que tiene y lo anota (el backend nota el hueco por el `seq`);
-- **código 4001 («reubicar»):** una instancia que se apaga cierra el relay así; la central lo reabre sin esperar;
+- **código 4001 («reubicar»):** una instancia que se apaga cierra el relay así; la central lo reabre sin esperar. Solo el primer intento de cada corte sale sin esperar: si las reaperturas siguientes también reciben 4001 (todas las instancias drenándose), van cada 1 s, sin bucle;
 - si vence la ventana sin confirmación, o el backend rechaza la reanudación, va al respaldo.
 
-**Hechos con el relay cerrado** (el resultado de una transferencia, el corte de quien llama al final): `POST <externo_url>/api/pbx/llamadas/<pbxCallId>/hechos` con el token y el hecho como cuerpo. Cualquier instancia lo anota en la llamada. Tres intentos (1 y 2 s entre ellos); un 4xx no se reintenta.
+**Hechos con el relay cerrado** (el resultado de una transferencia, el corte de quien llama al final): `POST <externo_url>/api/pbx/llamadas/<pbxCallId>/hechos` con el token y el hecho como cuerpo. Cualquier instancia lo anota en la llamada. Tres intentos (1 y 2 s entre ellos); un 4xx no se reintenta. Si el aviso de la llamada nunca llegó a salir (quien llama cortó antes de abrir el relay), no se le manda nada: el backend no sabe de esa llamada.
 
 **Respaldo** (transferir a `default_exten`, o colgar si no hay):
 - **Sin abrir sesión:** no hay configuración bajada.

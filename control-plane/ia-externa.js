@@ -46,6 +46,17 @@ const ORDENES_RECORDADAS = 500;
 const TOPE_RELAY = 2000;
 const REAPERTURA_MS = 1000;
 const CODIGO_REUBICAR = 4001;
+/* El latido del relay: un ping cada LATIDO_RELAY_MS, y sin respuesta en MUDO_RELAY_MS se
+ * da por cortado (y se reabre). */
+const LATIDO_RELAY_MS = 2000;
+const MUDO_RELAY_MS = 6000;
+/* Cuánto espera el cierre a las órdenes en curso: un `transferir` espera la cola de audio
+ * (hasta 5 s) y la transferencia. */
+const TOPE_CIERRE_MS = 10000;
+/* Tope para abrir el relay o el canal: un balanceador que manda la conexión a una
+ * instancia apagada puede dejarla colgada (no la rechaza); sin tope, la reapertura
+ * del relay se comía la ventana entera (prueba con la central, 01/10). */
+const HANDSHAKE_MS = 3000;
 
 const base = (url) => String(url || '').trim().replace(/\/+$/, '');
 const aWs = (url) => base(url).replace(/^http/i, 'ws');
@@ -194,7 +205,7 @@ class CanalControl {
   conectar() {
     if (this.parado) return;
     let ws;
-    try { ws = new this.WS(this.url, { headers: { Authorization: 'Bearer ' + this.token } }); }
+    try { ws = new this.WS(this.url, { headers: { Authorization: 'Bearer ' + this.token }, handshakeTimeout: HANDSHAKE_MS }); }
     catch (e) { this.log('canal de control: no se puede abrir (' + e.message + ')'); this.reintentar(); return; }
     this.ws = ws;
     /* Un 401/403 no se arregla reintentando: el token está mal. Se sigue probando, pero
@@ -289,6 +300,9 @@ class RelayLlamada {
     this.alRechazado = o.alRechazado || (() => {});
     this.alPerdido = o.alPerdido || (() => {});
     this.reaperturaMs = o.reaperturaMs === undefined ? REAPERTURA_MS : o.reaperturaMs;
+    this.latidoMs = o.latidoMs || LATIDO_RELAY_MS;
+    this.mudoMs = o.mudoMs || MUDO_RELAY_MS;
+    this.topeCierreMs = o.topeCierreMs || TOPE_CIERRE_MS;
     this.tope = o.tope || TOPE_RELAY;
     this.seq = 0;
     this.guardados = [];          // [{ seq, texto }], los últimos `tope`
@@ -299,9 +313,12 @@ class RelayLlamada {
     this.avisoMandado = false;    // el backend ya supo de la llamada por algún socket
     this.confirmada = false;      // el backend la confirmó alguna vez
     this.vistas = new Map();      // id de orden → respuesta (null mientras corre)
+    this.enCurso = new Set();     // órdenes ejecutándose: el cierre espera su respuesta
     this.reintento = null;
     this.ventana = null;          // el tope para reabrir, mientras está cortado
     this.intentosVentana = 0;
+    this.latido = null;
+    this.ultimoSonido = 0;
   }
 
   get terminado() { return this.estado === 'terminado'; }
@@ -319,8 +336,10 @@ class RelayLlamada {
     return this.estado === 'vivo' || this.terminado ? this.escribir(texto) : false;
   }
 
-  /** Fin de la llamada: no se reabre más. El socket se cierra un instante después, para que
-   * salga lo último (el ack de la orden que la terminó, el hecho final). */
+  /** Fin de la llamada: no se reabre más y no se ejecutan más órdenes. El socket se cierra
+   * cuando terminan las órdenes en curso (su respuesta tiene que salir: el ack del `colgar`
+   * que terminó la llamada) y un instante después, para que salga el hecho final. Un
+   * socket que todavía se estaba abriendo se corta ya: el backend no tiene nada que saber. */
   cerrar(codigo, motivo) {
     if (this.terminado) return;
     this.estado = 'terminado';
@@ -328,13 +347,23 @@ class RelayLlamada {
     clearTimeout(this.ventana);
     const ws = this.ws;
     if (!ws) return;
-    const t = setTimeout(() => {
-      try {
-        if (ws.readyState === 1) ws.close(codigo || 1000, motivo || 'fin de la llamada');
-        else ws.terminate();
-      } catch (_) {}
-    }, 200);
-    if (t.unref) t.unref();
+    if (ws.readyState !== 1) { this.soltar(ws); return; }
+    const tope = new Promise((ok) => { const t = setTimeout(ok, this.topeCierreMs); if (t.unref) t.unref(); });
+    Promise.race([Promise.allSettled([...this.enCurso]), tope]).then(() => {
+      const t = setTimeout(() => this.soltar(ws, codigo || 1000, motivo || 'fin de la llamada'), 200);
+      if (t.unref) t.unref();
+    });
+  }
+
+  soltar(ws, codigo, motivo) {
+    this.pararLatido();
+    /* Cortar un socket que todavía se conecta emite un `error`: sin quien lo escuche,
+     * tiraría abajo el proceso. */
+    try { if (typeof ws.on === 'function') ws.on('error', () => {}); } catch (_) {}
+    try {
+      if (ws.readyState === 1 && codigo) ws.close(codigo, motivo);
+      else ws.terminate();
+    } catch (_) {}
   }
 
   abrirAhora() {
@@ -343,15 +372,24 @@ class RelayLlamada {
     if (this.terminado) return;
     let ws;
     try { ws = this.abrir(); } catch (e) { this.log('relay: no se puede abrir (' + e.message + ')'); this.cortado(); return; }
+    /* La llamada terminó mientras se creaba el socket: no se pisa «terminado». */
+    if (this.terminado) { this.soltar(ws); return; }
     this.ws = ws;
     this.estado = 'abriendo';
-    ws.on('open', () => { if (this.ws === ws) this.abierto(ws); });
-    ws.on('message', (data) => { if (this.ws === ws) this.recibir(data); });
+    ws.on('open', () => {
+      if (this.ws !== ws) return;
+      /* La llamada terminó mientras se abría: no se avisa nada ni se reabre. */
+      if (this.terminado) { this.soltar(ws, 1000, 'fin de la llamada'); return; }
+      this.abierto(ws);
+    });
+    ws.on('message', (data) => { if (this.ws === ws) { this.ultimoSonido = Date.now(); this.recibir(data); } });
+    ws.on('pong', () => { if (this.ws === ws) this.ultimoSonido = Date.now(); });
     ws.on('error', (e) => this.log('relay: ' + ((e && e.message) || e)));
     ws.on('close', (codigo) => { if (this.ws === ws) this.cortado(codigo); });
   }
 
   abierto(ws) {
+    this.vigilar(ws);
     /* Si el backend ya supo de la llamada (por este relay o uno anterior), es una
      * reanudación: lo nuevo espera la confirmación con `desde`. */
     const reanudar = this.avisoMandado;
@@ -364,8 +402,32 @@ class RelayLlamada {
     for (const g of this.guardados) this.escribirEn(ws, g.texto);
   }
 
+  /* El latido: una instancia del backend congelada, o una red cortada sin aviso, dejan el
+   * socket «abierto» sin nadie del otro lado. Sin respuesta en `mudoMs`, se corta y se
+   * reabre como cualquier corte. (`ws` contesta los ping solo, del lado del backend.) */
+  vigilar(ws) {
+    this.pararLatido();
+    this.ultimoSonido = Date.now();
+    this.latido = setInterval(() => {
+      if (this.ws !== ws) { this.pararLatido(); return; }
+      if (Date.now() - this.ultimoSonido > this.mudoMs) {
+        this.log('relay: el backend no contesta el latido en ' + this.mudoMs + ' ms, se corta y se reabre');
+        try { ws.terminate(); } catch (_) {}
+        return;
+      }
+      try { if (typeof ws.ping === 'function') ws.ping(); } catch (_) {}
+    }, this.latidoMs);
+    if (this.latido.unref) this.latido.unref();
+  }
+
+  pararLatido() {
+    clearInterval(this.latido);
+    this.latido = null;
+  }
+
   cortado(codigo) {
     this.ws = null;
+    this.pararLatido();
     if (this.terminado) return;
     this.estado = 'cerrado';
     /* El backend todavía no supo de la llamada (no se pudo conectar): se reintenta; el
@@ -382,9 +444,11 @@ class RelayLlamada {
       this.ventana = setTimeout(() => { this.ventana = null; if (this.estado !== 'vivo') this.perder('no se pudo reabrir el relay en ' + this.ventanaMs + ' ms'); }, this.ventanaMs);
       if (this.ventana.unref) this.ventana.unref();
     }
-    /* Enseguida la primera vez y siempre que el backend pide reubicar; después, cada
-     * REAPERTURA_MS. */
-    const espera = codigo === CODIGO_REUBICAR || this.intentosVentana === 0 ? 0 : this.reaperturaMs;
+    /* El primer intento de cada corte sale enseguida (también con 4001, «reubicar»); los
+     * siguientes, cada REAPERTURA_MS. Si no, una instancia que se drena y sigue recibiendo
+     * conexiones y contestando 4001 armaba un bucle sin pausa (revisor, 01/10). */
+    const espera = this.intentosVentana === 0 ? 0 : this.reaperturaMs;
+    if (codigo === CODIGO_REUBICAR && this.intentosVentana === 0) this.log('relay: el backend pide reubicar la llamada');
     this.intentosVentana++;
     this.reintento = setTimeout(() => this.abrirAhora(), espera);
     if (this.reintento.unref) this.reintento.unref();
@@ -395,7 +459,7 @@ class RelayLlamada {
     this.estado = 'terminado';
     clearTimeout(this.reintento);
     clearTimeout(this.ventana);
-    try { if (ws) ws.terminate(); } catch (_) {}
+    if (ws) this.soltar(ws);
     this.alPerdido(motivo);
   }
 
@@ -403,9 +467,12 @@ class RelayLlamada {
     let msg;
     try { msg = JSON.parse(String(data)); } catch (_) { return; }
     if (!msg || typeof msg.type !== 'string') return;
+    if (ORDENES_LLAMADA.has(msg.type)) { this.ordenar(msg); return; }
+    /* Terminada, lo único que se contesta son las órdenes (con falla, o la respuesta que ya
+     * se dio): ni confirmaciones ni comandos a una sesión que ya no está. */
+    if (this.terminado) return;
     if (msg.type === 'enganche_confirmado') return this.confirmar(msg);
     if (msg.type === 'enganche_rechazado') return this.rechazar(String(msg.motivo || 'rechazado'));
-    if (ORDENES_LLAMADA.has(msg.type)) { this.ordenar(msg); return; }
     const cmd = comandoPermitido(msg);
     if (cmd) { this.alComando(cmd); return; }
     if (msg.id) this.responder({ type: 'orden_fallida', pbxCallId: this.aviso.pbxCallId, ordenId: String(msg.id), detalle: 'orden desconocida: ' + msg.type });
@@ -435,27 +502,36 @@ class RelayLlamada {
   }
 
   async ordenar(orden) {
+    const falla = (detalle) => ({ type: 'orden_fallida', pbxCallId: this.aviso.pbxCallId, ordenId: orden.id || '', detalle: String(detalle).slice(0, 300) });
+    /* Una orden de otra llamada se rechaza sin recordar su id: si no, la buena con ese id
+     * recibiría la falla sin ejecutarse. */
+    if (orden.pbxCallId !== this.aviso.pbxCallId) { this.responder(falla('la orden es de otra llamada (' + orden.pbxCallId + ')')); return; }
     /* Repetida: no se ejecuta otra vez. Si la primera todavía corre, su respuesta sale
-     * cuando termine; si ya terminó, se repite. */
+     * cuando termine; si ya terminó, se repite (también con la llamada terminada). */
     if (orden.id && this.vistas.has(orden.id)) {
       const dada = this.vistas.get(orden.id);
       if (dada) this.responder(dada);
       return;
     }
+    if (this.terminado) { this.responder(falla('la llamada ya no está en curso')); return; }
     if (orden.id) {
       this.vistas.set(orden.id, null);
       if (this.vistas.size > ORDENES_RECORDADAS) this.vistas.delete(this.vistas.keys().next().value);
     }
+    let fin;
+    const enCurso = new Promise((ok) => { fin = ok; });
+    this.enCurso.add(enCurso);
     let respuesta;
     try {
-      if (orden.pbxCallId !== this.aviso.pbxCallId) throw new Error('la orden es de otra llamada (' + orden.pbxCallId + ')');
       await this.alOrden(orden);
       respuesta = orden.id ? { type: 'ack', id: orden.id } : null;
     } catch (e) {
-      respuesta = { type: 'orden_fallida', pbxCallId: this.aviso.pbxCallId, ordenId: orden.id || '', detalle: String((e && e.message) || e).slice(0, 300) };
+      respuesta = falla((e && e.message) || e);
     }
     if (orden.id) this.vistas.set(orden.id, respuesta);
     if (respuesta) this.responder(respuesta);
+    this.enCurso.delete(enCurso);
+    fin();
   }
 
   /* Las respuestas a una orden no se numeran: si se pierden, el backend reenvía la orden y
@@ -543,12 +619,11 @@ function crear(deps) {
   return {
     recargar,
     configDe: (agenteId) => configs.get(agenteId) || null,
-    canalDe: (agente) => canales.get(clave(agente)) || null,
     /** Abre un socket del relay de una llamada (el balanceador lo manda a cualquier
      * instancia del backend). */
     abrirRelay: (agente, pbxCallId) => {
       const WS = deps.WebSocketImpl || require('ws');
-      return new WS(aWs(agente.externo_url) + '/api/pbx/llamadas/' + encodeURIComponent(pbxCallId) + '/relay', { headers: { Authorization: 'Bearer ' + agente.externo_token } });
+      return new WS(aWs(agente.externo_url) + '/api/pbx/llamadas/' + encodeURIComponent(pbxCallId) + '/relay', { headers: { Authorization: 'Bearer ' + agente.externo_token }, handshakeTimeout: HANDSHAKE_MS });
     },
     /** Un hecho de una llamada con el relay ya cerrado, por HTTP. */
     enviarHecho: (agente, hecho) => enviarHecho({ url: agente.externo_url, token: agente.externo_token, hecho, fetchImpl: deps.fetchImpl }),
@@ -558,6 +633,6 @@ function crear(deps) {
 
 module.exports = {
   crear, decidirArranque, comandoPermitido, bajarConfig, enviarHecho, CanalControl, RelayLlamada,
-  COMANDOS_RELAY, ORDENES_LLAMADA, CODIGO_REUBICAR, TOPE_RELAY, VENTANA_DEF_MS, VENTANA_MAX_MS,
+  COMANDOS_RELAY, ORDENES_LLAMADA, CODIGO_REUBICAR, TOPE_RELAY, VENTANA_DEF_MS, VENTANA_MAX_MS, HANDSHAKE_MS,
   urlPermitida, destinoPermitido, dtmfApertura, DTMF,
 };
