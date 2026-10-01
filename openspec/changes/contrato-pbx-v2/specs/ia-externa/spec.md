@@ -116,6 +116,18 @@ se haya reabierto.
 - **THEN** la central SHALL mandarlo en la llamada y dejarlo registrado en la auditoría de
   acciones de la IA
 
+#### Scenario: Orden con la llamada ya terminada
+
+- **WHEN** llega una orden nueva cuando la llamada ya terminó o ya se mandó al respaldo
+- **THEN** la central SHALL NOT ejecutarla y SHALL contestarla como fallida ("la llamada ya
+  no está en curso"); una orden ya hecha repite su respuesta
+
+#### Scenario: La orden que termina la llamada
+
+- **WHEN** el backend manda colgar y la central termina la llamada
+- **THEN** la central SHALL mandar la confirmación de la orden antes de cerrar el relay, con
+  un tope (un parámetro) para una orden trabada
+
 ### Requirement: Hechos de la llamada para el backend
 
 La central SHALL avisarle al backend todo lo que pasa en la llamada que el backend no
@@ -186,7 +198,9 @@ problema del backend: SHALL ir al destino de respaldo del agente, o colgarse si 
 #### Scenario: OpenAI corta la sesión
 
 - **WHEN** la sesión de voz se corta sin aviso del lado de OpenAI
-- **THEN** la central SHALL cerrar el relay para que el backend se entere
+- **THEN** la central SHALL avisarle al backend por el relay con un `session.closed` propio,
+  numerado como los demás eventos, y SHALL dejar el relay abierto para la orden final (un
+  cierre del relay significa «reabrir»)
 
 ## ADDED Requirements
 
@@ -213,10 +227,24 @@ el backend al confirmar.
 - **THEN** la central SHALL reenviar desde el primero que tiene, y el backend se entera del
   hueco por el `seq`
 
+#### Scenario: Una instancia del backend congelada
+
+- **WHEN** la instancia que tiene el relay deja de contestar sin cerrar la conexión (el
+  proceso trabado, o la red cortada sin aviso)
+- **THEN** la central SHALL notarlo por el latido del relay (un ping cada pocos segundos, sin
+  respuesta en un tiempo límite que es un parámetro) y SHALL reabrirlo como en cualquier corte
+
+#### Scenario: La llamada termina mientras el relay se reabre
+
+- **WHEN** quien llama corta mientras el relay se está abriendo o reabriendo
+- **THEN** la central SHALL NOT mandar el aviso ni volver a reabrirlo
+
 ### Requirement: Reubicar ante el apagado ordenado del backend
 
 Si el backend cierra el relay con el código 4001 ("reubicar"), la central SHALL reabrirlo al
-instante, sin esperar, como en una reanudación.
+instante, sin esperar, como en una reanudación. Solo el primer intento de cada corte sale sin
+esperar: si los siguientes también reciben 4001, la central SHALL espaciarlos como en
+cualquier reanudación, sin un bucle de reaperturas.
 
 #### Scenario: Despliegue del backend con una llamada en curso
 

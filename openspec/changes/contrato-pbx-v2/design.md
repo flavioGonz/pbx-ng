@@ -68,7 +68,7 @@ al terminar la llamada.
 
 **5. Hechos con el relay cerrado, por HTTP.** El resultado de una transferencia llega después de
 que el backend cerró la sesión y el relay. Va por `POST /api/pbx/llamadas/:pbxCallId/hechos`, con
-el token y pocos reintentos (por ejemplo, 3 en 10 s). Si no llega, queda en el log de la sesión.
+el token y pocos reintentos (3 intentos, con 1 y 2 s entre ellos y un tope de 5 s por intento: unos 18 s en el peor caso). Si no llega, queda en el log de la sesión.
 
 **6. Canal de control solo para la configuración.**
 - Se quitan los hechos y las órdenes de llamadas.

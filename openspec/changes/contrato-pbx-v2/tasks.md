@@ -13,14 +13,15 @@
 ## 2. El relay v2
 
 - [x] 2.1 `ai-pipeline.js`: el primer mensaje del relay es `llamada_nueva` (con `reanudar` y
-      `ultimoSeq`); cada mensaje hacia el backend lleva `seq`; buffer circular de 2000 en la
-      sesión. Tests en `test/ia-externa.test.js`: el aviso primero; `seq` de a uno; el buffer
+      `ultimoSeq`); cada evento y cada hecho hacia el backend lleva `seq` (el aviso y las
+      respuestas a órdenes no); buffer circular de 2000 en la sesión. Tests en
+      `test/ia-externa-relay.test.js`: el aviso primero; `seq` de a uno; el buffer
       no pasa del tope.
 - [x] 2.2 `ia-externa.js` y `ai-pipeline.js`: las órdenes llegan por el relay, se ejecutan
       solo sobre esa llamada y se confirman por el mismo relay; la cola de ids procesados
       vive en la sesión y sobrevive a una reapertura. Tests: orden ejecutada y ack; orden
       repetida por un relay reabierto; destino no permitido; orden con otro `pbxCallId`.
-- [x] 2.3 Hechos por el relay (`colgo`, `dtmf`, `orden_fallida`); con el relay cerrado, por
+- [x] 2.3 Hechos por el relay (`colgo`, `dtmf`, `transferencia`; `orden_fallida` es la respuesta a una orden y no se numera); con el relay cerrado, por
       HTTP (`POST /api/pbx/llamadas/:pbxCallId/hechos`, con el token y 3 reintentos). Tests:
       por el relay; por HTTP con el relay cerrado; reintento.
 
@@ -50,7 +51,7 @@
 
 ## 6. Integración y cierre
 
-- [ ] 6.1 Prueba en local con el backend v2 (dos instancias y su nginx):
+- [x] 6.1 Prueba en local con el backend v2 (dos instancias y su nginx):
       - llamadas a la vez en instancias distintas;
       - `kill -9` de la instancia de una llamada (se retoma);
       - `SIGTERM` (se reubica);
@@ -59,9 +60,29 @@
       Medir cuánto tarda la reanudación.
 - [x] 6.2 `node --test` en `control-plane/` (sin fallos nuevos), lint sin errores,
       `node --check` de los módulos tocados.
-      **Avance (01/10):** el `RelayLlamada` real de este repo contra el backend v2 real (compose
+      **Hecho (01/10) con la central entera** (Asterisk, ARI, llamadas reales del 1001 al 8000,
+      backend en dos instancias detrás de su nginx): reanudación a los 24 ms con `SIGTERM` y a los
+      26 ms con `kill`, sin volver a saludar; llamadas repartidas entre las dos instancias; el
+      canal caído con una llamada en curso no la afecta y se reconecta a la otra en 1 s; el
+      hecho tardío de la transferencia se anota. Encontró que una conexión a una instancia
+      apagada se colgaba a través del balanceador (14 a 61 s): tope de 3 s para abrir el relay
+      y el canal (6.5), y del lado del asistente, tope de conexión en su nginx. Detalle en la
+      SPEC del asistente, §85.5.
+      **Antes, con el relay solo:** el `RelayLlamada` real de este repo contra el backend v2 real (compose
       del asistente, dos instancias): con `kill` de la instancia, retomada en la otra a los
       ~0,5 s; con `SIGTERM` (4001), a los ~0,4 s; sin repetir el saludo; y después de retomar,
       la llamada terminó por inactividad con `colgar` por el relay nuevo. Falta la prueba con
       la central entera (Asterisk, ARI y una llamada de verdad).
+- [x] 6.4 Arreglos de la revisión del agente `revisor` (01/10), con un test de regresión cada
+      uno en `test/ia-externa-relay.test.js`: el relay no revive si la llamada termina mientras
+      se abre (y cortar un socket que se conecta no tira el proceso); con la llamada terminada
+      las órdenes fallan sin ejecutarse; el cierre espera la respuesta de las órdenes en curso
+      (con tope); 4001 seguidos no arman un bucle (solo el primer intento de cada corte sale
+      sin esperar); latido en el relay (ping cada 2 s, cortado sin respuesta en 6 s); un
+      `transferir` inválido no desarma la espera de la orden; sin aviso mandado no se le
+      avisa nada al backend; una orden ajena no deja recordado su id; el `session.closed`
+      propio no sale después del fin.
+- [x] 6.5 Tope de 3 s para abrir el relay y el canal (`handshakeTimeout`): una apertura que el
+      balanceador deja colgada contra una instancia apagada se corta y se reintenta. Tests en
+      `test/ia-externa-relay.test.js` (un servidor que acepta y nunca contesta).
 - [ ] 6.3 Archivar con `openspec archive contrato-pbx-v2`, después de `conexion-con-pbx`.

@@ -730,31 +730,7 @@ function arrancarExterno(session) {
   session.rtCola = [];
   conectarAudio(session, puente);
 
-  /* Las órdenes del backend para ESTA llamada, que llegan por su relay. Cualquiera de
-   * ellas cancela la espera de orden (ver `esperarOrden`). */
-  const ordenes = {
-    colgar: async () => {
-      clearTimeout(session.esperaOrden);
-      await esperarColaVacia(session);
-      await endSession(session, 'orden del backend');
-    },
-    transferir: async (destino) => {
-      clearTimeout(session.esperaOrden);
-      if (!iaExterna.destinoPermitido(agente, destino)) throw new Error('destino no permitido para este agente: ' + destino);
-      await esperarColaVacia(session);
-      const ok = await doTransfer(session, destino, 'derivación del backend');
-      avisarBackend(session, { type: 'transferencia', pbxCallId, ok, detalle: ok ? null : 'no se pudo transferir a ' + destino }, { final: true });
-      cerrarExterno(session, 'transferida');
-      if (!ok) throw new Error('no se pudo transferir a ' + destino);
-    },
-    enviar_dtmf: async (digitos) => {
-      if (!iaExterna.DTMF.test(digitos)) throw new Error('DTMF inválido');
-      await ARI.channels.sendDTMF({ channelId: session.channel.id, dtmf: digitos, duration: 250, between: 100 });
-      /* La apertura la decide el backend, pero la respuesta a «¿quién abrió el portón?»
-       * sigue estando acá. */
-      auditarAccion(session, { herramienta: 'abrir_porton', resultado: 'DTMF ' + digitos + ' (orden del backend)', razon: 'ia-externa' });
-    },
-  };
+  const ordenes = ordenesExternas(session);
 
   /* El relay de la llamada (contrato v2): el aviso va primero, cada evento y cada hecho
    * van numerados, y si se corta se reabre durante la ventana que publica el backend
@@ -786,7 +762,8 @@ function arrancarExterno(session) {
   puente.on('audio-salida', (msg) => relay.mandar(msg));
   puente.on('error', (e) => { session.log('realtime: ' + e); anotarProblemaProveedor(e); });
   puente.on('cerrado', (info) => {
-    if (session.closed) return;
+    /* El cierre que hace `cerrarExterno` al terminar la llamada no es un corte. */
+    if (session.closed || session.externoCerrado) return;
     session.log('realtime: sesión cerrada (' + ((info && info.code) || 'sin código') + '), se espera la orden del backend');
     /* Sin `session.closed` de OpenAI (un corte de red) el backend no se enteraría: con el
      * contrato v2 el cierre del relay ya no lo dice (significa «reabrir»). Se le avisa con
@@ -807,14 +784,56 @@ function arrancarExterno(session) {
   }).catch((e) => respaldoExterno(session, 'la sesión no abrió: ' + e.message));
 }
 
+/* Las órdenes del backend para una llamada de IA externa, que llegan por su relay. */
+function ordenesExternas(session) {
+  const agente = session.agent;
+  const pbxCallId = session.uuid;
+  /* Con la llamada ya terminada o en el respaldo, ninguna orden se ejecuta: un
+   * `transferir` tardío sobre un canal que ya salió de Stasis lo colgaba (revisor, 01/10). */
+  const enCurso = () => { if (session.closed || session.externoCerrado) throw new Error('la llamada ya no está en curso'); };
+  /* Una orden válida cancela la espera de orden; una inválida no, así el respaldo sigue
+   * armado si la sesión de voz ya se cerró. */
+  const cancelarEspera = () => { clearTimeout(session.esperaOrden); session.esperaOrden = null; };
+  return {
+    colgar: async () => {
+      enCurso();
+      cancelarEspera();
+      await esperarColaVacia(session);
+      await endSession(session, 'orden del backend');
+    },
+    transferir: async (destino) => {
+      enCurso();
+      if (!iaExterna.destinoPermitido(agente, destino)) throw new Error('destino no permitido para este agente: ' + destino);
+      cancelarEspera();
+      await esperarColaVacia(session);
+      const ok = await doTransfer(session, destino, 'derivación del backend');
+      avisarBackend(session, { type: 'transferencia', pbxCallId, ok, detalle: ok ? null : 'no se pudo transferir a ' + destino }, { final: true });
+      cerrarExterno(session, 'transferida');
+      if (!ok) throw new Error('no se pudo transferir a ' + destino);
+    },
+    enviar_dtmf: async (digitos) => {
+      enCurso();
+      if (!iaExterna.DTMF.test(digitos)) throw new Error('DTMF inválido');
+      await ARI.channels.sendDTMF({ channelId: session.channel.id, dtmf: digitos, duration: 250, between: 100 });
+      /* La apertura la decide el backend, pero la respuesta a «¿quién abrió el portón?»
+       * sigue estando acá. */
+      auditarAccion(session, { herramienta: 'abrir_porton', resultado: 'DTMF ' + digitos + ' (orden del backend)', razon: 'ia-externa' });
+    },
+  };
+}
+
 /* Un hecho de la llamada para el backend. Va por el relay, numerado: si está cortado, sale
  * al reabrirlo. Uno final (colgó, el resultado de la transferencia) no puede esperar: si no
  * sale ya, va por HTTP a cualquier instancia. */
 function avisarBackend(session, hecho, { final = false } = {}) {
   const relay = session.relay;
-  if (relay && relay.mandar(hecho)) return true;
-  if (relay && !final && !relay.terminado) return true;
-  if (!IAX) return false;
+  /* Sin relay (todavía no hay sesión de voz) el backend no sabe de la llamada: no hay a
+   * quién avisarle. */
+  if (!relay) return false;
+  if (relay.mandar(hecho)) return true;
+  if (!final && !relay.terminado) return true;
+  /* Tampoco si el aviso nunca llegó a salir (quien llama cortó antes de abrir el relay). */
+  if (!relay.avisoMandado || !IAX) return false;
   IAX.enviarHecho(session.agent, hecho)
     .then((r) => { if (!r.ok) session.log('IA externa: el hecho ' + hecho.type + ' no llegó al backend (' + r.motivo + ')'); })
     .catch((e) => session.log('IA externa: el hecho ' + hecho.type + ' no llegó al backend (' + e.message + ')'));
@@ -1242,6 +1261,7 @@ module.exports._respaldoExterno = respaldoExterno;
 /* Y para las pruebas del contrato v2 (test/ia-externa-relay.test.js): por dónde sale un
  * hecho y qué hace el cierre, sin armar una llamada entera. */
 module.exports._avisarBackend = avisarBackend;
+module.exports._ordenesExternas = ordenesExternas;
 module.exports._cerrarExterno = cerrarExterno;
 module.exports._esperarOrden = esperarOrden;
 module.exports._setIax = (x) => { IAX = x; };

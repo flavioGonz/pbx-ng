@@ -15,9 +15,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   diga; otra instancia retoma la llamada sin cortarla. Las órdenes ya ejecutadas se
   recuerdan por llamada, así una repetida por un relay reabierto no se ejecuta dos veces.
   Los hechos con el relay cerrado van por HTTP (`POST /api/pbx/llamadas/:id/hechos`, tres
-  intentos). **Incompatible con un backend v1:** se despliegan juntos. Verificado contra el
-  backend real con dos instancias: con `kill` de la instancia, retomada a los ~0,5 s; con
-  `SIGTERM`, a los ~0,4 s, sin repetir el saludo; y la orden final por el relay nuevo.
+  intentos). El relay tiene latido (ping cada 2 s; sin respuesta en 6 s se reabre) y al
+  terminar la llamada espera la respuesta de las órdenes en curso antes de cerrarse.
+  **Incompatible con un backend v1:** se despliegan juntos. Verificado el `RelayLlamada`
+  solo (sin Asterisk ni ARI) contra el backend real con dos instancias: con `kill` de la
+  instancia, retomada a los ~0,5 s; con `SIGTERM`, a los ~0,4 s, sin repetir el saludo; y
+  la orden final por el relay nuevo. Con la central entera (llamadas reales, 01/10): retomada
+  a los 24 a 26 ms, sin volver a saludar. El relay y el canal se abren con un tope de 3 s: un
+  balanceador que manda la conexión a una instancia apagada la dejaba colgada hasta 60 s.
   Contrato en `docs/CONTRATOS.md` §11. (`control-plane/ia-externa.js`,
   `control-plane/ai-pipeline.js`, migración 0031, `test/ia-externa-relay.test.js`)
 
