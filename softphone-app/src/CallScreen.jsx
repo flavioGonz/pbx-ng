@@ -438,15 +438,42 @@ export default function CallScreen(p) {
             </div>
           )}
 
-          <TarjetaCamara apagada={!flags.videoOn} iniciales={iniciales}
-            color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando}>
-            {p.videoNodes.yo}
-          </TarjetaCamara>
+          {/* Mientras timbra una entrante todavia no hay camara propia: el stream local
+              recien existe cuando la sesion SIP arma sus medios. Mostrar la tarjeta apagada
+              seria anunciar algo que no esta. La previa es el grupo 3 del cambio
+              `video-en-timbrado`; cuando exista, se saca esta condicion. */}
+          {estado !== 'entrante' && (
+            <TarjetaCamara apagada={!flags.videoOn} iniciales={iniciales}
+              color={COLOR_ESTADO[estado] || COLOR_ESTADO.hablando}>
+              {p.videoNodes.yo}
+            </TarjetaCamara>
+          )}
 
           <div className="cs-video-top">
             <span className="cs-video-quien">{nombre}</span>
             {desde ? <Reloj desde={desde} className="cs-video-reloj" /> : null}
           </div>
+
+          {/* La llamada entrante, ENCIMA de la imagen.
+              Atender, rechazar y la ficha del CRM viven en el bloque del medio, y ese
+              bloque se oculta entero en cuanto hay escena de video. Mientras las camaras
+              del cliente no se encendian al timbrar eso no se notaba; ahora si: sin esto,
+              una entrante con la entrada en pantalla se veria perfecto y no se podria
+              atender. */}
+          {estado === 'entrante' && (
+            <div className="cs-video-entrante">
+              <div className="cs-nombre">{nombre}</div>
+              <div className="cs-estado">{leyenda}</div>
+              {extra}
+              <div className="cs-redondos">
+                <button className="cs-red cs-red-cortar" onClick={acciones.rechazar} title="Rechazar"><IcTelCortar s={24} /></button>
+                {acciones.atenderVideo ? (
+                  <button className="cs-red cs-red-video" onClick={acciones.atenderVideo} title="Atender con video"><IcCam s={24} /></button>
+                ) : null}
+                <button className="cs-red cs-red-atender" onClick={acciones.atender} title="Atender"><IcTel s={24} /></button>
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 

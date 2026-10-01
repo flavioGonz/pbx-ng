@@ -295,6 +295,15 @@ button:disabled { cursor: default !important; }
 .cs-modo-video .cs-ctl-lab,.cs-modo-video .cs-terminar span:last-child{text-shadow:0 1px 5px rgba(0,0,0,.7)}
 .cs-modo-video.cs-ocultos{cursor:none}
 
+/* La llamada entrante, encima de la imagen: nombre, ficha del CRM y los tres redondos.
+   Va con su propio degradado porque abajo no hay barra de controles (`conBarra` es sólo
+   para hablando y espera) y los botones quedarían sobre la imagen pelada. */
+.cs-video-entrante{position:absolute;left:0;right:0;bottom:0;z-index:5;display:flex;
+  flex-direction:column;align-items:center;padding:0 20px 30px;color:#fff;
+  text-shadow:0 1px 6px rgba(0,0,0,.65);
+  background:linear-gradient(180deg,rgba(18,20,24,0),rgba(18,20,24,.78) 46%)}
+.cs-video-entrante .cs-redondos{margin-top:20px}
+
 /* ── La cámara propia ───────────────────────────────────────────────────────── */
 .cs-yo{position:absolute;z-index:6;width:172px;height:116px;border-radius:14px;overflow:hidden;
   background:#15171c;border:1px solid rgba(255,255,255,.18);box-shadow:0 10px 28px rgba(0,0,0,.5);

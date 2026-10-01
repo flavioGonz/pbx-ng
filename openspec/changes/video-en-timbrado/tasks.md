@@ -2,22 +2,27 @@
 
 ## 1. Las cámaras del cliente durante el timbrado
 
-- [ ] 1.1 En `App.jsx`, dejar de excluir `entrante` de `camsEnLlamada`; excluir sólo
+- [x] 1.1 En `App.jsx`, dejar de excluir `entrante` de `camsEnLlamada`; excluir sólo
       `finCall` y el caso de llamada entrante que anuncia video (`sp.incomingVideo`).
-- [ ] 1.2 Verificar que al atender la cámara no se corta ni se reinicia: el componente de
-      la fuente no debe desmontarse al cambiar de estado.
+- [x] 1.2 Verificar que al atender la cámara no se corta ni se reinicia: el componente de
+      la fuente no debe desmontarse al cambiar de estado. **Verificado por inspección**:
+      `EscenaMedios` dibuja cada fuente con `key={f.id}`, así que al aparecer la fuente
+      `llamada` al atender, React reconcilia las cámaras por su clave y no las remonta.
 - [ ] 1.3 Verificar que al rechazar y al vencer el timbrado se dejan de consumir las
       cámaras.
 
 ## 2. Los controles de la entrante, sobre el video
 
-- [ ] 2.1 En `CallScreen.jsx`, sacar del bloque que se oculta los redondos de atender,
+- [x] 2.1 En `CallScreen.jsx`, sacar del bloque que se oculta los redondos de atender,
       atender con video y rechazar cuando el estado es `entrante` y hay escena de video.
-- [ ] 2.2 Mostrar sobre el video quién llama y la ficha del CRM mientras timbra.
-- [ ] 2.3 Que los controles no se escondan solos mientras timbra: el ocultamiento
-      automático es para la llamada en curso.
+- [x] 2.2 Mostrar sobre el video quién llama y la ficha del CRM mientras timbra.
+- [x] 2.3 Que los controles no se escondan solos mientras timbra: el ocultamiento
+      automático es para la llamada en curso. **Ya era así**: el efecto que los esconde
+      sólo corre con `hablando`. Además la barra inferior no existe en `entrante`
+      (`conBarra`), por eso el bloque nuevo trae su propio degradado.
 - [ ] 2.4 Probar en ventana angosta: los tres redondos y la ficha tienen que entrar sin
-      taparse entre sí.
+      taparse entre sí. Se agregó el escenario **Entra+cam** a `?demo=call` para poder
+      mirarlo sin levantar una llamada; falta pasarlo en una ventana chica de verdad.
 
 ## 3. La cámara propia antes de atender
 
