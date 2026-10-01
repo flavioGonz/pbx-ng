@@ -146,6 +146,23 @@ ordenó.
 - **WHEN** quien llama marca un DTMF, o una transferencia ordenada termina bien o mal
 - **THEN** el backend SHALL recibir el hecho correspondiente, con el resultado
 
+### Requirement: El video del portero llega al agente
+
+Mientras la IA atiende, la central SHALL conservar el video que negoció quien llama, aunque
+la IA solo use el audio, para que una derivación al agente lleve el video.
+
+#### Scenario: Portero con cámara derivado a un agente
+
+- **WHEN** quien llama ofrece audio y video, la IA atiende y después deriva a un interno que
+  acepta video
+- **THEN** la central SHALL NOT renegociar la llamada sin video mientras atiende la IA
+- **AND** el agente SHALL recibir el video de quien llama al atender
+
+#### Scenario: Quien llama sin video
+
+- **WHEN** quien llama ofrece solo audio
+- **THEN** la llamada SHALL seguir igual, solo con audio, con la IA y con el agente
+
 ### Requirement: Canal de control con reconexión
 
 La central SHALL mantener un canal de control por backend, compartido por todos sus

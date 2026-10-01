@@ -1908,6 +1908,8 @@ Proveedor `ia-externa` de `pbxng_ai_agents` (migración 0029, `control-plane/ia-
 - **Cerrando la sesión:** el backend no confirma dentro de `attachTimeoutMs` o la rechaza, o la sesión no abre.
 - **Pasados 5 s sin orden del backend:** se cerró la sesión o el relay y no llegó `colgar` ni `transferir`. Se espera porque el backend primero cierra la sesión (se despide o anuncia la derivación) y recién después manda la orden. Si OpenAI corta la sesión sin avisar, la central cierra el relay para que el backend se entere.
 
+**Video del portero en la derivación:** el puente del agente de IA es `mixing,video_sfu`, que en Asterisk es el softmix. Con `mixing` solo, para dos canales Asterisk usaba el puente simple, que iguala las negociaciones: le sacaba el video al portero (re-INVITE con `m=video 0`, porque el canal de audio de la IA no tiene video) y la derivación al agente salía solo con audio. Con el softmix, el portero conserva su video mientras habla con la IA (que no lo usa) y el `Dial` al agente lo ofrece. La imagen verifica `bridge_softmix.so`.
+
 **Tono de llamada en la transferencia:** mientras suena el destino, quien llama **escucha el tono de llamada**, tanto en `transferir` como en cualquiera de los respaldos.
 - **La causa del silencio eran las zonas de tono.** La llamada ya la atendió el `Answer()` del `ivr`, y sobre un canal atendido Asterisk no manda 180: el tono lo tiene que generar el core por audio, con la zona de tono. La imagen no traía `indications.conf` (`indication show` vacío), así que no sonaba nada: ni el aviso de ringing del interno, ni la opción `r`. Quien llama escuchaba silencio y el softphone del panel cortaba solo a los ~8 s por su vigilante `rtp-timeout`. Se vio en la primera llamada real (29/09): dos derivaciones cortadas a los 9 s.
 - **Zonas de tono:** la imagen trae `docker/config/asterisk/indications.conf` con `uy` y `ar`, con los valores de la UIT (Anexo al Boletín de Explotación 781, 1.II.2003, «Various tones used in national networks»). Uruguay: 425 Hz, invitación a marcar continua, llamada 1 s sonando y 4 s de silencio, ocupado 0,5/0,5 s y congestión 0,25/0,25 s. El país sale de `TONE_COUNTRY` (§6, `uy` por defecto); para cambiarlo se pone en `docker/.env` y se recrea el contenedor de Asterisk. Para agregar un país hay que sumar su sección al archivo y reconstruir la imagen.
@@ -1927,4 +1929,4 @@ Proveedor `ia-externa` de `pbxng_ai_agents` (migración 0029, `control-plane/ia-
 
 **Auditoría:** cada `enviar_dtmf` queda en `pbxng_ia_acciones` como `abrir_porton` (orden del backend).
 
-El lado del backend, en el repo del asistente: la spec `integracion-pbx` y SPEC §74.
+El lado del backend, en el repo del asistente: la spec `integracion-pbx` y SPEC §77 (el video del portero, §82).

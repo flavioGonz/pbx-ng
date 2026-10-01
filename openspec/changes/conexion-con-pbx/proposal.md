@@ -64,4 +64,4 @@ Ninguna: `openspec/specs/` todavía no tiene capacidades especificadas.
   Asterisk y la API.**
 - Panel: pantalla de Agentes IA, con el proveedor y sus campos.
 - Contrato: `docs/CONTRATOS.md` §6 (`TONE_COUNTRY`) y §11 (IA externa). El lado del backend
-  está en el repo del asistente: la spec `integracion-pbx` y SPEC §74.
+  está en el repo del asistente: la spec `integracion-pbx` y SPEC §77.
