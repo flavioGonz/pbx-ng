@@ -4,17 +4,22 @@
  *  La central NO sabe de negocio en este perfil: atiende, pone el audio y ejecuta
  *  órdenes de telefonía. Todo lo demás —qué decir, cuándo verificar, abrir, derivar o
  *  cortar— lo decide el backend. Por eso este módulo tiene tres piezas y ninguna lógica
- *  de conversación:
+ *  de conversación (contrato v2):
  *
  *   · la CONFIGURACIÓN de la sesión, que el backend publica y acá se baja y se guarda.
  *     Se usa tal cual en el `session.start`: sin prompt, saludo ni herramientas nuestras;
- *   · el CANAL DE CONTROL, un WebSocket por backend: por ahí van los hechos de la llamada
- *     (llamada nueva, colgó, DTMF, resultado de una transferencia) y vuelven las órdenes
- *     (colgar, transferir, mandar un DTMF, refrescar la configuración);
- *   · el RELAY de cada llamada: los eventos de la sesión de GPT-Live, tal cual, hacia el
- *     backend, y los comandos del backend, tal cual, hacia la sesión. Existe porque a una
- *     sesión abierta por WebSocket el backend no se puede enganchar por el sideband de
- *     OpenAI (da 404): la central le hace de sideband.
+ *   · el CANAL DE CONTROL, un WebSocket por backend: solo el latido y la orden de volver a
+ *     bajar la configuración (`refrescar_config`);
+ *   · el RELAY de cada llamada, y todo lo de esa llamada va por ahí: el aviso de la llamada
+ *     (primer mensaje), los eventos de la sesión de GPT-Live tal cual, los hechos (colgó,
+ *     DTMF, resultado de una transferencia), las órdenes del backend (colgar, transferir,
+ *     mandar un DTMF) y los comandos del backend hacia la sesión. Existe porque a una sesión
+ *     abierta por WebSocket el backend no se puede enganchar por el sideband de OpenAI (da
+ *     404): la central le hace de sideband.
+ *
+ *  El backend corre en varias instancias detrás de un balanceador. La que recibe el relay
+ *  conduce la llamada. Si el relay se corta (esa instancia se cayó o se apaga), la central
+ *  lo reabre —cae en otra instancia— y le reenvía lo que se perdió, numerado (`seq`).
  *
  *  Contrato completo: docs/CONTRATOS.md §11 y, del lado del backend, la spec
  *  `integracion-pbx` del repo del asistente.
@@ -24,14 +29,23 @@
 /* Lo único que el backend puede mandarle a la sesión. Cualquier otro tipo se descarta:
  * así, pase lo que pase del otro lado, nadie cambia la sesión por el relay. */
 const COMANDOS_RELAY = new Set(['session.instructions.append', 'session.commentary.append', 'session.close']);
+/* Las órdenes del backend sobre la llamada, por su relay. */
+const ORDENES_LLAMADA = new Set(['colgar', 'transferir', 'enviar_dtmf']);
 
 /* El canal se da por caído si pasan estos ms sin el ping del backend (que manda cada 5 s). */
 const CANAL_MUDO_MS = 15000;
-/* Reconexión: de a poco, sin martillar a un backend caído. */
+/* Reconexión del canal: de a poco, sin martillar a un backend caído. */
 const RECONEXION_MS = [1000, 2000, 5000, 10000];
-/* Órdenes ya ejecutadas que se recuerdan para descartar las repetidas (se reenvían al
- * reconectar si el ack no llegó). */
+/* Órdenes ya ejecutadas que se recuerdan para descartar las repetidas (el backend las
+ * reenvía si no vio el ack, también por un relay reabierto). */
 const ORDENES_RECORDADAS = 500;
+
+/* El relay: lo que se guarda para reenviar (unos 20 s de eventos), cada cuánto se
+ * reintenta reabrirlo, y el código con que el backend pide reabrirlo ya (se apaga una
+ * instancia: «reubicar»). */
+const TOPE_RELAY = 2000;
+const REAPERTURA_MS = 1000;
+const CODIGO_REUBICAR = 4001;
 
 const base = (url) => String(url || '').trim().replace(/\/+$/, '');
 const aWs = (url) => base(url).replace(/^http/i, 'ws');
@@ -40,6 +54,10 @@ const aWs = (url) => base(url).replace(/^http/i, 'ws');
  * afuera, y un valor absurdo dejaría a un visitante minutos en silencio. */
 const ESPERA_MIN_MS = 1000;
 const ESPERA_MAX_MS = 30000;
+/* Cuánto se intenta reabrir el relay, también acotado: más de un minuto con el visitante
+ * hablándole a nadie no tiene sentido; 0 es «no reabrir, al respaldo». */
+const VENTANA_DEF_MS = 20000;
+const VENTANA_MAX_MS = 60000;
 /* El DTMF que se le manda al portero: lo que un teclado puede marcar, y corto. */
 const DTMF = /^[0-9*#A-D]{1,16}$/;
 
@@ -73,10 +91,10 @@ function dtmfApertura(agente) {
   return DTMF.test(d) ? d : null;
 }
 
-/** ¿Se puede atender con IA externa, o va al respaldo sin abrir sesión? */
-function decidirArranque({ config, canalArriba }) {
+/** ¿Se puede atender con IA externa, o va al respaldo sin abrir sesión? Con el contrato v2
+ * el canal de control no hace falta para atender: la llamada va entera por su relay. */
+function decidirArranque({ config }) {
   if (!config || !config.session) return { atender: false, motivo: 'no hay configuración bajada del backend' };
-  if (!canalArriba) return { atender: false, motivo: 'el canal de control con el backend está caído' };
   return { atender: true, motivo: '' };
 }
 
@@ -84,6 +102,11 @@ function decidirArranque({ config, canalArriba }) {
 function comandoPermitido(msg) {
   return msg && typeof msg === 'object' && COMANDOS_RELAY.has(msg.type) ? msg : null;
 }
+
+const acotar = (valor, min, max, def) => {
+  const n = Number(valor);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : def;
+};
 
 /** Baja la configuración de la sesión. Con la versión que ya se tiene, el backend
  * contesta 304 y no cambia nada. */
@@ -102,14 +125,46 @@ async function bajarConfig({ url, token, version, fetchImpl, topeMs }) {
     /* El relay existe para GPT-Live: con otro modelo la sesión abriría con otro protocolo,
      * ignorando la configuración, y los comandos del backend no existirían. */
     if (!/^gpt-live/i.test(String(cfg.session.model || ''))) throw new Error('el modelo de la configuración no es GPT-Live: ' + String(cfg.session.model || 'sin modelo'));
-    const espera = Math.min(ESPERA_MAX_MS, Math.max(ESPERA_MIN_MS, Math.round(Number(cfg.attachTimeoutMs) || 5000)));
-    return { cambio: true, config: { version: String(cfg.version), session: cfg.session, attachTimeoutMs: espera } };
+    const espera = acotar(cfg.attachTimeoutMs, ESPERA_MIN_MS, ESPERA_MAX_MS, 5000);
+    const ventana = cfg.resumeWindowMs === undefined || cfg.resumeWindowMs === null ? VENTANA_DEF_MS : acotar(cfg.resumeWindowMs, 0, VENTANA_MAX_MS, VENTANA_DEF_MS);
+    return { cambio: true, config: { version: String(cfg.version), session: cfg.session, attachTimeoutMs: espera, resumeWindowMs: ventana } };
   } finally { clearTimeout(t); }
 }
 
 /**
- * El canal de control con UN backend. Reconecta solo; confirma cada orden con un ack
- * DESPUÉS de ejecutarla (o avisa `orden_fallida`), y descarta las repetidas por su id.
+ * Un hecho de una llamada cuyo relay ya se cerró (el resultado de una transferencia, el
+ * corte de quien llama): va por HTTP a cualquier instancia del backend, que lo anota en la
+ * llamada. Tres intentos; un 4xx no se reintenta (la llamada no existe o el hecho es malo).
+ */
+async function enviarHecho({ url, token, hecho, fetchImpl, intentos, esperaMs, topeMs }) {
+  const f = fetchImpl || fetch;
+  const total = intentos || 3;
+  let motivo = '';
+  for (let i = 1; i <= total; i++) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), topeMs || 5000);
+    try {
+      const r = await f(base(url) + '/api/pbx/llamadas/' + encodeURIComponent(hecho.pbxCallId) + '/hechos', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(hecho),
+        signal: ctl.signal,
+      });
+      if (r.ok) return { ok: true, motivo: '' };
+      motivo = 'el backend contestó ' + r.status;
+      if (r.status < 500) return { ok: false, motivo };
+    } catch (e) {
+      motivo = (e && e.message) || String(e);
+    } finally { clearTimeout(t); }
+    if (i < total) await new Promise((ok) => setTimeout(ok, (esperaMs === undefined ? 1000 : esperaMs) * i));
+  }
+  return { ok: false, motivo };
+}
+
+/**
+ * El canal de control con UN backend: el latido y `refrescar_config`. Reconecta solo;
+ * confirma cada orden con un ack DESPUÉS de ejecutarla (o avisa `orden_fallida`), y
+ * descarta las repetidas por su id.
  */
 class CanalControl {
   constructor({ url, token, WebSocketImpl, log, alOrden }) {
@@ -205,8 +260,6 @@ class CanalControl {
     if (respuesta) this.enviar(respuesta);
   }
 
-  /** Un hecho para el backend. Con el canal caído se pierde: la llamada ya se mandó al
-   * respaldo, que es lo que protege al visitante. */
   enviar(msg) {
     if (!this.conectado) return false;
     try { this.ws.send(JSON.stringify(msg)); return true; } catch (_) { return false; }
@@ -214,8 +267,212 @@ class CanalControl {
 }
 
 /**
- * Lo que usa el pipeline: canales por backend, configuración por agente, llamadas en
- * curso y la espera de la confirmación del backend.
+ * El relay de UNA llamada (contrato v2). Vive lo que la llamada, no lo que el socket:
+ * numera cada evento y cada hecho (`seq`, de a uno), guarda los últimos TOPE_RELAY, y si
+ * el socket se corta lo reabre durante la ventana y le reenvía al backend desde donde él
+ * diga. Las órdenes recordadas también son de la llamada: una repetida por un relay
+ * reabierto no se ejecuta dos veces.
+ *
+ * opciones: { abrir(): WebSocket, aviso (llamada_nueva, sin reanudar ni ultimoSeq),
+ *   ventanaMs, log, alComando(cmd), alOrden(orden) (async; si falla, orden_fallida),
+ *   alConfirmado(), alRechazado(motivo), alPerdido(motivo), reaperturaMs?, tope? }
+ */
+class RelayLlamada {
+  constructor(o) {
+    this.abrir = o.abrir;
+    this.aviso = o.aviso;
+    this.ventanaMs = Number.isFinite(o.ventanaMs) ? o.ventanaMs : VENTANA_DEF_MS;
+    this.log = o.log || (() => {});
+    this.alComando = o.alComando || (() => {});
+    this.alOrden = o.alOrden || (async () => {});
+    this.alConfirmado = o.alConfirmado || (() => {});
+    this.alRechazado = o.alRechazado || (() => {});
+    this.alPerdido = o.alPerdido || (() => {});
+    this.reaperturaMs = o.reaperturaMs === undefined ? REAPERTURA_MS : o.reaperturaMs;
+    this.tope = o.tope || TOPE_RELAY;
+    this.seq = 0;
+    this.guardados = [];          // [{ seq, texto }], los últimos `tope`
+    this.ws = null;
+    /* 'cerrado' | 'abriendo' | 'esperando' (aviso de reanudar mandado, falta la
+     * confirmación) | 'vivo' | 'terminado' */
+    this.estado = 'cerrado';
+    this.avisoMandado = false;    // el backend ya supo de la llamada por algún socket
+    this.confirmada = false;      // el backend la confirmó alguna vez
+    this.vistas = new Map();      // id de orden → respuesta (null mientras corre)
+    this.reintento = null;
+    this.ventana = null;          // el tope para reabrir, mientras está cortado
+    this.intentosVentana = 0;
+  }
+
+  get terminado() { return this.estado === 'terminado'; }
+
+  iniciar() { this.abrirAhora(); }
+
+  /** Un evento de la sesión o un hecho de la llamada: se numera y se guarda; sale ya si el
+   * relay está vivo, o al reabrirlo. Devuelve si salió ahora. */
+  mandar(msg) {
+    const seq = ++this.seq;
+    const texto = JSON.stringify(Object.assign({}, msg, { seq }));
+    this.guardados.push({ seq, texto });
+    if (this.guardados.length > this.tope) this.guardados.shift();
+    /* Terminada, todavía sale en el instante antes de cerrar el socket (el hecho final). */
+    return this.estado === 'vivo' || this.terminado ? this.escribir(texto) : false;
+  }
+
+  /** Fin de la llamada: no se reabre más. El socket se cierra un instante después, para que
+   * salga lo último (el ack de la orden que la terminó, el hecho final). */
+  cerrar(codigo, motivo) {
+    if (this.terminado) return;
+    this.estado = 'terminado';
+    clearTimeout(this.reintento);
+    clearTimeout(this.ventana);
+    const ws = this.ws;
+    if (!ws) return;
+    const t = setTimeout(() => {
+      try {
+        if (ws.readyState === 1) ws.close(codigo || 1000, motivo || 'fin de la llamada');
+        else ws.terminate();
+      } catch (_) {}
+    }, 200);
+    if (t.unref) t.unref();
+  }
+
+  abrirAhora() {
+    clearTimeout(this.reintento);
+    this.reintento = null;
+    if (this.terminado) return;
+    let ws;
+    try { ws = this.abrir(); } catch (e) { this.log('relay: no se puede abrir (' + e.message + ')'); this.cortado(); return; }
+    this.ws = ws;
+    this.estado = 'abriendo';
+    ws.on('open', () => { if (this.ws === ws) this.abierto(ws); });
+    ws.on('message', (data) => { if (this.ws === ws) this.recibir(data); });
+    ws.on('error', (e) => this.log('relay: ' + ((e && e.message) || e)));
+    ws.on('close', (codigo) => { if (this.ws === ws) this.cortado(codigo); });
+  }
+
+  abierto(ws) {
+    /* Si el backend ya supo de la llamada (por este relay o uno anterior), es una
+     * reanudación: lo nuevo espera la confirmación con `desde`. */
+    const reanudar = this.avisoMandado;
+    this.avisoMandado = true;
+    this.escribirEn(ws, JSON.stringify(Object.assign({}, this.aviso, { reanudar, ultimoSeq: reanudar ? this.seq : null })));
+    if (reanudar) { this.estado = 'esperando'; return; }
+    /* La primera vez sale todo lo numerado hasta ahora: el backend lo guarda hasta que la
+     * llamada arranca. */
+    this.estado = 'vivo';
+    for (const g of this.guardados) this.escribirEn(ws, g.texto);
+  }
+
+  cortado(codigo) {
+    this.ws = null;
+    if (this.terminado) return;
+    this.estado = 'cerrado';
+    /* El backend todavía no supo de la llamada (no se pudo conectar): se reintenta; el
+     * tope lo pone quien espera la confirmación (attachTimeoutMs). */
+    if (!this.avisoMandado) {
+      this.reintento = setTimeout(() => this.abrirAhora(), this.reaperturaMs);
+      if (this.reintento.unref) this.reintento.unref();
+      return;
+    }
+    if (!this.ventana) {
+      if (this.ventanaMs <= 0) { this.perder('el relay con el backend se cortó y no se reabre (ventana 0)'); return; }
+      this.log('relay: se cortó (' + (codigo || 'sin código') + '), se reabre durante ' + this.ventanaMs + ' ms');
+      this.intentosVentana = 0;
+      this.ventana = setTimeout(() => { this.ventana = null; if (this.estado !== 'vivo') this.perder('no se pudo reabrir el relay en ' + this.ventanaMs + ' ms'); }, this.ventanaMs);
+      if (this.ventana.unref) this.ventana.unref();
+    }
+    /* Enseguida la primera vez y siempre que el backend pide reubicar; después, cada
+     * REAPERTURA_MS. */
+    const espera = codigo === CODIGO_REUBICAR || this.intentosVentana === 0 ? 0 : this.reaperturaMs;
+    this.intentosVentana++;
+    this.reintento = setTimeout(() => this.abrirAhora(), espera);
+    if (this.reintento.unref) this.reintento.unref();
+  }
+
+  perder(motivo) {
+    const ws = this.ws;
+    this.estado = 'terminado';
+    clearTimeout(this.reintento);
+    clearTimeout(this.ventana);
+    try { if (ws) ws.terminate(); } catch (_) {}
+    this.alPerdido(motivo);
+  }
+
+  recibir(data) {
+    let msg;
+    try { msg = JSON.parse(String(data)); } catch (_) { return; }
+    if (!msg || typeof msg.type !== 'string') return;
+    if (msg.type === 'enganche_confirmado') return this.confirmar(msg);
+    if (msg.type === 'enganche_rechazado') return this.rechazar(String(msg.motivo || 'rechazado'));
+    if (ORDENES_LLAMADA.has(msg.type)) { this.ordenar(msg); return; }
+    const cmd = comandoPermitido(msg);
+    if (cmd) { this.alComando(cmd); return; }
+    if (msg.id) this.responder({ type: 'orden_fallida', pbxCallId: this.aviso.pbxCallId, ordenId: String(msg.id), detalle: 'orden desconocida: ' + msg.type });
+    else this.log('relay: se descarta un mensaje no permitido (' + msg.type + ')');
+  }
+
+  confirmar(msg) {
+    const primera = !this.confirmada;
+    this.confirmada = true;
+    clearTimeout(this.ventana);
+    this.ventana = null;
+    if (this.estado === 'esperando') {
+      const desde = Number.isInteger(msg.desde) ? msg.desde : this.seq + 1;
+      const primero = this.guardados.length ? this.guardados[0].seq : this.seq + 1;
+      if (desde < primero) this.log('relay: el backend pide desde el ' + desde + ' y lo más viejo guardado es el ' + primero + ': ese hueco se pierde');
+      this.estado = 'vivo';
+      for (const g of this.guardados) if (g.seq >= desde) this.escribir(g.texto);
+      this.log('relay: el backend retomó la llamada (desde el ' + desde + ')');
+    }
+    if (primera) this.alConfirmado(msg);
+  }
+
+  rechazar(motivo) {
+    if (this.confirmada) { this.perder('el backend rechazó la reanudación: ' + motivo); return; }
+    this.cerrar(1000, 'rechazada');
+    this.alRechazado(motivo);
+  }
+
+  async ordenar(orden) {
+    /* Repetida: no se ejecuta otra vez. Si la primera todavía corre, su respuesta sale
+     * cuando termine; si ya terminó, se repite. */
+    if (orden.id && this.vistas.has(orden.id)) {
+      const dada = this.vistas.get(orden.id);
+      if (dada) this.responder(dada);
+      return;
+    }
+    if (orden.id) {
+      this.vistas.set(orden.id, null);
+      if (this.vistas.size > ORDENES_RECORDADAS) this.vistas.delete(this.vistas.keys().next().value);
+    }
+    let respuesta;
+    try {
+      if (orden.pbxCallId !== this.aviso.pbxCallId) throw new Error('la orden es de otra llamada (' + orden.pbxCallId + ')');
+      await this.alOrden(orden);
+      respuesta = orden.id ? { type: 'ack', id: orden.id } : null;
+    } catch (e) {
+      respuesta = { type: 'orden_fallida', pbxCallId: this.aviso.pbxCallId, ordenId: orden.id || '', detalle: String((e && e.message) || e).slice(0, 300) };
+    }
+    if (orden.id) this.vistas.set(orden.id, respuesta);
+    if (respuesta) this.responder(respuesta);
+  }
+
+  /* Las respuestas a una orden no se numeran: si se pierden, el backend reenvía la orden y
+   * la respuesta sale de las recordadas. */
+  responder(msg) { this.escribir(JSON.stringify(msg)); }
+
+  escribir(texto) { return this.escribirEn(this.ws, texto); }
+
+  escribirEn(ws, texto) {
+    if (!ws || ws.readyState !== 1) return false;
+    try { ws.send(texto); return true; } catch (_) { return false; }
+  }
+}
+
+/**
+ * Lo que usa el pipeline: canales por backend, configuración por agente, relays y hechos
+ * por HTTP.
  *
  * deps: { agentes(): Promise<agente[]>, leerConfig(id), guardarConfig(id, cfg), log,
  *         WebSocketImpl?, fetchImpl? }
@@ -223,9 +480,7 @@ class CanalControl {
 function crear(deps) {
   const log = deps.log || (() => {});
   const canales = new Map();          // clave de backend → CanalControl
-  const configs = new Map();          // agente_id → { version, session, attachTimeoutMs }
-  const llamadas = new Map();         // pbxCallId → { colgar, transferir, dtmf }
-  const esperas = new Map();          // pbxCallId → (resultado) => void
+  const configs = new Map();          // agente_id → { version, session, attachTimeoutMs, resumeWindowMs }
 
   const clave = (a) => base(a.externo_url) + '|' + (a.externo_token || '');
 
@@ -250,29 +505,11 @@ function crear(deps) {
     if (fallas.length) throw new Error('no se pudo bajar la configuración (' + fallas.join('; ') + ')');
   }
 
+  /* Por el canal solo llega `refrescar_config` (contrato v2): lo de cada llamada va por su
+   * relay. */
   async function ordenar(orden, agentesDelBackend) {
-    switch (orden.type) {
-      case 'refrescar_config': return refrescar(agentesDelBackend);
-      case 'enganche_confirmado':
-      case 'enganche_rechazado': {
-        const avisar = esperas.get(orden.pbxCallId);
-        if (avisar) { esperas.delete(orden.pbxCallId); avisar(orden.type === 'enganche_confirmado' ? { ok: true } : { ok: false, motivo: orden.motivo || 'rechazado' }); }
-        return undefined;
-      }
-      case 'colgar':
-      case 'transferir':
-      case 'enviar_dtmf': {
-        const llamada = llamadas.get(orden.pbxCallId);
-        if (!llamada) throw new Error('la llamada ' + orden.pbxCallId + ' ya no está en curso');
-        /* Cada backend manda solo sobre las llamadas de SUS agentes. */
-        if (!agentesDelBackend.some((a) => a.id === llamada.agenteId)) throw new Error('la llamada ' + orden.pbxCallId + ' no es de un agente de este backend');
-        if (orden.type === 'colgar') return llamada.colgar();
-        if (orden.type === 'transferir') return llamada.transferir(String(orden.destino || ''));
-        return llamada.dtmf(String(orden.digitos || ''));
-      }
-      default:
-        throw new Error('orden desconocida: ' + orden.type);
-    }
+    if (orden.type === 'refrescar_config') return refrescar(agentesDelBackend);
+    throw new Error('orden desconocida en el canal de control: ' + orden.type);
   }
 
   /** Abre (o cierra) los canales según los agentes de IA externa que haya. */
@@ -307,20 +544,20 @@ function crear(deps) {
     recargar,
     configDe: (agenteId) => configs.get(agenteId) || null,
     canalDe: (agente) => canales.get(clave(agente)) || null,
-    /** Registra cómo se ejecutan las órdenes de una llamada en curso. */
-    registrar: (pbxCallId, acciones, agenteId) => llamadas.set(pbxCallId, { ...acciones, agenteId }),
-    soltar: (pbxCallId) => { llamadas.delete(pbxCallId); esperas.delete(pbxCallId); },
-    /** Espera la confirmación del backend; si no llega a tiempo, `{ ok: false }`. */
-    esperarEnganche: (pbxCallId, ms) => new Promise((ok) => {
-      const t = setTimeout(() => { esperas.delete(pbxCallId); ok({ ok: false, motivo: 'el backend no confirmó a tiempo' }); }, ms);
-      esperas.set(pbxCallId, (r) => { clearTimeout(t); ok(r); });
-    }),
+    /** Abre un socket del relay de una llamada (el balanceador lo manda a cualquier
+     * instancia del backend). */
     abrirRelay: (agente, pbxCallId) => {
       const WS = deps.WebSocketImpl || require('ws');
       return new WS(aWs(agente.externo_url) + '/api/pbx/llamadas/' + encodeURIComponent(pbxCallId) + '/relay', { headers: { Authorization: 'Bearer ' + agente.externo_token } });
     },
+    /** Un hecho de una llamada con el relay ya cerrado, por HTTP. */
+    enviarHecho: (agente, hecho) => enviarHecho({ url: agente.externo_url, token: agente.externo_token, hecho, fetchImpl: deps.fetchImpl }),
     parar: () => { for (const c of canales.values()) c.parar(); canales.clear(); },
   };
 }
 
-module.exports = { crear, decidirArranque, comandoPermitido, bajarConfig, CanalControl, COMANDOS_RELAY, urlPermitida, destinoPermitido, dtmfApertura, DTMF };
+module.exports = {
+  crear, decidirArranque, comandoPermitido, bajarConfig, enviarHecho, CanalControl, RelayLlamada,
+  COMANDOS_RELAY, ORDENES_LLAMADA, CODIGO_REUBICAR, TOPE_RELAY, VENTANA_DEF_MS, VENTANA_MAX_MS,
+  urlPermitida, destinoPermitido, dtmfApertura, DTMF,
+};

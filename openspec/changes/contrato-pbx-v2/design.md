@@ -37,7 +37,9 @@ Ver proposal.md, sección Why. Lo que existe hoy, en la rama `conexion-con-pbx`:
 - El primer mensaje es `{ type: 'llamada_nueva', pbxCallId, from, to, origen, configVersion,
   dtmfApertura, destinoAgentes, reanudar, ultimoSeq }`.
 - Después, en el mismo socket, van los eventos de la sesión y los hechos (`colgo`, `dtmf`,
-  `orden_fallida`), cada uno con su `seq`. Hacia la central llegan los tres comandos de sesión,
+  `transferencia`), cada uno con su `seq`. Las respuestas a las órdenes (`ack`,
+  `orden_fallida`) no se numeran: se recuerdan por llamada y se repiten si el backend
+  reenvía la orden (decisión tomada al implementar, 01/10). Hacia la central llegan los tres comandos de sesión,
   `enganche_confirmado` (con `desde`), `enganche_rechazado` y las órdenes con id.
 - **Descartado: dejar el aviso y las órdenes en el canal de control** y que el backend las
   reparta entre sus instancias. Lo evaluó el backend: necesita una cola de órdenes en su base y
@@ -48,7 +50,7 @@ respuesta vive en la sesión de la llamada, así sobrevive a una reapertura del 
 al terminar la llamada.
 
 **3. `seq` y buffer en la sesión de la llamada.**
-- Cada mensaje hacia el backend se numera y se guarda en un buffer circular (el mismo tope de
+- Cada evento y cada hecho hacia el backend se numera y se guarda en un buffer circular (el mismo tope de
   2000 que hoy guarda los pendientes, unos 20 s).
 - Mientras el relay está cerrado, lo nuevo se sigue numerando y guardando.
 - Al reabrir: `llamada_nueva` con `reanudar: true` y `ultimoSeq`. El backend contesta

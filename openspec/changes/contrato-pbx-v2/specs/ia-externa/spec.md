@@ -56,9 +56,11 @@ incluye `resumeWindowMs`: cuánto intenta reabrir el relay de una llamada en cur
 
 Durante la llamada, la central SHALL reenviarle al backend, por el relay de esa llamada, cada
 evento de la sesión de voz, y SHALL dejar pasar hacia la sesión solo las frases y el cierre
-que mande el backend. Cada mensaje de la central al backend SHALL llevar un número de orden
-(`seq`) que crece de a uno en toda la llamada, y la central SHALL guardar los últimos para
-reenviarlos.
+que mande el backend. Cada evento de la sesión y cada hecho que la central le manda al
+backend SHALL llevar un número de orden (`seq`) que crece de a uno en toda la llamada, y la
+central SHALL guardar los últimos para reenviarlos. El aviso de la llamada y las respuestas
+a las órdenes (`ack`, `orden_fallida`) no se numeran: si una respuesta se pierde, el
+backend reenvía la orden y la central repite la respuesta.
 
 #### Scenario: Eventos de la sesión
 

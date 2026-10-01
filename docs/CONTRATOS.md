@@ -1868,45 +1868,49 @@ Proveedor `ia-externa` de `pbxng_ai_agents` (migración 0029, `control-plane/ia-
 - `default_exten`: el destino de **respaldo**, cuando no hay backend o configuración. Hace falta al menos uno de los dos: sin destino, el backend rechaza cada llamada;
 - `herramientas.abrir_porton.dtmf`: el DTMF de apertura del portero. Solo en `modo: "dtmf"`, y solo `0-9 * # A-D`.
 
+**Contrato v2 (desde el cambio `contrato-pbx-v2`, 01/10):** el backend corre en **varias instancias** detrás de un balanceador, sin afinidad. Todo lo de una llamada va por **su relay**, así la instancia que lo recibe la conduce; si esa instancia se cae o se apaga, la central reabre el relay, cae en otra y esa la retoma. El canal de control queda solo para la configuración. Es un cambio incompatible con la v1: la central y el backend se despliegan juntos.
+
 **Configuración de la sesión** (`GET <externo_url>/api/pbx/session-config`, `Authorization: Bearer <token>`, `If-None-Match` con la versión guardada; responde 304 si no cambió):
-- devuelve `{ version, generatedAt, session, attachTimeoutMs }`;
+- devuelve `{ version, generatedAt, session, attachTimeoutMs, resumeWindowMs }`;
 - `session` se manda **tal cual** en `{ type: "session.start", session }`;
-- se rechaza si `session.model` no es GPT-Live, porque el relay existe para esa API, y `attachTimeoutMs` se acota entre 1 y 30 s;
-- se guarda en `pbxng_ia_externa_config`, así que un reinicio de la API no deja al agente sin configuración;
-- se baja al recibir la orden `refrescar_config`, que el backend manda al conectarse el canal y cuando cambia la configuración.
+- se rechaza si `session.model` no es GPT-Live, porque el relay existe para esa API; `attachTimeoutMs` se acota entre 1 y 30 s, y `resumeWindowMs` (cuánto se intenta reabrir el relay) entre 0 y 60 s, con 20 s si no viene;
+- se guarda en `pbxng_ia_externa_config` (migraciones 0029 y 0031), así que un reinicio de la API no deja al agente sin configuración;
+- se baja al recibir la orden `refrescar_config`.
 
-**Canal de control** (`ws(s)://<externo_url>/api/pbx/canal`, `Authorization: Bearer <token>`): uno por backend, que comparten todos sus agentes. El backend manda un ping cada 5 s; sin ping en 15 s, la central lo da por caído y reconecta, con esperas de 1, 2, 5 y 10 s.
-- **Hechos** (central → backend):
-  - `llamada_nueva { pbxCallId, from, to, origen: "portero"|"telefono", configVersion, dtmfApertura, destinoAgentes }`;
-  - `colgo { pbxCallId }`;
-  - `dtmf { pbxCallId, digito }`;
-  - `transferencia { pbxCallId, ok, detalle }`;
-  - `orden_fallida { pbxCallId, ordenId, detalle }`.
+**Canal de control** (`ws(s)://<externo_url>/api/pbx/canal`, `Authorization: Bearer <token>`): uno por backend, que comparten todos sus agentes; lo atiende una instancia cualquiera. El backend manda un ping cada 5 s; sin ping en 15 s, la central lo da por caído y reconecta, con esperas de 1, 2, 5 y 10 s. Con token inválido (401/403), reintenta cada 60 s y lo avisa una vez.
+- La única orden es `refrescar_config { id }`: el backend la manda al conectarse el canal y cuando cambia la configuración (desde cualquier instancia). La central contesta `{ type: "ack", id }` después de bajarla, u `orden_fallida` si no pudo. Una repetida no se ejecuta dos veces.
+- Cualquier otra orden por el canal se contesta con `orden_fallida`: lo de las llamadas va por su relay.
+- **Sin canal no se va al respaldo:** una llamada nueva se atiende igual si hay configuración bajada.
 
-  `pbxCallId` es el uuid de la sesión de IA.
-- **Órdenes** (backend → central), cada una con `id`:
-  - `refrescar_config`;
-  - `enganche_confirmado { pbxCallId }` y `enganche_rechazado { pbxCallId, motivo }`;
-  - `colgar { pbxCallId }`;
-  - `transferir { pbxCallId, destino }`;
-  - `enviar_dtmf { pbxCallId, digitos }`.
+**Relay de la llamada** (`ws(s)://<externo_url>/api/pbx/llamadas/<pbxCallId>/relay`, con el token): uno por llamada, abierto cuando la sesión de GPT-Live está lista. `pbxCallId` es el uuid de la sesión de IA.
+- **Primer mensaje (central → backend), el aviso:** `llamada_nueva { pbxCallId, from, to, origen: "portero"|"telefono", configVersion, dtmfApertura, destinoAgentes, reanudar, ultimoSeq }`. `reanudar` es `false` y `ultimoSeq` `null` en una llamada nueva.
+- **El backend contesta** `enganche_confirmado { pbxCallId, desde? }` o `enganche_rechazado { pbxCallId, motivo }`.
+- **Central → backend, numerados (`seq`, de a uno en toda la llamada):** cada evento de GPT-Live tal cual, el `session.input_audio.append` que manda la central, y los hechos: `colgo { pbxCallId }`, `dtmf { pbxCallId, digito }`, `transferencia { pbxCallId, ok, detalle }`. La central guarda los últimos 2000 (unos 20 s) para reenviarlos. El aviso y las respuestas a las órdenes no se numeran.
+- **Backend → central:**
+  - `session.instructions.append`, `session.commentary.append` y `session.close`, que pasan a la sesión; cualquier otro tipo se descarta;
+  - las órdenes de esa llamada, cada una con `id`: `colgar { pbxCallId }`, `transferir { pbxCallId, destino }`, `enviar_dtmf { pbxCallId, digitos }`. El `id` es determinístico (`<llamada>:<tipo>:<n>`): si otra instancia retoma la llamada y manda la misma orden, lleva el mismo id.
 
-  La central contesta `{ type: "ack", id }` **después** de ejecutarla, o `orden_fallida` si no pudo. Una orden repetida, que el backend reenvía si no vio el ack, no se ejecuta dos veces: se repite la respuesta.
+  La central contesta `{ type: "ack", id }` **después** de ejecutarla, u `orden_fallida { pbxCallId, ordenId, detalle }` si no pudo. Las órdenes ya vistas se recuerdan **por llamada**, no por socket: una repetida, también por un relay reabierto, no se ejecuta dos veces y se repite la respuesta. Una orden con otro `pbxCallId`, o de un tipo desconocido, se contesta con `orden_fallida`.
 - **Restricciones:**
   - `transferir` solo acepta como `destino` el `agentes_exten` o el `default_exten` del agente, porque en el contexto `internal` también están las salidas por troncal y la DISA;
-  - cada backend manda solo sobre las llamadas de sus agentes;
-  - `colgar` y `transferir` esperan a que suene lo que quedaba en la cola de audio, hasta 5 s, para no cortar la despedida;
-  - `refrescar_config` falla con `orden_fallida` si la configuración no se pudo bajar.
-- **Rechazos del backend:** un hecho inválido, por ejemplo una `llamada_nueva` sin `destinoAgentes` o con un DTMF inválido, lo contesta con `{ type: "error", detalle }`, y la central lo anota. Con token inválido (401/403), la central reintenta cada 60 s y lo avisa una vez.
+  - `colgar` y `transferir` esperan a que suene lo que quedaba en la cola de audio, hasta 5 s, para no cortar la despedida.
+- **El relay lo cierra la central**, cuando termina la llamada (después de ejecutar la orden final). Para la central, un cierre del backend significa «reabrí».
+- **Si la sesión de GPT-Live se corta sin `session.closed`** (un corte de red), la central manda un `session.closed { reason: "cortada_en_la_central" }` numerado, porque el cierre del relay ya no sirve para avisarlo.
 
-**Relay de la sesión** (`ws(s)://<externo_url>/api/pbx/llamadas/<pbxCallId>/relay`, con el token): uno por llamada, abierto al empezar la sesión.
-- **Hacia el backend** va cada evento de GPT-Live tal cual, más el `session.input_audio.append` que manda la central. El backend lo usa como sideband, porque a una sesión abierta por WebSocket no se puede enganchar el sideband de OpenAI (da 404).
-- **Hacia la sesión** solo pasan `session.instructions.append`, `session.commentary.append` y `session.close`. Cualquier otro tipo se descarta.
+**Reanudar** (el relay se corta sin que la llamada haya terminado):
+- la central lo reabre **enseguida**, y después cada 1 s, durante `resumeWindowMs`. El balanceador lo manda a cualquier instancia;
+- el aviso va con `reanudar: true` y `ultimoSeq` (el último número que mandó). Lo que pasa mientras está cortado se sigue numerando y guardando;
+- el backend contesta `enganche_confirmado` con `desde` (el siguiente al último que tiene guardado), y la central reenvía desde ahí, en orden. Si `desde` es más viejo que lo guardado, manda lo que tiene y lo anota (el backend nota el hueco por el `seq`);
+- **código 4001 («reubicar»):** una instancia que se apaga cierra el relay así; la central lo reabre sin esperar;
+- si vence la ventana sin confirmación, o el backend rechaza la reanudación, va al respaldo.
+
+**Hechos con el relay cerrado** (el resultado de una transferencia, el corte de quien llama al final): `POST <externo_url>/api/pbx/llamadas/<pbxCallId>/hechos` con el token y el hecho como cuerpo. Cualquier instancia lo anota en la llamada. Tres intentos (1 y 2 s entre ellos); un 4xx no se reintenta.
 
 **Respaldo** (transferir a `default_exten`, o colgar si no hay):
-- **Sin abrir sesión:** no hay configuración bajada, o el canal de control está caído.
+- **Sin abrir sesión:** no hay configuración bajada.
 - **Cerrando la sesión:** el backend no confirma dentro de `attachTimeoutMs` o la rechaza, o la sesión no abre.
-- **Pasados 5 s sin orden del backend:** se cerró la sesión o el relay y no llegó `colgar` ni `transferir`. Se espera porque el backend primero cierra la sesión (se despide o anuncia la derivación) y recién después manda la orden. Si OpenAI corta la sesión sin avisar, la central cierra el relay para que el backend se entere.
+- **Pasados 5 s sin orden del backend** después de que se cerró la sesión de voz: no llegó `colgar` ni `transferir`. Se espera porque el backend primero cierra la sesión (se despide o anuncia la derivación) y recién después manda la orden. Un corte del relay no la usa: el relay se reabre.
+- **El relay no se pudo reabrir** en la ventana.
 
 **Video del portero en la derivación:** el puente del agente de IA es `mixing,video_sfu`, que en Asterisk es el softmix. Con `mixing` solo, para dos canales Asterisk usaba el puente simple, que iguala las negociaciones: le sacaba el video al portero (re-INVITE con `m=video 0`, porque el canal de audio de la IA no tiene video) y la derivación al agente salía solo con audio. Con el softmix, el portero conserva su video mientras habla con la IA (que no lo usa) y el `Dial` al agente lo ofrece. La imagen verifica `bridge_softmix.so`.
 
@@ -1925,8 +1929,8 @@ Proveedor `ia-externa` de `pbxng_ai_agents` (migración 0029, `control-plane/ia-
 - **Los grupos e IVR que ya existían:** la migración `0030_tono_derivaciones.sql` les agrega `,${DIAL_OPCIONES}` a los `Dial` escritos antes del cambio. Solo toca las filas con la forma exacta que escribía el panel: `PJSIP/a&PJSIP/b,<timbre>` en la prioridad 2 del grupo y `PJSIP/<interno>,30` en las opciones del IVR. Es idempotente, y un grupo cuyo `Dial` no entra en la columna (256 caracteres) queda como estaba y se nombra en el log de la migración. Una cola no lee la variable.
 - **`ring_time` de los grupos de timbre:** tiene que ser un entero de 5 a 120 s (400 si no); sin él, 25 s. Entraba crudo al `Dial`, y una coma metía opciones propias y corría `${DIAL_OPCIONES}` a un argumento que `Dial` no lee.
 
-**Fin de la llamada:** todo fin que no ordenó el backend (colgó quien llama, se cortó el audio, un tope, un apagado) se le avisa con `colgo`.
+**Fin de la llamada:** todo fin que no ordenó el backend (colgó quien llama, se cortó el audio, un tope, un apagado) se le avisa con `colgo`, por el relay o, si ya no está, por HTTP.
 
 **Auditoría:** cada `enviar_dtmf` queda en `pbxng_ia_acciones` como `abrir_porton` (orden del backend).
 
-El lado del backend, en el repo del asistente: la spec `integracion-pbx` y SPEC §77 (el video del portero, §82).
+El lado del backend, en el repo del asistente: la spec `integracion-pbx` y SPEC §77 y §85 (contrato v2; el video del portero, §82).
