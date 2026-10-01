@@ -156,6 +156,21 @@ cd pbx-ng/docker
 
 El instalador es **interactivo**: te pregunta la topología, qué **módulos** levantar, el dominio y genera los secretos automáticamente en `.env`. Al terminar deja el stack corriendo y te muestra las URLs.
 
+#### El instalador del softphone no viene en el repo
+
+En un clon nuevo, el login **no muestra** los botones de descarga del softphone. No está
+roto: los instaladores son binarios y no se versionan, así que `docker/softphone/` —la
+carpeta del host que compose monta sobre `/app/softphone`— nace vacía, y `/api/softphone/latest`
+contesta que no hay nada. Se baja una vez, desde la raíz del repo:
+
+```bash
+docker/fetch-softphone.sh --dest=docker/softphone
+```
+
+Trae el último release de Windows (`.exe`, `.blockmap` y `latest.yml`, que es el feed OTA).
+El APK de Android se firma y publica aparte: si la central también tiene que ofrecerlo, el
+`.apk` se deja a mano en esa misma carpeta.
+
 **Modelo de empaquetado (importante): módulo = perfil de compose = contenedor.** Un contenedor existe **solo si su módulo está activo**. El estado activo vive en `docker/.env` → `COMPOSE_PROFILES`. Módulos:
 
 | Módulo | Perfil | Contenedor(es) | Función |
