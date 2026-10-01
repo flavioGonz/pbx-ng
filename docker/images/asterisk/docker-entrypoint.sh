@@ -170,7 +170,9 @@ done
 # corta si el modulo no se compilo (ver images/asterisk/Dockerfile); esto es la red de
 # seguridad para una imagen vieja o armada a mano: el aviso queda en el log del arranque en
 # vez de aparecer como "no such application" en medio de una llamada.
-for m in app_disa.so app_confbridge.so; do
+# bridge_softmix.so: el puente del agente de IA (ai-pipeline.js, `video_sfu`); sin el, la IA
+# no puede armar su puente y la llamada va al respaldo.
+for m in app_disa.so app_confbridge.so bridge_softmix.so; do
   [ -f "/usr/lib/asterisk/modules/$m" ] || echo "aviso: falta el modulo $m en esta imagen; las funciones que lo usan van a fallar en tiempo de llamada"
 done
 

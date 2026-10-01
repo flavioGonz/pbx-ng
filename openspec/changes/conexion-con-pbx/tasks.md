@@ -38,6 +38,10 @@
 - [x] 2.4 `ring_time` de los grupos de timbre, de 5 a 120 s, con 400 si no. Verificado con
       `test/telefonia.test.js`.
 - [x] 2.5 Documentación: `docs/CONTRATOS.md` §6 (`TONE_COUNTRY`) y §11, y CHANGELOG.
+- [x] 2.6 El video del portero llega al agente: el puente de la IA pasa a `mixing,video_sfu`
+      (design.md, decisión 9) y la imagen verifica `bridge_softmix.so`. Verificado con
+      `test/puente-ia.test.js` y en vivo: con el registro SIP, el re-INVITE con `m=video 0`
+      ya no sale y el INVITE al 1002 lleva `m=video`; el 1002 vio la cámara del 1001.
 
 ## 3. Revisión
 

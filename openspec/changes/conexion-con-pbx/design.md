@@ -102,6 +102,18 @@ detrás de un proxy.
 `,${DIAL_OPCIONES}` a los `Dial` de grupos e IVR que tienen la forma exacta generada por
 `apps.js`. Las filas editadas a mano no se tocan, y la migración es idempotente.
 
+**9. El puente de la IA es softmix (`mixing,video_sfu`), agregado el 30/09.**
+- **Por qué:** con `mixing`, para dos canales Asterisk elige el puente simple, que iguala las
+  negociaciones de las dos puntas (`bridge_simple.c`). El canal de AudioSocket no tiene
+  video, así que el portero perdía el suyo (re-INVITE con `m=video 0`) y el `Dial` al agente
+  salía sin video. Se vio con el registro SIP en la central local.
+- `video_sfu` es la única opción de ARI que fuerza el softmix y le saca lo "inteligente" al
+  puente (`res_stasis.c`). El softmix no le cambia la negociación a nadie. No suma latencia
+  medible: en las dos llamadas de prueba, del fin del habla a la voz del asistente fue ~2,1 s
+  con softmix y ~2,2 s con el simple.
+- **Descartado: volver a ofrecer el video desde el teléfono después de la derivación.** Lo
+  tendría que hacer cada portero, y un portero de hardware no lo hace.
+
 ## Risks / Trade-offs
 
 - **[Las zonas de tono valen para toda llamada atendida]** → `Busy()`, `Congestion()` y las

@@ -1167,7 +1167,11 @@ async function startAiSession(channel, agent) {
   };
   try { await channel.answer(); } catch (_) {}
   try {
-    const bridge = ARI.Bridge(); await bridge.create({ type: 'mixing' });
+    /* `video_sfu` fuerza el puente de mezcla (softmix). Con `mixing` solo, Asterisk usa el
+     * puente simple de dos canales, que iguala las negociaciones: el canal de audio de la IA
+     * no tiene video, así que le sacaba el video al portero con un re-INVITE (m=video 0), y la
+     * derivación al agente salía sin video. El softmix no toca la negociación del portero. */
+    const bridge = ARI.Bridge(); await bridge.create({ type: 'mixing,video_sfu' });
     session.bridge = bridge;
     pendingByUuid.set(uuid, session);   // registrar ANTES de crear el externalMedia (evita carrera con el handshake AudioSocket)
     const em = await ARI.channels.externalMedia({ app: APP, external_host: MEDIA_HOST + ':' + AS_PORT, format: 'slin', encapsulation: 'audiosocket', transport: 'tcp', connection_type: 'client', data: uuid });

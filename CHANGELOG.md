@@ -16,6 +16,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **El agente no veía la cámara del portero después de una derivación de la IA.** El puente
+  del agente (`mixing`) usaba, con dos canales, el puente simple de Asterisk, que iguala las
+  negociaciones de las dos puntas: como el canal de audio de la IA no tiene video, le mandaba
+  al portero un re-INVITE con `m=video 0`, y la derivación al agente salía solo con audio.
+  Visto con el registro SIP en la central local. Ahora el puente es `mixing,video_sfu`, la
+  única opción de ARI que fuerza el softmix, que no toca la negociación del portero: el
+  `Dial` al agente ofrece el video y el agente ve la cámara. Verificado en vivo (1001 con
+  cámara al 8000, derivado al 1002). La imagen de Asterisk verifica `bridge_softmix.so` como
+  módulo esperado. (`control-plane/ai-pipeline.js`, `docker/images/asterisk/Dockerfile`,
+  `docker/images/asterisk/docker-entrypoint.sh`, `test/puente-ia.test.js`)
 - **La derivación de la IA se cortaba cuando el agente tardaba en atender.** Mientras
   sonaba el interno, quien llama escuchaba silencio, y el softphone del panel colgaba solo
   a los ~8 s por su vigilante de RTP: en la primera llamada real se cortaron dos
