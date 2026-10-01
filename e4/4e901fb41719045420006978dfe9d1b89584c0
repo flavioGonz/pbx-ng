@@ -1,0 +1,27 @@
+openspec/changes/contrato-pbx-v2/proposal.md
+  s_cf45a22c4be6cc::t_401dc8f280d694 1-72
+openspec/changes/contrato-pbx-v2/specs/ia-externa/spec.md
+  s_cf45a22c4be6cc::t_8f23f3b4a06aec 1-223
+openspec/changes/contrato-pbx-v2/design.md
+  s_cf45a22c4be6cc::t_ba4db5f29b9a50 1-100
+openspec/changes/contrato-pbx-v2/.openspec.yaml
+  s_cf45a22c4be6cc::t_c813a30c9d80a3 1-2
+openspec/changes/contrato-pbx-v2/tasks.md
+  s_cf45a22c4be6cc::t_b47efd7f330381 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e44e901fb41719045420006978dfe9d1b89584c0",
+  "prompts": {},
+  "sessions": {
+    "s_cf45a22c4be6cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5d1aee9-7d54-4b6a-b1fa-1081b583776f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
