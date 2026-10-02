@@ -48,8 +48,10 @@
 - [x] 3.1 Rebase sobre `main` sin conflictos. `node --test` en `control-plane/`: los mismos
       7 fallos que ya tenía `main` y ninguno nuevo; lint sin errores; `node --check` de
       los módulos tocados.
-- [ ] 3.2 Pull Request de `conexion-con-pbx` hacia `main`, revisado y aprobado por la otra
-      persona del repo.
+- [x] 3.2 Pull Request de `conexion-con-pbx` hacia `main`, revisado y aprobado por la otra
+      persona del repo. **Descartada (02/10):** no se hace un PR propio; todos los commits de
+      `conexion-con-pbx` están en `contrato-pbx-v2`, que va a `main` en su PR. La rama
+      `conexion-con-pbx` se borró.
 
 ## 4. Despliegue y verificación en una central real
 
