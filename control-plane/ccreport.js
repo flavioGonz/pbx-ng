@@ -104,13 +104,24 @@ module.exports = function init(deps) {
     return e[l] !== undefined ? e[l] : e[nombre];
   };
   const entero = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : null; };
-  /* Nombre del agente: `MemberName` es lo que configura el panel (el interno); si la cola
-   * se armó a mano puede venir vacío y queda la interfaz (PJSIP/1001) sin el prefijo. */
+  /* Nombre del agente: `MemberName` es lo que configura el panel (el interno).
+   * Un miembro dinamico agregado sin nombre (`queue add member PJSIP/2001`, o un
+   * `Local/6098@ivr/n` de prueba) llega con `MemberName` igual a la interfaz cruda, y
+   * «Local/6098@ivr/n» no le dice nada a un supervisor. Normalizamos cualquiera de los
+   * dos campos con la misma regla: saco la tecnologia, el `@contexto` y las opciones del
+   * canal Local, y el sufijo de instancia de PJSIP. Lo que queda es el interno. */
+  const soloInterno = (v) => String(v || '').trim()
+    .replace(/^[A-Za-z0-9]+\//, '')     // PJSIP/ , Local/ , SIP/ ...
+    .replace(/@[^/]*(\/.*)?$/, '')      // @ivr/n  (canal Local)
+    .replace(/-[0-9a-f]{4,}$/i, '')     // -00000012 (instancia)
+    .trim();
   const agenteDe = (e) => {
-    const n = String(campo(e, 'MemberName') || '').trim();
-    if (n) return n.slice(0, 64);
-    const i = String(campo(e, 'Interface') || '').trim();
-    return i ? i.replace(/^[A-Za-z]+\//, '').replace(/-[^-]*$/, '').slice(0, 64) : null;
+    const bruto = String(campo(e, 'MemberName') || '').trim() || String(campo(e, 'Interface') || '').trim();
+    if (!bruto) return null;
+    /* Si el nombre que puso el panel no parece una interfaz, va tal cual (puede ser
+     * «Juan Perez»); si tiene barra o arroba, es una interfaz y la limpio. */
+    const n = /[/@]/.test(bruto) ? soloInterno(bruto) : bruto;
+    return (n || bruto).slice(0, 64);
   };
 
   /* ── Cota del consumidor: buffer en memoria + INSERT por lotes ────────────
