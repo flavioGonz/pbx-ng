@@ -77,7 +77,7 @@ Volver a desplegar la version anterior: `export PBXNG_VERSION=X.Y.(Z-1); ./deplo
 ## Ediciones (licenciamiento) — mapea a perfiles
 - **Core**: `core` (PBX + WebRTC basico).
 - **Pro**: `core,turn` (TURN propio para WebRTC tras NAT).
-- **Enterprise**: `core,turn,ai,intercom` (IVR IA + video intercom + multi-tenant).
+- **Enterprise**: `core,turn,ai,intercom` (IVR IA + video intercom).
 El cliente solo levanta los perfiles contratados; el resto de contenedores ni existen.
 **SBC-NG** (borde SIP, LCR, troncales del operador) se licencia aparte: en cualquier edicion se
 conecta desde el modulo «Conexion a SBC-NG» del panel, que no levanta contenedores.

@@ -15,7 +15,7 @@
 #  No interactivo:    ./install.sh --role=all  --public-ip=1.2.3.4 --domain=pbx.x.com --yes
 #                     ./install.sh --role=core --public-ip=1.2.3.4 --domain=pbx.x.com --turn-ip=10.0.0.20 --yes
 #  Flags: --role= --profiles=a,b --turn-ip= --public-ip= --domain=
-#         --tenant=single|multi --release --yes --print-firewall
+#         --release --yes --print-firewall
 #
 #  Firewall/NAT: es REQUISITO, no un anexo. Al terminar, el instalador imprime
 #  exactamente que abrir segun los modulos activos y verifica el TURN de verdad
@@ -46,12 +46,12 @@ need(){ local v w; v="$(getv "$1")"; [[ -z "$v" ]] && return 0; for w in $WEAK; 
 tcpok(){ timeout 3 bash -c "echo > /dev/tcp/$1/$2" 2>/dev/null && echo ok || echo fail; }
 
 # ---------------- flags ----------------
-ROLE=""; PROFILES=""; TURN_IP=""; PUBLIC_IP_F=""; DOMAIN_F=""; TENANT_F=""; RELEASE=0; YES=0; PRINT_FW=0; VERSION_F=""
+ROLE=""; PROFILES=""; TURN_IP=""; PUBLIC_IP_F=""; DOMAIN_F=""; RELEASE=0; YES=0; PRINT_FW=0; VERSION_F=""
 for a in "$@"; do case "$a" in
   --role=*) ROLE="${a#*=}";; --profiles=*) PROFILES="${a#*=}";;
   --turn-ip=*) TURN_IP="${a#*=}";; --edge-ip=*) TURN_IP="${a#*=}";;   # --edge-ip: compatibilidad
   --public-ip=*) PUBLIC_IP_F="${a#*=}";; --domain=*) DOMAIN_F="${a#*=}";;
-  --join=*) ;; --tenant=*) TENANT_F="${a#*=}";;
+  --join=*) ;;
   --release) RELEASE=1;; --version=*) VERSION_F="${a#*=}";; --yes|-y) YES=1;;
   --print-firewall) PRINT_FW=1;;
   -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
@@ -218,7 +218,6 @@ if [[ "$PRINT_FW" == 1 ]]; then ROLE="${ROLE:-all}"; fw_note "${PROFILES:-core,t
 case "$ROLE" in
 # ==========================================================================
 all)
-  TENANT_MODE="${TENANT_F:-single}"
   # El perfil `turn` NO se pregunta: el coturn propio es parte de PBX-NG y viene
   # ENCENDIDO DE FABRICA. Sin TURN, un softphone detras de un NAT simetrico se queda
   # sin audio; eso es ROTO, no "mejorable". Ya paso: una central se instalo con
@@ -241,7 +240,7 @@ all)
   DOMAIN="${DOMAIN_F:-$( [[ "$YES" == 1 ]] && echo pbx.local || ask 'Dominio publico' 'pbx.tu-dominio.com')}"
   PUBLIC_IP="${PUBLIC_IP_F:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP publica (TURN/RTP, opcional)' '')}"
   ensure_env; gen_shared_secrets
-  put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"; put TENANT_MODE "$TENANT_MODE"
+  put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"
   # DB_HOST es 127.0.0.1 y no la IP LAN: Postgres solo escucha en loopback del host
   # y el unico que lo usa por fuera de la red interna es Asterisk (host network).
   put DB_HOST 127.0.0.1; put ASTERISK_HOST "$LAN"
@@ -267,7 +266,6 @@ all)
 ;;
 # ==========================================================================
 core)
-  TENANT_MODE="${TENANT_F:-single}"
   DOMAIN="${DOMAIN_F:-$( [[ "$YES" == 1 ]] && echo pbx.local || ask 'Dominio publico' 'pbx.tu-dominio.com')}"
   PUBLIC_IP="${PUBLIC_IP_F:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP publica (WAN)' '')}"
   TURN_IP="${TURN_IP:-$( [[ "$YES" == 1 ]] && echo '' || ask 'IP del host TURN (coturn) si esta separado (vacio = esta VM)' '')}"
@@ -279,7 +277,7 @@ core)
   elif [[ "$YES" != 1 ]]; then yn "Incluir 'ai' (Voz IA/IVR)?" n && PROFS+=(ai); yn "Incluir 'intercom' (video go2rtc)?" n && PROFS+=(intercom); fi
   CPROFILES="$(IFS=,; echo "${PROFS[*]}")"
   ensure_env; gen_shared_secrets
-  put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"; put TENANT_MODE "$TENANT_MODE"
+  put DOMAIN "$DOMAIN"; put PUBLIC_IP "$PUBLIC_IP"
   # ASTERISK_HOST lo usa la API (red bridge) para llegar a ARI/AMI/agente de Asterisk,
   # que corre en host network: tiene que ser la IP LAN del host, nunca 127.0.0.1
   # (dentro del contenedor de la API eso seria la propia API).

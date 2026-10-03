@@ -78,7 +78,7 @@ misma en los dos `.env`.
 
 ### Modo interactivo
 `./install.sh` sin flags pregunta el rol y el resto. Flags para automatización:
-`--role=`, `--profiles=`, `--turn-ip=`, `--public-ip=`, `--domain=`, `--tenant=`,
+`--role=`, `--profiles=`, `--turn-ip=`, `--public-ip=`, `--domain=`,
 `--release`, `--yes`, `--print-firewall`.
 
 ## Conectar un SBC-NG (opcional)

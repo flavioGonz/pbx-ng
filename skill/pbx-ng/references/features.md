@@ -144,8 +144,9 @@
 
 - **rtpengine en Docker** (imagen drachtio) — falla el listener WS sobre IPv6 link-local
   (`Failed to init websocket listener`). La PBX funciona sin él para WebRTC LAN. **Prioritario.**
-- **Multi-tenant real + RBAC** — hoy single-tenant efectivo; todo user autenticado = admin.
-  Agregar `requireRole('admin')`, role en el JWT, aislamiento por tenant.
+- **RBAC** — todo usuario autenticado = admin. Agregar `requireRole('admin')` y el rol en
+  el JWT. (El multi-tenant se retiró de la interfaz y del instalador; el esquema sigue
+  siendo tenant-ready por si se decide retomarlo.)
 - **TURN-NG** (task 224) — TURNS 5349 TLS/DTLS + cert LE, cred efímeras REST time-limited,
   cuotas/max-bps, métricas Prometheus. Hoy Coturn básico (3478, no-tls/no-dtls, cred fija).
 - **HA** — mover el estado en memoria de la API a Redis para multi-instancia; failover de CTs.

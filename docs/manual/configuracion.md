@@ -2073,21 +2073,7 @@ el lugar donde se ve *exactamente* qué reglas se aplicaron y en qué orden.
 
 ---
 
-## 30. Empresas (multi-tenant)
-
-» Menú lateral → Sistema → Empresas
-
-Solo tiene sentido si instalaste la central en **modo multi-tenant**: varias empresas conviviendo en
-la misma central, cada una con sus extensiones, sus troncales y su marca, sin verse entre sí.
-
-En modo **PBX simple** (el habitual, una sola empresa) esta sección existe pero no la vas a usar: hay
-una única empresa por defecto.
-
-![Empresas](img/cfg-49-empresas.png)
-
----
-
-## 31. Base de datos
+## 30. Base de datos
 
 » Menú lateral → Sistema → Base de datos
 

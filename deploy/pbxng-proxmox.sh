@@ -5,7 +5,6 @@
 #  Corre EN un nodo Proxmox (o cualquier nodo quorate del cluster) y crea por
 #  si mismo todos los contenedores LXC necesarios, preguntando:
 #    - forma de despliegue (compacto / standalone / hibrido / separado / custom)
-#    - modo de la app (PBX simple / multi-tenant)
 #    - donde ubicar cada componente (recomienda el nodo con mas RAM libre)
 #  Cada CT corre Docker y levanta su(s) perfil(es) del docker-compose de PBX-NG.
 #
@@ -152,16 +151,8 @@ CORE_ROLE=""
 for role in "${ROLES[@]}"; do [[ " ${ROLE_PROFILES[$role]} " == *" core "* ]] && CORE_ROLE="$role"; done
 [[ -n "$CORE_ROLE" ]] || die "Ningún contenedor incluye el perfil 'core' (DB/Asterisk/App)."
 
-# ---------- 2) modo de la aplicacion ----------
-c "2) Modo de la aplicación"
-echo "   1) PBX simple (single-tenant)  · una sola empresa, UI plana   (RECOMENDADO)"
-echo "   2) Multi-tenant (SaaS)         · varias empresas aisladas"
-TMODE_SEL=$(ask "Elegí" "1")
-[[ "$TMODE_SEL" == "2" ]] && TENANT_MODE="multi" || TENANT_MODE="single"
-echo
-
-# ---------- 3) parametros generales ----------
-c "3) Parámetros generales"
+# ---------- 2) parametros generales ----------
+c "2) Parámetros generales"
 DOMAIN=$(ask "Dominio público" "pbx.tu-dominio.com")
 PUBLIC_IP=$(ask "IP pública (TURN/RTP, opcional)" "")
 NET_MODE=$(ask "Red de los contenedores: dhcp / static" "dhcp")
@@ -209,8 +200,8 @@ res_for(){
   echo "$cores $ram $disk"
 }
 
-# ---------- 4) planificar: VMID, nodo, recursos por rol ----------
-c "4) Recursos por componente (todos los CTs se crean en este nodo: $LOCAL_NODE)"
+# ---------- 3) planificar: VMID, nodo, recursos por rol ----------
+c "3) Recursos por componente (todos los CTs se crean en este nodo: $LOCAL_NODE)"
 declare -A ROLE_ID ROLE_NODE ROLE_CORES ROLE_RAM ROLE_DISK ROLE_IP
 id=$NEXTID; idx=0
 for role in "${ROLES[@]}"; do
@@ -238,7 +229,6 @@ c "================================================================"
 c "  RESUMEN DEL DESPLIEGUE"
 c "================================================================"
 echo "  Forma        : $SHAPE   ($(printf '%s ' "${ROLES[@]}"))"
-echo "  Modo app     : $TENANT_MODE"
 echo "  Dominio      : $DOMAIN"
 echo "  Red          : $NET_MODE (bridge $BRIDGE)"
 echo "  Plantilla    : $TEMPLATE   Storage: $STORAGE"
@@ -358,7 +348,6 @@ provision_ct(){
     cat > .env <<EOF
 DOMAIN=$DOMAIN
 PUBLIC_IP=$PUBLIC_IP
-TENANT_MODE=$TENANT_MODE
 DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_NAME=pbxng
@@ -423,7 +412,7 @@ for role in "${ORDER[@]}"; do provision_ct "$role"; done
 # ---------- persistir el plan ----------
 {
   echo "# PBX-NG deploy plan · $(date -Is)"
-  echo "SHAPE=$SHAPE TENANT_MODE=$TENANT_MODE DOMAIN=$DOMAIN"
+  echo "SHAPE=$SHAPE DOMAIN=$DOMAIN"
   for role in "${ROLES[@]}"; do
     echo "$role CT=${ROLE_ID[$role]} node=${ROLE_NODE[$role]} ip=${ROLE_IP[$role]} profiles=\"${ROLE_PROFILES[$role]}\""
   done
@@ -450,7 +439,7 @@ fi
 g "  API       : 127.0.0.1:3000 del CT núcleo (solo local, la usa el panel)"
 g "  Admin     : admin / $ADMIN_DEFAULT_PASS  (se pide cambiarla en el primer ingreso)"
 [[ -n "$PROXY_ROLE" ]] && g "  Proxy NPM : http://${ROLE_IP[$PROXY_ROLE]}:81  (admin@example.com / changeme)"
-g "  Modo app  : $TENANT_MODE   Plan guardado en $PLAN_FILE"
+g "  Plan guardado en $PLAN_FILE"
 if [[ "$SHAPE" == "2" ]]; then
   echo "  ---------------------------------------------------------------"
   y "  Topología:  núcleo=${ROLE_IP[core]:-?} (LAN)   ·   acceso=${ROLE_IP[edge]:-?} (TURN + proxy)"

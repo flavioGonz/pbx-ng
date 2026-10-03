@@ -215,7 +215,6 @@ scripts de aprovisionamiento o para dejar documentado un despliegue:
 | `--edge-ip=` | IP del borde en la LAN (rol core) | `10.0.0.20` |
 | `--core-ip=` | IP del núcleo (rol edge) | `10.0.0.10` |
 | `--join=` | Archivo de unión con los secretos compartidos (rol edge) | `edge-join.env` |
-| `--tenant=` | Modo de inquilinos | `single` (default) · `multi` |
 | `--yes` / `-y` | No preguntar nada, usar defaults | — |
 | `--print-firewall` | Sólo imprime los puertos a abrir y sale | — |
 
@@ -286,7 +285,6 @@ las claves que sí conviene entender si tenés que diagnosticar o migrar el serv
 | `DOMAIN` | Dominio público de la central | Debe resolver a este servidor; de acá sale el certificado y el WSS |
 | `PUBLIC_IP` | IP WAN que se anuncia para el audio | Si está mal, la llamada conecta y no se escucha |
 | `COMPOSE_PROFILES` | Módulos activos | Se cambia con `pbxng-ctl`, no a mano |
-| `TENANT_MODE` | `single` o `multi` inquilino | Se define al instalar |
 | `DB_HOST` · `ASTERISK_HOST` · `SBC_HOST` · `TURN_HOST` | Dónde vive cada componente | En una sola máquina son la misma IP; en núcleo+borde apuntan cruzado |
 | `DB_PASS` · `JWT_SECRET` · `AMI_*` · `ARI_*` · `TURN_PASS` | Secretos generados | **Nunca los pongas a mano**: el instalador aborta si detecta uno débil |
 

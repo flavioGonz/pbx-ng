@@ -1594,7 +1594,7 @@ esperando y no hay evento que avise. Al desmontar se cierra el WebSocket: el vid
 
 ## 6. Variables de entorno (`.env` del compose)
 
-`DOMAIN PUBLIC_IP TENANT_MODE DEFAULT_COMPANY` · `DB_HOST DB_PORT DB_NAME DB_USER DB_PASS` ·
+`DOMAIN PUBLIC_IP DEFAULT_COMPANY` · `DB_HOST DB_PORT DB_NAME DB_USER DB_PASS` ·
 `ARI_USER ARI_PASS AMI_USER AMI_PASS JWT_SECRET ADMIN_DEFAULT_PASS` · `ASTERISK_HOST MEDIA_HOST
 TURN_HOST VOZ_HOST NPM_HOST AST_AGENT TURN_AGENT` · `TURN_USER TURN_PASS TURN_CLI_PASS
 TURN_REALM` (**`TURN_HOST` NO alimenta `/api/ice`**: sólo apunta al agente `:8091` y al nodo
