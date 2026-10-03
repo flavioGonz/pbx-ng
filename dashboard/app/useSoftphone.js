@@ -61,7 +61,17 @@ function ringTone(loud) {
     freqs.forEach(f => { const o = ractx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(g); o.start(t); o.stop(t + dur); });
   } catch (_) {}
 }
-function buzz() { if (navigator.vibrate) { try { navigator.vibrate([500, 300, 500]); } catch (_) {} } }
+/* Chrome BLOQUEA vibrate hasta que hubo un gesto del usuario en la pestaña, y por cada
+ * intento escribe un «[Intervention] Blocked call to navigator.vibrate» en la consola. En
+ * una llamada entrante eso son tres líneas de ruido por timbre, en una pantalla que a veces
+ * es la que ve un invitado. Se consulta el gesto antes de pedir la vibración: si todavía no
+ * lo hubo, no se intenta — igual no iba a vibrar. */
+let hubeGesto = false;
+if (typeof window !== 'undefined') {
+  const marcar = () => { hubeGesto = true; };
+  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => window.addEventListener(ev, marcar, { once: true, passive: true }));
+}
+function buzz() { if (hubeGesto && navigator.vibrate) { try { navigator.vibrate([500, 300, 500]); } catch (_) {} } }
 export function startRinging(loud) {
   stopRinging();
   ringTone(loud); if (loud) buzz();
@@ -69,7 +79,7 @@ export function startRinging(loud) {
 }
 export function stopRinging() {
   if (ringInt) { clearInterval(ringInt); ringInt = null; }
-  if (navigator.vibrate) { try { navigator.vibrate(0); } catch (_) {} }
+  if (hubeGesto && navigator.vibrate) { try { navigator.vibrate(0); } catch (_) {} }
 }
 
 // Libera micrófono/cámara (apaga el indicador rojo de iOS) al terminar la llamada.
