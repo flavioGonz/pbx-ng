@@ -1348,7 +1348,18 @@ export default function App() {
                tiene cámaras: el portero sin video se suplanta con la cámara de la entrada,
                que es lo que uno quería mirar desde el principio. */
             const videoLlamada = !!sp.videoOn && !entrante;
-            const camsEnLlamada = (!entrante && !finCall) ? camaras : [];
+            /* Las camaras del cliente se ven TAMBIEN mientras timbra una entrante: atender
+               es la decision que uno quiere tomar despues de mirar quien esta en la puerta,
+               no antes. Antes esta linea decia `!entrante && !finCall`, y por eso una
+               entrante del portero mostraba el orbe hasta que se atendia, mientras que la
+               misma llamada marcada al reves mostraba la entrada desde el primer timbre.
+
+               La excepcion: si la entrante ANUNCIA video, no se encienden. La imagen que
+               importa es la que va a traer la llamada, y encender las camaras para taparlas
+               un segundo despues es peor que esperar. En una saliente no existe esa
+               excepcion porque no se sabe de antemano si el otro lado manda imagen. */
+            const anunciaVideo = entrante && !!sp.incomingVideo;
+            const camsEnLlamada = (!finCall && !anunciaVideo) ? camaras : [];
             const videoVivo = videoLlamada || camsEnLlamada.length > 0;
 
             /* Los dos videos se entregan SUELTOS (no una escena ya armada): la pantalla de

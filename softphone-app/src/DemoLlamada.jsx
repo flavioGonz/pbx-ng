@@ -55,6 +55,7 @@ function vozFalsa() {
  * ==========================================================================*/
 const PASOS = [
   { estado: 'entrante', corto: 'Entra', desc: 'Entra una llamada' },
+  { estado: 'entrante', corto: 'Entra+cam', desc: 'Entra el portero sin video: la cámara del cliente se ve ANTES de atender', video: true, cams: true, ficha: true },
   { estado: 'marcando', corto: 'Marca', desc: 'Estamos llamando' },
   { estado: 'hablando', corto: 'Habla', desc: 'Conversación' },
   { estado: 'espera', corto: 'Espera', desc: 'En espera' },
@@ -108,11 +109,20 @@ export default function DemoLlamada() {
         titulo={paso.estado === 'entrante' ? 'Carlos' : 'Carlos'}
         subtitulo="1008"
         iniciales="CA"
-        desde={paso.video ? Date.now() - 74000 : desde}
+        /* Una llamada que todavía timbra no tiene duración: el reloj aparecería contando
+           una conversación que no empezó. */
+        desde={paso.estado === 'entrante' ? 0 : (paso.video ? Date.now() - 74000 : desde)}
         calidad={3}
         video={!!paso.video}
         videoNodes={nodos}
         principalEsCamara={princ.startsWith('cam:')}
+        extra={paso.ficha ? (
+          <div className="menu-pop" style={{ marginTop: 14, background: 'rgba(255,255,255,.07)', border: '1px solid rgba(255,255,255,.14)', borderRadius: 14, padding: '12px 16px', maxWidth: 420, textAlign: 'left' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontWeight: 700, fontSize: 15 }}>Casa Pérez</span><span style={{ marginLeft: 'auto', fontSize: 10, background: 'rgba(159,208,255,.18)', color: '#cfe6ff', borderRadius: 8, padding: '2px 8px' }}>CRM</span></div>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,.62)', marginTop: 2 }}>Av. Giannattasio km 24</div>
+            <div style={{ marginTop: 6, fontSize: 12, color: 'rgba(255,255,255,.8)' }}><span style={{ color: 'rgba(255,255,255,.5)' }}>Autorizados: </span>Ana, Martín, Sofía</div>
+          </div>
+        ) : null}
         getRemoteStream={paso.video ? (() => falsos.current && falsos.current.remoto) : null}
         getAudioStream={() => (falsos.current && falsos.current.voz) || null}
         menuMas={<>
