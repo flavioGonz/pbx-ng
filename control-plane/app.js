@@ -12,6 +12,7 @@ const acme = require('./acme');  // ACME/Let's Encrypt (certificados TLS sin pro
 const { Server } = require('socket.io');
 const { Pool } = require('pg');
 const AriClient = require('ari-client');
+const { vigilarAri } = require('./ari-vigia');
 const aiPipeline = require('./ai-pipeline');
 const realtime = require('./realtime');   // probar la conexión con el modelo desde el panel
 const AsteriskManager = require('asterisk-manager');
@@ -249,6 +250,13 @@ const pendingConf = {};
  * activas, y el IVR con IA muerto hasta reiniciar la API. AMI ya reconectaba solo
  * (keepConnected); ARI merece lo mismo. Backoff 2s -> 30s. */
 let ariBackoff = 2000;
+/* El WebSocket del ARI también puede morir sin avisar (medio abierto): ari-client no
+ * emite nada y Asterisk ya no tiene la app, así que cada llamada a la IA se cortaba
+ * hasta reiniciar la API. El vigía (ari-vigia.js) pregunta cada 30 s si la app sigue
+ * registrada y, si no, la da por desconectada como un WebSocketClose. */
+const ARI_VIGIA_MS = 30000;
+let vigiaAri = null;
+function pararVigiaAri() { if (vigiaAri) { vigiaAri.parar(); vigiaAri = null; } }
 /* ari-client, cuando Asterisk todavía no escucha, no rechaza la promesa: el cliente
  * swagger tira la excepción en un callback suelto y eso llega como uncaughtException
  * (con el manejador de cierre de 1.5.0 el proceso salía con 1 en cada arranque hasta
@@ -279,7 +287,7 @@ async function connectAri() {
     });
     const onDown = (why) => {
       if (ari !== c) return;                 // ya fue reemplazado por otra conexion
-      ari = null; state.ari = false; callEngine.detach();
+      ari = null; state.ari = false; callEngine.detach(); pararVigiaAri();
       logger('ARI').warn('desconectado: ' + why);
       setTimeout(connectAri, ariBackoff); ariBackoff = Math.min(30000, ariBackoff * 2);
     };
@@ -290,6 +298,17 @@ async function connectAri() {
     ari = c; state.ari = true; ariBackoff = 2000;
     logger('ARI').info('ok (eventos de toda la central)');
     callEngine.attach(c);
+    pararVigiaAri();
+    vigiaAri = vigilarAri({
+      ...CFG.ari,
+      cadaMs: ARI_VIGIA_MS,
+      log: (m) => logger('ARI').warn(m),
+      alPerder: () => {
+        onDown('la central ya no tiene la app ' + CFG.ari.app + ' (el WebSocket se cortó sin avisar)');
+        // El cliente viejo sigue creyéndose conectado: se cierra para que no quede colgado.
+        Promise.resolve(c.stop && c.stop()).catch(() => {});
+      },
+    });
     try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { logger('AI').error('init', e); }
   } catch (e) {
     logger('ARI').warn('sin conexion (' + e.message + '); reintento en ' + Math.round(ariBackoff / 1000) + 's');
@@ -3192,7 +3211,7 @@ async function cerrarOrdenado(senal) {
     for (const id of ids) await callEngine.stopSpy(id).catch(() => {});
     paso('supervisiones cortadas', { spies: ids.length });
   } catch (e) { log.warn('cierre: supervisiones', e); }
-  try { if (ari) { const c = ari; ari = null; state.ari = false; callEngine.detach(); await Promise.resolve(c.stop && c.stop()).catch(() => {}); } paso('ARI cerrado'); } catch (e) { log.warn('cierre: ARI', e); }
+  try { pararVigiaAri(); if (ari) { const c = ari; ari = null; state.ari = false; callEngine.detach(); await Promise.resolve(c.stop && c.stop()).catch(() => {}); } paso('ARI cerrado'); } catch (e) { log.warn('cierre: ARI', e); }
   try { ami.disconnect && ami.disconnect(); paso('AMI cerrado'); } catch (e) { log.warn('cierre: AMI', e); }
   try { await Promise.race([aiPipeline.close(), new Promise((ok) => setTimeout(ok, 2000))]); paso('AudioSocket cerrado'); } catch (e) { log.warn('cierre: AudioSocket', e); }
   try {

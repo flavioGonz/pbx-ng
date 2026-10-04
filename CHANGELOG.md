@@ -39,6 +39,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **ARI: la API reconecta si Asterisk pierde la app.** El WebSocket de eventos del ARI podía
+  quedar medio abierto (un corte de la red de Docker, la máquina que se durmió) sin que
+  `ari-client` avisara: la API seguía diciendo «ok», pero Asterisk ya no tenía la app `pbxng`
+  y cortaba cada llamada a un agente de IA con «Stasis app 'pbxng' doesn't exist», hasta
+  reiniciar la API (visto en desarrollo el 04/10, con la conexión muerta desde el 02/10).
+  Ahora un vigía (`control-plane/ari-vigia.js`) pregunta cada 30 s por
+  `GET /ari/applications/pbxng`: un 404 lo da por desconectado, como un `WebSocketClose`, y
+  reconecta; un error de red no dispara nada. Con pruebas en `test/ari-vigia.test.js`.
 - **El agente no veía la cámara del portero después de una derivación de la IA.** El puente
   del agente (`mixing`) usaba, con dos canales, el puente simple de Asterisk, que iguala las
   negociaciones de las dos puntas: como el canal de audio de la IA no tiene video, le mandaba

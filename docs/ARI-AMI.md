@@ -7,7 +7,7 @@ diagnostican distinto.
 | Interfaz | Puerto | Cliente | Para qué la usamos |
 |---|---|---|---|
 | **AMI** (Asterisk Manager Interface) | 5038/TCP | `asterisk-manager` | Eventos en vivo, acciones puntuales y CLI encapsulada (`Action: Command`). Reconecta sola (`keepConnected`). |
-| **ARI** (Asterisk REST Interface + WebSocket) | 8088/TCP (`/ari`) | `ari-client` | Control de llamadas con estado propio: la app Stasis `pbxng`, bridges, canales de medios externos. Desde 1.3.0 reconecta con backoff (2 s → 30 s). |
+| **ARI** (Asterisk REST Interface + WebSocket) | 8088/TCP (`/ari`) | `ari-client` | Control de llamadas con estado propio: la app Stasis `pbxng`, bridges, canales de medios externos. Desde 1.3.0 reconecta con backoff (2 s → 30 s). Además, cada 30 s se comprueba que Asterisk siga teniendo la app (`GET /ari/applications/pbxng`): si el WebSocket quedó medio abierto y la app se perdió (404), se da por desconectado y se reconecta (`ari-vigia.js`). |
 | **AudioSocket** | 9092/TCP (escucha la API) | `ai-pipeline.js` | Audio crudo de la llamada hacia el pipeline STT → LLM → TTS del IVR con IA. Lo abre Asterisk vía ARI `externalMedia`. |
 
 ## Lo que depende de ARI
