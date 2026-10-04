@@ -163,7 +163,7 @@ async function liveFalso() {
 test('realtime: con sessionCruda la sesión se abre con la configuración del backend tal cual', async (t) => {
   const srv = await liveFalso();
   t.after(() => srv.cerrar());
-  const session = { model: 'gpt-live-1', instructions: 'Sos el portero virtual…', audio: { output: { voice: 'marin' } }, delegation: { type: 'responses', responses: { model: 'gpt-5.1' } } };
+  const session = { model: 'gpt-live-1', instructions: 'Sos el portero virtual…', audio: { output: { voice: 'marin' } }, delegation: { type: 'responses', responses: { model: 'gpt-6-sol' } } };
   const p = rt.abrir({ url: srv.url(), model: 'gpt-live-1', sessionCruda: session });
   t.after(() => p.cerrar());
   await p.cuandoListo(3000);

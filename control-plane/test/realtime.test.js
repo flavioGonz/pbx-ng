@@ -374,9 +374,12 @@ test('con herramientas, la delegación lleva SIEMPRE un modelo que razone', () =
   /* De a una: dos acciones a la vez en una portería es abrir la puerta mientras todavía se
    * verifica a quién. */
   assert.equal(c.session.delegation.responses.parallel_tool_calls, false);
+  /* Sol sin esfuerzo explícito razona «medium»: segundos de silencio en la llamada. */
+  assert.deepEqual(c.session.delegation.responses.reasoning, { effort: 'none' });
 
   const propio = rt.LIVE.configurar({ model: 'gpt-live-1', herramientas: [{ type: 'function', name: 'x' }], delegacionModel: 'gpt-5-nano' });
   assert.equal(propio.session.delegation.responses.model, 'gpt-5-nano', 'no respetó el modelo elegido en el panel');
+  assert.equal(propio.session.delegation.responses.reasoning, undefined, "le mandó 'none' a un modelo que no lo acepta");
 
   /* Y sin herramientas no se delega: el modelo conversa solo, como hasta ahora. */
   assert.equal(rt.LIVE.configurar({ model: 'gpt-live-1' }).session.delegation, undefined);

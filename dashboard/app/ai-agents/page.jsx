@@ -665,8 +665,8 @@ export default function AiAgents() {
                   ayuda="Con herramientas encendidas son DOS modelos: el de voz escucha y habla, y este decide qué herramienta pedir. Es obligatorio: sin él la sesión no abre y la llamada se cae a «no puedo atenderte».">
                   <Select label="Modelo que razona" searchable
                     description={rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? 'Los que sirve tu cuenta' : 'Sugerencias'}
-                    data={rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? rtModelos.razonamiento : ['gpt-5.1', 'gpt-5-nano', 'gpt-4.1-nano']}
-                    value={(form.herramientas?.delegacion || {}).model || 'gpt-5.1'}
+                    data={rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? rtModelos.razonamiento : ['gpt-6-sol', 'gpt-5-nano', 'gpt-4.1-nano']}
+                    value={(form.herramientas?.delegacion || {}).model || 'gpt-6-sol'}
                     onChange={v => upHerr('delegacion', 'model', v)} />
                   <Text size="xs" c="dimmed" mt="xs">
                     Uno más chico contesta más rápido y sale menos; uno más grande entiende mejor cuándo NO usar una herramienta.

@@ -172,7 +172,7 @@ const REALTIME = {
 /* El modelo que RAZONA detrás de la voz cuando hay herramientas. Se puede cambiar por
  * agente desde el panel; este default es el más común y existe para que encender una
  * herramienta no requiera además elegir un modelo. */
-const MODELO_RAZONA = 'gpt-5.1';
+const MODELO_RAZONA = 'gpt-6-sol';
 
 const LIVE = {
   url: (model, base) => (base ? String(base).replace(/\/+$/, '') : 'wss://api.openai.com/v1/live/sessions'),
@@ -208,6 +208,10 @@ const LIVE = {
           parallel_tool_calls: false,
         },
       };
+      /* Sol razona «medium» si no se le dice nada, y en una llamada eso son segundos de
+       * silencio antes de cada herramienta. Sólo a Sol: otros modelos (gpt-5-nano) no
+       * aceptan 'none' y la sesión no abriría. */
+      if (/^gpt-6-sol/.test(session.delegation.responses.model)) session.delegation.responses.reasoning = { effort: 'none' };
       if (o.instrucciones) session.delegation.responses.instructions = o.instrucciones;
     } else if (o.delegacion === 'responses') {
       /* Sin herramientas, pero delegando igual: es el segundo escalón de la prueba de
