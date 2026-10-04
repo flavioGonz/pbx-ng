@@ -2,6 +2,95 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.36.0] - 2026-10-04
+
+Tanda del softphone: el aparato deja de depender de que la central le preste todo, y la
+central deja de depender de que alguien copie el instalador a mano.
+
+### Added
+- **El softphone puede tener clientes propios.** Cargados en el aparato, con o sin central
+  conectada, guardados cifrados en el mismo almacén que las cuentas SIP. Con central
+  conectada la lista es **una sola** con los del sistema y los locales, cada fila con su
+  origen a la vista. No se limpian al cambiar de cuenta ni al desconectarse del sistema:
+  son del aparato, no de la cuenta. (`softphone-app/src/config.js`, `App.jsx`)
+- **Alta manual de cámaras RTSP desde el softphone**, asociadas a un cliente, eligiendo
+  destino: en la central (la ven todos, el video sale por go2rtc como cualquier otra) o
+  sólo en el teléfono. No hay sincronización automática en ningún sentido, a propósito: una
+  URL RTSP trae usuario y clave de la cámara adentro, y subirla sin que nadie lo pida la
+  hace visible a toda la central. El alta queda en la bitácora de seguridad con la
+  extensión que la hizo. (`control-plane/app.js`, `auth.js`)
+- **La central se trae sola el instalador nuevo del softphone** y con eso aparece el botón
+  de descarga en el login. Configurable desde el panel (`/softphone`), **apagado por
+  defecto**: prender una salida a internet periódica en el equipo telefónico de un cliente
+  es decisión de quien administra esa central. (`control-plane/softphone-ota.js`,
+  `dashboard/app/softphone/DistribucionSoftphone.jsx`, migración 0029)
+  - Es **pull y no push**, al revés de lo que decía el diseño: las centrales están detrás
+    de NAT, y para que CI les entregue algo habría que publicar un endpoint de
+    administración en cada PBX con una credencial de larga vida en los secretos del repo.
+    El argumento contra el pull —«muchas sin salida a internet»— no se sostiene: ya la
+    necesitan para Let's Encrypt, y sin salida el push tampoco les llega.
+  - El `latest.yml` se escribe **siempre al final**; al revés, un softphone que consulta en
+    el medio se va a buscar un `.exe` que todavía no bajó. Se baja a `.part` y se renombra.
+    Se conserva la versión anterior. Por debajo de 600 MB libres no se baja nada.
+- **El video del cliente se ve mientras timbra**, antes de atender, con el mismo
+  comportamiento que en una llamada saliente. (`softphone-app/src/CallScreen.jsx`)
+
+### Fixed
+- **La ficha de un cliente volvía 403 en el softphone enrolado.** `GET /api/clients/:id`
+  estaba fuera de la allowlist del token de aparato, con el peor efecto posible: la solapa
+  Clientes **listaba** los clientes y al abrir uno el detalle se comía el 403 en silencio,
+  así que la pestaña de dispositivos decía «Sin dispositivos» en un cliente con cámaras
+  cargadas. (`control-plane/auth.js`)
+- **La sala de reunión dejaba la pantalla en blanco con un 504 que inventaba el propio
+  panel.** El service worker respondía un 504 fabricado cuando fallaba el fetch, con un
+  caché que nunca se llenó —no hay un solo `cache.put` en el repo—. Ahora las rutas
+  públicas se saltean y una navegación sin red recibe HTML de verdad.
+  (`dashboard/public/sw.js`)
+- **El informe de call center mostraba la interfaz cruda de Asterisk como nombre del
+  agente** (`Local/6098@ivr/n`, `PJSIP/2001-00000012`). Un miembro dinámico agregado sin
+  nombre llega con `MemberName` igual a la interfaz; ahora se normaliza al interno, y un
+  nombre propio puesto desde el panel se respeta sin tocar. (`control-plane/ccreport.js`)
+- **Un clon nuevo del repo no mostraba los botones de descarga del softphone**: el bind
+  mount tapa el directorio que viaja en la imagen. `fetch-softphone.sh` acepta `--dest=`.
+- **`navigator.vibrate` sin gesto previo** llenaba la consola de intervenciones del
+  navegador. (`dashboard/app/useSoftphone.js`)
+- **Dos pruebas se habían quedado viejas y daban por roto código correcto**: la del
+  contexto `c2c` sólo aceptaba `<> 'c2c'` exacto cuando hoy rige `NOT LIKE 'c2c%'` —que es
+  la forma fuerte, porque los contextos son uno por sesión—, y la de sala sin PIN afirmaba
+  «ningún bloque de admin» cuando el de moderador **web** sí se publica y se autoriza por
+  el token del enlace, no por el PIN.
+
+### Removed
+- **Multi-tenant fuera de la interfaz, del instalador y de los manuales.** PBX-NG es de una
+  empresa por central. El ajuste `TENANT_MODE` no lo leía ningún código.
+- **`/aplicaciones/ai`**, duplicado y viejo de `/ia-voz`, con redirección.
+
+## [1.35.0] - 2026-10-01
+### Added
+- **El estado de los internos es en vivo.** `/internos` muestra en llamada, timbrando, en
+  espera, pausado en cola, no molestar y desvío, con un carril rápido por AMI (debounce de
+  60 ms) que emite sólo las extensiones que cambiaron. El registro (instantánea) y la
+  actividad (carril rápido) se mantienen separados: mezclarlos hacía que un interno
+  registrado pero en llamada pareciera desconectado al llegar la primera.
+  (`control-plane/estados.js`, `dashboard/app/EstadoVivo.jsx`)
+- Las pausas de cola se siembran del `QueueStatus` del AMI y no de `queue_members`: la
+  tabla no sabe de las pausas puestas a mano por consola.
+
+## [1.34.0] - 2026-09-30
+### Added
+- **Grabación de IA, IVR, colas y salas**, administrable por agente y por IVR.
+### Fixed
+- **Las grabaciones de cola nunca se indexaban**: el patrón de nombre rechazaba el espacio
+  y el punto. Se indexa por `UNIQUEID` contra el CDR.
+- **Grabaciones manuales fechadas en el año 58707**: `Date.now()` en milisegundos leído
+  como segundos, en el nombre del archivo y en el indexador. Cinco filas corregidas.
+- **La grabación de una sala se indexaba a los 4 s de una reunión de 16**: se leía mientras
+  Asterisk todavía la escribía. Ahora se saltea un archivo tocado hace menos de 20 s y se
+  refresca el tamaño cuando creció.
+- **`MixMonitor` con la opción `b`** (grabar sólo mientras hay puente) es correcta para
+  colas y **equivocada** para IA e IVR: esos canales nunca se puentean, y dejaba archivos
+  de 44 bytes.
+
 ## [1.33.0] - 2026-09-29
 ### Security
 - **Un invitado web podía entrar donde no lo invitaron, y hasta como moderador.** Todas las

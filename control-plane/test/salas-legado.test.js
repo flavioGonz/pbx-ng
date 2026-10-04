@@ -54,8 +54,17 @@ test('sala heredada sin PIN: el dialplan no pide PIN ni espera a un moderador qu
   assert.ok(rows.some((r) => r[1] === 'Goto'), 'se entra derecho como participante');
   assert.ok(!rows.some((r) => String(r[2]).includes('wait_marked')),
     'sin PIN de moderador nadie puede entrar como marked: wait_marked dejaría a todos en música para siempre');
-  assert.ok(!rows.some((r) => String(r[2]).includes('CONFBRIDGE(user,admin)')),
-    'no se publica un bloque de moderador al que no se puede llegar');
+  /* El bloque de moderador que se llega MARCANDO (prioridad 60) no se publica sin PIN de
+   * moderador: seria dejar en la tabla realtime una entrada de admin que nadie alcanza, y
+   * que un Goto mal escrito manana si alcanzaria.
+   *
+   * El de moderador WEB (prioridad 50) es otra cosa y SI se publica: a esa prioridad solo
+   * se llega desde el dialplan de una sesion de invitado, y lo que autoriza es el token
+   * del enlace, no el PIN. Afirmar «ningun bloque de admin» a secas daba por roto algo que
+   * es correcto desde que existe el enlace web — la prueba se quedo vieja, no el codigo. */
+  const marcando = rows.filter((r) => Number(r[0]) >= 60);
+  assert.ok(!marcando.some((r) => String(r[2]).includes('CONFBRIDGE(user,admin)')),
+    'sin PIN de moderador no se publica el bloque de moderador que se llega marcando');
   assert.ok(rows.some((r) => r[1] === 'ConfBridge' && r[2] === 'recepcion'));
 });
 
