@@ -420,7 +420,8 @@ module.exports = function init(deps) {
     /* El modelo que razona detrás de la voz cuando hay herramientas. Va en el mismo JSON
      * porque es parte de «cómo funcionan las herramientas de este agente». */
     if (dentro.delegacion && typeof dentro.delegacion === 'object') {
-      out.delegacion = { model: String(dentro.delegacion.model || '').slice(0, 80) };
+      /* Un modelo retirado no se guarda: vacío es «el default», que siempre es vigente. */
+      out.delegacion = { model: require('./realtime').vigente(String(dentro.delegacion.model || '').slice(0, 80)) };
     }
     if (dentro.remoto && typeof dentro.remoto === 'object') {
       const rm = dentro.remoto;

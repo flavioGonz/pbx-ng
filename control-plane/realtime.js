@@ -173,6 +173,10 @@ const REALTIME = {
  * agente desde el panel; este default es el más común y existe para que encender una
  * herramienta no requiera además elegir un modelo. */
 const MODELO_RAZONA = 'gpt-6-sol';
+/* Modelos que el proveedor apaga. Un agente que tenga uno guardado razona con el default:
+ * la llamada sigue andando el día del apagón en vez de caer a «no puedo atenderte». */
+const RETIRADOS = ['gpt-5.1'];
+const vigente = (m) => (m && !RETIRADOS.includes(m) ? m : '');
 
 const LIVE = {
   url: (model, base) => (base ? String(base).replace(/\/+$/, '') : 'wss://api.openai.com/v1/live/sessions'),
@@ -200,7 +204,7 @@ const LIVE = {
       session.delegation = {
         type: 'responses',
         responses: {
-          model: o.delegacionModel || MODELO_RAZONA,
+          model: vigente(o.delegacionModel) || MODELO_RAZONA,
           tools: o.herramientas,
           tool_choice: 'auto',
           /* De a una por vez: dos acciones simultáneas en una portería es abrir la puerta
@@ -558,4 +562,4 @@ async function unIntento(o, esc, live) {
   return r;
 }
 
-module.exports = { abrir, probar, elegirProtocolo, MODELO_RAZONA, REALTIME, LIVE, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };
+module.exports = { abrir, probar, elegirProtocolo, MODELO_RAZONA, RETIRADOS, vigente, REALTIME, LIVE, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };

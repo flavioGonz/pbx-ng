@@ -381,6 +381,10 @@ test('con herramientas, la delegación lleva SIEMPRE un modelo que razone', () =
   assert.equal(propio.session.delegation.responses.model, 'gpt-5-nano', 'no respetó el modelo elegido en el panel');
   assert.equal(propio.session.delegation.responses.reasoning, undefined, "le mandó 'none' a un modelo que no lo acepta");
 
+  /* Un agente con un modelo retirado guardado razona con el default, no con el apagado. */
+  const viejo = rt.LIVE.configurar({ model: 'gpt-live-1', herramientas: [{ type: 'function', name: 'x' }], delegacionModel: 'gpt-5.1' });
+  assert.equal(viejo.session.delegation.responses.model, rt.MODELO_RAZONA, 'usó un modelo que el proveedor apaga');
+
   /* Y sin herramientas no se delega: el modelo conversa solo, como hasta ahora. */
   assert.equal(rt.LIVE.configurar({ model: 'gpt-live-1' }).session.delegation, undefined);
 });

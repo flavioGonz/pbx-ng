@@ -32,6 +32,10 @@ const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label
  * cada pocos meses; una lista cerrada obligaría a actualizar la central para volver a
  * atender. Estas son sugerencias — la lista de verdad la trae «Nube». */
 const RT_MODELS = ['gpt-live-1', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini'];
+/* Modelos que el proveedor apaga: no se ofrecen aunque la cuenta todavía los sirva, y si un
+ * agente viejo tiene uno guardado se muestra el reemplazo (gpt-5.1 se apaga el 1/4/2027). */
+const RETIRADOS = ['gpt-5.1'];
+const vigentes = (lista) => lista.filter(m => !RETIRADOS.includes(m));
 const RT_VOICES = ['marin', 'cedar', 'alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
 const esRT = (p) => p === 'openai-realtime';
 const enLaNube = (p) => p === 'openai-realtime' || p === 'openai' || p === 'ia-externa';
@@ -442,7 +446,7 @@ export default function AiAgents() {
                           description={rtModelos === null ? 'gpt-live o gpt-realtime'
                             : rtModelos.ok ? (rtModelos.modelos.length ? 'Los ' + rtModelos.modelos.length + ' que sirve tu cuenta' : 'Tu cuenta no sirve ninguno de voz a voz')
                               : 'No se pudo consultar tu cuenta'}
-                          data={rtModelos && rtModelos.ok && rtModelos.modelos.length ? rtModelos.modelos : RT_MODELS}
+                          data={vigentes(rtModelos && rtModelos.ok && rtModelos.modelos.length ? rtModelos.modelos : RT_MODELS)}
                           value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} />
                       : <Select label="Modelo" data={MODELS} value={form.model} onChange={v => up('model', v)} />}
                     {esRT(form.provider)
@@ -665,8 +669,8 @@ export default function AiAgents() {
                   ayuda="Con herramientas encendidas son DOS modelos: el de voz escucha y habla, y este decide qué herramienta pedir. Es obligatorio: sin él la sesión no abre y la llamada se cae a «no puedo atenderte».">
                   <Select label="Modelo que razona" searchable
                     description={rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? 'Los que sirve tu cuenta' : 'Sugerencias'}
-                    data={rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? rtModelos.razonamiento : ['gpt-6-sol', 'gpt-5-nano', 'gpt-4.1-nano']}
-                    value={(form.herramientas?.delegacion || {}).model || 'gpt-6-sol'}
+                    data={vigentes(rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? rtModelos.razonamiento : ['gpt-6-sol', 'gpt-5-nano', 'gpt-4.1-nano'])}
+                    value={vigentes([(form.herramientas?.delegacion || {}).model || ''])[0] || 'gpt-6-sol'}
                     onChange={v => upHerr('delegacion', 'model', v)} />
                   <Text size="xs" c="dimmed" mt="xs">
                     Uno más chico contesta más rápido y sale menos; uno más grande entiende mejor cuándo NO usar una herramienta.
