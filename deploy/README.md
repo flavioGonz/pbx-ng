@@ -14,8 +14,6 @@ componentes por el cluster según los recursos libres.
    - **Híbrido** — 3 contenedores: `núcleo` / `borde` / `voz`.
    - **Separado** — 1 contenedor por componente (aislamiento máximo).
    - **Personalizado** — vos agrupás los 5 perfiles (core/sbc/media/ai/proxy) en los contenedores que quieras (mismo número de grupo = mismo contenedor).
-3. Pregunta el **modo de la aplicación**: PBX simple (single-tenant) o
-   multi-tenant (SaaS). Se guarda como `TENANT_MODE` en el `.env` de cada CT.
 4. Para cada componente, **recomienda el nodo** con más RAM libre y te deja
    elegir otro (ej: poner la voz IA en un nodo más potente).
 5. **Crea** los CTs (Debian + Docker con `nesting=1`), **clona** el repo,

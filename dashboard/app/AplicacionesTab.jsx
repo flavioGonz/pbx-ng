@@ -1,6 +1,5 @@
 'use client';
 /* AplicacionesTab — renderiza UNA aplicación de llamada por su clave (para rutas /aplicaciones/<tab>). */
-import { Badge } from '@mantine/core';
 import { IconUsersGroup, IconBroadcast, IconUsers, IconTag, IconHash, IconUser } from '@tabler/icons-react';
 import QueuePanel from './QueuePanel';
 /* El catálogo de códigos ya no es una lista escrita a mano acá: lo manda la API y
@@ -41,25 +40,5 @@ export default function AplicacionesTab({ tab }) {
    * pedía el PIN a mano y sugería el número del interno, que era justamente el agujero. */
   if (tab === 'vm') return <BuzonesPanel />;
   if (tab === 'codes') return <FeatureCodes />;
-  if (tab === 'ai') return (
-    <CrudPanel title="Agentes de IVR con IA" subtitle="Bots de voz · STT → LLM → TTS (integración de IA pendiente de conectar)" idKey="id" fetchUrl="/ai-agents" createUrl="/ai-agents" deleteUrl={(r) => '/ai-agents/' + r.id}
-      columns={[
-        { key: 'name', label: 'Agente', mono: false },
-        { key: 'exten', label: 'Acceso', render: (r) => <Badge variant="light" color="pbx" ff="monospace">{r.exten}</Badge> },
-        { key: 'provider', label: 'Proveedor', render: (r) => <Badge variant="dot" color="grape">{r.provider}/{r.model}</Badge> },
-        { key: 'voice', label: 'Voz' },
-        { key: 'enabled', label: 'Estado', render: (r) => <Badge variant="light" color={r.enabled !== false ? 'teal' : 'gray'}>{r.enabled !== false ? 'Activo' : 'Inactivo'}</Badge> },
-      ]}
-      fields={[
-        { name: 'name', label: 'Nombre del agente', required: true, placeholder: 'Recepción IA' },
-        { name: 'exten', label: 'Número de acceso', required: true, placeholder: '9000' },
-        { name: 'greeting', label: 'Audio de saludo inicial', placeholder: 'demo-congrats' },
-        { name: 'system_prompt', label: 'Instrucciones del agente (system prompt)', type: 'textarea', placeholder: 'Sos la recepción de IES. Atendé con cordialidad, identificá el motivo de la llamada y derivá al área correcta…' },
-        { name: 'voice', label: 'Voz (idioma/acento)', placeholder: 'es-ES' },
-        { name: 'provider', label: 'Proveedor', type: 'select', data: [{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'google', label: 'Google' }, { value: 'local', label: 'Local / self-hosted' }] },
-        { name: 'model', label: 'Modelo', placeholder: 'gpt-4o-mini' },
-        { name: 'enabled', label: 'Activo', type: 'switch' },
-      ]} emptyText="Sin agentes de IA. Creá uno y asignale un número; la voz se conectará a la IA en el siguiente paso." />
-  );
   return <QueuePanel />;
 }

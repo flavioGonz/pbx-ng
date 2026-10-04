@@ -37,7 +37,7 @@ anterior salió de esta tabla y está en §1.
 | **Reportería histórica** | **No existe** (hay wallboard en vivo y CDR crudo) | Nivel de servicio, abandono, tiempo medio de atención por cola/agente/troncal, exportable. Lo pide cualquier cliente con call center |
 | **Migraciones automáticas** | Parcial: existe `migrate.js` pero **el servidor no tiene el directorio `migrations/`** | Hoy actualizar en casa de un cliente depende de acordarse de correr el SQL a mano. Funciona en el lab y falla en la instalación número siete |
 | **API pública + webhooks** | No existe | Es lo que hace que un integrador elija esta central sobre otra |
-| **Multi-inquilino** | Parcial (`TENANT_MODE`, pantalla de empresas) | Define si se puede vender la central **como servicio** a varios clientes desde una instalación |
+| **Multi-inquilino** | Retirado de la interfaz y del instalador (2026-10); el esquema sigue siendo tenant-ready | Define si se puede vender la central **como servicio** a varios clientes desde una instalación. Decisión pendiente: si se retoma, hay que construirlo de verdad (aislar por tenant, tenant en el JWT), no reactivar un interruptor |
 | **Alta disponibilidad** | No existe | Requisito para clientes medianos y para pliegos públicos |
 | **Horarios / condiciones de tiempo** | No existe | *Decisión de producto: fuera de alcance por ahora.* Se deja anotado porque es lo que más se pregunta en un pliego |
 | **Fax / T.38** | No existe | *Decisión de producto: fuera de alcance.* Estuvo en 1.10.0 y se retiró en 1.11.0 sin que ninguna instalación lo usara; el mercado se achica todos los años. Quien lo pida se resuelve con un gateway ATA o un servicio de terceros |

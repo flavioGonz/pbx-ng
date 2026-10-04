@@ -104,7 +104,6 @@ vivos, sin secretos ni IPs de IES):
 - `api` usa `DB_HOST=postgres` (bridge); asterisk/kamailio usan `DB_HOST` = IP del host.
 
 `docker/install.sh` (instalador interactivo de un host):
-1. Pregunta **modo app** (single-tenant / multi-tenant).
 2. Pregunta **topología** (docker por servicio / todo-en-uno / bare-metal).
 3. Genera `.env` con secretos random + `HOST_IP`.
 4. `docker compose up` con los perfiles elegidos.
@@ -122,7 +121,6 @@ vivos, sin secretos ni IPs de IES):
    - **3 Híbrido** — core / edge / ai.
    - **4 Separado** — 1 CT por perfil.
    - **5 Personalizado** — agrupás perfiles a gusto.
-3. Pregunta **MODO** (single / multi-tenant).
 4. Deriva **recursos por CT** de los perfiles que agrupa.
 5. **Salta VMIDs** ya usados en el cluster; **valida el storage**; **autodetecta/ofrece bajar**
    la plantilla Debian.

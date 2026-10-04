@@ -19,8 +19,8 @@ description: >-
 ## Resumen ejecutivo
 
 PBX-NG es una central telefónica IP (UCaaS) para pymes/medianas, escala objetivo
-100-500 internos y 30-150 llamadas simultáneas. Arranca **single-tenant** y evoluciona
-hacia multi-tenant. Todo el estado telefónico vive en **PostgreSQL realtime (ARA)**:
+100-500 internos y 30-150 llamadas simultáneas. Es **de una empresa por central**. Todo
+el estado telefónico vive en **PostgreSQL realtime (ARA)**:
 Asterisk lee endpoints, aor, auth, dialplan, colas y voicemail de la base, y la aplicación
 los administra por API. El código real es un **monorepo** (`github.com/flavioGonz/pbx-ng`)
 y se despliega de dos formas equivalentes: los **contenedores LXC vivos** del cluster

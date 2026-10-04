@@ -190,7 +190,6 @@ services:
       # (no se ven las interfaces ni se puede cambiar el modo de red).
       ASTERISK_HOST: ${ASTERISK_HOST:-127.0.0.1}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
-      TENANT_MODE: ${TENANT_MODE:-single}
       DOMAIN: ${DOMAIN:-}
       PUBLIC_IP: ${PUBLIC_IP:-}
       TURN_USER: ${TURN_USER:-pbxng}

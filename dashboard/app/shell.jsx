@@ -6,8 +6,8 @@ import { AppShell, Group, NavLink, Text, Badge, ScrollArea, Box, Tooltip, Action
 import {
   IconSitemap, IconServer2, IconDatabase, IconRouteAltLeft, IconDatabaseExport, IconNetwork,
   IconLayoutDashboard, IconDeviceAnalytics, IconUsers, IconArrowsLeftRight,
-  IconApps, IconHistory, IconTerminal2, IconBuilding, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk, IconReportAnalytics, IconCpu,
-  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconRobot, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconClockHour4, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff, IconDoorEnter, IconAddressBook } from '@tabler/icons-react';
+  IconApps, IconHistory, IconTerminal2, IconSettings, IconShieldLock, IconUsersGroup, IconShieldCheck, IconMicrophone2, IconHeadphones, IconArrowsSplit, IconRoute, IconHeadset, IconBroadcast, IconMail, IconAsterisk, IconReportAnalytics, IconCpu,
+  IconLogout, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconSun, IconMoon, IconWorldShare, IconBell, IconDeviceLandlinePhone, IconWaveSine, IconChevronRight, IconPhoneCall, IconClockHour4, IconAdjustmentsCog, IconMap2, IconCertificate, IconBook, IconDatabaseOff, IconDoorEnter, IconAddressBook } from '@tabler/icons-react';
 import { useLive } from './useLive';
 import { useAuth, esAdmin, SUP_OK, logout } from './auth';
 import PbxLogo from './PbxLogo';
@@ -89,7 +89,11 @@ const groups = [
     { href: '/aplicaciones/vm', label: 'Buzones', icon: IconMail },
     { href: '/funciones', label: 'Aparcado · Captura · MoH', icon: IconAsterisk },
     { href: '/aplicaciones/codes', label: 'Códigos', icon: IconAsterisk },
-    { href: '/aplicaciones/ai', label: 'AI IVR', icon: IconRobot },
+    /* «AI IVR» (/aplicaciones/ai) se retiró: era un CRUD genérico sobre /ai-agents, más
+       viejo y más pobre que el editor real —el subtítulo todavía decía «integración de IA
+       pendiente de conectar» y ofrecía proveedores que no existen—. El agente de IA se
+       administra en IA & Voz, que trae el editor completo, el motor de voz local y los
+       proveedores de nube. Un agente creado en la pantalla vieja nacía a medio configurar. */
     { href: '/ia-voz', label: 'IA & Voz', icon: IconMicrophone2 },
     { href: '/click-to-call', label: 'Click-to-Call', icon: IconWorldShare },
   ] },
@@ -117,7 +121,11 @@ const groups = [
     { href: '/sistema', label: 'Sistema', icon: IconCpu },
     { href: '/red', label: 'Red', icon: IconNetwork },
     { href: '/sbc', label: 'SBC-NG (conexión)', icon: IconRouteAltLeft },
-    { href: '/empresas', label: 'Empresas', icon: IconBuilding },
+    /* «Empresas» se retiró del menú: era una tabla de sólo lectura de `tenants` que en una
+       central real muestra una sola fila, «Default», y cuyo propio subtítulo avisaba que el
+       multi-tenant estaba en fase single. Una pantalla que no se puede usar y que promete
+       algo que el producto no hace todavía confunde más de lo que informa. El esquema sigue
+       siendo tenant-ready; lo que se retira es la promesa en la interfaz. */
     { href: '/usuarios', label: 'Usuarios', icon: IconUsersGroup },
     { href: '/configuracion', label: 'Configuración', icon: IconSettings },
   ] },

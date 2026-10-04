@@ -131,19 +131,6 @@ La seguridad perimetral, el LCR con failover, la salud de operadores, la manipul
 - Un dominio apuntando al servidor y puertos SIP/RTP/TURN abiertos.
 - 2+ vCPU y 4+ GB RAM para el stack completo (más si vas a transcodificar muchas llamadas).
 
-### Modos de la aplicación
-
-En la instalación se elige el **modo**, que la app respeta en toda la UI y el ruteo:
-
-- **PBX simple (single-tenant)** — una sola empresa, panel plano, sin gestión de
-  inquilinos. Es lo recomendado para una central única o una *virtual appliance*.
-- **Multi-tenant (SaaS)** — varias empresas aisladas (contextos PJSIP separados,
-  branding y numeración por inquilino). Para ofrecer PBX como servicio.
-
-El modo se guarda como `TENANT_MODE` (`single` | `multi`) en el `.env`. El esquema
-de base de datos es *tenant-ready* en ambos casos: en modo simple todo usa un
-inquilino por defecto, sin duplicar esquema.
-
 ### Opción A — Docker, un contenedor por servicio (recomendado)
 
 Es la topología de producción: cada servicio corre aislado y escala por separado.
@@ -195,7 +182,7 @@ El instalador tiene dos **roles**: `all` (todo en un host: `core,turn,ai,interco
 ./install.sh --role=core --turn-ip=<IP_DEL_TURN> --public-ip=<IP_WAN> --domain=pbx.cliente.com
 ```
 
-Flags disponibles: `--role=`, `--profiles=`, `--turn-ip=`, `--public-ip=`, `--domain=`, `--tenant=`, `--release`, `--yes` y `--print-firewall`. Sin flags, el instalador pregunta todo. Cada host tiene su propia base y sus propios secretos; no se comparte nada entre el núcleo y un SBC-NG. Topologías y pasos completos en [`docs/TOPOLOGY.md`](docs/TOPOLOGY.md).
+Flags disponibles: `--role=`, `--profiles=`, `--turn-ip=`, `--public-ip=`, `--domain=`, `--release`, `--yes` y `--print-firewall`. Sin flags, el instalador pregunta todo. Cada host tiene su propia base y sus propios secretos; no se comparte nada entre el núcleo y un SBC-NG. Topologías y pasos completos en [`docs/TOPOLOGY.md`](docs/TOPOLOGY.md).
 
 ### Actualización por imagen (sin `docker cp`)
 
@@ -229,7 +216,7 @@ Instalación nativa sobre Debian/Ubuntu (o contenedores LXC en Proxmox), un serv
 
 Para un cluster **Proxmox VE**: un script que corre en cualquier nodo y **crea
 por sí mismo** todos los LXC del stack, preguntando la forma de despliegue
-(compacto / núcleo + acceso / núcleo + voz / separado / personalizado), el modo de la app (PBX simple o multi-tenant) y
+(compacto / núcleo + acceso / núcleo + voz / separado / personalizado) y
 **dónde ubicar cada componente** (recomienda el nodo con más RAM libre). Cada
 contenedor corre Docker y levanta sus perfiles.
 
