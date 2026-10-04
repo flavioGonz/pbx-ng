@@ -34,11 +34,15 @@
 - [x] 3.6 El alta queda en la bitácora de seguridad con la extensión que la hizo.
 - [x] 3.7 Acciones «subir a la central» y «bajar a este teléfono» en una cámara ya cargada.
 
-## 4. Ver las cámaras locales (depende de la decisión 2 del design)
+## 4. Ver las cámaras locales
 
-- [ ] 4.1 Cerrar la decisión: go2rtc empacado, go2rtc propio, o snapshot.
-- [ ] 4.2 Implementar el camino elegido para escritorio.
-- [ ] 4.3 Caída de Android, o el motivo a la vista si no hay ninguna.
+- [x] 4.1 Decidido: go2rtc empacado en el softphone de escritorio.
+- [x] 4.2 `electron/go2rtc-local.cjs` + IPC + `scripts/fetch-go2rtc.sh` + extraResources.
+      Probado contra una cámara real: el WebSocket negoció `avc1.640028` y entregó 261 KB
+      de fMP4 — el mismo camino que consume el visor. Loopback verificado contra la IP de
+      la máquina (rechazado). Config en 600. Reinicia sólo cuando cambia la lista.
+- [x] 4.3 Sin Electron (PWA) el visor dice que hace falta el de escritorio o subirla a la
+      central, con el motivo a la vista. Android queda igual que la PWA.
 - [x] 4.4 Verificar que una cámara que no se puede reproducir muestra el motivo y la acción
       de subirla, nunca un reproductor vacío.
 

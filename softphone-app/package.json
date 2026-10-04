@@ -1,6 +1,6 @@
 {
   "name": "pbxng-softphone",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "type": "module",
   "description": "Softphone WebRTC generico (registra contra cualquier PBX con internos WebRTC) - PWA + Electron",
@@ -14,7 +14,8 @@
     "build": "vite build",
     "preview": "vite preview --host",
     "electron": "^33.4.11",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run go2rtc && npm run build && electron-builder --win",
+    "go2rtc": "bash scripts/fetch-go2rtc.sh"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
@@ -98,6 +99,15 @@
         "provider": "github",
         "owner": "flavioGonz",
         "repo": "pbx-ng"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/go2rtc",
+        "to": "go2rtc",
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   }

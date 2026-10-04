@@ -14,29 +14,57 @@ acciones, nunca automáticas. La razón de que no haya sincronización automáti
 una URL RTSP trae usuario y contraseña de la cámara adentro, y subirla sin que nadie lo pida
 la hace visible a todos los que atienden en esa central.
 
-## Decisión 2 — Cómo se ve una cámara que está sólo en el teléfono (ABIERTA)
+## Decisión 2 — Cómo se ve una cámara que está sólo en el teléfono — CERRADA
 
-Chromium no reproduce `rtsp://`. Hoy TODO el video de cámaras del producto pasa por el
-go2rtc de la central, que es exactamente lo que no hay en el caso local. Tres caminos:
+**El softphone de escritorio trae su propio go2rtc.** Un binario estático de ~15 MB
+(`go2rtc_win64`, MIT) que viaja en el instalador como recurso y se levanta en `127.0.0.1`
+cuando hace falta. Es el **mismo motor** que corre en la central, así que una cámara local
+se ve por el mismo camino que una de la central —el proxy WebSocket del proceso main, MSE
+en el renderer, el mismo visor— y no hay un segundo reproductor que mantener.
 
-**(a) Empacar go2rtc en el softphone de escritorio.** Un binario estático (~15 MB, MIT) que
-el Electron levanta en `127.0.0.1` y usa igual que al de la central. Es el mismo motor que
-ya corre en el producto, así que no hay un segundo comportamiento que mantener, y funciona
-sin red hacia la central. Cuesta tamaño de instalador y un proceso hijo que hay que
-apagar bien al cerrar. En Android no aplica.
+Las otras dos opciones quedan descartadas: apuntar a un go2rtc del propio usuario le pide
+infraestructura que no tiene, y el snapshot JPEG depende del fabricante y no es video.
 
-**(b) Apuntar a un go2rtc propio.** En Ajustes se pone la URL de un go2rtc/MediaMTX que el
-usuario ya tenga, y las cámaras locales se publican ahí. Cero peso en el instalador, pero
-le pide al usuario infraestructura que probablemente no tiene.
+### Lo que no se ve en el camino feliz
 
-**(c) Sólo snapshot.** Muchos porteros y cámaras (Hikvision, Dahua, Akuvox) además del RTSP
-exponen un JPEG por HTTP. Sin central se muestra una imagen que se refresca cada segundo en
-vez de video. Es lo más barato y lo único que puede andar en Android, pero depende del
-fabricante y no es video.
+- **Por demanda, no al arrancar.** Casi ningún uso del softphone toca una cámara local;
+  dejar un proceso hijo corriendo para nada cuesta memoria y es un puerto más, aunque sea
+  en loopback.
+- **Puerto efímero pedido al sistema.** Fijar el 1984 —el de go2rtc— choca con un go2rtc
+  que el usuario ya tenga corriendo, o con una segunda instancia del softphone.
+- **Sólo `127.0.0.1`.** Un go2rtc en `0.0.0.0` publica en la red de la oficina, sin
+  autenticación, las cámaras del cliente con sus credenciales dentro de la URL. Es el
+  punto donde esto pasa de útil a peligroso, no un detalle de configuración. Verificado
+  contra la IP real de la máquina: conexión rechazada.
+- **El config se escribe con permisos 600**, y el `stderr` de go2rtc va al log de la app y
+  nunca a la pantalla: las dos cosas llevan la URL con usuario y clave adentro.
+- **No se pide «entrada» (ticket) para una cámara local.** Es loopback y no hay sesión de
+  central; pedírselo a la central además mandaría el nombre de una cámara local a un
+  servidor que no la conoce.
+- **El hijo se mata en `before-quit`**, no sólo en `will-quit`: un go2rtc huérfano sigue
+  tirándole RTSP a las cámaras del cliente después de cerrar la app.
+- **El binario no se baja en caliente.** Si no está, se dice y se ofrece subir la cámara a
+  la central. Una app de escritorio que sale a buscar un ejecutable a internet y lo corre
+  es exactamente la forma de un troyano, y el usuario no tiene cómo distinguirlo.
+- **No está commiteado**: 15 MB de binario de terceros por plataforma engordan cada clon
+  para siempre. Lo baja `scripts/fetch-go2rtc.sh` en el build, con la versión fijada y el
+  SHA-256 escrito al lado — que es lo único que permite decir después qué binario se
+  metió en un instalador ya distribuido.
 
-**Recomendación:** (a) en escritorio y (c) como caída en Android, dejando «subirla a la
-central» como el camino completo en los dos. Se decide antes del grupo 3 de tareas; los
-grupos 1 y 2 (almacenamiento y alta) no dependen de esto.
+### Límite conocido
+
+go2rtc repacka H.264 a MSE sin ayuda de nadie, y eso es lo que hace la inmensa mayoría de
+las cámaras y porteros. Lo que **necesita ffmpeg** —que NO viaja en el instalador— es
+transcodificar: una cámara que sólo emita H.265, o audio en un códec que el navegador no
+toca. En esos casos el visor dice que no puede, igual que hoy. Agregar ffmpeg son ~80 MB
+más de instalador y no se paga por adelantado por un caso que todavía no apareció.
+
+### La PWA no tiene esto
+
+En el navegador no hay proceso hijo que levantar. La cámara local se guarda y se lista, y
+el visor dice que para verla hace falta el softphone de escritorio, o subirla a la central.
+Es una diferencia real entre los dos y conviene que se lea en la pantalla, no que quede en
+un reproductor que no arranca nunca.
 
 ## Decisión 3 — Cómo se mezclan los clientes del sistema con los locales
 

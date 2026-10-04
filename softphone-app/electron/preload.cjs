@@ -52,6 +52,12 @@ contextBridge.exposeInMainWorld('sphone', {
   onMiniData: (cb) => { const h = (_e, d) => cb(d); ipcRenderer.on('mini-data', h); return () => ipcRenderer.removeListener('mini-data', h); },
   miniSize: (h) => ipcRenderer.send('mini-size', h),
   onSysEvent: (cb) => { const h = (_e, e) => cb(e); ipcRenderer.on('sys-event', h); return () => ipcRenderer.removeListener('sys-event', h); },
+  /* go2rtc propio de la app, para las camaras cargadas a mano en este telefono:
+   * `g2localAsegurar(cams)` devuelve { ok, base } o { ok:false, motivo }. El `base` se usa
+   * igual que el de la central, con el mismo proxy y el mismo visor. */
+  g2localAsegurar: (cams) => ipcRenderer.invoke('g2local-asegurar', cams),
+  g2localEstado: () => ipcRenderer.invoke('g2local-estado'),
+  g2localParar: () => ipcRenderer.invoke('g2local-parar'),
   // proxy go2rtc (MSE) por el main
   go2rtcOpen: (opts) => ipcRenderer.invoke('go2rtc-open', opts),
   go2rtcSend: (id, data) => ipcRenderer.send('go2rtc-send', { id, data }),

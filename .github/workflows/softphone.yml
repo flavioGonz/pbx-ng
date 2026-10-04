@@ -96,6 +96,14 @@ jobs:
       - name: Install deps
         working-directory: softphone-app
         run: npm install --no-audit --no-fund
+      # El motor de video que viaja DENTRO del instalador: es el mismo go2rtc que corre en
+      # la central, y es lo que permite que una camara RTSP cargada a mano en el softphone
+      # se pueda mirar sin central. Version fijada en el script. No esta commiteado: son
+      # 15 MB de binario de terceros (ver el encabezado de fetch-go2rtc.sh).
+      - name: Traer go2rtc (motor de video del softphone)
+        working-directory: softphone-app
+        shell: bash
+        run: bash scripts/fetch-go2rtc.sh --plat=win64
       - name: Build installers (electron-builder, sin publicar)
         working-directory: softphone-app
         run: |

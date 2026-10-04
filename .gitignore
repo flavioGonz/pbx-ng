@@ -40,3 +40,7 @@ Thumbs.db
 
 # SBC-NG es un producto (y un repo) aparte: github.com/flavioGonz/SBC-NG
 sbc-ng/
+
+# Binario de go2rtc que viaja en el instalador del softphone: lo baja
+# softphone-app/scripts/fetch-go2rtc.sh en el build (ver el porque ahi).
+softphone-app/vendor/

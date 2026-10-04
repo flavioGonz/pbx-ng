@@ -98,6 +98,25 @@ ipcMain.handle('go2rtc-open', (_e, opts) => {
 ipcMain.on('go2rtc-send', (_e, m) => { const ws = g2.get(m && m.id); if (ws && ws.readyState === 1) { try { ws.send(m.data); } catch (_) {} } });
 ipcMain.on('go2rtc-close', (_e, id) => { const ws = g2.get(id); if (ws) { try { ws.close(); } catch (_) {} } g2.delete(id); });
 
+/* ---- go2rtc PROPIO, para las camaras cargadas a mano en este telefono ----
+ * Chromium no reproduce rtsp://, y una camara que el usuario cargo aca no esta publicada
+ * en ningun go2rtc. La app trae el suyo y lo levanta en loopback por demanda; de ahi en
+ * adelante el camino es el mismo que el de una camara de la central y lo atiende el mismo
+ * proxy de arriba. Ver electron/go2rtc-local.cjs para el por que de cada decision. */
+let g2local = null;
+try {
+  g2local = require('./go2rtc-local.cjs')({
+    app,
+    log: (campos, msg) => { if (DEBUG) { try { console.log('[g2local]', msg, JSON.stringify(campos)); } catch (_) {} } },
+  });
+} catch (e) { if (DEBUG) console.log('[g2local] no disponible:', e && e.message); }
+ipcMain.handle('g2local-asegurar', async (_e, cams) => {
+  if (!g2local) return { ok: false, motivo: 'motor de video local no disponible en esta version' };
+  try { return await g2local.asegurar(cams); } catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
+});
+ipcMain.handle('g2local-estado', () => (g2local ? g2local.estado() : { disponible: false, corriendo: false, base: null }));
+ipcMain.handle('g2local-parar', () => { try { g2local && g2local.parar(); } catch (_) {} return { ok: true }; });
+
 // ---- auto-update visible ----
 /* Feed OTA: la central a la que esta aprovisionado el softphone publica su propio
  * instalador y latest.yml en https://<central>/descargas/softphone/ (lo sirve la API).
@@ -316,7 +335,9 @@ if (!app.requestSingleInstanceLock()) { app.quit(); }
 else {
   app.on('second-instance', (_e, argv) => { showWin(); dialFromArgs(argv); });
   app.on('open-url', (e, url) => { e.preventDefault(); dialFromArgs([url]); });
-  app.on('before-quit', () => { app.__quitting = true; try { sipNat && sipNat.stop(); } catch (_) {} try { mini && mini.destroy(); } catch (_) {} });
+  /* El go2rtc local se mata ACA y no sólo en `will-quit`: un hijo huerfano sigue
+   * tirandole RTSP a las camaras del cliente despues de cerrar la app. */
+  app.on('before-quit', () => { app.__quitting = true; try { sipNat && sipNat.stop(); } catch (_) {} try { g2local && g2local.parar(); } catch (_) {} try { mini && mini.destroy(); } catch (_) {} });
   app.on('will-quit', () => globalShortcut.unregisterAll());
   app.on('window-all-closed', () => { /* queda en bandeja */ });
   app.whenReady().then(() => {

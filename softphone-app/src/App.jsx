@@ -166,6 +166,42 @@ const fmtDate = (t) => {
 const fmtDur = (d) => d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : '—';
 
 // ---- Reproductor go2rtc por MSE (fMP4 sobre WebSocket, atraviesa el proxy sin UDP) ----
+/* ── El go2rtc propio de la app, visto desde el renderer ─────────────────────
+ * Recibe las camaras locales que hay que mostrar y devuelve dónde mirarlas. Decide una
+ * vez por lista: la firma es `id=rtsp` ordenado, así que volver a entrar a la misma
+ * pantalla no reinicia el proceso.
+ *
+ * Fuera de Electron —la PWA en un navegador— no hay proceso hijo que levantar y no hay
+ * nada que inventar: se devuelve el motivo y el visor lo muestra. Esa es la diferencia
+ * real entre el softphone de escritorio y la PWA, y conviene que se lea en la pantalla en
+ * vez de quedar en un reproductor que no arranca nunca. */
+function useGo2rtcLocal(camsLocales) {
+  const [res, setRes] = useState({ base: '', motivo: '' });
+  const firma = (camsLocales || []).map((c) => c.id + '=' + c.rtsp).sort().join('|');
+  useEffect(() => {
+    if (!firma) { setRes({ base: '', motivo: '' }); return undefined; }
+    const sp = typeof window !== 'undefined' ? window.sphone : null;
+    if (!sp || !sp.g2localAsegurar) {
+      setRes({ base: '', motivo: 'Para verla acá hace falta el softphone de escritorio. Desde el navegador, subila a la central.' });
+      return undefined;
+    }
+    let vivo = true;
+    sp.g2localAsegurar(firma.split('|').map((x) => ({ id: x.slice(0, x.indexOf('=')), rtsp: x.slice(x.indexOf('=') + 1) })))
+      .then((r) => { if (!vivo) return; setRes(r && r.ok ? { base: r.base, motivo: '' } : { base: '', motivo: (r && r.motivo) || 'no se pudo abrir el video' }); })
+      .catch((e) => { if (vivo) setRes({ base: '', motivo: (e && e.message) || 'no se pudo abrir el video' }); });
+    return () => { vivo = false; };
+  }, [firma]);
+  return res;
+}
+
+/* Una camara —de la central o de este aparato— lista para el visor. La de la central ya
+ * viene con `base` y `src`; la local los recibe del go2rtc propio, y si no hay con que
+ * levantarlo se queda con el motivo a la vista en vez de un reproductor vacio. */
+function fuenteDeCamara(d, g2l) {
+  if (!d || !d.rtsp) return d;                             // de la central: tal cual
+  if (g2l && g2l.base) return { ...d, base: g2l.base, src: d.id, local: true };
+  return { ...d, motivo: (g2l && g2l.motivo) || '' };
+}
 /* Una camara guardada SOLO en este aparato no tiene go2rtc donde mirarse: Chromium no
  * reproduce rtsp://. El requisito es explicito en que eso se DICE, con la accion para
  * resolverlo, en vez de mostrar un reproductor vacio o un «sin senal» generico que manda a
@@ -188,6 +224,11 @@ function MseTile({ stream, fit = false, onSubir }) {
      * esta cámara, y se quema al abrirla. */
     const armarUrl = async () => {
       const b = base.replace(/^http/, 'ws').replace(/\/$/, '') + '/api/ws?src=' + encodeURIComponent(src);
+      /* Una camara del go2rtc PROPIO de la app no necesita entrada: el go2rtc escucha en
+       * 127.0.0.1 y no hay sesion de central de por medio. Pedirle un ticket a la central
+       * ademas fallaria —o peor, funcionaria y mandaria el nombre de una camara local a un
+       * servidor que no la conoce—. */
+      if (stream && stream.local) return b;
       try { const r = await api.intercomTicket(src); if (r && r.ticket) return b + '&t=' + encodeURIComponent(r.ticket); } catch (_) {}
       return b;
     };
@@ -234,7 +275,7 @@ function MseTile({ stream, fit = false, onSubir }) {
       : { position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden', background: '#0b0f17' }}>
       <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', display: status === 'live' ? 'block' : 'none' }} />
       {status === 'connecting' && <div className="ic-skel" style={{ position: 'absolute', inset: 0 }} />}
-      {status === 'local' && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#8b95a3', padding: 16, textAlign: 'center' }}>{IcCam({ c: '#67c7f5', s: 26 })}<span style={{ fontSize: 12.5, color: '#cdd3db', fontWeight: 600 }}>Guardada en este teléfono</span><span style={{ fontSize: 11, maxWidth: 270, lineHeight: 1.45 }}>El softphone no puede abrir un RTSP por sí solo. Subila a la central y la vas a ver acá y en el panel, como cualquier otra.</span><span style={{ fontSize: 10, color: '#5a6a8f', maxWidth: 270, wordBreak: 'break-all' }}>{String((stream && stream.rtsp) || '').replace(/\/\/[^@/]*@/, '//···@')}</span>{onSubir && <button onClick={onSubir} style={{ background: 'rgba(14,165,233,.16)', color: '#67c7f5', border: '1px solid rgba(14,165,233,.3)', borderRadius: 8, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Subir a la central</button>}</div>}
+      {status === 'local' && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#8b95a3', padding: 16, textAlign: 'center' }}>{IcCam({ c: '#67c7f5', s: 26 })}<span style={{ fontSize: 12.5, color: '#cdd3db', fontWeight: 600 }}>Guardada en este teléfono</span><span style={{ fontSize: 11, maxWidth: 270, lineHeight: 1.45 }}>{(stream && stream.motivo) || 'Este aparato no puede abrir un RTSP por sí solo. Subila a la central y la vas a ver acá y en el panel, como cualquier otra.'}</span><span style={{ fontSize: 10, color: '#5a6a8f', maxWidth: 270, wordBreak: 'break-all' }}>{String((stream && stream.rtsp) || '').replace(/\/\/[^@/]*@/, '//···@')}</span>{onSubir && <button onClick={onSubir} style={{ background: 'rgba(14,165,233,.16)', color: '#67c7f5', border: '1px solid rgba(14,165,233,.3)', borderRadius: 8, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Subir a la central</button>}</div>}
       {status === 'error' && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#8b95a3' }}>{IcVideoOff({ c: '#8b95a3', s: 28 })}<span style={{ fontSize: 12 }}>Sin señal</span><span style={{ fontSize: 10, color: '#5a6a8f', maxWidth: 240, textAlign: 'center', wordBreak: 'break-all' }}>{(stream && stream.base) || 'sin go2rtc_url'} · {(stream && stream.src) || '?'}</span><button onClick={() => setGen(g => g + 1)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,.08)', color: '#cdd3db', border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>{IcReload({ c: '#cdd3db', s: 13 })} Reintentar</button></div>}
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px', background: 'linear-gradient(180deg,rgba(0,0,0,.62),transparent)', color: '#fff' }}>
         {Ic({ c: '#fff', s: 14 })}
@@ -498,6 +539,17 @@ export default function App() {
   const [principal, setPrincipal] = useState('llamada');
   const [principalManual, setPrincipalManual] = useState(false);
   const remotoVivo = useVideoRemoto(!!sp.inCall, sp.getRemoteStream);
+  /* Un solo go2rtc propio para todo lo que puede estar a la vista: las camaras locales del
+   * cliente abierto en Intercom y las de la llamada en curso. Si se levantara uno por
+   * pantalla, pasar de Intercom a una llamada reiniciaria el proceso y cortaria el video
+   * justo en el momento en que se lo quiere mirar. */
+  const camsLocalesVivas = (() => {
+    const m = new Map();
+    for (const d of (Array.isArray(streams) ? streams : [])) if (d && d.rtsp) m.set(d.id, d);
+    for (const d of camaras) if (d && d.rtsp) m.set(d.id, d);
+    return Array.from(m.values());
+  })();
+  const g2l = useGo2rtcLocal(camsLocalesVivas);
   useEffect(() => { if (!sp.inCall && !sp.incoming) { setPrincipal('llamada'); setPrincipalManual(false); } }, [sp.inCall, sp.incoming]);
   /* La regla: manda el video de la llamada mientras exista. Si el otro lado no manda imagen
    * —un portero de audio, o el interno con la cámara apagada— la pantalla grande se la
@@ -1263,7 +1315,7 @@ export default function App() {
                     streams === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
                     streams.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errStreams ? '#b91c1c' : C.sub }}>{errStreams ? 'No se pudieron leer las cámaras: ' + errStreams : 'Este cliente no tiene dispositivos.'}</div> :
                     tab === 'intercom' ?
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => <MseTile key={(d.id || i) + ':' + (d.src || d.rtsp || '')} stream={d} onSubir={esLocal(d) && apiOn && !esLocal(selClient) ? () => subirCamara(selClient, d) : undefined} />)}</div> :
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => <MseTile key={(d.id || i) + ':' + (d.src || d.rtsp || '')} stream={fuenteDeCamara(d, g2l)} onSubir={esLocal(d) && apiOn && !esLocal(selClient) ? () => subirCamara(selClient, d) : undefined} />)}</div> :
                       streams.map((d, i) => (
                         <div key={i} className="ph-row" style={S.row}>
                           <Ava txt="" size={38} bg="#0f1a30" />
@@ -1505,7 +1557,7 @@ export default function App() {
               : null;
             const fuentes = [];
             if (nodoRemoto) fuentes.push({ id: 'llamada', label: nombre || numero, nodo: nodoRemoto });
-            camsEnLlamada.forEach(c => fuentes.push({ id: 'cam:' + c.id, label: c.label || 'Cámara', nodo: <MseTile fit stream={c} /> }));
+            camsEnLlamada.forEach(c => fuentes.push({ id: 'cam:' + c.id, label: c.label || 'Cámara', nodo: <MseTile fit stream={fuenteDeCamara(c, g2l)} /> }));
             const principalReal = fuentes.some(f => f.id === principal) ? principal : ((fuentes[0] && fuentes[0].id) || 'llamada');
             const nodosVideo = videoVivo ? {
               remoto: nodoRemoto,
