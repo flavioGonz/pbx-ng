@@ -139,12 +139,27 @@ module.exports = function init(deps) {
          * (la PK es (client_id, clave)) y sólo uno pasa a ejecutar. */
         return pool.query('INSERT INTO pbxng_idempotencia (client_id, clave, huella) VALUES ($1,$2,$3)', [cid, clave, huella])
           .then(() => {
-            /* Se intercepta `res.json` para guardar lo que efectivamente se respondió. */
+            /* Se intercepta `res.json` para guardar lo que efectivamente se respondió.
+             *
+             * EL GUARDADO VA ANTES DE CONTESTAR, y eso importa. Antes se disparaba el
+             * UPDATE sin esperarlo y se contestaba en el mismo tick: el cliente ya tenía
+             * la respuesta en la mano mientras la fila seguía con `estado = NULL`. El
+             * reintento —que es LA razón de ser de esto: el backoffice manda originar, se
+             * le corta la conexión y vuelve a mandar— leía ese NULL y se comía un
+             * «ese pedido está en curso» por un pedido que ya había terminado. Encima
+             * dejaba la clave quemada: 409 para siempre, sin poder recuperar la respuesta.
+             *
+             * Se demora el envío hasta que el UPDATE resuelve (o falla: ahí igual se
+             * contesta, perder la idempotencia es mejor que no contestarle al cliente).
+             * Nadie depende de que el cuerpo salga en el mismo tick; los handlers hacen
+             * `return res.json(...)` y se devuelve `res` para no romper el encadenado. */
             const json = res.json.bind(res);
             res.json = (cuerpoResp) => {
               pool.query('UPDATE pbxng_idempotencia SET estado=$3, cuerpo=$4 WHERE client_id=$1 AND clave=$2',
-                [cid, clave, res.statusCode, JSON.stringify(cuerpoResp)]).catch((e) => log.error('idempotencia: no se pudo guardar la respuesta', e));
-              return json(cuerpoResp);
+                [cid, clave, res.statusCode, JSON.stringify(cuerpoResp)])
+                .catch((e) => log.error('idempotencia: no se pudo guardar la respuesta', e))
+                .finally(() => json(cuerpoResp));
+              return res;
             };
             next();
           })

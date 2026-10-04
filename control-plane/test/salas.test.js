@@ -45,12 +45,19 @@ test('salas: alta con PIN al azar, dialplan, agenda, edición, permisos y baja',
     assert.match(t2, /DB\(sala\/directorio\)/, t2);
     assert.match(t2, /CONFBRIDGE\(bridge,max_members\)=8/, t2);
     assert.match(t2, /CONFBRIDGE\(bridge,record_conference\)=yes/, t2);
-    // El nombre del archivo es el que ya indexa recordings.js (pbxng-<alnum>-<epoch>.wav).
-    assert.match(t2, /pbxng-sala9001-\$\{EPOCH\}\.wav/, t2);
+    /* El nombre es el que indexa recordings.js (pbxng-<alnum>-<epoch>.wav), pero el epoch
+     * lo pone ConfBridge, NO el dialplan: con `${EPOCH}` escrito a mano salia dos veces
+     * (pbxng-sala50000-1790660054-1790660054.wav) y el indexador no lo reconocia. Por eso
+     * el record_file va sin sello y al lado viaja `record_file_timestamp=yes`. */
+    assert.match(t2, /CONFBRIDGE\(bridge,record_file_timestamp\)=yes/, t2);
+    assert.match(t2, /CONFBRIDGE\(bridge,record_file\)=\/var\/spool\/asterisk\/monitor\/pbxng-sala9001\.wav/, t2);
+    assert.ok(!/pbxng-sala9001-\$\{EPOCH\}/.test(t2), 'el sello lo pone ConfBridge: escribirlo ademas duplica el nombre');
     // Los PIN NO están en el dialplan: se comparan contra la AstDB, por eso cambiarlos no lo reescribe.
     assert.ok(!t2.includes(s.pin), 'el PIN de participante no puede quedar escrito en el dialplan');
     assert.ok(!t2.includes(s.pin_mod), 'el PIN de moderador no puede quedar escrito en el dialplan');
-    assert.match(t2, /GotoIf\(\$\["\$\{SALAPIN\}"="\$\{DB\(salamod\/directorio\)\}"\]\?40\)/, t2);
+    /* 60 y no 40: el bloque del invitado web vive en 30 y con todo encendido llega a 38,
+     * asi que el del moderador que se llega marcando se corrio a 60 (ver salas.js). */
+    assert.match(t2, /GotoIf\(\$\["\$\{SALAPIN\}"="\$\{DB\(salamod\/directorio\)\}"\]\?60\)/, t2);
     /* El PIN vacío se rechaza ANTES de comparar: sin esto, una clave ausente en la AstDB
      * (sala guardada con el AMI caído) hacía que el que no marca nada entre de MODERADOR. */
     const vacio = filas.find((r) => r.app === 'GotoIf' && r.appdata === '$["${SALAPIN}"=""]?' + (r.priority + 3));
