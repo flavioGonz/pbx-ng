@@ -573,6 +573,34 @@ function softphoneLatest() {
   });
 }
 app.get('/api/softphone/latest', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(softphoneLatest()); });
+/* La central se trae sola el instalador nuevo (pull contra el Release, NO push de CI:
+ * el por que esta escrito arriba de softphone-ota.js). Lo que baja cae en SOFTPHONE_DIR,
+ * asi que el boton del login y el feed OTA se enteran sin tocar nada mas. */
+const softphoneOta = require('./softphone-ota')({ pool, dir: SOFTPHONE_DIR });
+function soloAdminOta(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'requiere rol administrador' });
+  next();
+}
+app.get('/api/softphone/ota', soloAdminOta, async (req, res) => { try { res.json(await softphoneOta.estado()); } catch (e) { errorHttp(res, e); } });
+app.post('/api/softphone/ota/config', soloAdminOta, async (req, res) => {
+  const b = req.body || {};
+  try {
+    const set = async (k, v) => pool.query(
+      'INSERT INTO pbxng_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [k, String(v)]);
+    if (b.auto !== undefined) await set('softphone_ota_auto', b.auto ? '1' : '0');
+    if (b.repo !== undefined) await set('softphone_ota_repo', String(b.repo).trim());
+    if (b.cada_h !== undefined) await set('softphone_ota_cada_h', String(Math.max(1, Math.min(168, parseInt(b.cada_h, 10) || 6))));
+    await softphoneOta.programar();      // el reloj nuevo entra sin reiniciar la API
+    res.json(await softphoneOta.estado());
+  } catch (e) { errorHttp(res, e); }
+});
+/* Revisar ahora. Puede tardar lo que tarde bajar 85 MB, asi que la respuesta es el
+ * resultado real y no un «ok» inmediato: el que aprieta el boton quiere saber si quedo. */
+app.post('/api/softphone/ota/revisar', soloAdminOta, async (req, res) => {
+  const b = req.body || {};
+  try { res.json(await softphoneOta.revisar({ forzar: !!b.forzar, version: b.version || undefined })); }
+  catch (e) { errorHttp(res, e); }
+});
 /* ICE/TURN: lo registra control-plane/turn.js (dueño `medios`), más abajo, junto al
  * resto de /api/turn/**. Acá sólo queda la nota para el que lo venga a buscar: la
  * lista de servidores ICE la arma UNA función (turn.iceServers()), y de ahí salen

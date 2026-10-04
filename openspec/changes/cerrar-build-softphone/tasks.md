@@ -26,19 +26,26 @@
 
 ## 2. Entregar el instalador a la central
 
-- [ ] 2.1 Definir el mecanismo de entrega y su autenticación (es la decisión abierta del
+- [x] 2.1 Definir el mecanismo de entrega y su autenticación (es la decisión abierta del
       design). No avanzar con el resto del grupo hasta cerrarlo.
-- [ ] 2.2 Implementar la recepción en la central: escribir a temporal, renombrar, y dejar
+- [x] 2.2 Implementar la recepción en la central: escribir a temporal, renombrar, y dejar
       el `latest.yml` para el final.
-- [ ] 2.3 Borrar versiones viejas dejando la actual y la anterior.
-- [ ] 2.4 Probar contra pbx01 con una versión de prueba, y probar el caso de central
-      inalcanzable: el Release queda publicado y la central sigue sirviendo la anterior.
+- [x] 2.3 Borrar versiones viejas dejando la actual y la anterior.
+- [x] 2.4 Probado contra pbx01: descarga forzada de 0.17.0, 84 MB en 11 s, 0.15.0 podada,
+      0.16.0 conservada como anterior, `latest.yml` reescrito al final. El caso «no se
+      llega a GitHub» queda en warn y la central sigue sirviendo lo que tiene.
+- [x] 2.5 Guarda de rol: `/api/softphone/ota*` sólo admin (verificado 403 con rol
+      operador); `/api/softphone/latest` sigue público, que es lo que lee el login.
+- [x] 2.6 Freno de disco: por debajo de 600 MB libres no se baja nada, porque dejar sin
+      espacio el disco de una central corta llamadas y una versión del softphone no vale eso.
+- [ ] 2.7 Subida manual del instalador desde el panel, para la central sin salida a
+      internet (hoy se sube por SSH al directorio montado).
 
 ## 3. Hacer visible el atraso
 
-- [ ] 3.1 Agregar la fecha de publicación a `/api/softphone/latest` (el dato ya existe en
+- [x] 3.1 Agregar la fecha de publicación a `/api/softphone/latest` (el dato ya existe en
       el `latest.yml`, falta exponerlo).
-- [ ] 3.2 Mostrarlo donde se ve la versión, para que se lea sin entrar por SSH.
+- [x] 3.2 Mostrarlo donde se ve la versión, para que se lea sin entrar por SSH.
 - [ ] 3.3 Que el workflow avise cuando hay commits en `softphone-app/` sin cambio de
       versión, que es el caso que nos costó dos días.
 
