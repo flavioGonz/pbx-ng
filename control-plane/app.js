@@ -2748,8 +2748,106 @@ function rtspMask(url){
 /* Un dispositivo tal como puede salir a la vista: sin la URL cruda, con la enmascarada y con
  * el booleano que necesita el formulario para saber si ya hay algo guardado. */
 function deviceSafe(d){
-  const { rtsp_url, ...resto } = d;
-  return { ...resto, rtsp_url: rtspMask(rtsp_url), rtsp_set: !!(rtsp_url && String(rtsp_url).trim()) };
+  const { rtsp_url, rele_cfg, ...resto } = d;
+  /* La clave del portero sigue el mismo criterio que la de la camara: la central la tiene,
+   * la pantalla no. Se devuelve `pass_set` para que el formulario pueda decir «hay una
+   * guardada» sin mostrarla, y para que dejar el campo vacio signifique «no la toques». */
+  const cfg = (rele_cfg && typeof rele_cfg === 'object') ? { ...rele_cfg } : {};
+  if (cfg.pass !== undefined) { cfg.pass_set = !!String(cfg.pass || ''); delete cfg.pass; }
+  return { ...resto, rele_cfg: cfg, rtsp_url: rtspMask(rtsp_url), rtsp_set: !!(rtsp_url && String(rtsp_url).trim()) };
+}
+
+/* ── Abrir un rele ───────────────────────────────────────────────────────────
+ * Tres caminos, y el aparato dice cual es el suyo:
+ *
+ *   dtmf    Lo manda el que esta EN la llamada, no la central: el tono tiene que viajar
+ *           por ese audio. Aca solo se devuelve el codigo; abrir lo hace el softphone.
+ *   http    La central le pega al portero por su API. Es el unico que abre SIN llamada.
+ *   codigo  La central marca un codigo de funcion del dialplan, que es donde ya vive la
+ *           logica de esa puerta.
+ *
+ * El que abrio queda escrito SIEMPRE, en los tres casos. Una puerta que se abre sin dejar
+ * quien la abrio es la clase de cosa que despues no se puede responder. */
+async function abrirRele(dev, idx, quien) {
+  const cfg = (dev.rele_cfg && typeof dev.rele_cfg === 'object') ? dev.rele_cfg : {};
+  const reles = Array.isArray(cfg.reles) ? cfg.reles : [];
+  const r = reles[idx];
+  if (!r) throw Object.assign(new Error('ese relé no está configurado en el dispositivo'), { status: 400 });
+  const modo = String(dev.rele_modo || '').trim();
+
+  if (modo === 'dtmf') {
+    if (!r.codigo) throw Object.assign(new Error('el relé no tiene código DTMF'), { status: 400 });
+    return { modo: 'dtmf', dtmf: String(r.codigo), nombre: r.nombre || '' };
+  }
+
+  if (modo === 'codigo') {
+    if (!r.codigo) throw Object.assign(new Error('el relé no tiene código de función'), { status: 400 });
+    if (!quien) throw Object.assign(new Error('hace falta saber desde qué interno marcar'), { status: 400 });
+    await amiAction({ Action: 'Originate', Channel: 'Local/' + String(r.codigo) + '@internal',
+      Application: 'Wait', Data: '2', CallerID: 'Apertura <' + quien + '>', Async: 'true' });
+    return { modo: 'codigo', nombre: r.nombre || '' };
+  }
+
+  if (modo === 'http') {
+    const host = String(cfg.host || '').trim();
+    if (!host) throw Object.assign(new Error('el portero no tiene dirección configurada'), { status: 400 });
+    const marca = String(cfg.marca || '').toLowerCase();
+    const num = parseInt(r.num, 10) || 1;
+    const user = String(cfg.user || ''), pass = String(cfg.pass || '');
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 8000);
+    try {
+      let resp;
+      if (marca === 'hikvision') {
+        /* ISAPI con digest: fetch no lo hace solo, asi que se hace el ida y vuelta a mano
+         * (401 con el nonce, y recien ahi el PUT firmado). */
+        const url = 'http://' + host + '/ISAPI/AccessControl/RemoteControl/door/' + num;
+        const cuerpo = '<RemoteControlDoor><cmd>open</cmd></RemoteControlDoor>';
+        resp = await fetchDigest(url, 'PUT', cuerpo, user, pass, ctl.signal);
+      } else {
+        /* Akuvox y compatibles: fcgi con usuario y clave en la query. */
+        const url = 'http://' + host + '/fcgi/do?action=OpenDoor&UserName=' + encodeURIComponent(user)
+          + '&Password=' + encodeURIComponent(pass) + '&DoorNum=' + num;
+        resp = await fetch(url, { signal: ctl.signal });
+      }
+      const txt = await resp.text().catch(() => '');
+      if (!resp.ok) throw new Error('el portero contestó HTTP ' + resp.status);
+      /* Akuvox contesta 200 con un JSON que puede decir que fallo: un 200 no alcanza. */
+      if (/"?result"?\s*:\s*0|fail|error/i.test(txt) && !/"?result"?\s*:\s*1/i.test(txt)) {
+        throw new Error('el portero rechazó la apertura: ' + txt.slice(0, 120));
+      }
+      return { modo: 'http', nombre: r.nombre || '' };
+    } catch (e) {
+      /* «fetch failed» a secas no le dice a nadie que mirar. El que lee esto necesita
+       * saber A QUE aparato no se llego, que es lo que lo manda a revisar la red o la
+       * direccion guardada. */
+      const m = (e && e.message) || 'error';
+      throw Object.assign(new Error(/abort/i.test(m) ? 'el portero ' + host + ' no contestó a tiempo'
+        : /fetch failed|ECONN|EHOST|ENOTFOUND/i.test(m) ? 'no se llegó al portero ' + host : m), { status: 502 });
+    } finally { clearTimeout(t); }
+  }
+
+  throw Object.assign(new Error('el dispositivo no tiene modo de apertura configurado'), { status: 400 });
+}
+
+/* Digest HTTP a mano: una vuelta para que el aparato mande el nonce y otra ya firmada. */
+async function fetchDigest(url, metodo, cuerpo, user, pass, signal) {
+  const primera = await fetch(url, { method: metodo, body: cuerpo, signal });
+  if (primera.status !== 401) return primera;
+  const wa = primera.headers.get('www-authenticate') || '';
+  const campo = (k) => { const m = new RegExp(k + '="?([^",]+)"?').exec(wa); return m ? m[1] : ''; };
+  const realm = campo('realm'), nonce = campo('nonce'), qop = campo('qop'), opaque = campo('opaque');
+  const u = new URL(url);
+  const uri = u.pathname + u.search;
+  const md5 = (x) => crypto.createHash('md5').update(x).digest('hex');
+  const ha1 = md5(user + ':' + realm + ':' + pass);
+  const ha2 = md5(metodo + ':' + uri);
+  const cnonce = crypto.randomBytes(8).toString('hex'), nc = '00000001';
+  const resp = qop ? md5(ha1 + ':' + nonce + ':' + nc + ':' + cnonce + ':auth:' + ha2) : md5(ha1 + ':' + nonce + ':' + ha2);
+  const cab = 'Digest username="' + user + '", realm="' + realm + '", nonce="' + nonce + '", uri="' + uri
+    + '", response="' + resp + '"' + (qop ? ', qop=auth, nc=' + nc + ', cnonce="' + cnonce + '"' : '')
+    + (opaque ? ', opaque="' + opaque + '"' : '');
+  return fetch(url, { method: metodo, body: cuerpo, headers: { Authorization: cab }, signal });
 }
 
 // Escribir en el CRM (clientes, personas autorizadas, espacios, dispositivos) queda reservado a
@@ -2896,8 +2994,11 @@ function camaraAlta(req, res, next) {
 }
 app.post('/api/clients/:id/devices', camaraAlta, async (req,res)=>{ const b=req.body||{}; try{
   const src = b.go2rtc_src || ('cli'+req.params.id+'_'+Date.now().toString(36));
-  const { rows } = await pool.query('INSERT INTO pbxng_client_devices (client_id,label,type,rtsp_url,go2rtc_src,enabled) VALUES ($1,$2,$3,$4,$5,COALESCE($6,true)) RETURNING *',
-    [req.params.id,b.label,b.type||'camera',b.rtsp_url||null,src,b.enabled]);
+  const { rows } = await pool.query(
+    'INSERT INTO pbxng_client_devices (client_id,label,type,rtsp_url,go2rtc_src,enabled,ext,rele_modo,rele_cfg) VALUES ($1,$2,$3,$4,$5,COALESCE($6,true),$7,$8,COALESCE($9,\'{}\'::jsonb)) RETURNING *',
+    [req.params.id,b.label,b.type||'camera',b.rtsp_url||null,src,b.enabled,
+     (b.ext ? String(b.ext).trim() : null) || null, b.rele_modo || null,
+     b.rele_cfg ? JSON.stringify(b.rele_cfg) : null]);
   g2alta(rows[0].go2rtc_src, rows[0].rtsp_url);   // que el video aparezca ya, sin esperar el barrido
   /* Best-effort a proposito: si la bitacora falla, el alta ya se hizo y negarla ahora seria
    * peor. Queda el warn en el log de la API. */
@@ -2914,10 +3015,25 @@ app.post('/api/clients/:id/devices', camaraAlta, async (req,res)=>{ const b=req.
  * URL entera (viaja enmascarada), mandar lo que se lee en el formulario borraria la clave. */
 app.put('/api/devices/:did', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
   const nueva = (b.rtsp_url===undefined || b.rtsp_url===null || String(b.rtsp_url).trim()==='') ? null : String(b.rtsp_url).trim();
+  /* La clave del portero sigue la misma regla que la URL RTSP: ausente o vacia significa
+   * «no la toques», porque la pantalla nunca la ve y mandar lo que se lee en el formulario
+   * la borraria. Por eso el merge del jsonb se hace aca y no en el cliente. */
+  let cfgNueva = null;
+  if (b.rele_cfg && typeof b.rele_cfg === 'object') {
+    const prev = (await pool.query('SELECT rele_cfg FROM pbxng_client_devices WHERE id=$1', [req.params.did])).rows[0];
+    const anterior = (prev && prev.rele_cfg) || {};
+    const c = { ...anterior, ...b.rele_cfg };
+    delete c.pass_set;
+    if (b.rele_cfg.pass === undefined || String(b.rele_cfg.pass || '') === '') c.pass = anterior.pass;
+    if (c.pass === undefined) delete c.pass;
+    cfgNueva = JSON.stringify(c);
+  }
   const { rows } = await pool.query(`UPDATE pbxng_client_devices SET
       label=COALESCE($2,label), type=COALESCE($3,type), rtsp_url=COALESCE($4,rtsp_url),
-      enabled=COALESCE($5,enabled) WHERE id=$1 RETURNING *`,
-    [req.params.did, b.label||null, b.type||null, nueva, (b.enabled===undefined?null:!!b.enabled)]);
+      enabled=COALESCE($5,enabled), ext=COALESCE($6,ext), rele_modo=COALESCE($7,rele_modo),
+      rele_cfg=COALESCE($8::jsonb,rele_cfg) WHERE id=$1 RETURNING *`,
+    [req.params.did, b.label||null, b.type||null, nueva, (b.enabled===undefined?null:!!b.enabled),
+     (b.ext !== undefined ? String(b.ext||'').trim() : null) || null, b.rele_modo || null, cfgNueva]);
   if(!rows[0]) return res.status(404).json({error:'no existe'});
   // Deshabilitar un portero tiene que cortar el RTSP, no solo esconderlo del panel.
   if(rows[0].enabled) g2alta(rows[0].go2rtc_src, rows[0].rtsp_url); else g2baja(rows[0].go2rtc_src);
@@ -2933,6 +3049,30 @@ app.post('/api/devices/:did/test', crmWrite, async (req,res)=>{ try{
   if(!rows[0].enabled) return res.json({ ok:false, motivo:'el dispositivo esta deshabilitado' });
   await g2alta(rows[0].go2rtc_src, rows[0].rtsp_url);
   res.json(await g2probar(rows[0].go2rtc_src));
+}catch(e){errorHttp(res, e);} });
+
+/* Abrir un rele. Lo puede hacer cualquiera que atienda —un softphone enrolado incluido—:
+ * el que esta mirando al que toco el timbre es el que tiene que poder abrirle, y mandarlo
+ * a pedirle permiso a un administrador es lo mismo que no tener apertura.
+ *
+ * Lo que SI se exige: que el dispositivo exista, que el rele este configurado, y que quede
+ * escrito quien abrio. La configuracion de los reles sigue siendo del panel. */
+app.post('/api/devices/:did/rele', async (req,res)=>{ const b=req.body||{}; try{
+  const { rows } = await pool.query('SELECT * FROM pbxng_client_devices WHERE id=$1',[req.params.did]);
+  const dev = rows[0];
+  if(!dev) return res.status(404).json({error:'no existe'});
+  if(!dev.enabled) return res.status(409).json({error:'el dispositivo está deshabilitado'});
+  const quien = (req.user && (req.user.ext || req.user.user)) || null;
+  const idx = parseInt(b.rele, 10) || 0;
+  let r;
+  try { r = await abrirRele(dev, idx, quien); }
+  catch(e){ return res.status(e.status || 502).json({ error: e.message }); }
+  pool.query('INSERT INTO pbxng_sec_events (kind, severity, detail) VALUES ($1,$2,$3)',
+    ['apertura','info',JSON.stringify({ que:'apertura de relé', dispositivo:dev.id, etiqueta:dev.label,
+      cliente:dev.client_id, rele:idx, nombre:r.nombre, modo:r.modo, por:quien,
+      via:(req.user && req.user.scope==='phone')?'softphone':'panel' })])
+    .catch((e)=>logger.warn({mod:'crm',msg:'no se pudo anotar la apertura',err:e&&e.message}));
+  res.json({ ok:true, ...r });
 }catch(e){errorHttp(res, e);} });
 
 app.delete('/api/devices/:did', crmWrite, async (req,res)=>{ try{
@@ -2951,9 +3091,18 @@ app.get('/api/intercom/clients', async (req,res)=>{ try{
 function baseVideo(req) { return CRMGO2RTC || intercomProxy.basePublica(req); }
 app.get('/api/intercom/streams', async (req,res)=>{ try{
   const cid = req.query.client;
-  const { rows } = await pool.query('SELECT id,label,type,go2rtc_src FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[cid]);
+  /* Se agregan el interno y los reles: el que mira al portero por esta pantalla es el que
+   * le va a hablar y le va a abrir, y hasta ahora para eso tenia que irse a otra pantalla
+   * y marcar el numero de memoria. La CLAVE del portero no sale de la central —de
+   * `rele_cfg` viajan solo los nombres de los reles y el modo—, porque la apertura la
+   * ejecuta la central, no la pantalla. */
+  const { rows } = await pool.query('SELECT id,label,type,go2rtc_src,ext,rele_modo,rele_cfg FROM pbxng_client_devices WHERE client_id=$1 AND enabled ORDER BY label',[cid]);
   const base = baseVideo(req);
-  res.json(rows.map(d=>({ id:d.id, label:d.label, type:d.type, base, src:d.go2rtc_src })));
+  res.json(rows.map(d=>{
+    const cfg = (d.rele_cfg && typeof d.rele_cfg === 'object') ? d.rele_cfg : {};
+    const reles = Array.isArray(cfg.reles) ? cfg.reles.map((r,i)=>({ i, nombre: r.nombre || ('Relé ' + (i+1)) })) : [];
+    return { id:d.id, label:d.label, type:d.type, base, src:d.go2rtc_src, ext:d.ext||null, rele_modo:d.rele_modo||null, reles };
+  }));
 }catch(e){errorHttp(res, e);} });
 
 app.get('/api/survey/fields', async (req,res)=>{ try{ const { rows } = await pool.query('SELECT * FROM pbxng_survey_fields WHERE active ORDER BY ord, id'); res.json(rows); }catch(e){errorHttp(res, e);} });

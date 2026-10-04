@@ -903,6 +903,31 @@ export default function App() {
       setStreams(null); setClientDet(null); setClsFull(null); setSelClient({ ...cli });
     } catch (e) { setAltaMsg('No se pudo subir: ' + (e.message || 'error')); }
   }
+  /* ── El portero: hablarle y abrirle, sin salir de Intercom ─────────────────
+   * El que esta mirando quien toco el timbre es el que le va a contestar y el que le va a
+   * abrir. Hasta ahora para eso habia que irse a Llamadas y marcar el interno de memoria,
+   * y para abrir, acordarse del codigo. */
+  const [releMsg, setReleMsg] = useState(null);   // { did, texto, mal }
+  function llamarPortero(d) {
+    if (!d || !d.ext) return;
+    callNow(d.ext, true);   // con video: es un portero, lo que se quiere es ver quien es
+  }
+  async function abrir(d, i) {
+    setReleMsg({ did: d.id, texto: 'Abriendo…' });
+    try {
+      const r = await api.abrirRele(d.id, i);
+      /* El DTMF no lo puede mandar la central: el tono tiene que viajar por el audio de
+       * ESTA llamada. La central dice cual es y lo manda este aparato. */
+      if (r && r.modo === 'dtmf') {
+        if (!sp.inCall) { setReleMsg({ did: d.id, texto: 'Para abrir con tono hay que estar en la llamada', mal: true }); return; }
+        for (const ch of String(r.dtmf)) { try { sp.sendDtmf(ch); } catch (_) {} await new Promise((x) => setTimeout(x, 120)); }
+      }
+      setReleMsg({ did: d.id, texto: '✓ ' + (r.nombre || 'Abierto') });
+    } catch (e) {
+      setReleMsg({ did: d.id, texto: (e && e.message) || 'no se pudo abrir', mal: true });
+    }
+    setTimeout(() => setReleMsg((m) => (m && m.did === d.id ? null : m)), 4000);
+  }
   function apiDisconnect() { api.apiLogout(); setApiOn(false); setApiMsg(''); setDir(null); setCls(null); setClsFull(null); setClientDet(null); setSelClient(null); setStreams(null); }
   async function openCall(h) {
     setModal(h); setRecUrl(''); setRecState('idle');
@@ -1322,7 +1347,33 @@ export default function App() {
                     streams === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
                     streams.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errStreams ? '#b91c1c' : C.sub }}>{errStreams ? 'No se pudieron leer las cámaras: ' + errStreams : 'Este cliente no tiene dispositivos.'}</div> :
                     tab === 'intercom' ?
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => <MseTile key={(d.id || i) + ':' + (d.src || d.rtsp || '')} stream={fuenteDeCamara(d, g2l)} onSubir={esLocal(d) && apiOn && !esLocal(selClient) ? () => subirCamara(selClient, d) : undefined} />)}</div> :
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => (
+                        <div key={(d.id || i) + ':' + (d.src || d.rtsp || '')}>
+                          <MseTile stream={fuenteDeCamara(d, g2l)} onSubir={esLocal(d) && apiOn && !esLocal(selClient) ? () => subirCamara(selClient, d) : undefined} />
+                          {/* Un portero no es una camara que ademas suena: es un aparato con
+                              el que se habla y que abre. Las acciones van PEGADAS a su imagen,
+                              que es donde esta mirando el que las necesita. */}
+                          {(d.ext || (d.reles || []).length > 0) && (
+                            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+                              {d.ext && <button onClick={() => llamarPortero(d)}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: 'none', background: 'rgba(43,217,90,.14)', color: '#4ade80', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                                {IcPhone({ c: '#4ade80', s: 14 })} Llamar{d.ext ? ' · ' + d.ext : ''}
+                              </button>}
+                              {(d.reles || []).map((r) => {
+                                /* El de DTMF se apaga sin llamada en curso en vez de fallar
+                                   despues: el tono no tiene por donde viajar. */
+                                const necesitaLlamada = d.rele_modo === 'dtmf' && !sp.inCall;
+                                return (
+                                  <button key={r.i} onClick={() => abrir(d, r.i)} disabled={necesitaLlamada}
+                                    title={necesitaLlamada ? 'Este portero abre con tono: hay que estar en la llamada' : 'Abrir ' + r.nombre}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: necesitaLlamada ? C.sub : '#fbbf24', cursor: necesitaLlamada ? 'default' : 'pointer', fontWeight: 700, fontSize: 12, opacity: necesitaLlamada ? .45 : 1 }}>
+                                    🔓 {r.nombre}
+                                  </button>);
+                              })}
+                              {releMsg && releMsg.did === d.id && <span style={{ fontSize: 11.5, color: releMsg.mal ? C.red : '#4ade80', fontWeight: 600 }}>{releMsg.texto}</span>}
+                            </div>
+                          )}
+                        </div>))}</div> :
                       streams.map((d, i) => (
                         <div key={i} className="ph-row" style={S.row}>
                           <Ava txt="" size={38} bg="#0f1a30" />

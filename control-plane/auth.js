@@ -115,6 +115,14 @@ module.exports = function init(deps) {
      * y deja el alta en la bitacora con la extension. No se abre el borrado: una camara
      * cargada de mas molesta; una borrada de menos deja a alguien sin ver la puerta. */
     ['POST', /^\/api\/clients\/[0-9]+\/devices$/],
+    /* Abrir el rele de un portero. El que esta mirando al que toco el timbre es el que
+     * tiene que poder abrirle: mandarlo a buscar a un administrador es lo mismo que no
+     * tener apertura. La ruta anota quien abrio, con la extension del token. Configurar
+     * los reles sigue siendo del panel: esto solo dispara los que ya estan. */
+    ['POST', /^\/api\/devices\/[0-9]+\/rele$/],
+    /* El detalle de un dispositivo: el softphone necesita el interno del portero y sus
+     * reles para poder llamarlo y abrirle. La clave no vuelve (deviceSafe). */
+    ['GET',  /^\/api\/intercom\/streams$/],
   ];
 
   /* ¿El que pide puede meterse con la extensión `ext`?

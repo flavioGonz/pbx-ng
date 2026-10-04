@@ -112,6 +112,10 @@ export const clientStreams = (id) => call('GET', '/intercom/streams?client=' + e
  * ahi en adelante la central la devuelve enmascarada (deviceSafe) y el aparato no la vuelve
  * a ver. La respuesta trae el `go2rtc_src` con el que despues se mira el video. */
 export const clientDeviceAdd = (id, dev) => call('POST', '/clients/' + encodeURIComponent(id) + '/devices', dev);
+/* Abrir un rele de un portero. La central decide COMO (DTMF, HTTP al aparato, o un codigo
+ * del dialplan) y devuelve `{ modo }`; si contesta `modo:'dtmf'` trae el tono y el que lo
+ * manda es este aparato, porque el tono tiene que viajar por el audio de ESTA llamada. */
+export const abrirRele = (did, rele) => call('POST', '/devices/' + encodeURIComponent(did) + '/rele', { rele });
 /* «Entrada» de un solo uso para abrir el video de UNA cámara: vale un minuto y se quema
  * al usarse. Es lo que se manda en la URL del WebSocket, en vez de la sesión entera —que
  * quedaría escrita en cualquier registro por el que pase esa URL—. */
