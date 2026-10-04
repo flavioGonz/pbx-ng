@@ -110,6 +110,11 @@ module.exports = function init(deps) {
      * más que lo que ya da `/api/clients` y `/api/clients/lookup`: el mismo cliente, los
      * mismos datos, una fila en vez de todas. */
     ['GET',  /^\/api\/clients\/[0-9]+$/],
+    /* Alta de camara desde el aparato: el que esta en la obra con la URL RTSP en la mano
+     * es el que tiene el telefono. La ruta tiene su propia guarda (`camaraAlta` en app.js)
+     * y deja el alta en la bitacora con la extension. No se abre el borrado: una camara
+     * cargada de mas molesta; una borrada de menos deja a alguien sin ver la puerta. */
+    ['POST', /^\/api\/clients\/[0-9]+\/devices$/],
   ];
 
   /* ¿El que pide puede meterse con la extensión `ext`?

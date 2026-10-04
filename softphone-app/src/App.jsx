@@ -5,7 +5,8 @@ import ShaderPuntos from './ShaderPuntos';
 import { flushSync } from 'react-dom';
 import { useSip, listDevices, getDevPrefs, setDevPref } from './useSip.js';
 import { useSipNative } from './useSipNative.js';
-import { loadConfig, saveConfig, isComplete, getAccounts as cfgGetAccounts, setAccounts as cfgSetAccounts } from './config.js';
+import { loadConfig, saveConfig, isComplete, getAccounts as cfgGetAccounts, setAccounts as cfgSetAccounts,
+  getClientesLocales, setClientesLocales, esLocal, nuevoIdLocal } from './config.js';
 import * as api from './api.js';
 import { decodeProv } from './prov.js';
 import QRCode from 'qrcode';
@@ -165,13 +166,18 @@ const fmtDate = (t) => {
 const fmtDur = (d) => d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : '—';
 
 // ---- Reproductor go2rtc por MSE (fMP4 sobre WebSocket, atraviesa el proxy sin UDP) ----
-function MseTile({ stream, fit = false }) {
+/* Una camara guardada SOLO en este aparato no tiene go2rtc donde mirarse: Chromium no
+ * reproduce rtsp://. El requisito es explicito en que eso se DICE, con la accion para
+ * resolverlo, en vez de mostrar un reproductor vacio o un «sin senal» generico que manda a
+ * revisar la red de una camara que nunca se intento abrir. */
+function MseTile({ stream, fit = false, onSubir }) {
   const videoRef = useRef(null);
   const [status, setStatus] = useState('connecting');
   const [muted, setMuted] = useState(true);
   const [gen, setGen] = useState(0);
   useEffect(() => {
     const base = stream && stream.base, src = stream && stream.src, video = videoRef.current;
+    if (stream && stream.rtsp && !src) { setStatus('local'); return; }
     if (!base || !src || !video || typeof MediaSource === 'undefined') { setStatus('error'); return; }
     let stopped = false, ws = null, sb = null, queue = [], connId = null, unsub = null;
     setStatus('connecting');
@@ -228,12 +234,13 @@ function MseTile({ stream, fit = false }) {
       : { position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden', background: '#0b0f17' }}>
       <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', display: status === 'live' ? 'block' : 'none' }} />
       {status === 'connecting' && <div className="ic-skel" style={{ position: 'absolute', inset: 0 }} />}
+      {status === 'local' && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#8b95a3', padding: 16, textAlign: 'center' }}>{IcCam({ c: '#67c7f5', s: 26 })}<span style={{ fontSize: 12.5, color: '#cdd3db', fontWeight: 600 }}>Guardada en este teléfono</span><span style={{ fontSize: 11, maxWidth: 270, lineHeight: 1.45 }}>El softphone no puede abrir un RTSP por sí solo. Subila a la central y la vas a ver acá y en el panel, como cualquier otra.</span><span style={{ fontSize: 10, color: '#5a6a8f', maxWidth: 270, wordBreak: 'break-all' }}>{String((stream && stream.rtsp) || '').replace(/\/\/[^@/]*@/, '//···@')}</span>{onSubir && <button onClick={onSubir} style={{ background: 'rgba(14,165,233,.16)', color: '#67c7f5', border: '1px solid rgba(14,165,233,.3)', borderRadius: 8, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Subir a la central</button>}</div>}
       {status === 'error' && <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#8b95a3' }}>{IcVideoOff({ c: '#8b95a3', s: 28 })}<span style={{ fontSize: 12 }}>Sin señal</span><span style={{ fontSize: 10, color: '#5a6a8f', maxWidth: 240, textAlign: 'center', wordBreak: 'break-all' }}>{(stream && stream.base) || 'sin go2rtc_url'} · {(stream && stream.src) || '?'}</span><button onClick={() => setGen(g => g + 1)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,.08)', color: '#cdd3db', border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>{IcReload({ c: '#cdd3db', s: 13 })} Reintentar</button></div>}
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px', background: 'linear-gradient(180deg,rgba(0,0,0,.62),transparent)', color: '#fff' }}>
         {Ic({ c: '#fff', s: 14 })}
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>{(stream && stream.label) || 'Dispositivo'}</span>
         {status === 'live' && <button onClick={toggleMute} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', padding: 0 }}>{IcSpeaker({ c: muted ? '#8b95a3' : '#fff', s: 15 })}</button>}
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 800, color: status === 'live' ? '#69db7c' : status === 'connecting' ? '#ffd43b' : '#ff8787' }}><span className={status === 'live' ? 'ic-pulse' : ''} style={{ width: 7, height: 7, borderRadius: '50%', background: status === 'live' ? '#40c057' : status === 'connecting' ? '#fab005' : '#fa5252' }} />{status === 'live' ? 'EN VIVO' : status === 'connecting' ? 'CARGANDO' : 'OFFLINE'}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 800, color: status === 'live' ? '#69db7c' : status === 'connecting' ? '#ffd43b' : status === 'local' ? '#67c7f5' : '#ff8787' }}><span className={status === 'live' ? 'ic-pulse' : ''} style={{ width: 7, height: 7, borderRadius: '50%', background: status === 'live' ? '#40c057' : status === 'connecting' ? '#fab005' : status === 'local' ? '#0ea5e9' : '#fa5252' }} />{status === 'live' ? 'EN VIVO' : status === 'connecting' ? 'CARGANDO' : status === 'local' ? 'LOCAL' : 'OFFLINE'}</span>
       </div>
     </div>
   );
@@ -341,6 +348,20 @@ export default function App() {
   const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem('sp_favs') || '[]'); } catch { return []; } });
   const [showDiag, setShowDiag] = useState(false); const [callStats, setCallStats] = useState(null); const [upd, setUpd] = useState(null);
   const [popClient, setPopClient] = useState(null);
+  /* ── Clientes de este aparato ───────────────────────────────────────────────
+   * Existen con o sin central. Se guardan cifrados en el mismo almacén que las cuentas
+   * (ver config.js) y NO se limpian al cambiar de cuenta ni al desconectarse del sistema:
+   * son del aparato. Esa es justo la diferencia con `cls`/`clsFull`, que son prestados. */
+  const [locales, setLocales] = useState(() => getClientesLocales());
+  function guardarLocales(lista) { const l = (lista || []).slice(); setLocales(l); setClientesLocales(l); }
+  function upsertLocal(c) {
+    const l = locales.slice(); const i = l.findIndex((x) => x.id === c.id);
+    if (i >= 0) l[i] = c; else l.push(c);
+    guardarLocales(l);
+    return c;
+  }
+  /* El alta: `null` = cerrado; `{ tipo:'cliente' }` o `{ tipo:'camara', cliente }`. */
+  const [alta, setAlta] = useState(null);
   const [splash, setSplash] = useState(true); const [splashOut, setSplashOut] = useState(false); const splashRef = useRef(null);
   useEffect(() => { if (splash && splashRef.current) return gSplash(splashRef.current); }, [splash]);
   const [accts, setAccts] = useState(() => cfgGetAccounts()); const [showAccts, setShowAccts] = useState(false);
@@ -407,7 +428,9 @@ export default function App() {
     return () => md.removeEventListener('devicechange', alCambiar);
   }, []);
   useEffect(() => { if (tab === 'llamadas' && !sp.inCall && !sp.incoming && !splash && authed) { const t = setTimeout(() => { try { numRef.current && numRef.current.focus(); } catch {} }, 120); return () => clearTimeout(t); } }, [tab, sp.inCall, sp.incoming, splash, authed]);
-  useEffect(() => { if ((!apiOn && (tab === 'clientes' || tab === 'intercom' || tab === 'voz')) || (!showIntercom && tab === 'intercom')) setTab('llamadas'); }, [apiOn, tab, showIntercom]);
+  /* Clientes e Intercom YA NO dependen de la central: el aparato puede tener los suyos.
+   * Sólo Voz (buzón) necesita sistema de verdad. */
+  useEffect(() => { if ((!apiOn && tab === 'voz') || (!showIntercom && tab === 'intercom')) setTab('llamadas'); }, [apiOn, tab, showIntercom]);
   const loadVm = () => { if (apiOn && cfg.ext) api.vmList(cfg.ext).then(d => setVm(Array.isArray(d) ? d : (d && (d.messages || d.msgs)) || [])).catch(() => setVm([])); };
   useEffect(() => { if (apiOn && cfg.ext) loadVm(); }, [apiOn, tab, cfg.ext]); // eslint-disable-line
   useEffect(() => {
@@ -429,17 +452,49 @@ export default function App() {
   const numFicha = sp.incoming
     ? ((sp.incoming.remoteIdentity && sp.incoming.remoteIdentity.uri && sp.incoming.remoteIdentity.uri.user) || '')
     : ((sp.callInfo && sp.callInfo.number) || '');
+  /* Se busca en los dos lados. Si el número está en los dos gana el del sistema: es el dato
+   * que mantiene quien administra la central, y el local es una anotación personal. Pero las
+   * cámaras se juntan, porque una cámara que uno se cargó a mano sirve igual. */
   useEffect(() => {
-    if (!apiOn || !numFicha) return undefined;
+    if (!numFicha) return undefined;
+    const loc = locales.find((c) => (c.phones || []).some((ph) => String(ph) === String(numFicha)));
+    if (!apiOn) { setPopClient(loc || null); return undefined; }
     let alive = true;
-    api.clientsLookup(numFicha).then(c => { if (alive && c && c.id) setPopClient(c); }).catch(() => {});
+    api.clientsLookup(numFicha)
+      .then(c => {
+        if (!alive) return;
+        if (c && c.id) setPopClient(loc ? { ...c, devices: (c.devices || []).concat(loc.devices || []) } : c);
+        else if (loc) setPopClient(loc);
+      })
+      .catch(() => { if (alive && loc) setPopClient(loc); });
     return () => { alive = false; };
-  }, [numFicha, apiOn]);
+  }, [numFicha, apiOn, locales]);
   useEffect(() => { if (!sp.incoming && !sp.inCall) setPopClient(null); }, [sp.incoming, sp.inCall]);
 
-  /* Las cámaras del cliente que está del otro lado de esta llamada. Son las mismas que se
-   * ven en Intercom: canales de go2rtc ya publicados, no URLs RTSP sueltas. */
-  const camaras = (popClient && Array.isArray(popClient.devices) ? popClient.devices : []).filter(d => d && d.src);
+  /* ── Una sola lista de clientes ────────────────────────────────────────────
+   * Los del sistema (prestados por la central) y los del aparato, juntos y ordenados por
+   * nombre. El origen de cada uno lo dice su id (`loc_…`), no un campo aparte: ver la nota
+   * de `esLocal` en config.js. Un cliente local NUNCA se sube solo. */
+  const clientesU = (() => {
+    const sis = Array.isArray(clsFull) ? clsFull : [];
+    return sis.concat(locales).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  })();
+  /* Para Intercom alcanza con los que tienen algo que mirar. */
+  const clientesConCam = (() => {
+    const sis = Array.isArray(cls) ? cls : [];
+    return sis.concat(locales.filter((c) => (c.devices || []).length)).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  })();
+  /* La ficha que se muestra: si el cliente es local ya la tenemos en la mano y no hay nada
+   * que pedirle a nadie — esto es lo que hace que la solapa funcione sin central. */
+  const fichaLocal = selClient && esLocal(selClient) ? (locales.find((c) => c.id === selClient.id) || selClient) : null;
+  const ficha = fichaLocal || clientDet;
+
+  /* Las cámaras del cliente que está del otro lado de esta llamada. Las del sistema son
+   * canales de go2rtc ya publicados (`src`); las locales son una URL RTSP guardada acá
+   * (`rtsp`). Se muestran las dos, las del sistema primero, porque al que atiende le da
+   * igual de dónde salió la cámara: quiere ver la puerta. */
+  const camaras = (popClient && Array.isArray(popClient.devices) ? popClient.devices : [])
+    .filter(d => d && (d.src || d.rtsp));
   const [principal, setPrincipal] = useState('llamada');
   const [principalManual, setPrincipalManual] = useState(false);
   const remotoVivo = useVideoRemoto(!!sp.inCall, sp.getRemoteStream);
@@ -555,10 +610,16 @@ export default function App() {
    * un 403 de permisos) se viera como "no hay nada". Ahora el motivo se guarda y se
    * muestra: si la lista está vacía porque el usuario no tiene permiso, que lo diga. */
   useEffect(() => { if ((tab === 'clientes' || tab === 'intercom') && apiOn && cls === null) api.clients().then(d => { setCls(Array.isArray(d) ? d : []); setErrCls(''); }).catch(e => { setCls([]); setErrCls(e.message || 'no se pudo leer la lista'); }); }, [tab, apiOn, cls]);
-  useEffect(() => { if (selClient && tab === 'intercom') { setStreams(null); setErrStreams(''); api.clientStreams(selClient.id).then(d => setStreams(Array.isArray(d) ? d : [])).catch(e => { setStreams([]); setErrStreams(e.message || 'no se pudieron leer las cámaras'); }); } }, [selClient, tab]);
+  useEffect(() => {
+    if (!(selClient && tab === 'intercom')) return;
+    setErrStreams('');
+    if (esLocal(selClient)) { const c = locales.find((x) => x.id === selClient.id); setStreams((c && c.devices) || []); return; }
+    setStreams(null);
+    api.clientStreams(selClient.id).then(d => setStreams(Array.isArray(d) ? d : [])).catch(e => { setStreams([]); setErrStreams(e.message || 'no se pudieron leer las cámaras'); });
+  }, [selClient, tab, locales]);
   useEffect(() => { if (tab === 'clientes' && apiOn && clsFull === null) api.clientsFull().then(d => setClsFull(Array.isArray(d) ? d : [])).catch(() => setClsFull([])); }, [tab, apiOn, clsFull]);
   useEffect(() => { setCliTab('datos'); }, [selClient]);
-  useEffect(() => { if (tab === 'clientes' && selClient) { setClientDet(null); api.clientDetail(selClient.id).then(d => setClientDet(d || {})).catch(() => setClientDet({})); } }, [selClient, tab]);
+  useEffect(() => { if (tab === 'clientes' && selClient && !esLocal(selClient)) { setClientDet(null); api.clientDetail(selClient.id).then(d => setClientDet(d || {})).catch(() => setClientDet({})); } }, [selClient, tab]);
 
   function connectNow() {
     saveConfig(cfg); started.current = true;
@@ -720,6 +781,69 @@ export default function App() {
       setApiOn(false); setApiMsg('No se pudo conectar: ' + ((e && e.message) || 'error inesperado'));
     }
   }
+  /* ── Alta de cliente y de camara ───────────────────────────────────────────
+   * El destino se elige una vez y se elige EXPLICITAMENTE. No hay sincronizacion
+   * automatica entre el aparato y la central, y eso es a proposito: una URL RTSP trae
+   * usuario y contrasena de la camara adentro, y subirla sin que nadie lo pida la hace
+   * visible a todos los que atienden en esa central. */
+  const [altaMsg, setAltaMsg] = useState('');
+  /* Que una URL sirva no se puede saber sin probarla, pero que NO sirva si: es lo unico
+   * que se chequea acá, para no rechazar camaras raras que igual andan. */
+  function urlCamaraMal(u) {
+    const v = String(u || '').trim();
+    if (!v) return 'Falta la URL de la cámara.';
+    if (!/^(rtsp|rtsps|http|https):\/\/[^\s/]+/i.test(v)) return 'Tiene que empezar con rtsp:// (o http:// si la cámara da MJPEG).';
+    return '';
+  }
+  async function altaGuardar(datos) {
+    setAltaMsg('');
+    if (alta && alta.tipo === 'cliente') {
+      const name = String(datos.name || '').trim();
+      if (!name) { setAltaMsg('Falta el nombre.'); return; }
+      const phones = String(datos.phones || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+      if (datos.destino === 'central' && apiOn) {
+        try { const c = await api.clientCreate({ name, phones }); setClsFull(null); setSelClient(c); setAlta(null); return; }
+        catch (e) { setAltaMsg('La central no lo aceptó: ' + (e.message || 'error') + '. Podés guardarlo en este teléfono.'); return; }
+      }
+      const c = upsertLocal({ id: nuevoIdLocal(), name, phones, devices: [] });
+      setSelClient(c); setAlta(null); return;
+    }
+    /* Camara */
+    const cli = alta && alta.cliente; if (!cli) return;
+    const label = String(datos.label || '').trim() || 'Cámara';
+    const mal = urlCamaraMal(datos.rtsp); if (mal) { setAltaMsg(mal); return; }
+    const rtsp = String(datos.rtsp).trim();
+    const tipo = datos.type === 'intercom' ? 'intercom' : 'camera';
+    /* Un cliente local no tiene a quién colgarle la cámara en la central: va local y punto. */
+    if (datos.destino === 'central' && apiOn && !esLocal(cli)) {
+      try {
+        await api.clientDeviceAdd(cli.id, { label, type: tipo, rtsp_url: rtsp });
+        setClientDet(null); setStreams(null); setClsFull(null);
+        if (selClient && selClient.id === cli.id) setSelClient({ ...cli });
+        setAlta(null); return;
+      } catch (e) { setAltaMsg('La central no la aceptó: ' + (e.message || 'error') + '. Podés guardarla en este teléfono.'); return; }
+    }
+    const base = esLocal(cli) ? (locales.find((x) => x.id === cli.id) || cli)
+      : { id: cli.id, name: cli.name, phones: cli.phones || [], devices: [] };
+    /* Una cámara local sobre un cliente DEL SISTEMA necesita una copia local de ese cliente
+     * para colgarla; se le deja el mismo nombre y teléfonos, y la ficha de la llamada junta
+     * las cámaras de los dos (ver el efecto del lookup). */
+    const dev = { id: nuevoIdLocal(), label, type: tipo, rtsp };
+    upsertLocal({ ...base, id: esLocal(cli) ? base.id : nuevoIdLocal(), devices: (base.devices || []).concat([dev]) });
+    setAlta(null);
+  }
+  /* Subir a la central una cámara que estaba sólo en el aparato. */
+  async function subirCamara(cli, dev) {
+    if (!apiOn || esLocal(cli) || !dev || !dev.rtsp) return;
+    try {
+      await api.clientDeviceAdd(cli.id, { label: dev.label, type: dev.type, rtsp_url: dev.rtsp });
+      /* Recién cuando la central la aceptó se saca de acá: al revés, un error de red la
+       * perdía de los dos lados. */
+      const l = locales.map((c) => ({ ...c, devices: (c.devices || []).filter((x) => x.id !== dev.id) }));
+      guardarLocales(l.filter((c) => (c.devices || []).length || (c.phones || []).length));
+      setStreams(null); setClientDet(null); setClsFull(null); setSelClient({ ...cli });
+    } catch (e) { setAltaMsg('No se pudo subir: ' + (e.message || 'error')); }
+  }
   function apiDisconnect() { api.apiLogout(); setApiOn(false); setApiMsg(''); setDir(null); setCls(null); setClsFull(null); setClientDet(null); setSelClient(null); setStreams(null); }
   async function openCall(h) {
     setModal(h); setRecUrl(''); setRecState('idle');
@@ -767,7 +891,7 @@ export default function App() {
     </div>
   );
   const media = <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }} aria-hidden><audio ref={sp.audioRef} autoPlay /></div>;
-  const nav = [['llamadas', IcGrid, 'Llamadas'], ['contactos', IcUser, 'Contactos'], ...(apiOn ? [['voz', IcVoicemail, 'Voz'], ['clientes', IcUsers, 'Clientes'], ...(showIntercom ? [['intercom', IcCam, 'Intercom']] : [])] : []), ['ajustes', IcGear, 'Ajustes']];
+  const nav = [['llamadas', IcGrid, 'Llamadas'], ['contactos', IcUser, 'Contactos'], ...(apiOn ? [['voz', IcVoicemail, 'Voz']] : []), ['clientes', IcUsers, 'Clientes'], ...(showIntercom ? [['intercom', IcCam, 'Intercom']] : []), ['ajustes', IcGear, 'Ajustes']];
 
   return (
     <div style={S.root}>
@@ -1067,40 +1191,50 @@ export default function App() {
           {tab === 'clientes' && (
             <>
               <div style={{ width: 300, borderRight: `1px solid ${C.line}`, background: C.card, display: 'flex', flexDirection: 'column' }}>
-                <div style={S.listHdr}>Clientes {clsFull ? <span style={{ fontSize: 12, color: C.sub, fontWeight: 400 }}>{clsFull.length}</span> : null}</div>
-                {apiOn && clsFull && clsFull.length > 0 && <div style={{ padding: '0 14px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 10, padding: '0 12px', background: C.card }}>{IcSearch({ c: C.sub, s: 16 })}<input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0' }} />{clientQ && <button onClick={() => setClientQ('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17 }}>×</button>}</div></div>}
+                <div style={S.listHdr}>Clientes <span style={{ fontSize: 12, color: C.sub, fontWeight: 400 }}>{clientesU.length || ''}</span>
+                  <button onClick={() => setAlta({ tipo: 'cliente' })} title="Agregar cliente"
+                    style={{ marginLeft: 'auto', border: `1px solid ${C.line}`, background: 'none', borderRadius: 8, padding: '4px 9px', cursor: 'pointer', color: C.sub, fontSize: 18, lineHeight: 1 }}>+</button>
+                </div>
+                {clientesU.length > 0 && <div style={{ padding: '0 14px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 10, padding: '0 12px', background: C.card }}>{IcSearch({ c: C.sub, s: 16 })}<input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0' }} />{clientQ && <button onClick={() => setClientQ('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17 }}>×</button>}</div></div>}
                 <div style={S.scroll}>
-                  {!apiOn ? <EmptySystem onGo={() => setTab('ajustes')} /> :
-                    clsFull === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
-                    clsFull.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin clientes</div> :
-                    (() => { const f = clsFull.filter(c => !clientQ || ((c.name || '') + ' ' + (c.doc || '')).toLowerCase().includes(clientQ.toLowerCase())); return f.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin resultados</div> : f.map((c, i) => (
-                      <div key={i} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? C.sel : 'transparent' }} onClick={() => setSelClient(c)}>
-                        <Ava txt={initials(c.name)} size={38} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
-                        <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{c.name}</div>{c.doc && <div style={{ fontSize: 12, color: C.sub }}>{c.doc}</div>}</div>
+                  {apiOn && clsFull === null && !clientesU.length ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
+                    clientesU.length === 0 ? <SinClientes apiOn={apiOn} onAlta={() => setAlta({ tipo: 'cliente' })} onSistema={() => setTab('ajustes')} /> :
+                    (() => { const f = clientesU.filter(c => !clientQ || ((c.name || '') + ' ' + (c.doc || '')).toLowerCase().includes(clientQ.toLowerCase())); return f.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin resultados</div> : f.map((c) => (
+                      <div key={c.id} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? C.sel : 'transparent' }} onClick={() => setSelClient(c)}>
+                        <Ava txt={initials(c.name)} size={38} bg={esLocal(c) ? 'linear-gradient(160deg,#0ea5e9,#0369a1)' : 'linear-gradient(160deg,#8b5cf6,#6d28d9)'} />
+                        <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{c.name}</div><div style={{ fontSize: 12, color: C.sub }}>{esLocal(c) ? 'de este teléfono' : (c.doc || 'del sistema')}</div></div>
                       </div>)); })()}
                 </div>
               </div>
               <div style={{ ...S.listCol, overflowY: 'auto' }}>
                 {!selClient ? <div style={{ color: C.sub, textAlign: 'center', padding: 50 }}>Elegí un cliente para ver su ficha.</div> :
-                  clientDet === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 40 }}>Cargando ficha…</div> :
+                  ficha === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 40 }}>Cargando ficha…</div> :
                   <div style={{ padding: '18px 22px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-                      <Ava txt={initials(clientDet.name)} size={56} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
-                      <div style={{ minWidth: 0 }}><div style={{ fontSize: 20, fontWeight: 700 }}>{clientDet.name}</div><div style={{ fontSize: 13, color: C.sub, display: 'flex', gap: 10, flexWrap: 'wrap' }}>{clientDet.doc ? <span>Doc: {clientDet.doc}</span> : null}<span>{(clientDet.persons || []).length} personas</span><span>{(clientDet.spaces || []).length} espacios</span><span>{(clientDet.devices || []).length} disp.</span></div></div>
+                      <Ava txt={initials(ficha.name)} size={56} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
+                      <div style={{ minWidth: 0 }}><div style={{ fontSize: 20, fontWeight: 700 }}>{ficha.name}</div><div style={{ fontSize: 13, color: C.sub, display: 'flex', gap: 10, flexWrap: 'wrap' }}>{ficha.doc ? <span>Doc: {ficha.doc}</span> : null}<span>{(ficha.persons || []).length} personas</span><span>{(ficha.spaces || []).length} espacios</span><span>{(ficha.devices || []).length} disp.</span></div></div>
                     </div>
                     <div style={{ display: 'flex', gap: 2, marginBottom: 14, borderBottom: `1px solid ${C.line}` }}>
-                      {[['datos', 'Datos', IcUser, null], ['personas', 'Personas', IcUsers, (clientDet.persons || []).length], ['espacios', 'Espacios', IcGrid, (clientDet.spaces || []).length], ['disp', 'Dispositivos', IcCam, (clientDet.devices || []).length]].map(([id, lbl, Ic, n]) => { const on = cliTab === id; return (
+                      {[['datos', 'Datos', IcUser, null], ['personas', 'Personas', IcUsers, (ficha.persons || []).length], ['espacios', 'Espacios', IcGrid, (ficha.spaces || []).length], ['disp', 'Dispositivos', IcCam, (ficha.devices || []).length]].map(([id, lbl, Ic, n]) => { const on = cliTab === id; return (
                         <button key={id} onClick={() => setCliTab(id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', border: 'none', borderBottom: `2px solid ${on ? '#a78bfa' : 'transparent'}`, background: 'none', color: on ? '#b794f6' : C.sub, cursor: 'pointer', fontWeight: on ? 700 : 600, fontSize: 13, marginBottom: -1 }}>{Ic({ c: on ? '#b794f6' : C.sub, s: 15 })}{lbl}{n ? <span style={{ fontSize: 11, background: on ? 'rgba(139,92,246,.15)' : C.soft, color: on ? '#b794f6' : C.sub, borderRadius: 8, padding: '0 6px' }}>{n}</span> : null}</button>); })}
                     </div>
                     <div key={cliTab} ref={gEnter}>
                     {cliTab === 'datos' && (<>
-                      {(clientDet.address || clientDet.notes) ? <div style={S.card}>{clientDet.address && <div style={{ padding: '9px 0', display: 'flex', gap: 10 }}>{IcGrid({ c: C.sub, s: 16 })}<div><div style={S.fieldLbl}>Dirección</div>{clientDet.address}</div></div>}{clientDet.notes && <div style={{ padding: '9px 0', borderTop: clientDet.address ? `1px solid ${C.line}` : 'none' }}><div style={S.fieldLbl}>Notas</div>{clientDet.notes}</div>}</div> : null}
-                      {Array.isArray(clientDet.phones) && clientDet.phones.length > 0 ? <><div style={S.section}>TELÉFONOS</div><div style={S.card}>{clientDet.phones.map((ph, i) => <div key={i} className="ph-row" style={S.row} onClick={() => callNow(String(ph))}>{IcPhone({ c: C.sub, s: 16 })}<div style={{ flex: 1 }}>{ph}</div><button style={S.actBtn(C.green)} onClick={e => { e.stopPropagation(); callNow(String(ph)); }}>{IcPhone({ c: C.green, s: 16 })}</button></div>)}</div></> : null}
-                      {!clientDet.address && !clientDet.notes && !(clientDet.phones || []).length && <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin datos generales.</div>}
+                      {(ficha.address || ficha.notes) ? <div style={S.card}>{ficha.address && <div style={{ padding: '9px 0', display: 'flex', gap: 10 }}>{IcGrid({ c: C.sub, s: 16 })}<div><div style={S.fieldLbl}>Dirección</div>{ficha.address}</div></div>}{ficha.notes && <div style={{ padding: '9px 0', borderTop: ficha.address ? `1px solid ${C.line}` : 'none' }}><div style={S.fieldLbl}>Notas</div>{ficha.notes}</div>}</div> : null}
+                      {Array.isArray(ficha.phones) && ficha.phones.length > 0 ? <><div style={S.section}>TELÉFONOS</div><div style={S.card}>{ficha.phones.map((ph, i) => <div key={i} className="ph-row" style={S.row} onClick={() => callNow(String(ph))}>{IcPhone({ c: C.sub, s: 16 })}<div style={{ flex: 1 }}>{ph}</div><button style={S.actBtn(C.green)} onClick={e => { e.stopPropagation(); callNow(String(ph)); }}>{IcPhone({ c: C.green, s: 16 })}</button></div>)}</div></> : null}
+                      {!ficha.address && !ficha.notes && !(ficha.phones || []).length && <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin datos generales.</div>}
                     </>)}
-                    {cliTab === 'personas' && (Array.isArray(clientDet.persons) && clientDet.persons.length > 0 ? <div style={S.card}>{clientDet.persons.map((pr, i) => <div key={i} className="ph-row" style={S.row}><Ava txt={initials(pr.name)} size={34} bg="#4f6fc9" /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{pr.name}</div>{(pr.phone || pr.role) && <div style={{ fontSize: 12, color: C.sub }}>{[pr.role, pr.phone].filter(Boolean).join(' · ')}</div>}</div>{pr.phone && <button style={S.actBtn(C.green)} onClick={() => callNow(String(pr.phone))}>{IcPhone({ c: C.green, s: 16 })}</button>}</div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin personas autorizadas.</div>)}
-                    {cliTab === 'espacios' && (Array.isArray(clientDet.spaces) && clientDet.spaces.length > 0 ? <div style={S.card}>{clientDet.spaces.map((sx, i) => <div key={i} className="ph-row" style={S.row}>{IcGrid({ c: C.sub, s: 16 })}<div style={{ flex: 1 }}><b>{sx.name}</b>{sx.notes ? <div style={{ fontSize: 12, color: C.sub }}>{sx.notes}</div> : null}</div></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin espacios.</div>)}
-                    {cliTab === 'disp' && (Array.isArray(clientDet.devices) && clientDet.devices.length > 0 ? <div style={S.card}>{clientDet.devices.map((d, i) => <div key={i} className="ph-row" style={S.row}>{IcCam({ c: C.sub, s: 18 })}<div style={{ flex: 1 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}</div></div><button onClick={() => { setSelClient(clientDet); setTab('intercom'); }} style={{ ...S.chip('rgba(26,115,242,.12)', '#7cb0ff'), border: 'none', cursor: 'pointer' }}>Ver en vivo</button></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin dispositivos.</div>)}
+                    {cliTab === 'personas' && (Array.isArray(ficha.persons) && ficha.persons.length > 0 ? <div style={S.card}>{ficha.persons.map((pr, i) => <div key={i} className="ph-row" style={S.row}><Ava txt={initials(pr.name)} size={34} bg="#4f6fc9" /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{pr.name}</div>{(pr.phone || pr.role) && <div style={{ fontSize: 12, color: C.sub }}>{[pr.role, pr.phone].filter(Boolean).join(' · ')}</div>}</div>{pr.phone && <button style={S.actBtn(C.green)} onClick={() => callNow(String(pr.phone))}>{IcPhone({ c: C.green, s: 16 })}</button>}</div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin personas autorizadas.</div>)}
+                    {cliTab === 'espacios' && (Array.isArray(ficha.spaces) && ficha.spaces.length > 0 ? <div style={S.card}>{ficha.spaces.map((sx, i) => <div key={i} className="ph-row" style={S.row}>{IcGrid({ c: C.sub, s: 16 })}<div style={{ flex: 1 }}><b>{sx.name}</b>{sx.notes ? <div style={{ fontSize: 12, color: C.sub }}>{sx.notes}</div> : null}</div></div>)}</div> : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin espacios.</div>)}
+                    {cliTab === 'disp' && (<>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                        <button onClick={() => setAlta({ tipo: 'camara', cliente: ficha })} style={{ ...S.chip('rgba(14,165,233,.12)', '#67c7f5'), border: 'none', cursor: 'pointer', display: 'inline-flex', gap: 6, alignItems: 'center' }}>{IcCam({ c: '#67c7f5', s: 14 })} Agregar cámara</button>
+                      </div>
+                      {Array.isArray(ficha.devices) && ficha.devices.length > 0 ? <div style={S.card}>{ficha.devices.map((d, i) => <div key={d.id || i} className="ph-row" style={S.row}>{IcCam({ c: C.sub, s: 18 })}<div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{(d.type || 'dispositivo') + ' · ' + (esLocal(d) ? 'de este teléfono' : 'del sistema')}</div></div>
+                        {esLocal(d) && <button title="Quitar de este teléfono" onClick={() => { const c = { ...ficha, devices: (ficha.devices || []).filter((x) => x.id !== d.id) }; upsertLocal(c); }} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17, padding: '0 6px' }}>×</button>}
+                        <button onClick={() => { setSelClient(ficha); setTab('intercom'); }} style={{ ...S.chip('rgba(26,115,242,.12)', '#7cb0ff'), border: 'none', cursor: 'pointer' }}>Ver en vivo</button></div>)}</div>
+                        : <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin dispositivos.</div>}
+                    </>)}
                     </div>
                   </div>}
               </div>
@@ -1111,26 +1245,25 @@ export default function App() {
             <>
               <div style={{ width: 300, borderRight: `1px solid ${C.line}`, background: C.card, display: 'flex', flexDirection: 'column' }}>
                 <div style={S.listHdr}>{tab === 'clientes' ? 'Clientes' : 'Intercom'}</div>
-                {apiOn && cls && cls.length > 0 && <div style={{ padding: '0 14px 8px' }}><input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ ...S.inp, padding: '9px 12px' }} /></div>}
+                {clientesConCam.length > 0 && <div style={{ padding: '0 14px 8px' }}><input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ ...S.inp, padding: '9px 12px' }} /></div>}
                 <div style={S.scroll}>
-                  {!apiOn ? <EmptySystem onGo={() => setTab('ajustes')} /> :
-                    cls === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
-                    cls.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errCls ? '#b91c1c' : C.sub }}>{errCls ? 'No se pudo leer la lista: ' + errCls : 'Sin clientes'}</div> :
-                    (() => { const clsF = cls.filter(c => !clientQ || (c.name || '').toLowerCase().includes(clientQ.toLowerCase())); return clsF.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin resultados</div> : clsF.map((c, i) => (
-                      <div key={i} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? C.sel : 'transparent' }} onClick={() => setSelClient(c)}>
-                        <Ava txt={initials(c.name)} size={38} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
-                        <div style={{ fontWeight: 600 }}>{c.name}</div>
+                  {apiOn && cls === null && !clientesConCam.length ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
+                    clientesConCam.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errCls ? '#b91c1c' : C.sub, fontSize: 13.5, lineHeight: 1.5 }}>{errCls ? 'No se pudo leer la lista: ' + errCls : 'Ningún cliente tiene cámaras todavía. Cargalas desde la ficha del cliente.'}</div> :
+                    (() => { const clsF = clientesConCam.filter(c => !clientQ || (c.name || '').toLowerCase().includes(clientQ.toLowerCase())); return clsF.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Sin resultados</div> : clsF.map((c) => (
+                      <div key={c.id} className="ph-row" style={{ ...S.row, background: selClient && selClient.id === c.id ? C.sel : 'transparent' }} onClick={() => setSelClient(c)}>
+                        <Ava txt={initials(c.name)} size={38} bg={esLocal(c) ? 'linear-gradient(160deg,#0ea5e9,#0369a1)' : 'linear-gradient(160deg,#8b5cf6,#6d28d9)'} />
+                        <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{c.name}</div>{esLocal(c) && <div style={{ fontSize: 11.5, color: C.sub }}>de este teléfono</div>}</div>
                       </div>)); })()}
                 </div>
               </div>
               <div style={S.listCol}>
                 <div style={S.listHdr}>{selClient ? selClient.name : (tab === 'intercom' ? 'Cámaras y porteros' : 'Dispositivos')}{tab === 'intercom' && selClient && <button onClick={() => setSelClient({ ...selClient })} style={{ background: 'none', border: `1px solid ${C.line}`, borderRadius: 8, padding: '5px 10px', cursor: 'pointer', color: C.sub, display: 'inline-flex', gap: 5, alignItems: 'center', fontSize: 13 }}>{IcReload({ c: C.sub, s: 14 })} Refrescar</button>}</div>
                 <div style={{ ...S.scroll, padding: tab === 'intercom' ? '0 18px 18px' : S.scroll.padding }}>
-                  {!apiOn ? null : !selClient ? <div style={{ color: C.sub, textAlign: 'center', padding: 40 }}>Elegí un cliente para ver sus {tab === 'intercom' ? 'cámaras/porteros en vivo' : 'dispositivos'}.</div> :
+                  {!selClient ? <div style={{ color: C.sub, textAlign: 'center', padding: 40 }}>Elegí un cliente para ver sus {tab === 'intercom' ? 'cámaras/porteros en vivo' : 'dispositivos'}.</div> :
                     streams === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
                     streams.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errStreams ? '#b91c1c' : C.sub }}>{errStreams ? 'No se pudieron leer las cámaras: ' + errStreams : 'Este cliente no tiene dispositivos.'}</div> :
                     tab === 'intercom' ?
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => <MseTile key={(d.id || i) + ':' + (d.src || '')} stream={d} />)}</div> :
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => <MseTile key={(d.id || i) + ':' + (d.src || d.rtsp || '')} stream={d} onSubir={esLocal(d) && apiOn && !esLocal(selClient) ? () => subirCamara(selClient, d) : undefined} />)}</div> :
                       streams.map((d, i) => (
                         <div key={i} className="ph-row" style={S.row}>
                           <Ava txt="" size={38} bg="#0f1a30" />
@@ -1503,6 +1636,9 @@ export default function App() {
             </div>
           )}
 
+          {alta && <PanelAlta alta={alta} apiOn={apiOn} msg={altaMsg}
+            onCerrar={() => { setAlta(null); setAltaMsg(''); }} onGuardar={altaGuardar} />}
+
           {showProv && (
             <div style={S.modalWrap} onClick={() => setShowProv(false)}>
               <div ref={gModal} onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, padding: 22, width: 360, boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
@@ -1659,6 +1795,88 @@ export default function App() {
         </div>
       </div>
       {showQr && <div style={{ position: 'fixed', inset: 0, zIndex: 3000 }}><QrProvision cfg={cfg} onApply={applyProv} onClose={() => { sounds.uiClick(); setShowQr(false); }} /></div>}
+    </div>
+  );
+}
+
+/* La lista de clientes vacia. Dos salidas distintas segun donde este parado el usuario, y
+ * ninguna de las dos es un cartel que no lleva a nada: sin central, cargar uno acá es LA
+ * salida; con central, puede ser que todavia no haya ninguno cargado en el sistema. */
+function SinClientes({ apiOn, onAlta, onSistema }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '38px 22px', color: C.sub }}>
+      {IcUsers({ c: C.sub, s: 30 })}
+      <div style={{ marginTop: 10, fontSize: 14, color: C.txt, fontWeight: 600 }}>Todavía no hay clientes</div>
+      <div style={{ marginTop: 6, fontSize: 12.5, lineHeight: 1.5 }}>
+        {apiOn
+          ? 'La central no tiene ninguno cargado. Podés agregar uno acá: queda en este teléfono.'
+          : 'Podés cargarlos en este teléfono y quedan guardados, o conectarte al sistema para traer los de la central.'}
+      </div>
+      <button onClick={onAlta} style={{ marginTop: 14, background: 'rgba(14,165,233,.14)', color: '#0ea5e9', border: '1px solid rgba(14,165,233,.3)', borderRadius: 10, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Agregar un cliente</button>
+      {!apiOn && <div><button onClick={onSistema} style={{ marginTop: 9, background: 'none', border: 'none', color: C.sub, cursor: 'pointer', fontSize: 12.5, textDecoration: 'underline' }}>Conectarme al sistema</button></div>}
+    </div>
+  );
+}
+
+/* El alta de un cliente o de una camara. El DESTINO es la decision del formulario: se
+ * muestra sólo cuando hay a dónde elegir —con central conectada y sobre un cliente del
+ * sistema—; en cualquier otro caso va local y se dice por qué, en vez de ofrecer una opción
+ * que despues falla. */
+function PanelAlta({ alta, apiOn, msg, onCerrar, onGuardar }) {
+  const esCam = alta.tipo === 'camara';
+  const cli = alta.cliente;
+  const cliLocal = !!(cli && typeof cli.id === 'string' && cli.id.indexOf('loc_') === 0);
+  const puedeCentral = apiOn && (esCam ? !cliLocal : true);
+  const [f, setF] = useState({ name: '', phones: '', label: '', rtsp: '', type: 'camera', destino: puedeCentral ? 'central' : 'local' });
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const enviar = () => onGuardar(f);
+  return (
+    <div style={S.modalWrap} onClick={onCerrar}>
+      <div ref={gModal} onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, padding: 22, width: 400, maxHeight: '84vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 17 }}>{esCam ? 'Agregar cámara' : 'Agregar cliente'}</div>
+          <button onClick={onCerrar} style={{ marginLeft: 'auto', ...S.actBtn(C.sub) }}>{IcX({ c: C.sub, s: 16 })}</button>
+        </div>
+        {esCam && <div style={{ fontSize: 12.5, color: C.sub, marginBottom: 12 }}>Para <b style={{ color: C.txt }}>{(cli && cli.name) || 'el cliente'}</b>.</div>}
+
+        {!esCam && <>
+          <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>Nombre</div><input autoFocus style={S.inp} value={f.name} onChange={set('name')} placeholder="Ej. Edificio Rambla 1200" onKeyDown={(e) => { if (e.key === 'Enter') enviar(); }} /></div>
+          <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>Teléfonos o internos</div><input style={S.inp} value={f.phones} onChange={set('phones')} placeholder="2001, 099123456" autoCapitalize="off" /><div style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>Separados por coma. Son los números con los que se reconoce al cliente cuando llama.</div></div>
+        </>}
+
+        {esCam && <>
+          <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>Etiqueta</div><input autoFocus style={S.inp} value={f.label} onChange={set('label')} placeholder="Ej. Portero frente" /></div>
+          <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>Tipo</div><select style={S.sel} value={f.type} onChange={set('type')}><option value="camera">Cámara</option><option value="intercom">Portero</option></select></div>
+          <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>URL de la cámara</div><input style={S.inp} value={f.rtsp} onChange={set('rtsp')} placeholder="rtsp://usuario:clave@192.168.1.50:554/Streaming/Channels/101" autoCapitalize="off" autoCorrect="off" spellCheck={false} /><div style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>La URL lleva el usuario y la clave de la cámara adentro. Si la subís a la central, la central es la única que la ve entera: al teléfono vuelve enmascarada.</div></div>
+        </>}
+
+        <div style={{ padding: '10px 0 2px' }}>
+          <div style={S.fieldLbl}>Dónde queda</div>
+          {puedeCentral ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              {[['central', 'En la central', 'La ven todos los que atienden, y el video sale por la central.'],
+                ['local', 'Sólo en este teléfono', 'No se comparte con nadie ni sale del aparato.']].map(([v, t, d]) => {
+                const on = f.destino === v;
+                return (
+                  <button key={v} onClick={() => setF((x) => ({ ...x, destino: v }))}
+                    style={{ textAlign: 'left', border: `1px solid ${on ? '#0ea5e9' : C.line}`, background: on ? 'rgba(14,165,233,.08)' : 'none', borderRadius: 10, padding: '9px 12px', cursor: 'pointer' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: on ? '#0ea5e9' : C.txt }}>{t}</div>
+                    <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2 }}>{d}</div>
+                  </button>);
+              })}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4, border: `1px solid ${C.line}`, borderRadius: 10, padding: '9px 12px' }}>
+              Queda <b style={{ color: C.txt }}>sólo en este teléfono</b>. {esCam && cliLocal
+                ? 'Este cliente también es de este teléfono, así que no hay a quién colgarla en la central.'
+                : 'No hay sesión con el sistema; conectate en Ajustes si la querés en la central.'}
+            </div>
+          )}
+        </div>
+
+        {msg && <div style={{ color: C.red, fontSize: 12, marginTop: 10, lineHeight: 1.45 }}>{msg}</div>}
+        <button onClick={enviar} style={{ ...S.primary, marginTop: 14 }}>Guardar</button>
+      </div>
     </div>
   );
 }

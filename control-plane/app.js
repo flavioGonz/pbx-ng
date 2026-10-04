@@ -2850,11 +2850,34 @@ app.post('/api/clients/:id/spaces', crmWrite, async (req,res)=>{ const b=req.bod
 }catch(e){errorHttp(res, e);} });
 app.delete('/api/spaces/:sid', crmWrite, async (req,res)=>{ try{ await pool.query('DELETE FROM pbxng_client_spaces WHERE id=$1',[req.params.sid]); res.json({ok:true}); }catch(e){errorHttp(res, e);} });
 
-app.post('/api/clients/:id/devices', crmWrite, async (req,res)=>{ const b=req.body||{}; try{
+/* Dar de alta una camara SI lo puede hacer un softphone enrolado, no solo un admin.
+ *
+ * POR QUE. El que tiene la URL RTSP del portero en la mano es el que esta en la obra, con
+ * el telefono. Hasta ahora tenia que pedirle a otro que la cargara desde el panel, y hasta
+ * que eso pasaba la camara no existia para nadie. El resto del CRM (crear o borrar
+ * clientes, personas, espacios) sigue siendo del panel: esto abre UNA cosa.
+ *
+ * LO QUE ESTO ABRE, dicho de frente: con el QR de cualquier interno se puede colgarle una
+ * camara a un cliente que ya existe. Es mucho menos que leer la central entera, pero no es
+ * nada — por eso cada alta queda en la bitacora de seguridad con la extension que la hizo,
+ * que es lo que permite darse cuenta despues. */
+function camaraAlta(req, res, next) {
+  const u = req.user || {};
+  if (u.scope === 'phone' && u.ext) return next();
+  return crmWrite(req, res, next);
+}
+app.post('/api/clients/:id/devices', camaraAlta, async (req,res)=>{ const b=req.body||{}; try{
   const src = b.go2rtc_src || ('cli'+req.params.id+'_'+Date.now().toString(36));
   const { rows } = await pool.query('INSERT INTO pbxng_client_devices (client_id,label,type,rtsp_url,go2rtc_src,enabled) VALUES ($1,$2,$3,$4,$5,COALESCE($6,true)) RETURNING *',
     [req.params.id,b.label,b.type||'camera',b.rtsp_url||null,src,b.enabled]);
   g2alta(rows[0].go2rtc_src, rows[0].rtsp_url);   // que el video aparezca ya, sin esperar el barrido
+  /* Best-effort a proposito: si la bitacora falla, el alta ya se hizo y negarla ahora seria
+   * peor. Queda el warn en el log de la API. */
+  pool.query('INSERT INTO pbxng_sec_events (kind, severity, detail) VALUES ($1,$2,$3)',
+    ['crm', 'info', JSON.stringify({ que: 'alta de camara', cliente: Number(req.params.id), dispositivo: rows[0].id,
+      etiqueta: rows[0].label, por: (req.user && (req.user.ext || req.user.user)) || null,
+      via: (req.user && req.user.scope === 'phone') ? 'softphone' : 'panel' })])
+    .catch((e) => logger.warn({ mod: 'crm', msg: 'no se pudo anotar el alta de camara', err: e && e.message }));
   res.status(201).json(deviceSafe(rows[0]));
 }catch(e){errorHttp(res, e);} });
 
