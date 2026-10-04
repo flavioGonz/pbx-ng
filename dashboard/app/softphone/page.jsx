@@ -4,6 +4,7 @@ import { Stack, Title, Text, Card, Group, Button, TextInput, PasswordInput, Swit
 import { IconPhone, IconPhoneOff, IconMicrophone, IconMicrophoneOff, IconPhoneIncoming, IconBackspace, IconExternalLink } from '@tabler/icons-react';
 import { useSoftphone } from '../useSoftphone';
 import { toast } from '../notify';
+import DistribucionSoftphone from './DistribucionSoftphone';
 export default function Softphone() {
   const sp = useSoftphone();
   const [ext, setExt] = useState(''); const [pass, setPass] = useState(''); const [video, setVideo] = useState(false); const [dial, setDial] = useState('');
@@ -52,6 +53,7 @@ export default function Softphone() {
           <audio ref={sp.audioRef} autoPlay />
         </Card>
       </SimpleGrid>
+      <DistribucionSoftphone />
       {sp.incoming &&
         <Card withBorder radius="lg" padding="lg" shadow="md" style={{ borderColor: 'var(--mantine-color-teal-5)' }}>
           <Group justify="space-between"><Group><IconPhoneIncoming color="var(--mantine-color-teal-6)" /><Text fw={600}>Llamada entrante</Text></Group>

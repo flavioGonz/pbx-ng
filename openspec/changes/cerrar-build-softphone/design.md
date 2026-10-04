@@ -29,18 +29,33 @@ qué no dejarlo sólo en el tag: es justamente el paso que se olvidó.
 
 Se mantiene `workflow_dispatch` para poder recompilar a mano.
 
-### La entrega a la central es push, no pull
+### La entrega a la central es pull, no push — REVISADO al implementar
 
-La central no sale a buscar. El workflow, ya con el Release publicado, entrega los tres
-archivos del feed OTA a cada central registrada.
+**Decisión original (descartada):** la central no sale a buscar; el workflow le entrega los
+tres archivos del feed OTA a cada central registrada. El argumento era que son equipos
+on-prem, muchos sin salida libre a internet.
 
-La alternativa —que cada central consulte periódicamente la API de GitHub— se descarta:
-son equipos on-prem en redes de clientes, muchos sin salida libre a internet, y obligaría a
-que cada central tenga credenciales de un repo privado el día que deje de ser público.
+**Decisión final: pull.** La central consulta el Release y baja el instalador. Al ir a
+implementar el push aparecieron tres cosas que lo vuelven la peor de las dos opciones:
 
-Queda pendiente de definir en la implementación **cómo** se entrega (el mecanismo de
-autenticación contra cada central), porque hoy no existe un endpoint para eso. Es el punto
-de mayor riesgo del cambio y conviene resolverlo con una sola central antes de generalizar.
+1. **Las centrales están detrás de NAT.** Para que GitHub Actions les entregue algo hay que
+   darle a CI un camino ENTRANTE a cada una. Eso es justamente lo que un cliente on-prem no
+   da, y es la superficie más peligrosa de todo el cambio: un endpoint de administración
+   publicado en cada PBX, con una credencial de larga vida guardada en los secretos del
+   repo, a cambio de no consultar una URL.
+2. **El argumento contra el pull no se sostiene.** La central ya necesita salida HTTPS para
+   Let's Encrypt (`acme.js`). Y si de verdad no tiene salida, el push tampoco la salva: no
+   le llega nada igual.
+3. **Para la central sin salida, la respuesta honesta es otra:** subir el archivo a mano
+   desde el panel. Es un camino que conviene tener de todas formas y no requiere ni push ni
+   pull. (Queda como tarea aparte: hoy se sube por SSH al directorio montado.)
+
+El pull atraviesa NAT sin abrir nada, no necesita credencial mientras el repo sea público, y
+degrada bien: si no se llega a GitHub la central sigue sirviendo la versión que ya tiene.
+
+Nace **apagado**. Prender una salida a internet periódica en el equipo telefónico de un
+cliente es una decisión de quien administra esa central, no un default que llega con una
+actualización.
 
 ### El atraso se mide contra `main`, no contra el Release
 
