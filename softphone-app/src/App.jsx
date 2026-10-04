@@ -698,11 +698,18 @@ export default function App() {
       .then(r => setTurnT(r))
       .catch(e => setTurnT({ state: 'error', errors: [String(e && e.message || e)], host: 0, srflx: 0, relay: 0 }));
   }
-  useEffect(() => { if (tab === 'ajustes' && aTab === 'red') runTurnTest(); }, [tab, aTab]); // eslint-disable-line
+  /* El test de TURN NO se dispara solo al entrar a la pestania. Levanta un
+   * RTCPeerConnection y se queda esperando candidatos: con la central lejos eso son unos
+   * segundos de ruedita cada vez que alguien pasa por Ajustes a mirar otra cosa. Lo
+   * dispara el boton, que es cuando alguien de verdad quiere saber. */
   /* Al registrarse: es el momento en que se sabe cuál es la central y que está viva. Se
    * refresca el ICE aunque no haya nada cargado a mano —antes esto sólo corría si había
-   * un TURN guardado, o sea nunca en el aparato que más lo necesita—. */
-  useEffect(() => { if (authed) setTimeout(() => { refrescarYProbar(true).then(() => runTurnTest()); }, 1200); }, [authed]); // eslint-disable-line
+   * un TURN guardado, o sea nunca en el aparato que más lo necesita—.
+   *
+   * Se TRAEN los servidores, pero no se prueban: traerlos es lo que hace falta para que la
+   * proxima llamada tenga relay, y probar es una pregunta que se hace cuando alguien la
+   * quiere hacer. Antes esto dejaba un RTCPeerConnection levantandose en cada arranque. */
+  useEffect(() => { if (authed) setTimeout(() => { refrescarYProbar(true).catch(() => {}); }, 1200); }, [authed]); // eslint-disable-line
   const startEngineRef = useRef(startEngine); startEngineRef.current = startEngine;
   useEffect(() => {
     const reconnect = (why) => {
@@ -1387,31 +1394,13 @@ export default function App() {
                   {aTab === 'red' && <Section title="ICE / TURN" icon={IcShield({ c: C.sub, s: 14 })}>
                     <div style={{ display: 'flex', gap: 18 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        {/* Quién manda acá: la central. Los campos de abajo son el plan C, y
-                            tienen que decirlo, o alguien va a pasar una hora corrigiendo un
-                            TURN que el aparato ya ni usa (pasó: un interno con el relay del
-                            SBC guardado contra una central que entrega el suyo propio). */}
-                        {(() => {
-                          const desde = iceInfo.fuente === 'central'
-                            ? 'Lo entrega la central' + (iceInfo.origen ? ' · origen «' + iceInfo.origen + '»' : '')
-                            : iceInfo.fuente === 'manual' ? 'Cargado a mano en este aparato' : 'Sin servidores ICE';
-                          const cuando = iceInfo.at ? new Date(iceInfo.at).toLocaleString() : '';
-                          const col = iceInfo.fuente === 'central' ? C.green : iceInfo.fuente === 'manual' ? '#f0b429' : C.red;
-                          return (
-                            <div style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${col}`, borderRadius: 9, padding: '10px 12px', marginBottom: 10, background: C.card }}>
-                              <div style={{ fontWeight: 700, fontSize: 13 }}>{desde}</div>
-                              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3 }}>
-                                {iceInfo.fuente === 'central'
-                                  ? (iceInfo.lista.length + ' servidor(es) · actualizado ' + cuando)
-                                  : iceInfo.fuente === 'manual'
-                                    ? 'La central no contestó todavía: se usa lo de abajo hasta que conteste.'
-                                    : 'Conectate a la central o cargá un TURN abajo.'}
-                              </div>
-                              {iceErr ? <div style={{ fontSize: 11.5, color: C.red, marginTop: 4 }}>{iceErr}</div> : null}
-                              <button onClick={() => { sounds.uiClick(); runTurnTest(); }} style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>Actualizar desde la central</button>
-                            </div>
-                          );
-                        })()}
+                        {/* El origen del ICE ya no se anuncia con un cartel propio: lo que
+                            el usuario viene a mirar es si el TURN sirve, y eso lo dice el
+                            estado de la derecha. Lo unico que sobrevive del cartel es el
+                            ERROR, porque esconder una falla para ganar prolijidad es
+                            justamente lo que deja a alguien una hora sin saber por que no
+                            tiene audio. */}
+                        {iceErr ? <div style={{ fontSize: 11.5, color: C.red, marginBottom: 8 }}>{iceErr}</div> : null}
                         <div style={{ fontSize: 11.5, color: C.sub, margin: '2px 0 6px' }}>Respaldo manual (sólo se usa si la central no contesta):</div>
                         {F('STUN', 'stun')}{F('TURN', 'turn', 'text', 'turn:host:3478')}{F('TURN usuario', 'turnUser')}
                         <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>TURN clave</div><input style={S.inp} type="password" value={cfg.turnPass || ''} onChange={e => setCfg(c => ({ ...c, turnPass: e.target.value }))} /></div>
@@ -1433,6 +1422,13 @@ export default function App() {
                             </div>
                             <div style={{ marginTop: 10, fontWeight: 700, fontSize: 13, color: ok ? '#4ade80' : bad ? C.red : C.sub }}>{title}</div>
                             <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{sub}</div>
+                            {/* Debajo del veredicto, que es donde se mira. Trae los servidores
+                                de la central y prueba con ellos, en ese orden. */}
+                            <button onClick={() => { sounds.uiClick(); runTurnTest(); }}
+                              style={{ marginTop: 12, padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontWeight: 600, fontSize: 11.5 }}>
+                              Actualizar desde la central
+                            </button>
+                            {iceInfo.fuente === 'manual' && <div style={{ fontSize: 10.5, color: '#f0b429', marginTop: 6, lineHeight: 1.35 }}>Usando el respaldo manual: la central no contestó.</div>}
                           </div>); })()}
                     </div>
                     {(() => {
@@ -1881,6 +1877,143 @@ function SinClientes({ apiOn, onAlta, onSistema }) {
   );
 }
 
+/* ── Buscar la cámara en la red, en vez de escribir su URL a mano ────────────
+ * Tres pasos y en este orden porque es el orden en que el técnico tiene la información:
+ * primero qué hay en la red (no sabe la IP de memoria), después la clave (la tiene
+ * anotada), y recién entonces elige el canal viendo la resolución de cada uno — que es lo
+ * que de verdad decide: el principal para mirar, el secundario para que no sature.
+ *
+ * Si el descubrimiento no encuentra nada, se puede escribir la IP y seguir igual: muchas
+ * cámaras traen el descubrimiento ONVIF apagado de fábrica, y en una red con wifi de por
+ * medio el multicast se pierde sin avisar. Que no aparezca NO significa que no hable ONVIF.
+ */
+function Onvif({ onElegir }) {
+  const [abierto, setAbierto] = useState(false);
+  const [paso, setPaso] = useState('buscar');     // buscar | credenciales | perfiles
+  const [equipos, setEquipos] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [manual, setManual] = useState('');
+  const [cred, setCred] = useState({ user: 'admin', pass: '' });
+  const [perfiles, setPerfiles] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [err, setErr] = useState('');
+  const sp = typeof window !== 'undefined' ? window.sphone : null;
+
+  if (!sp || !sp.onvifDescubrir) return null;   // en la PWA no hay red que recorrer
+
+  async function buscar() {
+    setCargando(true); setErr(''); setEquipos(null);
+    try {
+      const r = await sp.onvifDescubrir(4500);
+      if (!r.ok) { setErr(r.motivo || 'no se pudo buscar'); setEquipos([]); }
+      else setEquipos(r.equipos || []);
+    } catch (e) { setErr((e && e.message) || 'error'); setEquipos([]); }
+    finally { setCargando(false); }
+  }
+  function elegirEquipo(eq) { setSel(eq); setPaso('credenciales'); setErr(''); setPerfiles(null); }
+  async function traerPerfiles() {
+    const xaddr = sel ? sel.xaddr : ('http://' + String(manual).trim() + '/onvif/device_service');
+    setCargando(true); setErr(''); setPerfiles(null);
+    try {
+      const r = await sp.onvifPerfiles({ xaddr, user: cred.user, pass: cred.pass });
+      if (!r.ok) { setErr(r.motivo || 'no se pudieron leer los perfiles'); }
+      else { setPerfiles(r.perfiles || []); setPaso('perfiles'); }
+    } catch (e) { setErr((e && e.message) || 'error'); }
+    finally { setCargando(false); }
+  }
+  function usar(pf) {
+    onElegir(pf.rtsp, (sel && sel.nombre ? sel.nombre + ' · ' : '') + pf.nombre);
+    setAbierto(false); setPaso('buscar'); setSel(null); setPerfiles(null); setCred({ user: 'admin', pass: '' });
+  }
+
+  const caja = { border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginTop: 8, background: C.soft };
+  const fila = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: `1px solid ${C.line}`, background: C.card, marginBottom: 6 };
+
+  if (!abierto) {
+    return (
+      <button onClick={() => { setAbierto(true); buscar(); }}
+        style={{ marginTop: 8, width: '100%', padding: '9px 12px', borderRadius: 9, border: `1px dashed ${C.line}`, background: 'none', color: '#67c7f5', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
+        {IcSearch({ c: '#67c7f5', s: 15 })} Buscar la cámara en la red (ONVIF)
+      </button>
+    );
+  }
+
+  return (
+    <div style={caja}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 12.5 }}>
+          {paso === 'buscar' ? 'Cámaras en esta red' : paso === 'credenciales' ? 'Usuario de la cámara' : 'Elegí el canal'}
+        </div>
+        <button onClick={() => setAbierto(false)} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: C.sub, cursor: 'pointer', fontSize: 17, lineHeight: 1 }}>×</button>
+      </div>
+
+      {paso === 'buscar' && <>
+        {cargando && <div style={{ fontSize: 12, color: C.sub, padding: '8px 0' }}>Buscando… (unos segundos)</div>}
+        {!cargando && equipos && equipos.map((eq) => (
+          <div key={eq.xaddr} onClick={() => elegirEquipo(eq)} style={fila}>
+            {IcCam({ c: '#67c7f5', s: 17 })}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 12.5 }}>{eq.nombre || eq.host}</div>
+              <div style={{ fontSize: 11, color: C.sub }}>{eq.host}{eq.modelo ? ' · ' + eq.modelo : ''}</div>
+            </div>
+          </div>
+        ))}
+        {!cargando && equipos && equipos.length === 0 && (
+          <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.45, marginBottom: 8 }}>
+            No contestó ninguna. Muchas cámaras traen el descubrimiento apagado de fábrica, y por wifi el
+            multicast se pierde: que no aparezca no quiere decir que no hable ONVIF. Poné su IP acá abajo.
+          </div>
+        )}
+        {!cargando && <div style={{ display: 'flex', gap: 7, marginTop: 4 }}>
+          <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="IP de la cámara"
+            style={{ ...S.inp, flex: 1, padding: '8px 10px', fontSize: 12.5 }} autoCapitalize="off" spellCheck={false} />
+          <button onClick={() => { if (String(manual).trim()) { setSel(null); setPaso('credenciales'); } }}
+            style={{ padding: '8px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Usar</button>
+          <button onClick={buscar} title="Buscar de nuevo"
+            style={{ padding: '8px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontSize: 12 }}>↻</button>
+        </div>}
+      </>}
+
+      {paso === 'credenciales' && <>
+        <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 8 }}>
+          {sel ? (sel.nombre || sel.host) + ' · ' + sel.host : String(manual).trim()}
+        </div>
+        <div style={{ display: 'flex', gap: 7 }}>
+          <input value={cred.user} onChange={(e) => setCred((c) => ({ ...c, user: e.target.value }))} placeholder="usuario"
+            style={{ ...S.inp, flex: 1, padding: '8px 10px', fontSize: 12.5 }} autoCapitalize="off" spellCheck={false} />
+          <input value={cred.pass} onChange={(e) => setCred((c) => ({ ...c, pass: e.target.value }))} placeholder="clave" type="password"
+            style={{ ...S.inp, flex: 1, padding: '8px 10px', fontSize: 12.5 }}
+            onKeyDown={(e) => { if (e.key === 'Enter') traerPerfiles(); }} />
+        </div>
+        <div style={{ display: 'flex', gap: 7, marginTop: 8 }}>
+          <button onClick={() => { setPaso('buscar'); setErr(''); }}
+            style={{ padding: '8px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'none', color: C.sub, cursor: 'pointer', fontSize: 12 }}>Atrás</button>
+          <button onClick={traerPerfiles} disabled={cargando}
+            style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: `1px solid ${C.accent}`, background: 'rgba(26,115,242,.06)', color: '#7cb0ff', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            {cargando ? 'Consultando…' : 'Ver los canales'}
+          </button>
+        </div>
+      </>}
+
+      {paso === 'perfiles' && <>
+        {(perfiles || []).map((pf, i) => (
+          <div key={i} onClick={() => usar(pf)} style={fila}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 12.5 }}>{pf.nombre}</div>
+              <div style={{ fontSize: 11, color: C.sub }}>{[pf.resolucion, pf.codec, pf.fps ? pf.fps + ' fps' : ''].filter(Boolean).join(' · ')}</div>
+            </div>
+            <span style={{ fontSize: 11, color: '#67c7f5', fontWeight: 600 }}>Usar</span>
+          </div>
+        ))}
+        <button onClick={() => { setPaso('credenciales'); setErr(''); }}
+          style={{ padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'none', color: C.sub, cursor: 'pointer', fontSize: 12, marginTop: 2 }}>Atrás</button>
+      </>}
+
+      {err && <div style={{ fontSize: 11.5, color: C.red, marginTop: 8, lineHeight: 1.4 }}>{err}</div>}
+    </div>
+  );
+}
+
 /* El alta de un cliente o de una camara. El DESTINO es la decision del formulario: se
  * muestra sólo cuando hay a dónde elegir —con central conectada y sobre un cliente del
  * sistema—; en cualquier otro caso va local y se dice por qué, en vez de ofrecer una opción
@@ -1893,6 +2026,18 @@ function PanelAlta({ alta, apiOn, msg, onCerrar, onGuardar }) {
   const [f, setF] = useState({ name: '', phones: '', label: '', rtsp: '', type: 'camera', destino: puedeCentral ? 'central' : 'local' });
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const enviar = () => onGuardar(f);
+  /* La prueba se borra cada vez que cambia la URL: un tilde verde al lado de una URL que
+   * ya no es la que se probó es peor que no tener prueba. */
+  const [prueba, setPrueba] = useState(null);
+  const [probando, setProbando] = useState(false);
+  async function probar() {
+    const sp = typeof window !== 'undefined' ? window.sphone : null;
+    if (!sp || !sp.camaraProbar) { setPrueba({ ok: false, motivo: 'Probar necesita el softphone de escritorio.' }); return; }
+    setProbando(true); setPrueba(null);
+    try { setPrueba(await sp.camaraProbar(f.rtsp)); }
+    catch (e) { setPrueba({ ok: false, motivo: (e && e.message) || 'error' }); }
+    finally { setProbando(false); }
+  }
   return (
     <div style={S.modalWrap} onClick={onCerrar}>
       <div ref={gModal} onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, padding: 22, width: 400, maxHeight: '84vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
@@ -1910,7 +2055,28 @@ function PanelAlta({ alta, apiOn, msg, onCerrar, onGuardar }) {
         {esCam && <>
           <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>Etiqueta</div><input autoFocus style={S.inp} value={f.label} onChange={set('label')} placeholder="Ej. Portero frente" /></div>
           <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>Tipo</div><select style={S.sel} value={f.type} onChange={set('type')}><option value="camera">Cámara</option><option value="intercom">Portero</option></select></div>
-          <div style={{ padding: '6px 0' }}><div style={S.fieldLbl}>URL de la cámara</div><input style={S.inp} value={f.rtsp} onChange={set('rtsp')} placeholder="rtsp://usuario:clave@192.168.1.50:554/Streaming/Channels/101" autoCapitalize="off" autoCorrect="off" spellCheck={false} /><div style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>La URL lleva el usuario y la clave de la cámara adentro. Si la subís a la central, la central es la única que la ve entera: al teléfono vuelve enmascarada.</div></div>
+
+          {/* Buscar en la red antes que escribir a mano. El path del canal
+              (`/Streaming/Channels/101`, `/cam/realmonitor?channel=1`, `/live/0/MAIN`…)
+              cambia por fabricante y por modelo: no se adivina, se pregunta. ONVIF es el
+              estándar que contesta exactamente eso. */}
+          <Onvif onElegir={(rtsp, etiqueta) => setF((x) => ({ ...x, rtsp, label: x.label || etiqueta }))} />
+
+          <div style={{ padding: '6px 0' }}>
+            <div style={S.fieldLbl}>URL de la cámara</div>
+            <input style={S.inp} value={f.rtsp} onChange={(e) => { setF((x) => ({ ...x, rtsp: e.target.value })); setPrueba(null); }}
+              placeholder="rtsp://usuario:clave@192.168.1.50:554/Streaming/Channels/101" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 7 }}>
+              <button onClick={probar} disabled={!f.rtsp || probando}
+                style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: probando ? C.sub : '#7cb0ff', cursor: f.rtsp && !probando ? 'pointer' : 'default', fontWeight: 600, fontSize: 12, opacity: f.rtsp ? 1 : .5 }}>
+                {probando ? 'Probando…' : 'Probar'}
+              </button>
+              {prueba && (prueba.ok
+                ? <span style={{ fontSize: 11.5, color: '#4ade80', fontWeight: 600 }}>✓ Da video{prueba.codec ? ' · ' + String(prueba.codec).replace(/^video\/mp4; codecs="?|"?$/g, '') : ''}</span>
+                : <span style={{ fontSize: 11.5, color: C.red, lineHeight: 1.35 }}>{prueba.motivo}</span>)}
+            </div>
+            <div style={{ fontSize: 11, color: C.sub, marginTop: 6, lineHeight: 1.4 }}>La URL lleva el usuario y la clave de la cámara adentro. Si la subís a la central, la central es la única que la ve entera: al teléfono vuelve enmascarada.</div>
+          </div>
         </>}
 
         <div style={{ padding: '10px 0 2px' }}>

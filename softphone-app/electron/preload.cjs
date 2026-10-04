@@ -58,6 +58,12 @@ contextBridge.exposeInMainWorld('sphone', {
   g2localAsegurar: (cams) => ipcRenderer.invoke('g2local-asegurar', cams),
   g2localEstado: () => ipcRenderer.invoke('g2local-estado'),
   g2localParar: () => ipcRenderer.invoke('g2local-parar'),
+  /* ONVIF: encontrar camaras en la red de este aparato y sacarles la URL RTSP, para no
+   * tener que adivinar el path del canal (que cambia por fabricante y por modelo). */
+  onvifDescubrir: (ms) => ipcRenderer.invoke('onvif-descubrir', ms),
+  onvifPerfiles: (o) => ipcRenderer.invoke('onvif-perfiles', o),
+  /* Probar una camara antes de guardarla: devuelve { ok, codec } o { ok:false, motivo }. */
+  camaraProbar: (rtsp) => ipcRenderer.invoke('camara-probar', rtsp),
   // proxy go2rtc (MSE) por el main
   go2rtcOpen: (opts) => ipcRenderer.invoke('go2rtc-open', opts),
   go2rtcSend: (id, data) => ipcRenderer.send('go2rtc-send', { id, data }),

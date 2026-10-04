@@ -11,7 +11,17 @@ let autoUpdater = null; try { autoUpdater = require('electron-updater').autoUpda
 
 const isDev = !app.isPackaged;
 const DEBUG = isDev || process.env.SP_DEBUG === '1';
-let win = null, splash = null, tray = null, pendingDial = null, pendingProv = null;
+/* UNA sola ventana al arrancar. Antes habia dos: una ventana `splash.html` de 340x300 que
+ * se abria enseguida, y despues la ventana grande con el splash que dibuja la propia app
+ * (el de `src/App.jsx`). O sea, dos pantallas de carga distintas, una chica y una grande,
+ * una atras de la otra. Se retira la chica: la grande ya hace el trabajo, y la ventana
+ * principal nace con `show: false` y recien aparece en `ready-to-show`, asi que no hay
+ * destello blanco ni marco vacio.
+ *
+ * Lo que se paga: en una maquina lenta pasan uno o dos segundos entre el doble clic y la
+ * ventana, sin nada en pantalla. Es el precio de no mostrar un marco vacio antes de tiempo,
+ * y es lo que recomienda Electron para esto. */
+let win = null, tray = null, pendingDial = null, pendingProv = null;
 
 function showWin() { if (!win) return; if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
 
@@ -116,6 +126,61 @@ ipcMain.handle('g2local-asegurar', async (_e, cams) => {
 });
 ipcMain.handle('g2local-estado', () => (g2local ? g2local.estado() : { disponible: false, corriendo: false, base: null }));
 ipcMain.handle('g2local-parar', () => { try { g2local && g2local.parar(); } catch (_) {} return { ok: true }; });
+
+/* ---- ONVIF: encontrar camaras en la red y sacarles la URL RTSP ----
+ * El que agrega la camara esta parado al lado de la camara, en su misma LAN; la central
+ * casi nunca ve esa red, y el descubrimiento es multicast, que no cruza routers. Por eso
+ * esto corre aca y no en la central. Ver electron/onvif.cjs. */
+let onvif = null; try { onvif = require('./onvif.cjs'); } catch (e) { if (DEBUG) console.log('[onvif] no disponible:', e && e.message); }
+ipcMain.handle('onvif-descubrir', async (_e, ms) => {
+  if (!onvif) return { ok: false, motivo: 'descubrimiento no disponible en esta version' };
+  try { return { ok: true, equipos: await onvif.descubrir(Math.min(8000, Math.max(2000, parseInt(ms, 10) || 4000))) }; }
+  catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
+});
+ipcMain.handle('onvif-perfiles', async (_e, o) => {
+  if (!onvif) return { ok: false, motivo: 'ONVIF no disponible en esta version' };
+  try { return { ok: true, perfiles: await onvif.perfiles(o || {}) }; }
+  catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
+});
+
+/* ---- Probar una URL de camara ANTES de guardarla ----
+ * Se prueba con el MISMO go2rtc que despues la va a mostrar, y se espera a que entregue
+ * video de verdad. Un `connect()` al 554 contestaria que si en una camara con la clave mal
+ * o con el canal equivocado: lo unico que prueba algo es que salgan bytes de video. */
+ipcMain.handle('camara-probar', async (_e, rtsp) => {
+  if (!g2local) return { ok: false, motivo: 'motor de video local no disponible en esta version' };
+  const id = 'prueba_' + Date.now().toString(36);
+  try {
+    const r = await g2local.asegurar([{ id, rtsp: String(rtsp || '') }]);
+    if (!r.ok) return { ok: false, motivo: r.motivo };
+    if (!WS) return { ok: false, motivo: 'ws no disponible' };
+    const url = r.base.replace(/^http/, 'ws') + '/api/ws?src=' + encodeURIComponent(id);
+    const res = await new Promise((resolver) => {
+      let bytes = 0, codec = '', ws;
+      const cerrar = (salida) => { try { ws && ws.close(); } catch (_) {} resolver(salida); };
+      /* 12 s: una camara lenta o con mucha latencia tarda, y cortar antes seria decirle al
+       * tecnico que la camara no sirve cuando el que no espero fue el programa. */
+      const t = setTimeout(() => cerrar({ ok: false, motivo: 'la cámara no entregó video en 12 s (¿clave, canal o códec?)' }), 12000);
+      try { ws = new WS(url, { handshakeTimeout: 8000 }); } catch (e) { clearTimeout(t); return resolver({ ok: false, motivo: e.message }); }
+      ws.binaryType = 'arraybuffer';
+      ws.on('open', () => ws.send(JSON.stringify({ type: 'mse', value: 'avc1.640029,avc1.64002A,avc1.4d002a,avc1.42e01e,hvc1.1.6.L153.B0,mp4a.40.2,opus' })));
+      ws.on('message', (d, bin) => {
+        if (!bin) { try { const m = JSON.parse(d.toString()); if (m.type === 'mse' && m.value) codec = m.value; if (m.type === 'error') { clearTimeout(t); cerrar({ ok: false, motivo: String(m.value || 'la cámara rechazó la conexión') }); } } catch (_) {} return; }
+        bytes += d.length || d.byteLength || 0;
+        /* Con 20 KB ya hay imagen de verdad, no sólo cabeceras. */
+        if (bytes > 20000) { clearTimeout(t); cerrar({ ok: true, codec, bytes }); }
+      });
+      ws.on('error', (e) => { clearTimeout(t); cerrar({ ok: false, motivo: (e && e.message) || 'error de conexión' }); });
+      ws.on('close', () => { clearTimeout(t); cerrar({ ok: false, motivo: 'la cámara cortó la conexión' }); });
+    });
+    return res;
+  } catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
+  finally {
+    /* La prueba NO deja su stream levantado: la lista de camaras vivas la manda la
+     * pantalla, y al volver a pedirla el go2rtc se reinicia sin el de prueba. */
+    try { await g2local.asegurar([]); } catch (_) {}
+  }
+});
 
 // ---- auto-update visible ----
 /* Feed OTA: la central a la que esta aprovisionado el softphone publica su propio
@@ -266,16 +331,6 @@ ipcMain.on('mini-action', (_e, m) => {
 
 const MEDIA_PERMS = ['media', 'microphone', 'camera', 'audioCapture', 'videoCapture', 'notifications', 'display-capture'];
 
-function createSplash() {
-  splash = new BrowserWindow({
-    width: 340, height: 300, frame: false, transparent: true, resizable: false,
-    alwaysOnTop: true, center: true, skipTaskbar: true, backgroundColor: '#00000000',
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
-  });
-  splash.loadFile(path.join(__dirname, 'splash.html'), { query: { v: app.getVersion() } });
-  splash.on('closed', () => { splash = null; });
-}
-
 function createWindow() {
   win = new BrowserWindow({
     width: 920, height: 640, resizable: false, maximizable: false, fullscreenable: false, show: false, frame: false,
@@ -294,7 +349,6 @@ function createWindow() {
   const reveal = () => {
     if (pendingDial) { win.webContents.send('dial', pendingDial); pendingDial = null; }
     if (pendingProv) { win.webContents.send('provision', pendingProv); pendingProv = null; }
-    if (splash) { setTimeout(() => { try { splash && splash.close(); } catch (_) {} }, 400); }
     if (!process.argv.includes('--hidden')) showWin();
     if (DEBUG) { try { win.webContents.openDevTools({ mode: 'detach' }); } catch (_) {} }
   };
@@ -342,7 +396,7 @@ else {
   app.on('window-all-closed', () => { /* queda en bandeja */ });
   app.whenReady().then(() => {
     try { ['tel', 'sip', 'callto', 'pbxng'].forEach(p => app.setAsDefaultProtocolClient(p)); } catch (_) {}
-    createSplash(); createWindow(); createTray(); registerShortcuts();
+    createWindow(); createTray(); registerShortcuts();
     // Re-registro automático: al despertar la PC o volver la red
     try {
       const sys = (e) => { try { win && win.webContents.send('sys-event', e); } catch (_) {} };
