@@ -104,7 +104,14 @@ export const clients = () => call('GET', '/intercom/clients');
 export const clientsFull = () => call('GET', '/clients');
 export const clientsLookup = (number) => call('GET', '/clients/lookup?number=' + encodeURIComponent(number || ''));
 export const clientDetail = (id) => call('GET', '/clients/' + encodeURIComponent(id));
+/* Crear un cliente DEL SISTEMA. Solo lo acepta una sesion de panel con rol admin o
+ * supervisor; con el token del aparato vuelve 403 y el softphone lo crea local. */
+export const clientCreate = (c) => call('POST', '/clients', c);
 export const clientStreams = (id) => call('GET', '/intercom/streams?client=' + encodeURIComponent(id));
+/* Alta de una camara en la central. `rtsp_url` viaja entera una sola vez, en el POST: de
+ * ahi en adelante la central la devuelve enmascarada (deviceSafe) y el aparato no la vuelve
+ * a ver. La respuesta trae el `go2rtc_src` con el que despues se mira el video. */
+export const clientDeviceAdd = (id, dev) => call('POST', '/clients/' + encodeURIComponent(id) + '/devices', dev);
 /* «Entrada» de un solo uso para abrir el video de UNA cámara: vale un minuto y se quema
  * al usarse. Es lo que se manda en la URL del WebSocket, en vez de la sesión entera —que
  * quedaría escrita en cualquier registro por el que pase esa URL—. */

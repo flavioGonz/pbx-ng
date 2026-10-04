@@ -103,6 +103,18 @@ module.exports = function init(deps) {
      * siguen siendo del panel. */
     ['GET',  /^\/api\/intercom\/(clients|streams|ticket)$/],
     ['GET',  /^\/api\/clients$/],
+    /* La ficha de UN cliente. Estaba afuera, y el efecto era el peor de todos: la solapa
+     * Clientes del softphone LISTABA los clientes (eso sí pasaba por `/api/clients`) y al
+     * abrir uno se comía un 403 en silencio, así que la pestaña de dispositivos decía
+     * «Sin dispositivos» en un cliente que tenía cámaras cargadas. Leer una ficha no es
+     * más que lo que ya da `/api/clients` y `/api/clients/lookup`: el mismo cliente, los
+     * mismos datos, una fila en vez de todas. */
+    ['GET',  /^\/api\/clients\/[0-9]+$/],
+    /* Alta de camara desde el aparato: el que esta en la obra con la URL RTSP en la mano
+     * es el que tiene el telefono. La ruta tiene su propia guarda (`camaraAlta` en app.js)
+     * y deja el alta en la bitacora con la extension. No se abre el borrado: una camara
+     * cargada de mas molesta; una borrada de menos deja a alguien sin ver la puerta. */
+    ['POST', /^\/api\/clients\/[0-9]+\/devices$/],
   ];
 
   /* ¿El que pide puede meterse con la extensión `ext`?
