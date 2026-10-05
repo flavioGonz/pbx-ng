@@ -1,0 +1,38 @@
+control-plane/ai-pipeline.js
+  s_cf45a22c4be6cc::t_8f9b5d20913783 1170-1174
+CHANGELOG.md
+  s_cf45a22c4be6cc::t_ffff498af544e8 19-28
+openspec/changes/conexion-con-pbx/design.md
+  s_cf45a22c4be6cc::t_ffff498af544e8 105-116
+control-plane/test/puente-ia.test.js
+  s_cf45a22c4be6cc::t_7507dc44263271 1-33
+openspec/changes/conexion-con-pbx/specs/ia-externa/spec.md
+  s_cf45a22c4be6cc::t_ffff498af544e8 149-165
+docker/images/asterisk/docker-entrypoint.sh
+  s_cf45a22c4be6cc::t_d6a59d6128a1eb 173-175
+docker/images/asterisk/Dockerfile
+  s_cf45a22c4be6cc::t_d6a59d6128a1eb 66
+openspec/changes/conexion-con-pbx/proposal.md
+  s_cf45a22c4be6cc::t_0d48e0cde6b711 67
+docs/CONTRATOS.md
+  s_cf45a22c4be6cc::t_ffff498af544e8 1911-1912
+  s_cf45a22c4be6cc::t_0d48e0cde6b711 1932
+openspec/changes/conexion-con-pbx/tasks.md
+  s_cf45a22c4be6cc::t_ffff498af544e8 41-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2cbc3c0412072ec580f54d919469019e07f2e019",
+  "prompts": {},
+  "sessions": {
+    "s_cf45a22c4be6cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5d1aee9-7d54-4b6a-b1fa-1081b583776f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

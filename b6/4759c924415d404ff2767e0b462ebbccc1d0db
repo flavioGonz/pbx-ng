@@ -1,0 +1,44 @@
+openspec/changes/contrato-pbx-v2/design.md
+  s_cf45a22c4be6cc::t_5fb456dbbedd96 71
+CHANGELOG.md
+  s_cf45a22c4be6cc::t_5fb456dbbedd96 18-22
+  s_cf45a22c4be6cc::t_55793ca102c308 23-25
+openspec/changes/contrato-pbx-v2/tasks.md
+  s_cf45a22c4be6cc::t_5fb456dbbedd96 16-18,24,76-84
+  s_cf45a22c4be6cc::t_55793ca102c308 54,63-71,85-87
+control-plane/test/ia-externa-relay.test.js
+  s_cf45a22c4be6cc::t_583b24c359966a 445-446,448
+  s_cf45a22c4be6cc::t_bc1f6802730fe1 280-440,530-531,545,554-590
+  s_cf45a22c4be6cc::t_35d5b9d15396d1 441-444,447,449-475,517
+control-plane/ai-pipeline.js
+  s_cf45a22c4be6cc::t_7bd173211c9829 733,787-822,1264
+  s_cf45a22c4be6cc::t_4bf3c33f3359d0 765-766,830-836
+  s_cf45a22c4be6cc::t_beace3d7f4b81e 823-824
+control-plane/ia-externa.js
+  s_cf45a22c4be6cc::t_35d5b9d15396d1 56-59,208,626,636
+  s_cf45a22c4be6cc::t_d7c2b7b5ef2ea3 375-376
+  s_cf45a22c4be6cc::t_425f3223b373dc 360-362
+  s_cf45a22c4be6cc::t_ac74188bae2fb6 49-55,303-305,316,320-321,339-342,350-359,363-366,379-386,392,405-427,430,447-451,462,470-473,505-508,510,516,521-523,529,533-534
+openspec/changes/contrato-pbx-v2/specs/ia-externa/spec.md
+  s_cf45a22c4be6cc::t_5fb456dbbedd96 201-203
+  s_cf45a22c4be6cc::t_7015e636d94416 119-130,230-241,245-247
+docs/CONTRATOS.md
+  s_cf45a22c4be6cc::t_55793ca102c308 1898
+  s_cf45a22c4be6cc::t_5fb456dbbedd96 1897,1899,1906,1909
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b64759c924415d404ff2767e0b462ebbccc1d0db",
+  "prompts": {},
+  "sessions": {
+    "s_cf45a22c4be6cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5d1aee9-7d54-4b6a-b1fa-1081b583776f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

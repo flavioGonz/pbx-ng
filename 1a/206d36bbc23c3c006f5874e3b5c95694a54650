@@ -1,0 +1,19 @@
+openspec/changes/conexion-con-pbx/tasks.md
+  s_cf45a22c4be6cc::t_dd92bc2519e257 51-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a206d36bbc23c3c006f5874e3b5c95694a54650",
+  "prompts": {},
+  "sessions": {
+    "s_cf45a22c4be6cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5d1aee9-7d54-4b6a-b1fa-1081b583776f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

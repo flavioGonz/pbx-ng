@@ -1,0 +1,30 @@
+openspec/changes/conexion-con-pbx/design.md
+  s_cf45a22c4be6cc::t_b20dbbfe711f80 1-121,124-131
+  s_cf45a22c4be6cc::t_abc79816a4b3e5 122-123
+openspec/changes/conexion-con-pbx/proposal.md
+  s_cf45a22c4be6cc::t_9053b3a7acd9c8 1-67
+openspec/changes/conexion-con-pbx/specs/ia-externa/spec.md
+  s_cf45a22c4be6cc::t_9fd463f4891869 1-184
+openspec/changes/conexion-con-pbx/.openspec.yaml
+  s_cf45a22c4be6cc::t_8e837106c8f915 1-2
+openspec/changes/conexion-con-pbx/specs/tono-de-transferencia/spec.md
+  s_cf45a22c4be6cc::t_7e6675f50545ba 1-94
+openspec/changes/conexion-con-pbx/tasks.md
+  s_cf45a22c4be6cc::t_ea51498bae66b5 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "19ac1a6300a37be47e26749e95236e3828994d29",
+  "prompts": {},
+  "sessions": {
+    "s_cf45a22c4be6cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5d1aee9-7d54-4b6a-b1fa-1081b583776f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

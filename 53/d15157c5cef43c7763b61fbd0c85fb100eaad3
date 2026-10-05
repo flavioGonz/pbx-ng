@@ -1,0 +1,28 @@
+control-plane/test/proveedor-salud.test.js
+  s_2460ab41ca2e42::t_02506cd05b5414 17
+control-plane/test/realtime.test.js
+  s_2460ab41ca2e42::t_df4e7db1651e09 377-378,382
+dashboard/app/ai-agents/page.jsx
+  s_2460ab41ca2e42::t_02506cd05b5414 668-669
+control-plane/realtime.js
+  s_2460ab41ca2e42::t_02506cd05b5414 175
+  s_2460ab41ca2e42::t_9ddb590ff67a57 211-214
+control-plane/test/ia-externa.test.js
+  s_2460ab41ca2e42::t_02506cd05b5414 166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "53d15157c5cef43c7763b61fbd0c85fb100eaad3",
+  "prompts": {},
+  "sessions": {
+    "s_2460ab41ca2e42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f3d034ab-e487-4a83-aecd-240fab9f4a84",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
