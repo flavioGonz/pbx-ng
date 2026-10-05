@@ -58,6 +58,11 @@
       es lo que se ve en la lista de corridas sin entrar. Necesitó `fetch-depth: 0` y
       `fetch-tags`: con el checkout superficial, `git log <tag>..HEAD` no tiene con qué
       contestar.
+      Verificado en los dos sentidos contra el repo real: con el tag de la última versión
+      publicada da 0 (no avisa cuando no hay nada, que es la mitad que importa para que el
+      aviso signifique algo) y simulando que el último release fuera el anterior da 2, con
+      los dos commits listados. El run #19 no mostró warning porque ese commit no tocó
+      `softphone-app/` — que es el comportamiento correcto, no una falla del aviso.
 
 ## 4. Cierre
 
