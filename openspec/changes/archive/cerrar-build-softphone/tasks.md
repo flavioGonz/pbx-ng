@@ -13,7 +13,12 @@
       `workflow_dispatch` acepta `forzar` para recompilar igual.
 - [x] 1.3 El tag lo crea el paso de publicación desde la versión (`tag_name`), no una
       persona.
-- [ ] 1.4 Probar los tres casos del spec: versión nueva, versión repetida, build fallido.
+- [x] 1.4 Los tres casos, contra corridas reales:
+      · versión nueva → #16 publicó 0.19.0 y #17 la 0.20.0, con el tag creado solo.
+      · versión repetida → #14, #15 y #18 decidieron no compilar y lo escribieron en el
+        resumen.
+      · build fallido → no hay Release y la central sigue repartiendo la anterior, que es
+        el comportamiento verificado en 2.4.
       - **Versión repetida: verificado.** El merge del grupo 1 a `main` disparó la
         ejecución #10: `decidir` terminó en éxito y `build` quedó en *skipped*, porque ya
         existe el Release `softphone-v0.17.0`. Es el caso «se commitea código sin tocar la
@@ -38,19 +43,29 @@
       operador); `/api/softphone/latest` sigue público, que es lo que lee el login.
 - [x] 2.6 Freno de disco: por debajo de 600 MB libres no se baja nada, porque dejar sin
       espacio el disco de una central corta llamadas y una versión del softphone no vale eso.
-- [ ] 2.7 Subida manual del instalador desde el panel, para la central sin salida a
-      internet (hoy se sube por SSH al directorio montado).
+- [x] 2.7 Subida manual desde el panel (`POST /api/softphone/ota/subir`, botón «Subir a
+      mano»). Los tres archivos van en UNA subida porque el `latest.yml` se escribe al
+      final. Verificado: nombre con `../` → 400, extensión no permitida → 400, sin archivos
+      → 400, subida real → 200 y el feed lo toma.
 
 ## 3. Hacer visible el atraso
 
 - [x] 3.1 Agregar la fecha de publicación a `/api/softphone/latest` (el dato ya existe en
       el `latest.yml`, falta exponerlo).
 - [x] 3.2 Mostrarlo donde se ve la versión, para que se lea sin entrar por SSH.
-- [ ] 3.3 Que el workflow avise cuando hay commits en `softphone-app/` sin cambio de
-      versión, que es el caso que nos costó dos días.
+- [x] 3.3 El job `decidir` cuenta los commits de `softphone-app/` posteriores al tag del
+      Release que ya existe, los lista en el resumen y además emite un `::warning::`, que
+      es lo que se ve en la lista de corridas sin entrar. Necesitó `fetch-depth: 0` y
+      `fetch-tags`: con el checkout superficial, `git log <tag>..HEAD` no tiene con qué
+      contestar.
 
 ## 4. Cierre
 
-- [ ] 4.1 Verificar contra el spec: los tres requisitos con sus escenarios.
-- [ ] 4.2 Actualizar la documentación de operación con el flujo nuevo.
-- [ ] 4.3 Archivar el cambio con `openspec archive cerrar-build-softphone`.
+- [x] 4.1 Verificado contra el spec:
+      · «Compilación disparada por la versión» — los tres escenarios en 1.4.
+      · «Entrega a la central» — pull en vez de push (decisión revisada en design.md),
+        probado con descarga real: 84 MB en 11 s, poda de versiones y `latest.yml` último.
+      · «Central atrasada» — el aviso de 3.3 y la pantalla de 3.2.
+- [x] 4.2 `docs/SOFTPHONE-PUBLICAR.md` reescrito: el camino normal ya no tiene pasos
+      manuales, y están los dos casos en que no alcanza.
+- [x] 4.3 Archivado.

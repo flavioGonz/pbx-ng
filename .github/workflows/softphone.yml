@@ -44,8 +44,15 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
       compilar: ${{ steps.v.outputs.compilar }}
+      atrasados: ${{ steps.v.outputs.atrasados }}
     steps:
+      # Historia completa y tags: hace falta para poder preguntar si hubo commits en
+      # softphone-app/ DESPUES del ultimo release. Con el checkout superficial de siempre,
+      # `git log <tag>..HEAD` no tiene con que contestar.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - id: v
         name: Version del package.json contra los Releases publicados
         env:
@@ -67,10 +74,22 @@ jobs:
             compilar=true
             motivo="no hay Release para $tag"
           fi
+          # ¿Hay codigo de softphone commiteado DESPUES del release que ya existe? Ese es el
+          # atraso que importa: no «cuantos commits hay», sino cuantos no llegaron a nadie.
+          atrasados=""
+          lista=""
+          if [ "$compilar" = "false" ] && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            n=$(git rev-list --count "$tag..HEAD" -- softphone-app/ 2>/dev/null || echo 0)
+            if [ "${n:-0}" -gt 0 ]; then
+              atrasados="$n"
+              lista=$(git log --no-merges --format='- %h %s' "$tag..HEAD" -- softphone-app/ | head -20)
+            fi
+          fi
           {
             echo "version=$version"
             echo "tag=$tag"
             echo "compilar=$compilar"
+            echo "atrasados=${atrasados:-0}"
           } >> "$GITHUB_OUTPUT"
           # Que la decision se lea sin abrir los logs: es la mitad del problema que se arregla.
           {
@@ -79,9 +98,24 @@ jobs:
             if [ "$compilar" = "true" ]; then
               echo "Se compila: $motivo."
             else
-              echo "No se compila: $motivo. Para publicar una version nueva, subí \`version\` en \`softphone-app/package.json\`."
+              echo "No se compila: $motivo."
+              echo ""
+              if [ -n "$atrasados" ]; then
+                echo "> **Hay $atrasados commit(s) en \`softphone-app/\` que NO estan en ningun instalador.**"
+                echo "> La gente sigue bajando la $version. Para publicarlos, subí \`version\` en \`softphone-app/package.json\`."
+                echo ""
+                echo "$lista"
+              else
+                echo "No hay commits de softphone sin publicar."
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          # Ademas como warning del run: el resumen hay que ir a buscarlo, el warning
+          # aparece en la lista de corridas. Este es EXACTAMENTE el caso que costo dos dias
+          # —codigo commiteado que nadie compilo— y lo que fallaba era enterarse.
+          if [ "$compilar" = "false" ] && [ -n "$atrasados" ]; then
+            echo "::warning title=Softphone sin publicar::$atrasados commit(s) en softphone-app/ no estan en ningun instalador. Subí la version en softphone-app/package.json."
+          fi
 
   build:
     needs: decidir

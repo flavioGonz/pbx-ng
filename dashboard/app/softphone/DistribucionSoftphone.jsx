@@ -13,8 +13,8 @@
  *  el botón quiere saber si quedó, no un «listo» que no significa nada.
  * ───────────────────────────────────────────────────────────────────────────── */
 import { useEffect, useState } from 'react';
-import { Card, Group, Text, Badge, Button, Switch, NumberInput, TextInput, Stack, Code } from '@mantine/core';
-import { IconDownload, IconRefresh, IconDeviceMobile } from '@tabler/icons-react';
+import { Card, Group, Text, Badge, Button, Switch, NumberInput, TextInput, Stack, Code, FileButton } from '@mantine/core';
+import { IconDownload, IconRefresh, IconDeviceMobile, IconUpload } from '@tabler/icons-react';
 import { apiGet, apiPost } from '../api';
 import { toast } from '../notify';
 
@@ -38,6 +38,7 @@ const RESULTADO = {
 export default function DistribucionSoftphone() {
   const [st, setSt] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [subiendo, setSubiendo] = useState(false);
   const [form, setForm] = useState(null);
 
   const cargar = () => apiGet('/softphone/ota').then((d) => { setSt(d); setForm({ auto: !!d.auto, repo: d.repo || '', cada_h: d.cada_h || 6 }); }).catch(() => setSt(false));
@@ -66,6 +67,34 @@ export default function DistribucionSoftphone() {
 
   const sirv = st.sirviendo;
   const [color, texto] = RESULTADO[st.resultado] || ['gray', 'Todavía no se revisó'];
+
+  /* Subir el instalador a mano. Para la central que de verdad no tiene salida a internet:
+   * ahi no sirve el pull ni serviria un push de CI, y la respuesta honesta es que alguien
+   * traiga el archivo. Van los tres juntos en una sola subida porque el `latest.yml` tiene
+   * que escribirse al final: suelto, manda a los softphones a buscar un .exe que no esta. */
+  async function subir(files) {
+    const lista = Array.from(files || []);
+    if (!lista.length) return;
+    const nombres = lista.map((f) => f.name);
+    if (!nombres.some((n) => /\.yml$/i.test(n)) && !nombres.some((n) => /\.apk$/i.test(n))) {
+      toast('Falta el latest.yml: sin él el actualizador no se entera de la versión nueva', 'bad');
+      return;
+    }
+    setSubiendo(true);
+    try {
+      const archivos = await Promise.all(lista.map((f) => new Promise((ok, mal) => {
+        const fr = new FileReader();
+        fr.onload = () => ok({ name: f.name, data: String(fr.result).split(',')[1] });
+        fr.onerror = () => mal(new Error('no se pudo leer ' + f.name));
+        fr.readAsDataURL(f);
+      })));
+      const d = await apiPost('/softphone/ota/subir', { archivos });
+      setSt((x) => ({ ...x, sirviendo: d.sirviendo || x.sirviendo, android: d.android && d.android.available ? d.android : x.android }));
+      toast('Instalador subido' + (d.version ? ': ' + d.version : ''), 'ok');
+      await cargar();
+    } catch (e) { toast('No se pudo subir: ' + e.message, 'bad'); }
+    finally { setSubiendo(false); }
+  }
 
   return (
     <Card withBorder radius="lg" padding="lg" shadow="sm">
@@ -111,7 +140,14 @@ export default function DistribucionSoftphone() {
       <Group mt="md">
         <Button variant="light" leftSection={<IconRefresh size={16} />} loading={busy} onClick={() => buscar(false)}>Buscar ahora</Button>
         <Button variant="subtle" color="gray" loading={busy} onClick={() => buscar(true)}>Volver a bajar la actual</Button>
+        <FileButton multiple accept=".exe,.msi,.blockmap,.yml,.apk" onChange={subir}>
+          {(props) => <Button {...props} variant="subtle" color="gray" loading={subiendo} leftSection={<IconUpload size={16} />}>Subir a mano</Button>}
+        </FileButton>
       </Group>
+      <Text size="xs" c="dimmed" mt={6}>
+        Para una central sin salida a internet: elegí juntos el <Code>.exe</Code>, su <Code>.blockmap</Code> y el <Code>latest.yml</Code> del Release.
+        Van en una sola subida porque el <Code>latest.yml</Code> se escribe al final — suelto, manda a los softphones a buscar un instalador que todavía no está.
+      </Text>
     </Card>
   );
 }

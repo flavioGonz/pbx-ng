@@ -2,6 +2,46 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [1.37.0] - 2026-10-05
+
+Tanda del softphone de escritorio y de los porteros.
+
+### Added
+- **El softphone trae su propio go2rtc** (~19 MB dentro del instalador, el mismo motor que
+  corre en la central) y con eso una cámara RTSP cargada a mano en el teléfono se puede
+  mirar **sin central**. Se levanta por demanda, en `127.0.0.1` y en un puerto efímero: un
+  go2rtc en `0.0.0.0` publicaría en la red de la oficina, sin autenticación, las cámaras del
+  cliente con sus credenciales dentro de la URL. (`softphone-app/electron/go2rtc-local.cjs`)
+  - Límite conocido: go2rtc repacka H.264 solo, pero una cámara que **sólo** emita H.265
+    necesita ffmpeg, y ffmpeg no viaja en el instalador (son ~80 MB más).
+- **Alta de cámara por ONVIF**: el softphone busca las cámaras en la red, pide usuario y
+  clave y lista los canales con resolución, códec y fps. La URL sale de la propia cámara.
+  Corre en el aparato y no en la central porque el descubrimiento es multicast y no cruza
+  routers. Y un botón **Probar** que abre la cámara de verdad y espera video — un `connect()`
+  al 554 diría que sí con la clave mal. (`softphone-app/electron/onvif.cjs`)
+- **El portero se llama y se abre desde Intercom.** El dispositivo guarda su interno y sus
+  relés (migración 0030), con tres modos de apertura: tono DTMF en la llamada, HTTP al
+  aparato (Akuvox fcgi / Hikvision ISAPI con digest), o código de función del dialplan.
+  Cada apertura queda registrada con la extensión que la hizo.
+- **Panel: configurar el portero** desde la ficha del cliente, con un botón por relé para
+  probar la apertura. Pide confirmación: no simula nada, del otro lado hay una puerta.
+- **Subir el instalador a mano** desde el panel, para la central sin salida a internet. Los
+  tres archivos van en una sola subida porque el `latest.yml` se escribe al final.
+- **El workflow avisa cuando hay código de softphone sin publicar**: cuenta los commits de
+  `softphone-app/` posteriores al último Release, los lista y emite un warning del run. Es
+  el caso que el 28/09 dejó dos días a la gente bajando una versión vieja.
+
+### Changed
+- **Una sola ventana al abrir el softphone.** Había dos pantallas de carga, una chica y una
+  grande, una atrás de la otra.
+- **El test de TURN no corre solo**, ni al entrar a la pestaña ni al registrarse. Los
+  servidores de la central se siguen trayendo; probarlos es una pregunta que se hace cuando
+  alguien la quiere hacer.
+
+### Fixed
+- **`logger` es una fábrica, no un logger.** Tres llamadas en `app.js` la usaban como si ya
+  estuviera armada; una de ellas devolvía 500 en una subida que **sí había funcionado**.
+
 ## [1.36.0] - 2026-10-04
 
 Tanda del softphone: el aparato deja de depender de que la central le preste todo, y la

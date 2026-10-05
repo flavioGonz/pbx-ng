@@ -283,6 +283,71 @@ cuando tenés varios (el del notebook y un auricular USB). La app se acuerda de 
 
 ---
 
+## 5.5 Clientes y cámaras en el teléfono
+
+La app puede tener **sus propios clientes**, cargados en ella, con o sin central conectada.
+Se guardan cifrados en el mismo lugar que las cuentas SIP (ver 4.7) y **no se borran** al
+cambiar de cuenta ni al desconectarse del sistema: son del aparato, no de la cuenta.
+
+Con el sistema conectado la lista es **una sola**, con los clientes de la central y los del
+teléfono, y cada fila dice de dónde sale. Un cliente del teléfono nunca se sube solo:
+subirlo es una acción aparte.
+
+### 5.5.1 Agregar una cámara sin saber su URL
+
+En la ficha del cliente → **Dispositivos** → *Agregar cámara*. El camino corto es
+**«Buscar la cámara en la red (ONVIF)»**:
+
+1. La app pregunta quién contesta en la red (tarda unos segundos).
+2. Elegís la cámara y ponés su usuario y clave.
+3. Te muestra sus canales con resolución, códec y cuadros por segundo. Elegís uno y la URL
+   se completa sola, con la clave ya puesta.
+
+El canal principal es el de mirar; el secundario sirve cuando la red no da para más.
+
+Si no aparece ninguna, **no quiere decir que la cámara no hable ONVIF**: muchas vienen con
+el descubrimiento apagado de fábrica, y por wifi el multicast se pierde. Poné la IP a mano
+en el mismo cuadro y seguí igual.
+
+**Probar** (al lado de la URL) abre la cámara de verdad y espera a que entregue video: un
+tilde verde quiere decir que se ve, no que el puerto conteste. Si cambiás la URL, la prueba
+se borra.
+
+### 5.5.2 Dónde queda la cámara
+
+Al guardar se elige:
+
+- **En la central** — la ven todos los que atienden y el video sale por la central, como
+  cualquier otra cámara. Es lo que corresponde para la cámara de un cliente real.
+- **Sólo en este teléfono** — no se comparte ni sale del aparato. Para una obra en curso,
+  una prueba, o un teléfono que no está conectado a ninguna central.
+
+No hay sincronización automática en ningún sentido, **a propósito**: la URL de una cámara
+lleva su usuario y su clave adentro, y subirla sin que nadie lo pida la hace visible a todos
+los que atienden en esa central. «Subir a la central» y «bajar a este teléfono» son dos
+acciones que se piden.
+
+Una cámara guardada sólo en el teléfono se ve igual: la app de escritorio trae su propio
+motor de video. **La versión web no lo tiene** y lo dice en pantalla — ahí hay que subirla a
+la central. Y una cámara que sólo emita H.265 no se va a poder ver en ninguno de los dos:
+eso necesita transcodificar, y el instalador no trae el conversor.
+
+### 5.5.3 Porteros: llamar y abrir
+
+Si el dispositivo está cargado como **portero** y tiene interno, en *Intercom* aparecen,
+debajo de su imagen, el botón de **llamar** (con video: lo que se quiere es ver quién es) y
+un botón por cada **relé**.
+
+Cómo abre lo decide quien configuró el portero en el panel:
+
+- **Tono durante la llamada** — el botón está apagado si no hay llamada en curso; el tono
+  tiene que viajar por el audio de esa llamada.
+- **HTTP al portero** — abre sin necesidad de estar en llamada.
+- **Código del dialplan** — lo marca la central.
+
+Cada apertura queda registrada con el interno que la hizo.
+
+
 ## 6. La ventana flotante (modo mini)
 
 Tocá el botón **mini** en la barra superior y el teléfono se encoge a una **ventanita chica que

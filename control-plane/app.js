@@ -596,6 +596,46 @@ app.post('/api/softphone/ota/config', soloAdminOta, async (req, res) => {
 });
 /* Revisar ahora. Puede tardar lo que tarde bajar 85 MB, asi que la respuesta es el
  * resultado real y no un «ok» inmediato: el que aprieta el boton quiere saber si quedo. */
+/* Subir el instalador a mano. Para la central que de verdad no tiene salida a internet:
+ * ahi no sirve ni el pull ni un push de CI —no le llega nada igual—, y la respuesta honesta
+ * es que alguien traiga el archivo.
+ *
+ * Se aceptan los tres del feed de electron-updater, y el `latest.yml` SIEMPRE va al final,
+ * por la misma razon que en la descarga automatica: es lo que el actualizador lee para
+ * decidir, y escribirlo antes manda a los softphones a buscar un .exe que no esta. Por eso
+ * esto recibe el lote completo en una sola llamada y no un archivo por vez. */
+app.post('/api/softphone/ota/subir', soloAdminOta, express.json({ limit: '200mb' }), async (req, res) => {
+  const b = req.body || {};
+  const archivos = Array.isArray(b.archivos) ? b.archivos : [];
+  if (!archivos.length) return res.status(400).json({ error: 'no vino ningún archivo' });
+  /* Nombres: sólo los del feed, y sin separadores de ruta. Un `name` con `../` escribiria
+   * donde quisiera el que subio el archivo. */
+  const SANO = /^[A-Za-z0-9._ -]+\.(exe|msi|blockmap|apk|yml)$/;
+  const yml = [], resto = [];
+  for (const a of archivos) {
+    const nombre = String((a && a.name) || '').trim();
+    if (!SANO.test(nombre) || nombre.includes('/') || nombre.includes('\\') || nombre.includes('..')) {
+      return res.status(400).json({ error: 'nombre de archivo no permitido: ' + nombre });
+    }
+    (/\.yml$/i.test(nombre) ? yml : resto).push({ nombre, b64: String((a && a.data) || '') });
+  }
+  try {
+    const libre = await _fsm.promises.statfs(SOFTPHONE_DIR).then((x) => Math.floor((x.bsize * x.bavail) / 1048576)).catch(() => null);
+    const pesan = archivos.reduce((n, a) => n + Math.ceil(String(a.data || '').length * 0.75 / 1048576), 0);
+    if (libre != null && libre < pesan + 200) return res.status(507).json({ error: 'quedan ' + libre + ' MB libres y hacen falta ' + (pesan + 200) });
+    /* .part y rename, igual que la descarga: un corte deja un .part que nadie sirve. */
+    const escribir = async (f) => {
+      const destino = _pathm.join(SOFTPHONE_DIR, f.nombre);
+      await _fsm.promises.writeFile(destino + '.part', Buffer.from(f.b64, 'base64'));
+      await _fsm.promises.rename(destino + '.part', destino);
+    };
+    for (const f of resto) await escribir(f);
+    for (const f of yml) await escribir(f);
+    log.info({ archivos: archivos.length, por: req.user && req.user.user }, 'instalador subido a mano');
+    res.json({ ok: true, ...softphoneLatest() });
+  } catch (e) { errorHttp(res, e); }
+});
+
 app.post('/api/softphone/ota/revisar', soloAdminOta, async (req, res) => {
   const b = req.body || {};
   try { res.json(await softphoneOta.revisar({ forzar: !!b.forzar, version: b.version || undefined })); }
@@ -3006,7 +3046,7 @@ app.post('/api/clients/:id/devices', camaraAlta, async (req,res)=>{ const b=req.
     ['crm', 'info', JSON.stringify({ que: 'alta de camara', cliente: Number(req.params.id), dispositivo: rows[0].id,
       etiqueta: rows[0].label, por: (req.user && (req.user.ext || req.user.user)) || null,
       via: (req.user && req.user.scope === 'phone') ? 'softphone' : 'panel' })])
-    .catch((e) => logger.warn({ mod: 'crm', msg: 'no se pudo anotar el alta de camara', err: e && e.message }));
+    .catch((e) => log.warn({ err: e && e.message }, 'no se pudo anotar el alta de camara'));
   res.status(201).json(deviceSafe(rows[0]));
 }catch(e){ if (e && e.code === '23505') return res.status(409).json({ error: 'ese interno ya está asignado a otro portero' }); errorHttp(res, e);} });
 
@@ -3071,7 +3111,7 @@ app.post('/api/devices/:did/rele', async (req,res)=>{ const b=req.body||{}; try{
     ['apertura','info',JSON.stringify({ que:'apertura de relé', dispositivo:dev.id, etiqueta:dev.label,
       cliente:dev.client_id, rele:idx, nombre:r.nombre, modo:r.modo, por:quien,
       via:(req.user && req.user.scope==='phone')?'softphone':'panel' })])
-    .catch((e)=>logger.warn({mod:'crm',msg:'no se pudo anotar la apertura',err:e&&e.message}));
+    .catch((e)=>log.warn({err:e&&e.message},'no se pudo anotar la apertura'));
   res.json({ ok:true, ...r });
 }catch(e){errorHttp(res, e);} });
 

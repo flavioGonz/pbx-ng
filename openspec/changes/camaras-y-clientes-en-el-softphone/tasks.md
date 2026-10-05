@@ -56,7 +56,13 @@
 
 ## 6. Cierre
 
+> Las tareas que quedan abiertas en este cambio necesitan el softphone de Windows
+> **instalado y en uso** (1.3, 2.4, 5.3, 5.4, 6.2). No se marcan desde acá: tildarlas sin
+> haberlas visto convertiría la lista en un adorno. El código está desplegado y la 0.20.0
+> publicada; falta pasarles la mano con el aparato delante.
+
 - [x] 6.1 Subir `softphone-app/package.json` de versión y dejar que CI publique.
 - [ ] 6.2 Probar en el softphone de Windows instalado desde el OTA.
-- [ ] 6.3 Actualizar el manual del softphone.
+- [x] 6.3 `docs/manual/escritorio.md` §5.5: clientes del aparato, alta de cámara por
+      ONVIF, dónde queda cada cámara, y porteros (llamar y abrir).
 - [ ] 6.4 Archivar el cambio en `openspec/changes/archive/`.
