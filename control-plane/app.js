@@ -3008,7 +3008,7 @@ app.post('/api/clients/:id/devices', camaraAlta, async (req,res)=>{ const b=req.
       via: (req.user && req.user.scope === 'phone') ? 'softphone' : 'panel' })])
     .catch((e) => logger.warn({ mod: 'crm', msg: 'no se pudo anotar el alta de camara', err: e && e.message }));
   res.status(201).json(deviceSafe(rows[0]));
-}catch(e){errorHttp(res, e);} });
+}catch(e){ if (e && e.code === '23505') return res.status(409).json({ error: 'ese interno ya está asignado a otro portero' }); errorHttp(res, e);} });
 
 /* Editar un portero sin salir de la ficha: etiqueta, tipo, si esta habilitado y —si hace falta—
  * la URL RTSP. `rtsp_url` ausente o vacio significa «no la toques»: como la pantalla nunca ve la
@@ -3038,7 +3038,7 @@ app.put('/api/devices/:did', crmWrite, async (req,res)=>{ const b=req.body||{}; 
   // Deshabilitar un portero tiene que cortar el RTSP, no solo esconderlo del panel.
   if(rows[0].enabled) g2alta(rows[0].go2rtc_src, rows[0].rtsp_url); else g2baja(rows[0].go2rtc_src);
   res.json(deviceSafe(rows[0]));
-}catch(e){errorHttp(res, e);} });
+}catch(e){ if (e && e.code === '23505') return res.status(409).json({ error: 'ese interno ya está asignado a otro portero' }); errorHttp(res, e);} });
 
 /* Probar el portero contra la camara real. Se re-da de alta el stream antes de probar porque el
  * aparato puede haberse editado hace un segundo y el barrido de 60 s todavia no paso. */

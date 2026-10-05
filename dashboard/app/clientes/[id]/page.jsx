@@ -22,6 +22,98 @@ import Intercom from '../../Intercom';
 import RecordingPlayer from '../../RecordingPlayer';
 
 const API = '/backend/api';
+
+/* Los tres modos de apertura, escritos una vez. No se parecen entre si y conviene que el
+ * que elige lea POR QUE elegiria cada uno, no solo como se llama. */
+const MODO_RELE = { dtmf: 'tono en la llamada', http: 'HTTP al portero', codigo: 'código del dialplan' };
+const MODOS_RELE = [
+  { value: 'dtmf',   label: 'Tono DTMF durante la llamada' },
+  { value: 'http',   label: 'HTTP al portero (Akuvox / Hikvision)' },
+  { value: 'codigo', label: 'Código de función del dialplan' },
+];
+
+/* ── Lo que hace que un portero sea un portero ───────────────────────────────
+ * Su interno (para llamarlo) y sus reles (para abrirle). Van juntos porque se cargan
+ * juntos: el tecnico tiene el aparato delante y pone las dos cosas de una.
+ *
+ * El formulario cambia con el modo porque los tres modos NO piden lo mismo: el tono y el
+ * codigo piden un codigo por rele; el HTTP pide ademas la direccion y las credenciales del
+ * aparato. Mostrar los campos de los tres a la vez deja dos tercios vacios y a alguien
+ * llenando los que no van. */
+function PorteroCampos({ ed, setEd, dev }) {
+  const cfg = ed.rele_cfg || {};
+  const reles = Array.isArray(cfg.reles) ? cfg.reles : [];
+  const setCfg = (parche) => setEd((v) => ({ ...v, rele_cfg: { ...(v.rele_cfg || {}), ...parche } }));
+  const setRele = (i, parche) => setCfg({ reles: reles.map((r, k) => (k === i ? { ...r, ...parche } : r)) });
+  const agregar = () => setCfg({ reles: reles.concat([ed.rele_modo === 'http' ? { nombre: 'Puerta', num: reles.length + 1 } : { nombre: 'Puerta', codigo: '' }]) });
+  const sacar = (i) => setCfg({ reles: reles.filter((_, k) => k !== i) });
+
+  return (
+    <Card withBorder radius="sm" p="xs" mt={8} bg="var(--mantine-color-dark-8)">
+      <Group gap={6} mb={6}><IconBell size={14} /><Text fz="xs" fw={700}>Portero</Text></Group>
+
+      <Group gap={6} align="flex-end" wrap="wrap">
+        <TextInput size="xs" w={120} label="Interno"
+          description="Para llamarlo"
+          placeholder="5001" value={ed.ext || ''}
+          onChange={(e) => setEd((v) => ({ ...v, ext: e.currentTarget.value.replace(/[^0-9*#]/g, '') }))} />
+        <Select size="xs" w={240} label="Cómo abre" placeholder="Sin apertura"
+          data={MODOS_RELE} value={ed.rele_modo || null} clearable
+          onChange={(v) => setEd((x) => ({ ...x, rele_modo: v || '' }))} />
+      </Group>
+
+      {ed.rele_modo === 'dtmf' && (
+        <Text fz={10.5} c="dimmed" mt={6}>
+          El tono viaja por el audio de la llamada, así que sólo se puede abrir <b>estando en la llamada</b>.
+          Es el que anda con cualquier marca sin guardarle credenciales al aparato.
+        </Text>
+      )}
+      {ed.rele_modo === 'codigo' && (
+        <Text fz={10.5} c="dimmed" mt={6}>La central marca el código y la lógica de la puerta queda en el dialplan, donde ya está.</Text>
+      )}
+
+      {ed.rele_modo === 'http' && (
+        <>
+          <Text fz={10.5} c="dimmed" mt={6}>Es el único que abre <b>sin llamada</b>. La central tiene que llegar al portero por HTTP.</Text>
+          <Group gap={6} align="flex-end" wrap="wrap" mt={6}>
+            <Select size="xs" w={130} label="Marca" data={[{ value: 'akuvox', label: 'Akuvox y compat.' }, { value: 'hikvision', label: 'Hikvision' }]}
+              value={cfg.marca || 'akuvox'} onChange={(v) => setCfg({ marca: v })} />
+            <TextInput size="xs" w={150} label="Dirección" placeholder="192.168.1.60" value={cfg.host || ''} onChange={(e) => setCfg({ host: e.currentTarget.value })} />
+            <TextInput size="xs" w={120} label="Usuario" value={cfg.user || ''} onChange={(e) => setCfg({ user: e.currentTarget.value })} />
+            {/* Misma regla que la URL RTSP: la central la tiene, la pantalla no. Vacío
+                significa «no la toques», que es lo que evita borrarla al guardar otra cosa. */}
+            <TextInput size="xs" w={140} label="Clave" type="password"
+              description={cfg.pass_set ? 'Hay una guardada' : 'Todavía no tiene'}
+              placeholder={cfg.pass_set ? '••••••••' : ''}
+              value={cfg.pass || ''} onChange={(e) => setCfg({ pass: e.currentTarget.value })} />
+          </Group>
+        </>
+      )}
+
+      {ed.rele_modo && (
+        <>
+          <Divider my={8} label={<Text fz={10.5} c="dimmed">Relés</Text>} labelPosition="left" />
+          {reles.length === 0 && <Text fz={11} c="dimmed" ta="center" py={4}>Sin relés: el botón de abrir no va a aparecer.</Text>}
+          {reles.map((r, i) => (
+            <Group key={i} gap={6} align="flex-end" mb={6} wrap="nowrap">
+              <TextInput size="xs" style={{ flex: 1 }} placeholder="Nombre (Puerta, Portón…)" value={r.nombre || ''} onChange={(e) => setRele(i, { nombre: e.currentTarget.value })} />
+              {ed.rele_modo === 'http'
+                ? <TextInput size="xs" w={90} placeholder="Nº relé" value={r.num == null ? '' : r.num} onChange={(e) => setRele(i, { num: parseInt(e.currentTarget.value, 10) || 1 })} />
+                : <TextInput size="xs" w={120} placeholder={ed.rele_modo === 'dtmf' ? 'Tono (ej. #)' : 'Código (ej. *71)'} value={r.codigo || ''} onChange={(e) => setRele(i, { codigo: e.currentTarget.value })} />}
+              <ActionIcon size="sm" variant="subtle" color="red" onClick={() => sacar(i)}><IconTrash size={13} /></ActionIcon>
+            </Group>
+          ))}
+          <Button size="xs" variant="light" onClick={agregar}>Agregar relé</Button>
+        </>
+      )}
+
+      {dev && dev.ext && ed.ext && String(dev.ext) !== String(ed.ext) && (
+        <Text fz={10.5} c="orange.5" mt={8}>Cambiar el interno vale: un número no puede estar en dos porteros.</Text>
+      )}
+    </Card>
+  );
+}
+
 const j = (u, o) => fetch(u, o).then(r => (r.ok ? r.json() : Promise.reject(r))).catch(() => null);
 const initials = (n) => (n || '?').split(/[\s.]+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 const fmtDur = (s) => { s = s || 0; const m = Math.floor(s / 60), ss = s % 60; return m ? `${m}m ${ss}s` : `${ss}s`; };
@@ -164,6 +256,23 @@ export default function ClienteFicha() {
   async function addSpace() { if (!nsp.name) return; await j(API + '/clients/' + id + '/spaces', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nsp) }); setNsp({ name: '', kind: '' }); toast('Espacio agregado', 'ok'); reload(); }
   async function delSpace(sid) { await j(API + '/spaces/' + sid, { method: 'DELETE' }); reload(); }
   async function addDevice() { if (!nd.label) return; await j(API + '/clients/' + id + '/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nd) }); setNd({ label: '', type: 'intercom', rtsp_url: '' }); toast('Dispositivo agregado', 'ok', { description: 'Tarda unos segundos en aparecer el video.' }); recargarVideo(); reload(); }
+  /* Abrir de verdad desde el panel. No es un «test» que simula: abre la puerta. Por eso
+   * pide confirmacion — del otro lado hay una puerta que se abre en la calle de alguien. */
+  const [abriendo, setAbriendo] = useState('');
+  async function probarApertura(d, i) {
+    const nombre = ((d.rele_cfg && d.rele_cfg.reles || [])[i] || {}).nombre || ('relé ' + (i + 1));
+    if (!confirm('Esto ABRE «' + nombre + '» de verdad, no es una simulación. ¿Seguir?')) return;
+    setAbriendo(d.id + ':' + i);
+    try {
+      const r = await fetch(API + '/devices/' + d.id + '/rele', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rele: i }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (r.ok) toast('Abierto: ' + (b.nombre || nombre), 'ok');
+      else toast('No abrió: ' + (b.error || r.status), 'bad');
+    } catch (e) { toast('No abrió: ' + e.message, 'bad'); }
+    finally { setAbriendo(''); }
+  }
   async function delDevice(did) { if (!confirm('¿Sacar este portero? Deja de verse y go2rtc corta el RTSP.')) return; await j(API + '/devices/' + did, { method: 'DELETE' }); toast('Dispositivo eliminado', 'info'); recargarVideo(); reload(); }
   /* Guardar la edición de un portero. `rtsp_url` vacío significa «no la toques»: la URL viaja
    * enmascarada desde la API (adentro van usuario y clave de la cámara), así que mandar lo que
@@ -171,7 +280,13 @@ export default function ClienteFicha() {
   async function saveDevice() {
     if (!ed || !ed.label) return;
     const r = await j(API + '/devices/' + ed.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: ed.label, type: ed.type, enabled: ed.enabled, rtsp_url: ed.rtsp_nueva || '' }) });
+      body: JSON.stringify({
+        label: ed.label, type: ed.type, enabled: ed.enabled, rtsp_url: ed.rtsp_nueva || '',
+        /* Lo del portero se manda SIEMPRE que el tipo sea portero, aunque esté vacío: así
+         * se puede borrar el interno de un aparato al que se lo pusieron por error. Para
+         * una cámara ni se toca. */
+        ...(ed.type === 'intercom' ? { ext: ed.ext || '', rele_modo: ed.rele_modo || null, rele_cfg: ed.rele_cfg || {} } : {}),
+      }) });
     if (!r) { toast('No se pudo guardar el dispositivo', 'bad'); return; }
     setEd(null); toast('Dispositivo guardado', 'ok'); recargarVideo(); reload();
   }
@@ -340,6 +455,11 @@ export default function ClienteFicha() {
                         description={d.rtsp_set ? 'Dejalo vacío para conservar la que ya está cargada' : 'Todavía no tiene URL cargada'}
                         placeholder={d.rtsp_url || 'rtsp://usuario:clave@ip:554/stream'}
                         value={ed.rtsp_nueva} onChange={e => setEd(v => ({ ...v, rtsp_nueva: e.currentTarget.value }))} />
+                      {/* Un portero no es una cámara que además suena: se le habla y abre una
+                          puerta. Esos dos datos —su interno y sus relés— sólo aparecen cuando
+                          el tipo es portero, para no llenar de campos muertos el alta de una
+                          cámara, que es el caso común. */}
+                      {ed.type === 'intercom' && <PorteroCampos ed={ed} setEd={setEd} dev={d} />}
                       <Group justify="flex-end" gap={6} mt={8}>
                         <Button size="xs" variant="default" leftSection={<IconX size={13} />} onClick={() => setEd(null)}>Cancelar</Button>
                         <Button size="xs" color="teal" leftSection={<IconDeviceFloppy size={13} />} onClick={saveDevice}>Guardar</Button>
@@ -357,11 +477,28 @@ export default function ClienteFicha() {
                           {p && <> <Badge size="xs" variant="light" color={p.ok ? 'teal' : 'red'}>{p.ok ? 'responde' : 'no responde'}</Badge></>}
                         </Text>
                         <Text fz={11} c="dimmed" truncate>{d.rtsp_url || 'sin URL RTSP'}</Text>
+                        {d.type === 'intercom' && (
+                          <Text fz={11} c="dimmed">
+                            {d.ext ? 'interno ' + d.ext : 'sin interno: no se lo puede llamar'}
+                            {' · '}
+                            {d.rele_modo
+                              ? ((d.rele_cfg && d.rele_cfg.reles || []).length || 0) + ' relé(s) · ' + (MODO_RELE[d.rele_modo] || d.rele_modo)
+                              : 'sin apertura configurada'}
+                          </Text>
+                        )}
                         {p && !p.ok && p.motivo && <Text fz={11} c="red.6">{p.motivo}</Text>}
                       </div>
                       <Group gap={4} wrap="nowrap">
                         <Tooltip label="Probar contra la cámara"><ActionIcon size="sm" variant="subtle" color="blue" loading={probando === d.id} onClick={() => testDevice(d.id)}><IconPlugConnected size={14} /></ActionIcon></Tooltip>
-                        <Tooltip label="Editar"><ActionIcon size="sm" variant="subtle" onClick={() => setEd({ id: d.id, label: d.label || '', type: d.type || 'camera', enabled: d.enabled !== false, rtsp_nueva: '' })}><IconPencil size={14} /></ActionIcon></Tooltip>
+                        {/* Probar la apertura desde acá: el instalador está parado al lado de la
+                            puerta y lo que necesita saber es si abrió, no si el formulario guardó.
+                            El de tono no se ofrece porque sin llamada no tiene por dónde viajar. */}
+                        {d.type === 'intercom' && d.rele_modo && d.rele_modo !== 'dtmf' && (d.rele_cfg && d.rele_cfg.reles || []).map((r, i) => (
+                          <Tooltip key={i} label={'Abrir ' + (r.nombre || ('relé ' + (i + 1)))}>
+                            <ActionIcon size="sm" variant="subtle" color="yellow" loading={abriendo === d.id + ':' + i} onClick={() => probarApertura(d, i)}><IconLock size={14} /></ActionIcon>
+                          </Tooltip>
+                        ))}
+                        <Tooltip label="Editar"><ActionIcon size="sm" variant="subtle" onClick={() => setEd({ id: d.id, label: d.label || '', type: d.type || 'camera', enabled: d.enabled !== false, rtsp_nueva: '', ext: d.ext || '', rele_modo: d.rele_modo || '', rele_cfg: { marca: 'akuvox', reles: [], ...(d.rele_cfg || {}) } })}><IconPencil size={14} /></ActionIcon></Tooltip>
                         <Tooltip label="Sacar"><ActionIcon size="sm" variant="subtle" color="red" onClick={() => delDevice(d.id)}><IconTrash size={14} /></ActionIcon></Tooltip>
                       </Group>
                     </Group>
