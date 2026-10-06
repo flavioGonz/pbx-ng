@@ -806,7 +806,11 @@ function ordenesExternas(session) {
       if (!iaExterna.destinoPermitido(agente, destino)) throw new Error('destino no permitido para este agente: ' + destino);
       cancelarEspera();
       await esperarColaVacia(session);
+      /* Antes de soltar el canal: después de `continueInDialplan` ya no está en Stasis y
+       * no se le puede leer el linkedid. */
+      const atencion = await vigilarAtencion(session, pbxCallId);
       const ok = await doTransfer(session, destino, 'derivación del backend');
+      if (!ok) olvidarAtencion(atencion);
       avisarBackend(session, { type: 'transferencia', pbxCallId, ok, detalle: ok ? null : 'no se pudo transferir a ' + destino }, { final: true });
       cerrarExterno(session, 'transferida');
       if (!ok) throw new Error('no se pudo transferir a ' + destino);
@@ -820,6 +824,64 @@ function ordenesExternas(session) {
       auditarAccion(session, { herramienta: 'abrir_porton', resultado: 'DTMF ' + digitos + ' (orden del backend)', razon: 'ia-externa' });
     },
   };
+}
+
+/* QUIÉN ATENDIÓ LA DERIVACIÓN (internos-en-el-historial del asistente, docs/CONTRATOS.md §11).
+ * Al transferir, la central suelta el canal (`continueInDialplan`) y deja de seguir la
+ * llamada: el backend sabía que la transferencia salió, pero no qué interno la tomó. Los
+ * `DialEnd` del AMI sí lo dicen —es lo que ya usa `llamada.contestada`—, así que se anota
+ * cada derivación por el linkedid de la llamada y, cuando un interno contesta, se le avisa
+ * al backend `atendio { interno }`; si quien llama cuelga sin que nadie conteste,
+ * `atendio { interno: null }`. Una sola vez por llamada: con un grupo de timbre llegan los
+ * CANCEL de los que dejaron de sonar, y no cuentan. Va por HTTP, como el resultado de la
+ * transferencia: el relay ya se cerró. La entrada vence sola: si nunca llega ni la
+ * atención ni el corte (un reinicio de la API, un desvío a otro lado), no queda para
+ * siempre. Solo las transferencias que ordena el backend: el respaldo no la anota, porque
+ * el backend puede no saber de esa llamada. */
+const ATENCION_VENCE_MS = 10 * 60 * 1000;
+const atenciones = new Map();
+
+async function vigilarAtencion(session, pbxCallId) {
+  const canal = session.channel && session.channel.id;
+  if (!canal) return null;
+  let clave = canal;
+  try {
+    const v = await session.channel.getChannelVar({ variable: 'CHANNEL(linkedid)' });
+    if (v && v.value) clave = String(v.value);
+  } catch (e) { session.log('IA externa: no se pudo leer el linkedid (' + (e && e.message) + '); se sigue por el canal'); }
+  const atencion = { session, canal, clave, pbxCallId, timer: null };
+  atencion.timer = setTimeout(() => olvidarAtencion(atencion), ATENCION_VENCE_MS);
+  if (atencion.timer.unref) atencion.timer.unref();
+  atenciones.set(clave, atencion);
+  return atencion;
+}
+
+function olvidarAtencion(atencion) {
+  if (!atencion) return;
+  clearTimeout(atencion.timer);
+  if (atenciones.get(atencion.clave) === atencion) atenciones.delete(atencion.clave);
+}
+
+function avisarAtencion(atencion, interno) {
+  olvidarAtencion(atencion);
+  atencion.session.log('IA externa: ' + (interno ? 'atendió la derivación el ' + interno : 'nadie atendió la derivación'));
+  avisarBackend(atencion.session, { type: 'atendio', pbxCallId: atencion.pbxCallId, interno: interno || null }, { final: true });
+}
+
+/* app.js, con cada `DialEnd` ANSWER de un interno. El linkedid es el de la llamada aunque
+ * el que marca sea un canal Local de un grupo de timbre; el uniqueid, por si el linkedid
+ * no se pudo leer y se anotó por el canal. */
+function alAtender(linkedid, uniqueid, interno) {
+  const atencion = atenciones.get(String(linkedid || '')) || atenciones.get(String(uniqueid || ''));
+  if (atencion) avisarAtencion(atencion, String(interno));
+}
+
+/* app.js, con cada `Hangup`: el del canal de quien llama, si nadie contestó todavía. Los
+ * de los internos que dejaron de sonar no cuentan. */
+function alColgar(uniqueid) {
+  for (const atencion of atenciones.values()) {
+    if (atencion.canal === uniqueid) return avisarAtencion(atencion, null);
+  }
 }
 
 /* Un hecho de la llamada para el backend. Va por el relay, numerado: si está cortado, sale
@@ -1241,7 +1303,7 @@ function recargarIaExterna() {
   IAX.recargar().catch((e) => log.warn('IA externa: no se pudieron recargar los canales', { err: e.message }));
 }
 
-module.exports = { init, startAiSession, close, metricas, recargarIaExterna };
+module.exports = { init, startAiSession, close, metricas, recargarIaExterna, alAtender, alColgar };
 /* Sólo para la prueba del ORDEN de cierre (test/inactividad.test.js): lo que hay que fijar
  * es que el socket se suelte antes de tocar el canal, y eso no se ve desde afuera. */
 module.exports._sesiones = () => sessions;
@@ -1264,4 +1326,7 @@ module.exports._avisarBackend = avisarBackend;
 module.exports._ordenesExternas = ordenesExternas;
 module.exports._cerrarExterno = cerrarExterno;
 module.exports._esperarOrden = esperarOrden;
+/* Y para la prueba de quién atendió la derivación: cuántas quedan anotadas. */
+module.exports._atenciones = () => atenciones;
+module.exports._ATENCION_VENCE_MS = ATENCION_VENCE_MS;
 module.exports._setIax = (x) => { IAX = x; };

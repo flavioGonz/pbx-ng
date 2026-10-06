@@ -622,3 +622,71 @@ test('pipeline: la espera de la orden es solo por la sesión de voz cerrada, y u
   assert.equal(cerrada.esperaOrden, undefined);
 });
 
+
+/* ── Quién atendió la derivación (internos-en-el-historial del asistente) ─────── */
+function derivacionFalsa(pipe, { uuid, canal, linkedid, transfiere = true }) {
+  const sesion = sesionExterna({ relay: relayFalso({ vivo: false, terminado: true }), logs: [] });
+  sesion.uuid = uuid;
+  sesion.agent.agentes_exten = '6000';
+  sesion.channel = {
+    id: canal,
+    removeListener: () => {},
+    setChannelVar: async () => {},
+    continueInDialplan: async () => { if (!transfiere) throw new Error('Channel not found'); },
+    hangup: async () => {},
+    getChannelVar: async () => { if (!linkedid) throw new Error('sin la variable'); return { value: linkedid }; },
+  };
+  return sesion;
+}
+
+test('pipeline: quién atendió la derivación — el interno que contesta, una sola vez, por HTTP', async () => {
+  const pipe = require('../ai-pipeline');
+  const http = [];
+  pipe._setIax({ enviarHecho: async (_a, h) => { http.push(h); return { ok: true }; } });
+  pipe._setAri({ channels: { hangup: async () => {} } });
+  await pipe._ordenesExternas(derivacionFalsa(pipe, { uuid: 'c1', canal: 'canal-1', linkedid: 'L1' })).transferir('6000');
+  assert.equal(pipe._atenciones().size, 1);
+  /* Un grupo de timbre: contesta el 1002 desde un canal Local; el 1003, que también sonaba, ya no cuenta. */
+  pipe.alAtender('L1', 'local-2', '1002');
+  pipe.alAtender('L1', 'local-3', '1003');
+  pipe.alColgar('canal-1');
+  await esperar(10);
+  assert.deepEqual(http.filter((h) => h.type === 'atendio'), [{ type: 'atendio', pbxCallId: 'c1', interno: '1002' }]);
+  assert.equal(pipe._atenciones().size, 0);
+  pipe._setIax(null);
+});
+
+test('pipeline: quién atendió la derivación — si quien llama cuelga sin que nadie conteste, «nadie»; un interno que deja de sonar no', async () => {
+  const pipe = require('../ai-pipeline');
+  const http = [];
+  pipe._setIax({ enviarHecho: async (_a, h) => { http.push(h); return { ok: true }; } });
+  pipe._setAri({ channels: { hangup: async () => {} } });
+  /* Sin poder leer el linkedid, se sigue por el canal. */
+  await pipe._ordenesExternas(derivacionFalsa(pipe, { uuid: 'c2', canal: 'canal-2', linkedid: null })).transferir('6000');
+  pipe.alColgar('pjsip-1002-que-dejo-de-sonar');
+  assert.equal(pipe._atenciones().size, 1);
+  pipe.alColgar('canal-2');
+  await esperar(10);
+  assert.deepEqual(http.filter((h) => h.type === 'atendio'), [{ type: 'atendio', pbxCallId: 'c2', interno: null }]);
+  /* Y por el canal también se reconoce un ANSWER, si no hubo linkedid. */
+  await pipe._ordenesExternas(derivacionFalsa(pipe, { uuid: 'c3', canal: 'canal-3', linkedid: null })).transferir('6000');
+  pipe.alAtender('', 'canal-3', '1004');
+  await esperar(10);
+  assert.deepEqual(http.filter((h) => h.type === 'atendio').at(-1), { type: 'atendio', pbxCallId: 'c3', interno: '1004' });
+  pipe._setIax(null);
+});
+
+test('pipeline: quién atendió la derivación — si la transferencia falla no queda anotada, y la entrada vence sola', async (t) => {
+  const pipe = require('../ai-pipeline');
+  pipe._setIax({ enviarHecho: async () => ({ ok: true }) });
+  pipe._setAri({ channels: { hangup: async () => {} } });
+  await assert.rejects(pipe._ordenesExternas(derivacionFalsa(pipe, { uuid: 'c4', canal: 'canal-4', linkedid: 'L4', transfiere: false })).transferir('6000'), /no se pudo transferir/);
+  assert.equal(pipe._atenciones().size, 0);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  await pipe._ordenesExternas(derivacionFalsa(pipe, { uuid: 'c5', canal: 'canal-5', linkedid: 'L5' })).transferir('6000');
+  assert.equal(pipe._atenciones().size, 1);
+  t.mock.timers.tick(pipe._ATENCION_VENCE_MS);
+  assert.equal(pipe._atenciones().size, 0);
+  t.mock.timers.reset();
+  pipe._setIax(null);
+});

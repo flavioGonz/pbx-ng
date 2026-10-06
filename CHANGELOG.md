@@ -27,6 +27,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   `control-plane/ai-pipeline.js`, migración 0031, `test/ia-externa-relay.test.js`)
 
 ### Added
+- **IA externa: la central avisa quién atendió la derivación.** Después de un
+  `transferir` que salió bien, manda el hecho `atendio { pbxCallId, interno }` por HTTP
+  (`POST /api/pbx/llamadas/:id/hechos`): el interno que contestó, tomado del `DialEnd`
+  con `ANSWER` de AMI de la misma llamada (el primero, en un grupo de timbre), o `null` si
+  quien llama cortó sin que nadie contestara. Se avisa una sola vez y se deja de vigilar a
+  los 10 min. Compatible para los dos lados: un backend anterior lo rechaza con 4xx (sin
+  reintento). Contrato en `docs/CONTRATOS.md` §11. (`control-plane/ai-pipeline.js`,
+  `control-plane/app.js`, `test/ia-externa-relay.test.js`)
 - **Proveedor «IA externa»: el agente lo conduce el backend del asistente de voz.** La
   central abre la sesión de GPT-Live por el mismo WebSocket de siempre, pero con la
   configuración que publica el backend —sin prompt, saludo, herramientas ni inactividad

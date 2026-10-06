@@ -2603,6 +2603,9 @@ ami.on('managerevent', (e) => {
 
   /* Atendida: es el evento que el backoffice usa para empezar a contar el tiempo de
    * atención y para saber QUIÉN atendió, que con una cola no se sabe hasta este momento. */
+  /* Si es una derivación del asistente de voz, el backend se entera de quién la atendió
+   * (ai-pipeline.js · alAtender). */
+  if (status === 'ANSWER') aiPipeline.alAtender(linked, e.uniqueid || e.Uniqueid || '', ext);
   if (status === 'ANSWER' && !finDedup.visto('ans:' + key)) {
     outbox.emitir('llamada.contestada', {
       call_id: linked || null, leg_id: e.destuniqueid || e.DestUniqueid || null,
@@ -2628,6 +2631,9 @@ ami.on('managerevent', (e) => {
   if (!e || e.event !== 'Hangup') return;
   const uniq = e.uniqueid || e.Uniqueid || '';
   const linked = e.linkedid || e.Linkedid || '';
+  /* Colgó quien llamaba mientras sonaba una derivación del asistente y nadie la atendió
+   * (ai-pipeline.js · alColgar). */
+  if (uniq) aiPipeline.alColgar(uniq);
   if (!uniq || !linked || uniq !== linked) return;
   if (finDedup.visto('fin:' + linked)) return;
   outbox.emitir('llamada.terminada', {

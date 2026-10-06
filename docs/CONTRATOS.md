@@ -1908,6 +1908,12 @@ Proveedor `ia-externa` de `pbxng_ai_agents` (migración 0029, `control-plane/ia-
 
 **Hechos con el relay cerrado** (el resultado de una transferencia, el corte de quien llama al final): `POST <externo_url>/api/pbx/llamadas/<pbxCallId>/hechos` con el token y el hecho como cuerpo. Cualquier instancia lo anota en la llamada. Tres intentos (1 y 2 s entre ellos); un 4xx no se reintenta. Si el aviso de la llamada nunca llegó a salir (quien llama cortó antes de abrir el relay), no se le manda nada: el backend no sabe de esa llamada.
 
+**Quién atendió la derivación** (nuevo, compatible para los dos lados): después de un `transferir` que salió bien, la central avisa con el hecho `atendio { pbxCallId, interno }`, por HTTP como los demás hechos con el relay cerrado (a esa altura el relay ya terminó).
+- `interno` es el interno que contestó (dígitos), tomado del `DialEnd` con `ANSWER` de AMI de la misma llamada (`linkedid` del canal de quien llama; si no se puede leer, el `uniqueid` del canal). En un grupo de timbre cuenta el primero que contesta: se avisa una sola vez por llamada.
+- `interno: null` es «nadie atendió»: quien llama cortó (el `Hangup` de su canal) sin que ningún interno contestara.
+- Si en 10 min no pasó ninguna de las dos cosas, la central se olvida de la llamada sin avisar. Una transferencia que falla no se vigila.
+- Un backend que no conoce el hecho contesta 4xx y no se reintenta; un backend que lo conoce y nunca lo recibe (una central anterior) deja la llamada sin ese dato.
+
 **Respaldo** (transferir a `default_exten`, o colgar si no hay):
 - **Sin abrir sesión:** no hay configuración bajada.
 - **Cerrando la sesión:** el backend no confirma dentro de `attachTimeoutMs` o la rechaza, o la sesión no abre.
