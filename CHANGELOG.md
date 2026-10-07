@@ -47,6 +47,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **El freno del enlace web de las salas no agrupaba las IPv6.** El de click-to-call y el
+  del login pasan la IP por `ipKeyGenerator` (una IPv6 cuenta por su /64); este no, así que
+  con IPv6 se podía rotar de dirección en cada intento y saltarse el cupo de 10 cada 5
+  minutos. `express-rate-limit` lo avisaba al arrancar. (`control-plane/salas.js`)
 - **Si el modelo realtime no abría, la llamada se colgaba en vez de pasar a una persona.**
   El camino previsto es disculparse con TTS local y derivar al destino por defecto, pero un
   socket que no conecta emite `error` y enseguida `close`, y el manejador del cierre

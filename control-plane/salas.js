@@ -715,7 +715,9 @@ module.exports = function init(deps) {
     ? rateLimit({
       windowMs: 5 * 60 * 1000, limit: 10,
       standardHeaders: 'draft-7', legacyHeaders: false,
-      keyGenerator: (req) => String((clientIp && clientIp(req)) || req.ip || ''),
+      /* `ipKeyGenerator` agrupa las IPv6 por /64, como el click-to-call y el login: sin
+       * eso, quien tiene un /64 rota de dirección en cada pedido y el cupo no lo frena. */
+      keyGenerator: (req) => require('express-rate-limit').ipKeyGenerator(String((clientIp && clientIp(req)) || req.ip || '')),
       handler: (req, res) => res.status(429).json({ error: 'Demasiados intentos, probá en unos minutos.' }),
     })
     : (req, res, next) => next();
