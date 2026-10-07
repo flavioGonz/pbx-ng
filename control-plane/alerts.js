@@ -190,8 +190,13 @@ async function checkSecurity() {
   const r = await rule('security.attack');
   if (!r || !r.enabled) return;
   const p = r.params || {}; const win = Number(p.window_min || 10), need = Number(p.failed || 20);
-  const st = await getState('sec', { failed_at: nowMin() });
-  const prevAt = Number(st.failed_at || nowMin());
+  /* La primera vuelta sólo APRENDE la marca y la guarda. Antes se tomaba `nowMin()` como
+   * valor por defecto sin guardarlo: sin fila previa en pbxng_alert_state (toda
+   * instalación nueva) cada vuelta veía «la marca es ahora», salía por la ventana y no
+   * escribía nada, así que este chequeo no corría NUNCA. */
+  const st = await getState('sec', {});
+  if (!st.failed_at) { st.failed_at = nowMin(); await setState('sec', st); return; }
+  const prevAt = Number(st.failed_at);
   if (nowMin() - prevAt < win) return;
   const { rows } = await pool.query(
     `SELECT COALESCE(sum((detail->>'n')::int),0)::int AS fallos, count(DISTINCT detail->>'ip')::int AS ips

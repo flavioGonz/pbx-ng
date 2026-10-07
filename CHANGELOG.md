@@ -47,6 +47,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **La alerta «ataque en curso» no saltaba nunca en una instalación nueva.** El chequeo
+  tomaba «ahora» como marca de la vuelta anterior cuando no había ninguna guardada, y no la
+  guardaba: cada vuelta veía que no había pasado la ventana y salía sin escribir nada. Sin
+  la fila `sec` en `pbxng_alert_state` (que nada crea) la regla `security.attack` quedaba
+  muda. Ahora la primera vuelta guarda la marca y las siguientes comparan contra ella.
 - **`/api/v1/llamadas` decía «no hay llamadas» con la central caída.** Sin ARI tenía que
   contestar 503 («no lo sé»), y así lo dice el contrato, pero `getChannels()` devuelve una
   lista vacía en vez de fallar: el 503 no salía nunca y el backoffice mostraba un tablero
