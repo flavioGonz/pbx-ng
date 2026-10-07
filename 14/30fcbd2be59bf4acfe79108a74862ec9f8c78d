@@ -1,0 +1,19 @@
+control-plane/test/v1-extra.test.js
+  s_ace4c2a288c06b::t_1e96a585e726f6 1-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1430fcbd2be59bf4acfe79108a74862ec9f8c78d",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
