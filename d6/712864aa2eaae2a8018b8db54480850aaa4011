@@ -1,0 +1,27 @@
+control-plane/backup.js
+  s_ace4c2a288c06b::t_6249c23465db34 78-79,82-87,89,91-94,116
+CHANGELOG.md
+  s_ace4c2a288c06b::t_eae7be9a96e098 50-55
+docker/README.md
+  s_ace4c2a288c06b::t_c513c19bbe57c4 87
+docs/CONTRATOS.md
+  s_ace4c2a288c06b::t_494e49688bb8ae 1691
+docs/PACKAGING.md
+  s_ace4c2a288c06b::t_6798857a29a7df 194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d6712864aa2eaae2a8018b8db54480850aaa4011",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
