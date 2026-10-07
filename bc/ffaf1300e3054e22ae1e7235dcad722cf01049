@@ -1,0 +1,22 @@
+control-plane/test/helpers/smtp-falso.js
+  s_ace4c2a288c06b::t_463374b4f0da05 1-69
+control-plane/test/app-ajustes.test.js
+  s_ace4c2a288c06b::t_8367959e7bf332 77
+  s_ace4c2a288c06b::t_f8ca7b3e482fab 1-76,78-483
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bcffaf1300e3054e22ae1e7235dcad722cf01049",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
