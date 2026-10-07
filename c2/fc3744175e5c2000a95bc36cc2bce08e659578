@@ -1,0 +1,20 @@
+control-plane/test/recstore.test.js
+  s_ace4c2a288c06b::t_c9299c244f2448 1-76,78,80-159
+  s_ace4c2a288c06b::t_a11d4bf17001ab 77,79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c2fc3744175e5c2000a95bc36cc2bce08e659578",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
