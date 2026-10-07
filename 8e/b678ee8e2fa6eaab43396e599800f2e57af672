@@ -1,0 +1,28 @@
+control-plane/test/sec-ramas-salas.test.js
+  s_ace4c2a288c06b::t_8a953fc10b4c4c 1-569
+  s_ace4c2a288c06b::t_d3134dca7d8888 570-572
+control-plane/test/sec-ramas-guard.test.js
+  s_ace4c2a288c06b::t_fc2628f11d76e0 1-631
+  s_ace4c2a288c06b::t_eea53093088915 632
+control-plane/test/sec-ramas-trunks.test.js
+  s_ace4c2a288c06b::t_ee060c4c05ed42 1-693
+control-plane/test/sec-ramas-ccreport.test.js
+  s_ace4c2a288c06b::t_7c355a5e60aafe 1-512
+  s_ace4c2a288c06b::t_2f979705bceaf1 513-514
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8eb678ee8e2fa6eaab43396e599800f2e57af672",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
