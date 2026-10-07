@@ -47,6 +47,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Las grabaciones de internos no encontraban su llamada en el CDR.** El indexador
+  comparaba la hora del archivo contra `cdr.start` como si estuviera en UTC, pero Asterisk
+  la escribe en la hora local de la central (`cdr_pgsql` sin `timezone`, contenedor con
+  `TZ=America/Montevideo`): en Montevideo la ventana quedaba corrida tres horas, y la
+  grabación quedaba sin origen, sin destino y sin `call_id` (no se podía pedir por llamada
+  desde `/api/v1`). Ahora se compara en la zona de la central, igual que `ccreport.js`. Las
+  grabaciones ya indexadas antes de este arreglo siguen sin emparejar: el indexador no las
+  vuelve a mirar. (`control-plane/recordings.js`)
 - **Errores de entrada que contestaban 500.** Editar una cola que no existe reventaba con
   «Cannot read properties of undefined» (ahora 404); crear una cola sin nombre, subir un
   respaldo con un nombre inválido y transcribir una grabación que no existe contestaban 500

@@ -20,6 +20,10 @@ const recstore = require('./recstore');   // grabaciones: NAS/S3, subida automá
 /* El volumen de las grabaciones. El mismo valor (y la misma variable) que usa recstore.js:
  * estaba escrito fijo acá, así que configurar REC_DIR lo respetaba la mitad del código. */
 const REC_DIR = process.env.REC_DIR || '/recordings';
+/* La zona de la central (la de `TZ`, la misma que usa Asterisk al escribir el CDR). */
+const TZ_CENTRAL = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (_) { return process.env.TZ || 'UTC'; }
+})();
 const report = require('./report');       // informe ejecutivo del CDR (HTML A4)
 
 /**
@@ -373,18 +377,20 @@ module.exports = function init(deps) {
            * `abs(extract(epoch from start) - $2) < 300` ningún índice servía y cada
            * grabación nueva costaba un Seq Scan del CDR entero (medido: 270× más lento
            * con 500.000 filas, y el indexador corre en bucle sobre el directorio).
-           * `to_timestamp(...) AT TIME ZONE 'UTC'` devuelve `timestamp without time
-           * zone` en UTC, que es exactamente lo que `extract(epoch from start)` asumía
-           * de esta columna: el criterio de comparación no cambia, sólo la forma.
-           * El `abs()` queda en el ORDER BY, sobre las pocas filas que ya pasaron el
-           * rango: ahí no hace daño. */
+           *
+           * `cdr.start` es `timestamp` SIN zona y Asterisk lo escribe en la hora LOCAL de
+           * la central (cdr_pgsql sin `timezone`, contenedor con TZ=America/Montevideo).
+           * Antes se comparaba contra la hora UTC: en Montevideo la ventana quedaba
+           * corrida tres horas y ninguna grabación de interno encontraba su llamada —sin
+           * origen, sin destino y sin `call_id`—. Ahora el epoch se lleva a la hora de
+           * pared de la central (`AT TIME ZONE $3`), la misma zona que usa ccreport.js. */
           const cq = await pool.query(
             `SELECT src, dst, linkedid FROM cdr
               WHERE (src=$1 OR dst=$1)
-                AND start >= to_timestamp($2::bigint - 300) AT TIME ZONE 'UTC'
-                AND start <= to_timestamp($2::bigint + 300) AT TIME ZONE 'UTC'
-              ORDER BY abs(extract(epoch from start) - $2::bigint) ASC LIMIT 1`,
-            [rext, epoch]);
+                AND start >= to_timestamp($2::bigint - 300) AT TIME ZONE $3
+                AND start <= to_timestamp($2::bigint + 300) AT TIME ZONE $3
+              ORDER BY abs(extract(epoch from (start AT TIME ZONE $3)) - $2::bigint) ASC LIMIT 1`,
+            [rext, epoch, TZ_CENTRAL]);
           if (cq.rows[0]) { src = cq.rows[0].src; dst = cq.rows[0].dst; cq0 = cq.rows[0]; }
         } catch (e) {}
         const dur = Math.max(0, Math.round((f.bytes - 44) / 16000));
