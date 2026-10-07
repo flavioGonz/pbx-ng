@@ -281,6 +281,79 @@ test('realtime: saluda cuando entra audio, reproduce al ritmo del canal, ejecuta
   } finally { ajustes.delete('openai_api_key'); ajustes.delete('realtime_url'); clientes.length = 0; }
 });
 
+test('realtime: las herramientas de portería con sus candados, el CRM, el mensaje y el corte con despedida', async (t) => {
+  const modelo = await modeloFalso();
+  t.after(() => modelo.cerrar());
+  const ari = asteriskFalso();
+  pipe.init(ari, pool);
+  ajustes.set('openai_api_key', 'sk-prueba');
+  ajustes.set('realtime_url', modelo.url);
+  clientes.push({ id: 1, name: 'Edificio Sol', doc: '', address: 'Av. Brasil 100', notes: '' });
+  crm.ruta('POST', '/crm-ia', (p) => (p.body.tipo === 'verificar_unidad' ? { ok: true, texto: 'unidad 3B al día', datos: { u: '3B' } } : { result: 'saldo al día' }));
+  crm.ruta('POST', '/porton', { ok: true });
+  require('../herramientas')._resetTopes();
+  const herr = {
+    verificar_autorizado: { on: true }, verificar_unidad: { on: true }, consultar_datos: { on: true }, tomar_mensaje: { on: true },
+    terminar_llamada: { on: true }, abrir_porton: { on: true, modo: 'dtmf', dtmf: '#7', ventana: '00:00-23:59' },
+  };
+  const pedir = (id, nombre, args) => modelo.mandar({ type: 'response.function_call_arguments.done', call_id: id, name: nombre, arguments: JSON.stringify(args) });
+  const respuesta = (id) => hasta(() => { const r = modelo.recibido.find((x) => x.type === 'conversation.item.create' && x.item.call_id === id); return r ? JSON.parse(r.item.output) : null; });
+  try {
+    const ch = canal();
+    await pipe.startAiSession(ch, Object.assign({}, AGENTE, { provider: 'openai-realtime', crm_webhook: crm.url + '/crm-ia', herramientas: herr, despedida_text: 'Chau' }));
+    const m = ari.medios.at(-1);
+    await hasta(() => modelo.tipos().includes('session.update'));
+    hablar(m, 5, 0);
+    /* Abrir sin verificar antes: el candado lo niega. */
+    pedir('a0', 'abrir_porton', { motivo: 'apurado' });
+    assert.equal((await respuesta('a0')).ok, false);
+    pedir('v1', 'verificar_autorizado', { nombre: 'Juan Pérez' });
+    assert.equal((await respuesta('v1')).autorizado, true);
+    pedir('a1', 'abrir_porton', { motivo: 'autorizado' });
+    assert.equal((await respuesta('a1')).ok, true, 'verificado, abre');
+    assert.equal(ari.dtmf.at(-1).dtmf, '#7');
+    pedir('c1', 'consultar_datos', { consulta: 'saldo' });
+    assert.equal((await respuesta('c1')).respuesta, 'saldo al día');
+    pedir('u1', 'verificar_unidad', { unidad: '3B' });
+    assert.equal((await respuesta('u1')).encontrado, true);
+    pedir('m1', 'tomar_mensaje', { mensaje: 'dejo un paquete', unidad: '3B' });
+    assert.equal((await respuesta('m1')).ok, true);
+    assert.ok(acciones.some((a) => a[3] === 'tomar_mensaje'), 'el mensaje queda en el registro de acciones');
+    pedir('t1', 'terminar_llamada', { motivo: 'listo' });
+    assert.equal((await respuesta('t1')).ok, true);
+    assert.ok(modelo.recibido.some((x) => x.type === 'response.create' && /Chau/.test(JSON.stringify(x))), 'se despide antes de cortar');
+    assert.ok(await hasta(() => ch.colgado, 6000), 'después de despedirse corta');
+  } finally { ajustes.delete('openai_api_key'); ajustes.delete('realtime_url'); clientes.length = 0; }
+});
+
+test('realtime: abrir por webhook, y transferir a un agente por pedido del modelo', async (t) => {
+  const modelo = await modeloFalso();
+  t.after(() => modelo.cerrar());
+  const ari = asteriskFalso();
+  pipe.init(ari, pool);
+  ajustes.set('openai_api_key', 'sk-prueba');
+  ajustes.set('realtime_url', modelo.url);
+  crm.ruta('POST', '/porton', crudo(500, 'no'));
+  require('../herramientas')._resetTopes();
+  try {
+    const ch = canal();
+    await pipe.startAiSession(ch, Object.assign({}, AGENTE, { provider: 'openai-realtime', crm_webhook: '',
+      herramientas: { abrir_porton: { on: true, modo: 'webhook', url: crm.url + '/porton', exigir_verificacion: false, ventana: '00:00-23:59' }, transferir_a_agente: { on: true }, consultar_datos: { on: true } } }));
+    await hasta(() => modelo.tipos().includes('session.update'));
+    hablar(ari.medios.at(-1), 5, 0);
+    modelo.mandar({ type: 'response.function_call_arguments.done', call_id: 'w1', name: 'abrir_porton', arguments: '{"motivo":"x"}' });
+    const r = await hasta(() => modelo.recibido.find((x) => x.type === 'conversation.item.create' && x.item.call_id === 'w1'));
+    assert.equal(JSON.parse(r.item.output).ok, false, 'el webhook de apertura que falla no se reporta como abierto');
+    assert.equal(crm.pedidos('/porton').at(-1).body.accion, 'abrir');
+    modelo.mandar({ type: 'response.function_call_arguments.done', call_id: 'q1', name: 'consultar_datos', arguments: '{"consulta":"x"}' });
+    const q = await hasta(() => modelo.recibido.find((x) => x.type === 'conversation.item.create' && x.item.call_id === 'q1'));
+    assert.match(JSON.parse(q.item.output).motivo, /no hay consulta de datos configurada/);
+    modelo.mandar({ type: 'response.function_call_arguments.done', call_id: 'x1', name: 'transferir_a_agente', arguments: '{"motivo":"pide una persona"}' });
+    assert.ok(await hasta(() => ch.derivado, 5000));
+    assert.equal(ch.derivado.extension, '2030');
+  } finally { ajustes.delete('openai_api_key'); ajustes.delete('realtime_url'); }
+});
+
 test('realtime: si el modelo no abre, se disculpa con TTS local y deriva a una persona', async () => {
   const ari = asteriskFalso();
   pipe.init(ari, pool);
