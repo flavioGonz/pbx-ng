@@ -881,7 +881,7 @@ app.get('/api/c2c/public/:token', async (req, res) => {
   catch (e) { errorHttp(res, e); }
 });
 app.post('/api/c2c/public/:token/session', c2cLimite, async (req, res) => {
-  const b = req.body || {}; const c = await pool.connect();
+  const b = req.body || {}; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
   try {
     const { rows } = await c.query('SELECT * FROM pbxng_click2call WHERE token=$1', [req.params.token]);
     const link = rows[0]; if (!link || !link.enabled) { c.release(); return res.status(404).json({ error: 'enlace no disponible' }); }
@@ -1249,7 +1249,7 @@ app.post('/api/phones', async (req, res) => {
   const b = req.body || {}; const mac = normMac(b.mac);
   if (!mac || mac.length !== 12) return res.status(400).json({ error: 'MAC invalida (12 hex)' });
   if (!b.ext) return res.status(400).json({ error: 'interno requerido' });
-  const c = await pool.connect();
+  let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
   try {
     await c.query('BEGIN');
     let password = b.password;
@@ -2035,7 +2035,7 @@ app.post('/api/endpoints', async (req, res) => {
   if (!vn.ok && !(req.body && req.body.force)) {
     return res.status(409).json({ error: vn.mensaje, motivo: vn.motivo, conflicto: vn.conflicto || null });
   }
-  const c = await pool.connect();
+  let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
   /* El PIN del buzón que nace junto con el interno. Se devuelve UNA vez, en esta respuesta,
    * y no queda en ningún otro lado: el buzón recién creado todavía NO tiene dirección de
    * correo configurada, así que el aviso de `POST /api/mailboxes/:mailbox/pin` no tendría a
@@ -2069,7 +2069,7 @@ app.post('/api/endpoints', async (req, res) => {
     await c.query('COMMIT'); broadcastSoon();
     const _enAst = await setRecFlag(id, _rec);
     res.status(201).json(Object.assign({ created: id, webrtc, video, vm_mailbox: id, vm_pin: (vmSeed && vmSeed.pin) || null }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params;
@@ -2078,7 +2078,7 @@ app.put('/api/endpoints/:id', async (req, res) => {
   const transport = webrtc ? 'transport-ws' : 'transport-udp';
   // null = el body no lo trae -> COALESCE deja el valor que ya tenia el endpoint.
   const dtmf = dtmfOk((req.body || {}).dtmf_mode);
-  const c = await pool.connect();
+  let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
   try {
     await c.query('BEGIN');
     if (password) await c.query('UPDATE ps_auths SET password=$2 WHERE id=$1', [id, password]);
@@ -2099,12 +2099,12 @@ app.put('/api/endpoints/:id', async (req, res) => {
     await c.query('COMMIT'); broadcastSoon();
     const _enAst = _rec === null ? true : await setRecFlag(id, _rec);
     res.json(Object.assign({ updated: id, webrtc, video }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/endpoints/:id', async (req, res) => {
-  const { id } = req.params; const c = await pool.connect();
+  const { id } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
   try { await c.query('BEGIN'); await c.query('DELETE FROM ps_endpoints WHERE id=$1', [id]); await c.query('DELETE FROM ps_auths WHERE id=$1', [id]); await c.query('DELETE FROM ps_aors WHERE id=$1', [id]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: id }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+  catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
 });
 
 

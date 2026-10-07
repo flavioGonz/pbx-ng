@@ -47,6 +47,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Con la base caída, 25 rutas no contestaban nunca.** Las que abren una transacción
+  pedían la conexión con `await pool.connect()` fuera del `try`: si Postgres no respondía,
+  la promesa rechazada no la atrapaba nadie y el pedido quedaba colgado (el panel con la
+  rueda girando hasta que el navegador se rendía). Entre ellas, el alta y la baja de
+  internos, agentes de IA, IVR, colas, grupos, voceo, buzones, salas, troncales, el
+  geo-bloqueo y las sesiones públicas de click-to-call y de salas. Ahora contestan 503,
+  con el mismo arreglo que ya tenían `auth.js`, `telefonia.js` y parte de `trunks.js`.
+  Además, el `ROLLBACK` de los `catch` ya no puede tirar: si la base moría en medio de la
+  transacción, ese `ROLLBACK` también colgaba el pedido.
+  (`control-plane/app.js`, `apps.js`, `guard.js`, `salas.js`, `trunks.js`, `auth.js`)
 - **El freno del enlace web de las salas no agrupaba las IPv6.** El de click-to-call y el
   del login pasan la IP por `ipKeyGenerator` (una IPv6 cuenta por su /64); este no, así que
   con IPv6 se podía rotar de dirección en cada intento y saltarse el cupo de 10 cada 5

@@ -710,7 +710,7 @@ module.exports = function initGuard(deps) {
       const lista = Array.isArray(req.body && req.body.paises) ? req.body.paises : [];
       const modo = (req.body && req.body.modo) === 'permitir' ? 'permitir' : 'bloquear';
       const filas = lista.map((p) => ({ cc: limpiarCc(p && p.cc !== undefined ? p.cc : p), nombre: String((p && p.nombre) || '').slice(0, 80) })).filter((p) => p.cc.length === 2);
-      const c = await pool.connect();
+      let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
       try {
         await c.query('BEGIN');
         await c.query('DELETE FROM pbxng_geoblock');

@@ -790,7 +790,7 @@ module.exports = function init(deps) {
 
   app.post('/api/salas/web/:token/session', enlaceLimite, async (req, res) => {
     const b = req.body || {};
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       const { rows } = await c.query('SELECT ' + CAMPOS + ' FROM pbxng_conferences WHERE web_token=$1', [req.params.token]);
       const sala = rows[0];
@@ -842,7 +842,7 @@ module.exports = function init(deps) {
    * no sirve. Es admin porque entrar de moderador es exactamente lo que da el PIN de
    * moderador —abrir, silenciar y expulsar—. */
   app.post('/api/salas/:name/moderar', async (req, res) => {
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       const { rows } = await c.query('SELECT ' + CAMPOS + ' FROM pbxng_conferences WHERE name=$1', [req.params.name]);
       const sala = rows[0];
@@ -1012,11 +1012,11 @@ module.exports = function init(deps) {
 
   app.delete('/api/salas/:name', async (req, res) => {
     const { name } = req.params;
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows } = await c.query('SELECT access_exten FROM pbxng_conferences WHERE name=$1', [name]);
-      if (!rows[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'no existe esa sala' }); }
+      if (!rows[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'no existe esa sala' }); }
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]);
       await c.query('DELETE FROM pbxng_conferences WHERE name=$1', [name]);
       await c.query('COMMIT');
