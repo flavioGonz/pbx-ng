@@ -157,3 +157,39 @@ test('probar el NAS: ruta montada, servidor NFS o CIFS, y lo que falta', async (
   assert.match(cifs.mount_cmd, /^mount -t cifs \/\/127\.0\.0\.1\/share \/mnt\/nas -o username=grab,password=\*\*\*/);
   assert.equal((await rs.nastest({ nas_type: 'otro', nas_server: 'x' })).mount_cmd, '');
 });
+
+test('la ronda corre sola: la primera a los 45 s y después cada 2 min, sin romper si falla', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let rondas = 0;
+  rs.init({ async query() { rondas++; throw new Error('base caída'); } });
+  t.mock.timers.tick(45000);
+  t.mock.timers.tick(120000);
+  t.mock.timers.reset();
+  await new Promise((ok) => setImmediate(ok));
+  assert.ok(rondas >= 2, 'no corrió la ronda');
+});
+
+test('NAS: una ruta que no es carpeta falla al copiar, no al crearla', async () => {
+  const archivo = path.join(RAIZ, 'soy-un-archivo');
+  fs.writeFileSync(archivo, 'x');
+  await assert.rejects(rs.upload(grabacion('z.wav'), { backend: 'nas', nas_path: archivo }));
+});
+
+test('probar el NAS: el servidor NFS que contesta, y el que no contesta nunca', async (t) => {
+  const net = require('net');
+  const srv = net.createServer((c) => c.end());
+  const libre = await new Promise((ok) => { srv.once('error', () => ok(false)); srv.listen(2049, '127.0.0.1', () => ok(true)); });
+  if (libre) {
+    const r = await rs.nastest({ nas_type: 'nfs', nas_server: '127.0.0.1' });
+    assert.equal(r.pasos[0].ok, true);
+    assert.match(r.pasos[0].detalle, /puerto 2049 abierto/);
+    await new Promise((ok) => srv.close(ok));
+  } else t.diagnostic('el 2049 está ocupado en esta máquina: no se prueba el servidor que contesta');
+  /* Una dirección que no contesta: vence el tope de 4 s (con el reloj de mentira). */
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const p = rs.nastest({ nas_type: 'nfs', nas_server: '10.255.255.1' });
+  await new Promise((ok) => setImmediate(ok));
+  t.mock.timers.tick(4000);
+  const r = await p;
+  assert.equal(r.ok, false);
+});
