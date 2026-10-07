@@ -47,6 +47,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Una troncal «Unregistered» se mostraba «Registrada».** El estado buscaba `Registered` en
+  la línea de `pjsip show registrations`, y «Unregistered» lo contiene: la troncal sin
+  registro salía en verde y el failover no la salteaba. Ahora se busca la palabra entera.
+  (`control-plane/trunks.js`)
 - **Las grabaciones de internos no encontraban su llamada en el CDR.** El indexador
   comparaba la hora del archivo contra `cdr.start` como si estuviera en UTC, pero Asterisk
   la escribe en la hora local de la central (`cdr_pgsql` sin `timezone`, contenedor con

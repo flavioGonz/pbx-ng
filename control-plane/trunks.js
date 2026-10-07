@@ -212,7 +212,9 @@ module.exports = function init(deps) {
       if (t.do_register) {
         const rx = new RegExp('^\\s*' + t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/');
         const line = lines.find(l => rx.test(l)) || '';
-        if (/Registered/i.test(line)) out[t.name] = { status: 'online', detail: 'Registrada' + ((line.match(/exp\.?\s*(\d+)/i) || [])[1] ? ' (exp ' + line.match(/exp\.?\s*(\d+)/i)[1] + 's)' : '') };
+        /* Con límite de palabra: «Unregistered» contiene «Registered», y una troncal SIN
+         * registro salía en verde —y el failover no la salteaba—. */
+        if (/\bRegistered\b/i.test(line)) out[t.name] = { status: 'online', detail: 'Registrada' + ((line.match(/exp\.?\s*(\d+)/i) || [])[1] ? ' (exp ' + line.match(/exp\.?\s*(\d+)/i)[1] + 's)' : '') };
         /* Rechazada / sin registrar = el proveedor nos contestó que no: eso sí es evidencia
          * para saltarse la troncal. «Autenticando…» es un estado de paso (el REGISTER está
          * en vuelo) y no se marca: apagarla ahí es cortar la salida por medio segundo. */
