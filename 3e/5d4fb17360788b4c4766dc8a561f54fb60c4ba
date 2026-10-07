@@ -1,0 +1,29 @@
+control-plane/test/estados.test.js
+  s_ace4c2a288c06b::t_cc32ad74ad59a7 1-122
+control-plane/test/ia-externa-bordes.test.js
+  s_ace4c2a288c06b::t_5badc0f953f142 1-90
+control-plane/test/inactividad.test.js
+  s_ace4c2a288c06b::t_1e90809ff91293 205-221
+control-plane/test/push-nativo.test.js
+  s_ace4c2a288c06b::t_eb341174386c7d 1-141
+control-plane/test/recstore.test.js
+  s_ace4c2a288c06b::t_193b53e5c7b2b8 160-195
+control-plane/test/sipconf.test.js
+  s_ace4c2a288c06b::t_10cd929905b0cd 1-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e5d4fb17360788b4c4766dc8a561f54fb60c4ba",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
