@@ -1,0 +1,43 @@
+control-plane/test/misc-ramas-clientes-api.test.js
+  s_ace4c2a288c06b::t_4b91f7934b48b5 1-229
+control-plane/test/misc-ramas-outbox.test.js
+  s_ace4c2a288c06b::t_687ab9ede631db 1-261
+  s_ace4c2a288c06b::t_732391acfa0375 262-283
+control-plane/test/misc-ramas-turn-rutas.test.js
+  s_ace4c2a288c06b::t_36197707e68373 1-331
+  s_ace4c2a288c06b::t_fd7324b25121a2 332-333
+control-plane/test/misc-ramas-turn-sonda.test.js
+  s_ace4c2a288c06b::t_9499c161f28924 1-221
+control-plane/test/misc-ramas-sysmon.test.js
+  s_ace4c2a288c06b::t_3402953f9f874f 1-177
+control-plane/test/misc-ramas-callengine.test.js
+  s_ace4c2a288c06b::t_961cbcdf068387 1-303,305
+  s_ace4c2a288c06b::t_8bc7786c9b7527 304
+control-plane/alerts.js
+  s_ace4c2a288c06b::t_53e544af79e25d 193-199
+control-plane/test/misc-ramas-grabaciones.test.js
+  s_ace4c2a288c06b::t_2ec7b3c6881446 1-424
+control-plane/test/misc-ramas-auth.test.js
+  s_ace4c2a288c06b::t_7868824173f06d 1-363
+control-plane/test/misc-ramas-alerts.test.js
+  s_ace4c2a288c06b::t_b9efa302fbe064 1-302
+  s_ace4c2a288c06b::t_204b4fc1c6aedf 303-305
+CHANGELOG.md
+  s_ace4c2a288c06b::t_5de5e1f82eb53a 50-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3d5e3f5c1f3224b90c503f27f9ff93c977926134",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
