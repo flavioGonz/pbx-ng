@@ -172,7 +172,10 @@ function ruleLLM(text, session) {
   if (has('estado de cuenta', 'mi cuenta', 'factura', 'saldo', 'deuda')) return { text: '', tool: { name: 'crm_lookup', args: { query: text } } };
   if (has('hola', 'buenas', 'buenos días', 'buenas tardes')) return { text: '¡Hola! Soy el asistente virtual. Puedo ayudarte con ventas, soporte, o pasarte con una persona. ¿Qué necesitás?' };
   if (has('gracias', 'nada más', 'nada mas', 'chau', 'adiós', 'adios')) return { text: '¡Gracias por llamar! Que tengas un buen día.', end: true };
-  if (session._turns >= 1) return { text: 'Entiendo. Puedo derivarte a ventas o soporte, o pasarte con una persona. ¿Qué preferís?' };
+  /* `_turns` ya cuenta el turno actual (`onUtterance` lo suma antes de llamar acá): con
+   * `>= 1` la primera frase que no se entendía contestaba «Entiendo…» y el «no te entendí»
+   * no sonaba nunca. */
+  if (session._turns >= 2) return { text: 'Entiendo. Puedo derivarte a ventas o soporte, o pasarte con una persona. ¿Qué preferís?' };
   return { text: 'Disculpá, no te entendí bien. ¿Querés hablar con ventas, con soporte, o con una persona?' };
 }
 
@@ -1136,6 +1139,12 @@ function handleInAudio(session, pcm) {
 function attachStt(session) {
   const p = spawn('python3', ['/opt/pbxng-api/ai/vosk_stt.py'], { env: { ...process.env, VOSK_MODEL, VOSK_RATE: String(RATE) } });
   session.sttProc = p; let line = '';
+  /* Sin python3 o sin Vosk, spawn emite 'error' (en el proceso y en su stdin): sin quien lo
+   * escuche, Node lo tira como excepción no atrapada y se cae TODA la API por una llamada de
+   * demo. La llamada sigue, sorda, y se cuelga normal. */
+  const sinStt = (e) => log.warn('el reconocedor de voz no arrancó (¿falta python3 o Vosk?)', { err: (e && e.message) });
+  p.on('error', sinStt);
+  p.stdin.on('error', sinStt);
   p.stdout.on('data', (d) => {
     line += d.toString();
     let i;

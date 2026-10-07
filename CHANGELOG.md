@@ -47,6 +47,13 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Una llamada al agente de demo tiraba abajo la API si faltaba python3 o Vosk.** El
+  reconocedor de voz se lanza como proceso aparte y nadie escuchaba su error de arranque:
+  Node lo convertía en una excepción no atrapada y se caía todo el control-plane. Ahora se
+  avisa en el log y la llamada sigue (sin reconocimiento) hasta que se corta.
+- **El agente de demo nunca decía «no te entendí».** El contador de turnos ya incluía la
+  frase actual, así que la primera frase que no se entendía recibía «Entiendo. Puedo
+  derivarte…». Ahora la primera vez pide que se repita y recién después ofrece las opciones.
 - **La alerta «ataque en curso» no saltaba nunca en una instalación nueva.** El chequeo
   tomaba «ahora» como marca de la vuelta anterior cuando no había ninguna guardada, y no la
   guardaba: cada vuelta veía que no había pasado la ventana y salía sin escribir nada. Sin
