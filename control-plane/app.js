@@ -1062,7 +1062,7 @@ app.post('/api/geo/report', async (req, res) => {
  * astFwd/vozBase/setDialplan/smtpHint son declaraciones de función (izadas), así que
  * pueden definirse más abajo sin TDZ. */
 require('./apps')({   // devuelve { aiAgentDialplan, buildIvrDialplan, vmList }; app.js hoy no usa ninguno
-  app, pool, amiAction, amiCommand, astFwd, vozBase, setDialplan, astconf, exigirExt, wavToPcm, analyzeText,
+  app, pool, amiList, amiCommand, astFwd, vozBase, setDialplan, astconf, exigirExt, wavToPcm, analyzeText,
   smtpHint, errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), logger,
   recargarIaExterna: () => aiPipeline.recargarIaExterna(),
 });

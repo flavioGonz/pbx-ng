@@ -29,7 +29,8 @@ const vmpin = require('./vmpin');
  * deps:
  *   app            Express (las rutas se registran acá, DESPUÉS del gate)
  *   pool           pg.Pool
- *   amiAction      (action) => respuesta AMI (ParkedCalls para las plazas del aparcado)
+ *   amiList        (action, {evento, fin}) => eventos de una acción que contesta en lista
+ *                  (ParkedCalls para las plazas del aparcado; app.js)
  *   amiCommand     (cmd) => salida del CLI de Asterisk por AMI (queue show, reloads)
  *   astFwd         (method, path, body, ms) llamada al agente de Asterisk (desplegar audios TTS)
  *   vozBase        () => URL base del servicio de voz (TTS/STT), de pbxng_settings o NODES.voz
@@ -47,8 +48,11 @@ const vmpin = require('./vmpin');
  * útiles para pruebas; vmList para quien necesite el buzón sin pasar por HTTP).
  */
 module.exports = function init(deps) {
-  const { app, pool, amiAction, amiCommand, astFwd, vozBase, setDialplan, astconf,
+  const { app, pool, amiCommand, astFwd, vozBase, setDialplan, astconf,
     exigirExt, wavToPcm, analyzeText, smtpHint, errorHttp, broadcastSoon, logger } = deps;
+  /* Acciones AMI que contestan con una lista de eventos (ParkedCalls). Opcional para que
+   * las pruebas que arman este módulo a mano no tengan que darla. */
+  const amiList = deps.amiList || (() => Promise.resolve([]));
   /* IA externa: al guardar o borrar un agente, se abren o cierran sus canales con el
    * backend (ai-pipeline.js). Opcional: sin pipeline (pruebas), no hace nada. */
   const recargarIaExterna = deps.recargarIaExterna || (() => {});
@@ -1102,13 +1106,12 @@ module.exports = function init(deps) {
       const hasta = parseInt(await setGet('park_hasta', '720'), 10);
       const tiempo = parseInt(await setGet('park_time', '300'), 10);
 
-      // ParkedCalls devuelve un evento por llamada aparcada.
+      /* ParkedCalls devuelve un evento `ParkedCall` por llamada aparcada y cierra con
+       * `ParkedCallsComplete`. Se leía `r.events` de la respuesta, que esta librería de AMI
+       * no arma: la tabla mostraba TODAS las plazas libres con llamadas aparcadas. Es el
+       * mismo error que tenía la vista en vivo de las salas, y el mismo arreglo (amiList). */
       let evs = [];
-      try {
-        const r = await amiAction({ Action: 'ParkedCalls' });
-        evs = (r && (r.events || r.eventlist || [])) || [];
-        if (!Array.isArray(evs)) evs = [];
-      } catch (_) {}
+      try { evs = await amiList({ Action: 'ParkedCalls' }, { evento: 'ParkedCall', fin: 'ParkedCallsComplete' }); } catch (_) {}
 
       const ocupadas = evs
         .filter((e) => String(e.event || e.Event || '').toLowerCase() === 'parkedcall')

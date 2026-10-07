@@ -47,6 +47,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **La tabla del aparcado mostraba todas las plazas libres aunque hubiera llamadas
+  aparcadas.** Leía las filas de la respuesta de `ParkedCalls`, y la librería de AMI las
+  entrega como eventos sueltos. Mismo error y mismo arreglo que la vista en vivo de las
+  salas: se juntan con `amiList`. (`control-plane/apps.js`)
 - **`/api/v1/cdr` repetía o salteaba llamadas al paginar.** `cdr.start` guarda la hora
   de la central sin zona, y el cursor la mandaba en UTC: en Montevideo la comparación
   quedaba corrida tres horas. Ahora el cursor viaja en la misma hora de pared que la
