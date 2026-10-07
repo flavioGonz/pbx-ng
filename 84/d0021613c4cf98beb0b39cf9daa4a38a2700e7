@@ -1,0 +1,31 @@
+CHANGELOG.md
+  s_ace4c2a288c06b::t_6c4ae811798065 50-59
+control-plane/app.js
+  s_ace4c2a288c06b::t_d9e43ba407781b 884,1252,2038,2072,2081,2102,2105,2107
+control-plane/apps.js
+  s_ace4c2a288c06b::t_8b634120afd46d 538,550,560,564,576,579,586,623,632,638,642,650,654,656,804,806,833,835,837,844,846,848,941,955,1046
+control-plane/auth.js
+  s_ace4c2a288c06b::t_2c75979a162640 494
+control-plane/guard.js
+  s_ace4c2a288c06b::t_aeb98d11753442 713
+control-plane/salas.js
+  s_ace4c2a288c06b::t_a1623dbc11315b 793,845,1015,1019
+control-plane/trunks.js
+  s_ace4c2a288c06b::t_79a35431085b42 133,267,631,652,798,820,909,920,937,945,949,952,960,981,994,1007,1011,1040
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "84d0021613c4cf98beb0b39cf9daa4a38a2700e7",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
