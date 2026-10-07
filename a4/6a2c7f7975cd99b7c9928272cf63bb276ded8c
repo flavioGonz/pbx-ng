@@ -1,0 +1,35 @@
+control-plane/ai-pipeline.js
+  s_ace4c2a288c06b::t_adbb04bed49be5 175-178
+  s_ace4c2a288c06b::t_cdb3828fb2e19a 1142-1147
+control-plane/test/ia-ramas-pipeline.test.js
+  s_ace4c2a288c06b::t_e40b32bcdcd5c9 1-307
+  s_ace4c2a288c06b::t_10191ebd07b523 308-309
+control-plane/test/ia-ramas-realtime.test.js
+  s_ace4c2a288c06b::t_c8da7982d14b31 1-396
+control-plane/test/ia-ramas-pipeline-voz.test.js
+  s_ace4c2a288c06b::t_b624b96e9e3062 1-353
+control-plane/test/ia-ramas-pipeline-rt.test.js
+  s_ace4c2a288c06b::t_9d78045800400d 1-407
+  s_ace4c2a288c06b::t_fe6566a96966ee 408-411
+control-plane/test/ia-ramas-externa.test.js
+  s_ace4c2a288c06b::t_676befbf216258 1-296
+  s_ace4c2a288c06b::t_eb9b71773f58fd 297-303
+CHANGELOG.md
+  s_ace4c2a288c06b::t_2f8ace07ad39cb 50-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a46a2c7f7975cd99b7c9928272cf63bb276ded8c",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
