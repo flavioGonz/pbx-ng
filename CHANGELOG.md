@@ -47,6 +47,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Si el modelo realtime no abría, la llamada se colgaba en vez de pasar a una persona.**
+  El camino previsto es disculparse con TTS local y derivar al destino por defecto, pero un
+  socket que no conecta emite `error` y enseguida `close`, y el manejador del cierre
+  cortaba la llamada un instante antes de que sonara la disculpa. Ahora, si la sesión
+  nunca llegó a abrir, el cierre deja actuar a la degradación. (`control-plane/ai-pipeline.js`)
 - **Restaurar un respaldo del mismo minuto restauraba el estado actual.** Los respaldos se
   nombraban por minuto, y el respaldo de seguridad que se saca antes de restaurar caía con el
   mismo nombre y pisaba al que se iba a restaurar. Lo mismo con dos respaldos a mano en el

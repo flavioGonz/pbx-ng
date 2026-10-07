@@ -20,7 +20,10 @@ const herramientas = require('./herramientas'); // lo que el agente puede PEDIR 
 const remotas = require('./herramientas-remotas');   // la caja que pone el backoffice del cliente
 const porteria = require('./porteria');         // quién llama y quién está autorizado (CRM de la central)
 
-const AS_PORT = 9092;                 // puerto AudioSocket (TCP)
+/* Puerto AudioSocket (TCP). Configurable sólo para poder probar el pipeline en una máquina
+ * que ya tiene una central escuchando en el 9092; en producción es siempre el 9092 y el
+ * canal externalMedia se arma con este mismo valor. */
+const AS_PORT = Number(process.env.AUDIOSOCKET_PORT || 9092);
 const VOSK_MODEL = '/opt/vosk-model-es';
 const RATE = 8000;                    // slin (8kHz telefonia) - el canal AudioSocket reproduce a 8k
 const FRAME_BYTES = 320;              // 20ms @ 8kHz 16-bit
@@ -1023,6 +1026,11 @@ function arrancarRealtime(session) {
         : c === 1000 ? ' · cierre limpio' : '';
     const detalle = 'cierre ' + (c || 'sin código') + porQue;
     if (session.closed) { session.log('realtime: ' + detalle + ' (la llamada ya había terminado)'); return; }
+    /* Si la sesión NUNCA llegó a abrir, el cierre no corta: de eso se encarga la
+     * degradación de `cuandoListo` (disculpa con TTS local y pase a una persona). Un
+     * socket que no conecta emite `error` y enseguida `close`, y este manejador colgaba
+     * la llamada un instante antes de que la disculpa pudiera sonar. */
+    if (!puente.listo) { session.log('realtime: ' + detalle + ' antes de abrir: sigue la degradación'); return; }
     session.log('realtime: sesión cerrada por el proveedor (' + detalle + ') — se corta la llamada');
     if (c && c !== 1000) anotarProblemaProveedor(detalle);
     endSession(session, 'proveedor-cerro');
