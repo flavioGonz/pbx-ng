@@ -245,7 +245,7 @@ module.exports = function initGuard(deps) {
         await c.query('INSERT INTO pbxng_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', ['sec_' + k, v]);
       }
       await c.query('COMMIT');
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
     settings = s;
     return s;
   }
@@ -719,7 +719,7 @@ module.exports = function initGuard(deps) {
         await c.query('COMMIT');
         await cargarGeoblock();
         res.json({ ok: true, total: filas.length, modo, pendiente: 'aplicar para revisar las IPs ya vistas' });
-      } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+      } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
     });
     /* "Banear país" desde el SOC: en modo bloquear se agrega; en modo permitir se
      * SACA de los permitidos (siempre significa "este país no entra"). Aplica al toque. */

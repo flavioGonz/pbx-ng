@@ -1016,7 +1016,7 @@ module.exports = function init(deps) {
     try {
       await c.query('BEGIN');
       const { rows } = await c.query('SELECT access_exten FROM pbxng_conferences WHERE name=$1', [name]);
-      if (!rows[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'no existe esa sala' }); }
+      if (!rows[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'no existe esa sala' }); }
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]);
       await c.query('DELETE FROM pbxng_conferences WHERE name=$1', [name]);
       await c.query('COMMIT');

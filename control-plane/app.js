@@ -2069,7 +2069,7 @@ app.post('/api/endpoints', async (req, res) => {
     await c.query('COMMIT'); broadcastSoon();
     const _enAst = await setRecFlag(id, _rec);
     res.status(201).json(Object.assign({ created: id, webrtc, video, vm_mailbox: id, vm_pin: (vmSeed && vmSeed.pin) || null }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
-  } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params;
@@ -2099,12 +2099,12 @@ app.put('/api/endpoints/:id', async (req, res) => {
     await c.query('COMMIT'); broadcastSoon();
     const _enAst = _rec === null ? true : await setRecFlag(id, _rec);
     res.json(Object.assign({ updated: id, webrtc, video }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
-  } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
   try { await c.query('BEGIN'); await c.query('DELETE FROM ps_endpoints WHERE id=$1', [id]); await c.query('DELETE FROM ps_auths WHERE id=$1', [id]); await c.query('DELETE FROM ps_aors WHERE id=$1', [id]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: id }); }
-  catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+  catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 
 

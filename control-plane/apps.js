@@ -547,7 +547,7 @@ module.exports = function init(deps) {
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, rows[0].id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.status(201).json({ created: rows[0].id, exten });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.put('/api/ai-agents/:id', async (req, res) => {
     const { id } = req.params;
@@ -561,7 +561,7 @@ module.exports = function init(deps) {
     try {
       await c.query('BEGIN');
       const { rows: old } = await c.query('SELECT exten FROM pbxng_ai_agents WHERE id=$1', [id]);
-      if (!old[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'agente no existe' }); }
+      if (!old[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'agente no existe' }); }
       await c.query(
         'UPDATE pbxng_ai_agents SET name=$1,exten=$2,greeting=$3,system_prompt=$4,voice=$5,provider=$6,model=$7,enabled=$8,'
         + 'sales_exten=$10,support_exten=$11,default_exten=$12,crm_webhook=$13,greeting_text=$14,'
@@ -573,7 +573,7 @@ module.exports = function init(deps) {
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.json({ updated: id, exten });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.delete('/api/ai-agents/:id', async (req, res) => {
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
@@ -583,7 +583,7 @@ module.exports = function init(deps) {
       if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]);
       await c.query('DELETE FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
       await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.json({ deleted: req.params.id });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.get('/api/ivr', async (req, res) => {
@@ -629,7 +629,7 @@ module.exports = function init(deps) {
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of buildIvrDialplan(exten, greeting, timeout, options, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); res.status(201).json({ created: id, exten });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.put('/api/ivr/:id', async (req, res) => {
     const { id } = req.params;
@@ -639,7 +639,7 @@ module.exports = function init(deps) {
     try {
       await c.query('BEGIN');
       const { rows: old } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]);
-      if (!old[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'IVR no existe' }); }
+      if (!old[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'IVR no existe' }); }
       await c.query('UPDATE pbxng_ivr SET name=$1,exten=$2,greeting=$3,timeout=$4,flow=$5,record=$7 WHERE id=$6', [name, exten, greeting, timeout, flow, id, !!record]);
       await c.query('DELETE FROM pbxng_ivr_options WHERE ivr_id=$1', [id]);
       for (const o of options) await c.query('INSERT INTO pbxng_ivr_options (ivr_id,digit,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [id, o.digit, o.dest_type, o.dest_value]);
@@ -647,13 +647,13 @@ module.exports = function init(deps) {
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of buildIvrDialplan(exten, greeting, timeout, options, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.delete('/api/ivr/:id', async (req, res) => {
     const { id } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
     try { await c.query('BEGIN'); const { rows } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]); await c.query('DELETE FROM pbxng_ivr WHERE id=$1', [id]); await c.query('COMMIT'); res.json({ deleted: id }); }
-    catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   // ---------------------------------------------------------------------------
@@ -803,7 +803,7 @@ module.exports = function init(deps) {
   app.delete('/api/queues/:name', async (req, res) => {
     const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
     try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_queues WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM queue_members WHERE queue_name=$1', [name]); await c.query('DELETE FROM queues WHERE name=$1', [name]); await c.query('DELETE FROM pbxng_queues WHERE name=$1', [name]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: name }); }
-    catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.post('/api/queues/:name/members', async (req, res) => {
     const { name } = req.params; const { ext } = req.body || {};
@@ -832,9 +832,9 @@ module.exports = function init(deps) {
      * siempre. Los grupos creados antes los actualiza la migración 0030. */
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_ringgroups (name,label,access_exten,members,strategy,ring_time) VALUES ($1,$2,$3,$4,$5,$6)', [name, label || name, access_exten, list.join(','), strategy, ring_time]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Ring group ' + name], [2, 'Dial', dialStr + ',' + ring_time + ',${DIAL_OPCIONES}'], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-    catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
-  app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); } });
+  app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); } });
 
   app.get('/api/paging', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members FROM pbxng_paging ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
   app.post('/api/paging', async (req, res) => {
@@ -843,9 +843,9 @@ module.exports = function init(deps) {
     const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const pageStr = list.map(e => 'PJSIP/' + e).join('&');
     let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_paging (name,label,access_exten,members) VALUES ($1,$2,$3,$4)', [name, label || name, access_exten, list.join(',')]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Paging ' + name], [2, 'Page', pageStr + ',i'], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-    catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
-  app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); } });
+  app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); } });
 
   /* Lo que hace falta para avisar, buscado UNA vez. En la rotación en lote esto se
    * calcula al principio y se comparte: armar un transporte SMTP por buzón eran catorce
@@ -952,7 +952,7 @@ module.exports = function init(deps) {
       const quedo = (rows[0] && rows[0].password) || pin;
       res.status(201).json({ created: mailbox, pin: quedo, ya_existia: quedo !== pin });
     }
-    catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   /* Rota UN buzón y avisa. Lo comparten la rotación de a uno y la de lote para que las dos
    * se comporten igual: mismo UPDATE, mismo registro en el log y mismo correo. Devuelve
@@ -1043,7 +1043,7 @@ module.exports = function init(deps) {
       res.json({ rotados, avisados: resultados.filter((r) => r.avisado).length, resultados });
     } catch (e) { errorHttp(res, e); }
   });
-  app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); } });
+  app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); } });
 
   /* Los códigos de función se movieron a telefonia.js (sprint 6): ahora salen de la
    * tabla pbxng_featurecodes, cada acción tiene su código EDITABLE y hay muchos más

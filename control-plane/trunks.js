@@ -130,7 +130,7 @@ module.exports = function init(deps) {
         }
       }
       await c.query('COMMIT');
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
     _sbcLinkCache.v = null;
     try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
     return { ruta };
@@ -264,7 +264,7 @@ module.exports = function init(deps) {
       try { await astFwd('POST', '/reload', {}, 12000); } catch (_) {}
       broadcastSoon();
       res.json({ ok: true, rutas_borradas: rutas.length });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   // ---------------- Rutas SALIENTES ----------------
@@ -628,7 +628,7 @@ module.exports = function init(deps) {
     try {
       await c.query('BEGIN');
       const { rows: viejo } = await c.query('SELECT ' + COLS_OUT + ' FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
-      if (!viejo[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'ruta inexistente' }); }
+      if (!viejo[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'ruta inexistente' }); }
       const r = await normalizarSalida(c, req.body || {}, viejo[0]);
       // El patrón ES la extensión: si cambió hay que borrar la vieja o queda marcable.
       if (outExten(viejo[0].pattern) !== outExten(r.pattern)) await dueno.borrarPropio(c, outExten(viejo[0].pattern), 'outbound', viejo[0].id, log);
@@ -649,7 +649,7 @@ module.exports = function init(deps) {
       if (rows[0]) await dueno.borrarPropio(c, outExten(rows[0].pattern), 'outbound', rows[0].id, log);
       await c.query('DELETE FROM pbxng_outbound_routes WHERE id=$1', [req.params.id]);
       await c.query('COMMIT'); _foCache.v = null; broadcastSoon(); res.json({ deleted: req.params.id });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   // ---------------- Rutas ENTRANTES (DID) ----------------
@@ -795,7 +795,7 @@ module.exports = function init(deps) {
       validarEntrante(b);
       await c.query('BEGIN');
       const { rows: viejo } = await c.query('SELECT ' + COLS_IN + ' FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
-      if (!viejo[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'ruta inexistente' }); }
+      if (!viejo[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'ruta inexistente' }); }
       const { rows } = await c.query(
         `UPDATE pbxng_inbound_routes SET name=COALESCE($2,name), dest_type=COALESCE($3,dest_type), dest_value=COALESCE($4,dest_value),
            horario_id=$5, dest_cerrado_type=$6, dest_cerrado_value=$7 WHERE id=$1 RETURNING ` + COLS_IN,
@@ -817,7 +817,7 @@ module.exports = function init(deps) {
       if (rows[0]) await c.query("DELETE FROM extensions WHERE context='from-trunk' AND exten = ANY($1)", [[rows[0].did, 'abierto-' + rows[0].did, 'cerrado-' + rows[0].did]]);
       await c.query('DELETE FROM pbxng_inbound_routes WHERE id=$1', [req.params.id]);
       await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   // ---------------- Troncales SIP (avanzado) ----------------
@@ -917,7 +917,7 @@ module.exports = function init(deps) {
         await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,kam_config) VALUES ($1,$2,5060,$3,false,$4,'webrtc',$5) ON CONFLICT (name) DO UPDATE SET kind='webrtc',username=$3,kam_config=$5", [name, (NODES.domain || ''), uname, tenant_id, JSON.stringify(kam)]);
         await c.query('COMMIT'); broadcastSoon();
         return res.status(201).json({ created: name, kind: 'webrtc', link, username: uname });
-      } catch (e) { await c.query('ROLLBACK').catch(() => {}); return errorHttp(res, e); } finally { c.release(); }
+      } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} return errorHttp(res, e); } finally { c.release(); }
     }
     // Troncales que vivian en el SBC embebido: hoy se administran en SBC-NG (otro producto).
     if (kind === 'webrtc-client' || kind === 'kamailio') return res.status(400).json({ error: 'Las troncales vía SBC se administran en el panel de SBC-NG. En PBX-NG solo se configura la conexión al SBC (Configuración → SBC-NG).' });
@@ -934,7 +934,7 @@ module.exports = function init(deps) {
       await c.query("INSERT INTO pbxng_trunks (name,provider_host,provider_port,username,do_register,tenant_id,kind,adv_config) VALUES ($1,$2,$3,$4,$5,$6,'asterisk',$7)", [name, a.provider_host, a.provider_port, a.username || null, a.mode === 'register', tenant_id, JSON.stringify(a)]);
       await writeAsteriskTrunk(c, name, a, password, tenant_id);
       await c.query('COMMIT'); res.status(201).json({ created: name, mode: a.mode });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.put('/api/trunks/:name', async (req, res) => {
@@ -946,10 +946,10 @@ module.exports = function init(deps) {
       try {
         await c.query('BEGIN');
         const { rows: ex } = await c.query("SELECT 1 FROM pbxng_trunks WHERE name=$1", [name]);
-        if (!ex[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'troncal no existe' }); }
+        if (!ex[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'troncal no existe' }); }
         const { rows: oldAuth } = await c.query('SELECT password FROM ps_auths WHERE id=$1', [name]);
         const pass = password || (oldAuth[0] ? oldAuth[0].password : null);
-        if (!pass) { await c.query('ROLLBACK').catch(() => {}); return res.status(400).json({ error: 'contrasena requerida' }); }
+        if (!pass) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(400).json({ error: 'contrasena requerida' }); }
         await c.query("INSERT INTO ps_aors (id,max_contacts,remove_existing,qualify_frequency,tenant_id) VALUES ($1,1,'yes',30,$2) ON CONFLICT (id) DO UPDATE SET max_contacts=1,qualify_frequency=30", [name, tenant_id]);
         await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,$4) ON CONFLICT (id) DO UPDATE SET username=$2,password=$3", [name, uname, pass, tenant_id]);
         await c.query("INSERT INTO ps_endpoints (id,transport,aors,auth,context,disallow,allow,tenant_id,pbxng_kind,webrtc,dtls_auto_generate_cert,ice_support,use_avpf,media_encryption,media_use_received_transport,rtcp_mux,direct_media,rtp_symmetric,force_rport,rewrite_contact,identify_by) VALUES ($1,'transport-ws',$1,$1,'from-trunk','all','ulaw,alaw,g722,vp8,h264',$2,'trunk','yes','yes','yes','yes','dtls','yes','yes','no','yes','yes','yes','username') ON CONFLICT (id) DO UPDATE SET context='from-trunk',webrtc='yes',transport='transport-ws',allow='ulaw,alaw,g722,vp8,h264',media_encryption='dtls',identify_by='username'", [name, tenant_id]);
@@ -957,7 +957,7 @@ module.exports = function init(deps) {
         const kam = { kind: 'webrtc', username: uname, wss_path: '/ws', link, note: b.note || '' };
         await c.query("UPDATE pbxng_trunks SET username=$2, kind='webrtc', kam_config=$3, adv_config=NULL WHERE name=$1", [name, uname, JSON.stringify(kam)]);
         await c.query('COMMIT'); return res.json({ updated: name, kind: 'webrtc', link, username: uname });
-      } catch (e) { await c.query('ROLLBACK').catch(() => {}); return errorHttp(res, e); } finally { c.release(); }
+      } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} return errorHttp(res, e); } finally { c.release(); }
     }
     if (kind === 'webrtc-client') {
       if (!b.remote_url || !b.username) return res.status(400).json({ error: 'remote_url y username son obligatorios' });
@@ -978,7 +978,7 @@ module.exports = function init(deps) {
     try {
       await c.query('BEGIN');
       const { rows: ex } = await c.query("SELECT COALESCE(kind,'asterisk') AS kind, adv_config FROM pbxng_trunks WHERE name=$1", [name]);
-      if (!ex[0]) { await c.query('ROLLBACK').catch(() => {}); return res.status(404).json({ error: 'troncal no existe' }); }
+      if (!ex[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'troncal no existe' }); }
       const { rows: oldAuth } = await c.query('SELECT password FROM ps_auths WHERE id=$1', [name]);
       const oldPass = oldAuth[0] ? oldAuth[0].password : null;
       for (const t of ['ps_registrations', 'ps_endpoint_id_ips', 'ps_endpoints', 'ps_auths', 'ps_aors']) await c.query(`DELETE FROM ${t} WHERE id=$1`, [name]);
@@ -991,7 +991,7 @@ module.exports = function init(deps) {
       }
       const a = trunkDefaults(b);
       const pass = password || oldPass;
-      if (a.mode === 'register' && !(a.username && pass)) { await c.query('ROLLBACK').catch(() => {}); return res.status(400).json({ error: 'usuario y contraseña requeridos en modo Registro' }); }
+      if (a.mode === 'register' && !(a.username && pass)) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(400).json({ error: 'usuario y contraseña requeridos en modo Registro' }); }
       /* Cambiar el prefijo de salida (o apagar la ruta automática) tiene que llevarse el
        * dialplan VIEJO, y sólo si sigue siendo el nuestro: hasta ahora quedaba publicado para
        * siempre, marcando por una troncal que el administrador creía que ya no usaba ese
@@ -1004,7 +1004,7 @@ module.exports = function init(deps) {
       await c.query("UPDATE pbxng_trunks SET provider_host=$1, provider_port=$2, username=$3, do_register=$4, kind='asterisk', kam_config=NULL, adv_config=$5 WHERE name=$6", [a.provider_host, a.provider_port, a.username || null, a.mode === 'register', JSON.stringify(a), name]);
       await writeAsteriskTrunk(c, name, a, pass, tenant_id);
       await c.query('COMMIT'); res.json({ updated: name, mode: a.mode });
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.delete('/api/trunks/:name', async (req, res) => {
@@ -1037,7 +1037,7 @@ module.exports = function init(deps) {
       if (afect.length) broadcastSoon();
       res.json({ deleted: name, rutas_sin_respaldo: afect.length });
     }
-    catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.post('/api/trunks/diagnose', async (req, res) => { try { res.json(await diagtrunk.diagnosticar(req.body || {})); } catch (e) { errorHttp(res, e); } });
