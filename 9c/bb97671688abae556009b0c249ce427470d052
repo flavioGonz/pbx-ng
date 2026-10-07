@@ -1,0 +1,21 @@
+CHANGELOG.md
+  s_ace4c2a288c06b::t_693f2df9c77ba9 50-53
+control-plane/trunks.js
+  s_ace4c2a288c06b::t_e3e4f0994c3346 215-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9cbb97671688abae556009b0c249ce427470d052",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
