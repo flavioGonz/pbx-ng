@@ -1,0 +1,47 @@
+control-plane/test/app-ari.test.js
+  s_ace4c2a288c06b::t_d2dbb8fdf32d65 1-176
+  s_ace4c2a288c06b::t_e4d01660c5e683 177-179
+control-plane/test/helpers/ari-falso.js
+  s_ace4c2a288c06b::t_80e738853380b4 1-151
+  s_ace4c2a288c06b::t_07a714999d0d9e 152-154
+control-plane/test/fixtures/ari/applications.json
+  s_ace4c2a288c06b::t_c9fc7dfa9a5fee 1
+control-plane/test/fixtures/ari/asterisk.json
+  s_ace4c2a288c06b::t_54e6ef821e8a6c 1
+control-plane/test/fixtures/ari/bridges.json
+  s_ace4c2a288c06b::t_98d96a1836e9ad 1
+control-plane/test/fixtures/ari/channels.json
+  s_ace4c2a288c06b::t_247d849fac5317 1
+control-plane/test/fixtures/ari/deviceStates.json
+  s_ace4c2a288c06b::t_d798aec78f5fdf 1
+control-plane/test/fixtures/ari/endpoints.json
+  s_ace4c2a288c06b::t_a7dfb6e2ed7eae 1
+control-plane/test/fixtures/ari/events.json
+  s_ace4c2a288c06b::t_e7cfd3b2a6ba14 1
+control-plane/test/fixtures/ari/mailboxes.json
+  s_ace4c2a288c06b::t_ebf87a331374ce 1
+control-plane/test/fixtures/ari/playbacks.json
+  s_ace4c2a288c06b::t_aa32e65b8d8738 1
+control-plane/test/fixtures/ari/recordings.json
+  s_ace4c2a288c06b::t_c2ff15c26ed0f2 1
+control-plane/test/fixtures/ari/resources.json
+  s_ace4c2a288c06b::t_494dbe34a7a944 1
+control-plane/test/fixtures/ari/sounds.json
+  s_ace4c2a288c06b::t_8607bd602a3156 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "56c5bc87281d0b9f42ef39fc3cc5ebdd7c3f0593",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
