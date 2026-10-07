@@ -83,8 +83,17 @@ module.exports = function init(deps) {
       return { start: s.slice(0, i), leg: s.slice(i + 1) };
     } catch (_) { return null; }
   }
+  /* `cdr.start` es `timestamp` SIN zona: guarda la hora de la central tal cual, y node-pg
+   * la lee como hora local. El cursor tiene que volver a la base en esa MISMA hora de
+   * pared: con toISOString() viajaba en UTC (+3 h en Montevideo), el `::timestamp` le
+   * tiraba la zona y la comparación quedaba corrida tres horas — repetía o salteaba. */
+  const pared = (d) => {
+    const n = (x, k = 2) => String(x).padStart(k, '0');
+    return d.getFullYear() + '-' + n(d.getMonth() + 1) + '-' + n(d.getDate()) + 'T'
+      + n(d.getHours()) + ':' + n(d.getMinutes()) + ':' + n(d.getSeconds()) + '.' + n(d.getMilliseconds(), 3);
+  };
   const armarCursor = (fila) => (fila && fila.start
-    ? Buffer.from(new Date(fila.start).toISOString() + '|' + String(fila.leg_id || ''), 'utf8').toString('base64url')
+    ? Buffer.from(pared(new Date(fila.start)) + '|' + String(fila.leg_id || ''), 'utf8').toString('base64url')
     : null);
 
   function rango(req) {

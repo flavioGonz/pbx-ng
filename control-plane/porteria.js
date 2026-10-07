@@ -105,11 +105,17 @@ function verificarAutorizado(personas, datos, hoy) {
   /* Vencimiento: es la razón por la que el CRM tiene `valid_until`. Una autorización
    * temporal que no se chequea es una autorización permanente. */
   if (p.valid_until) {
-    const hasta = new Date(p.valid_until);
-    /* Vale todo el día del vencimiento. */
+    /* Vale todo el día del vencimiento, en la hora de la central. Postgres devuelve la
+     * columna `date` como medianoche local, pero un texto '2026-09-20' lo lee JavaScript
+     * como medianoche UTC: en Montevideo eso es el 19 a las 21 h, y la autorización
+     * vencía un día antes. Por eso se arma la fecha con año, mes y día locales. */
+    const v = p.valid_until;
+    const m = typeof v === 'string' && /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
+    const hasta = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(v);
     hasta.setHours(23, 59, 59, 999);
     if (ahora > hasta) {
-      return { ok: false, persona: p, razon: 'autorización vencida el ' + String(p.valid_until).slice(0, 10),
+      const dia = hasta.getFullYear() + '-' + String(hasta.getMonth() + 1).padStart(2, '0') + '-' + String(hasta.getDate()).padStart(2, '0');
+      return { ok: false, persona: p, razon: 'autorización vencida el ' + dia,
         alModelo: 'esa autorización está vencida; te paso con una persona' };
     }
   }

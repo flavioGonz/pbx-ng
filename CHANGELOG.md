@@ -47,6 +47,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **`/api/v1/cdr` repetía o salteaba llamadas al paginar.** `cdr.start` guarda la hora
+  de la central sin zona, y el cursor la mandaba en UTC: en Montevideo la comparación
+  quedaba corrida tres horas. Ahora el cursor viaja en la misma hora de pared que la
+  columna. Los cursores emitidos antes de esto se siguen aceptando, pero conviene volver
+  a pedir la primera página. (`control-plane/v1.js`)
+- **Una autorización de portería con vencimiento en texto vencía un día antes.**
+  `'2026-09-20'` se leía como medianoche UTC, que en Montevideo es el 19 a las 21 h. Lo
+  que viene de la base no estaba afectado; el mensaje de vencida además mostraba la fecha
+  como «Sun Sep 20» en vez de `2026-09-20`. (`control-plane/porteria.js`)
 - **ARI: la API reconecta si Asterisk pierde la app.** El WebSocket de eventos del ARI podía
   quedar medio abierto (un corte de la red de Docker, la máquina que se durmió) sin que
   `ari-client` avisara: la API seguía diciendo «ok», pero Asterisk ya no tenía la app `pbxng`
