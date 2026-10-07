@@ -1,0 +1,33 @@
+control-plane/test/tel-ramas-buzon.test.js
+  s_ace4c2a288c06b::t_bc34fbb998a9c3 1-299,302-303,307-308,310-493
+  s_ace4c2a288c06b::t_36240df8acc984 300-301,304-306,309
+  s_ace4c2a288c06b::t_6dd89e16842887 494-497
+control-plane/test/tel-ramas-marcacion.test.js
+  s_ace4c2a288c06b::t_95d884201faa11 1-486
+  s_ace4c2a288c06b::t_2619352dde3996 487
+control-plane/test/tel-ramas-telefonia.test.js
+  s_ace4c2a288c06b::t_9d86250375193e 1-469
+  s_ace4c2a288c06b::t_3213bb32bfa38b 470-471
+control-plane/test/tel-ramas-apps.test.js
+  s_ace4c2a288c06b::t_9f4e5763630792 1-607
+  s_ace4c2a288c06b::t_da4397de9bb3b0 608
+control-plane/test/helpers/tel-ramas-arnes.js
+  s_ace4c2a288c06b::t_6dc7ebf6bdde08 1-106
+  s_ace4c2a288c06b::t_076bb0ed6e2623 107-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7f1bb5a6b208345374b9bcfb249c94804918c455",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
