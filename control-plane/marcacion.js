@@ -84,7 +84,7 @@ const crearFiltroCentral = require('./desde-la-central');   // ¿el pedido lo hi
  */
 module.exports = function init(deps) {
   const { app, pool, amiAction, setDialplan, exigirExt, clientIp, errorHttp, broadcastSoon, logger } = deps;
-  const log = logger ? logger('marcacion') : { info() {}, warn() {}, error() {} };
+  const log = logger ? logger('marcacion') : require('./log').mudo;
 
   /* URL con la que ASTERISK ve a esta API (mismo criterio y misma variable que telefonia.js). */
   const API_URL = String(process.env.AST_API_URL || process.env.API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');

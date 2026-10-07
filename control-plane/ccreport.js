@@ -72,7 +72,7 @@ const report = require('./report');   // CSS, gráficos SVG y marca del informe 
  */
 module.exports = function init(deps) {
   const { app, pool, ami, alerts, errorHttp, logger } = deps;
-  const log = logger ? logger('ccreport') : { info() {}, debug() {}, error() {} };
+  const log = logger ? logger('ccreport') : require('./log').mudo;
 
   /* Tope de rango. Un informe no puede colgar la pantalla ni el pool: con 92 días el
    * agregado en SQL sigue siendo instantáneo y cubre el trimestre, que es lo que se

@@ -80,7 +80,7 @@ const emails = require('./emails');
  */
 module.exports = function init(deps) {
   const { app, pool, ami, amiAction, amiList, setDialplan, smtpHint, errorHttp, broadcastSoon, logger, createWebrtcEndpoint, rateLimit, reportarWeb, clientIp } = deps;
-  const log = logger ? logger('salas') : { info() {}, warn() {}, error() {} };
+  const log = logger ? logger('salas') : require('./log').mudo;
 
   const err = (status, msg) => Object.assign(new Error(msg), { status });
 
