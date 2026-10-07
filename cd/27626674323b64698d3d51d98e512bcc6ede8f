@@ -1,0 +1,20 @@
+control-plane/test/base-caida.test.js
+  s_ace4c2a288c06b::t_31109cec3e8903 1-93
+  s_ace4c2a288c06b::t_4a150ad2fc22e6 94-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cd27626674323b64698d3d51d98e512bcc6ede8f",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
