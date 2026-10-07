@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node app.js",
     "test": "node --test test/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='*.js' --test-coverage-exclude='eslint.config.js' --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 test/*.test.js",
     "lint": "eslint ."
   },
   "dependencies": {

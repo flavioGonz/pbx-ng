@@ -90,8 +90,11 @@ jobs:
             sleep 1
           done
           echo "Postgres no respondió en 30 s" >&2; exit 1
-      - name: Tests (unitarios + integración)
-        run: npm test
+      # Regla: 90% o más de cobertura en líneas, ramas y funciones de todo control-plane.
+      # Es un piso duro: por debajo, el job falla aunque todos los tests pasen. Y como
+      # release.yml invoca este workflow, tampoco sale un release por debajo del 90%.
+      - name: Tests (unitarios + integración) con cobertura mínima del 90%
+        run: npm run test:coverage
 
   # ---------------------------------------------------------------------------
   # Panel: `next build` corre su propio lint y falla con errores (CONTRATOS §10).
