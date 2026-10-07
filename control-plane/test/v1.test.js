@@ -66,6 +66,13 @@ test('v1: credencial de sistema, sobre, paginación e identidad de llamada', asy
   const servicio = tok.json.token;
   assert.deepEqual(tok.json.alcances, ['cdr:leer', 'llamadas:ver']);
 
+  await t.test('llamadas en curso sin ARI: 503 («no lo sé»), no una lista vacía', async () => {
+    /* La central de esta prueba no tiene ARI. Antes salía 200 con [] y el backoffice
+     * mostraba «no hay llamadas» durante una caída. */
+    const r = await api('GET', '/api/v1/llamadas', { token: servicio });
+    assert.equal(r.status, 503, JSON.stringify(r.json));
+  });
+
   await t.test('con secreto equivocado no se emite token, y el error no dice por qué', async () => {
     const r = await api('POST', '/api/v1/auth/token', { body: { client_id: 'horizon', secreto: 'no-es' } });
     assert.equal(r.status, 401);

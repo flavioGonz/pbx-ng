@@ -260,6 +260,10 @@ module.exports = function init(deps) {
    * la peor mentira posible en un tablero de operación. */
   router.get('/llamadas', exigirAlcance('llamadas:ver'), async (req, res) => {
     try {
+      /* `getChannels()` NO tira sin ARI: devuelve `[]` (callengine.js). El 503 de abajo no
+       * saltaba nunca y, con la central caída, el backoffice recibía «no hay llamadas».
+       * Por eso se pregunta antes si ARI está. */
+      if (deps.ariVivo && !deps.ariVivo()) throw new Error('ARI no conectado');
       const ch = await getChannels();
       res.json({ items: ch, tope_aplicado: ch.length, truncado: false, next_cursor: null });
     } catch (e) {

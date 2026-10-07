@@ -47,6 +47,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **`/api/v1/llamadas` decía «no hay llamadas» con la central caída.** Sin ARI tenía que
+  contestar 503 («no lo sé»), y así lo dice el contrato, pero `getChannels()` devuelve una
+  lista vacía en vez de fallar: el 503 no salía nunca y el backoffice mostraba un tablero
+  vacío durante la caída. (`control-plane/v1.js`)
 - **Una troncal «Unregistered» se mostraba «Registrada».** El estado buscaba `Registered` en
   la línea de `pjsip show registrations`, y «Unregistered» lo contiene: la troncal sin
   registro salía en verde y el failover no la salteaba. Ahora se busca la palabra entera.

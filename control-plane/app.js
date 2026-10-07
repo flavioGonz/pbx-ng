@@ -478,6 +478,7 @@ const apiV1 = require('./v1')({
   getChannels: (...a) => callEngine.getChannels(...a),
   endpointStates: (...a) => callEngine.endpointStates(...a),
   originar: (...a) => callEngine.originar(...a),
+  ariVivo: () => !!state.ari,
 });
 /* Outbox de eventos salientes (outbox.js): la mitad «la central avisa» del contrato.
  * Registra las suscripciones en `/api/eventos/**` (panel, admin) y el modo PULL en el
