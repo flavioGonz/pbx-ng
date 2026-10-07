@@ -47,6 +47,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Restaurar un respaldo del mismo minuto restauraba el estado actual.** Los respaldos se
+  nombraban por minuto, y el respaldo de seguridad que se saca antes de restaurar caía con el
+  mismo nombre y pisaba al que se iba a restaurar. Lo mismo con dos respaldos a mano en el
+  mismo minuto: el segundo borraba al primero. Ahora el nombre lleva los segundos
+  (`pbxng-AAAAMMDD-HHMMSS.tar.gz`) y, si aun así existe, un sufijo. La retención sigue
+  reconociendo los automáticos por el prefijo `pbxng-auto-`. (`control-plane/backup.js`)
 - **La tabla del aparcado mostraba todas las plazas libres aunque hubiera llamadas
   aparcadas.** Leía las filas de la respuesta de `ParkedCalls`, y la librería de AMI las
   entrega como eventos sueltos. Mismo error y mismo arreglo que la vista en vivo de las

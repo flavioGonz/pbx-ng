@@ -1688,7 +1688,7 @@ Recrear Asterisk corta llamadas: `pbxng-ctl` y `deploy.sh` drenan antes con
 Respaldo programado: `docker/backup-cron.sh` (cron del host 03:00, lo instala `install.sh`)
 → `docker compose exec -T api node backup-cli.js --keep=N`; `pbxng-ctl backup [args]` es el
 mismo camino a mano. `control-plane/backup-cli.js` (dueño `api`) invoca `backup.programado()` (= `crear()` con
-nombre `pbxng-auto-YYYYMMDD-HHMM.tar.gz` + retención: se borran sólo los `pbxng-auto-*` que
+nombre `pbxng-auto-YYYYMMDD-HHMMSS.tar.gz` + retención: se borran sólo los `pbxng-auto-*` que
 excedan `--keep`/`BACKUP_KEEP`, nunca los manuales del panel; si la creación falla no se poda
 nada). Además, la API trae un planificador interno equivalente (§3, `backup/schedule`), activo
 por defecto a las 03:00 del reloj del contenedor, así que el cron del host es opcional. Los dos
