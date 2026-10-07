@@ -240,7 +240,8 @@ test('aplicaciones: buzones, IVR, IA, colas, grupos, voceo, aparcado y música',
   });
 
   await t.test('colas: alta con anuncios por TTS, destino al vencer, el agente de IA como miembro, y baja', async () => {
-    assert.equal((await api('POST', '/api/queues', { token: admin, body: {} })).status, 500, 'sin nombre');
+    assert.equal((await api('POST', '/api/queues', { token: admin, body: {} })).status, 400, 'sin nombre');
+    assert.equal((await api('PUT', '/api/queues/no-existe', { token: admin, body: {} })).status, 404, 'editar una cola que no existe');
     assert.equal((await api('POST', '/api/queues', { token: admin, body: { name: 'ventas' } })).status, 400);
     const q = await api('POST', '/api/queues', { token: admin, body: {
       name: 'ventas', access_exten: '8200', label: 'Ventas', strategy: 'leastrecent', record: true, max_wait: 60,

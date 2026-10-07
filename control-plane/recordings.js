@@ -17,6 +17,9 @@
 'use strict';
 
 const recstore = require('./recstore');   // grabaciones: NAS/S3, subida automática y retención local
+/* El volumen de las grabaciones. El mismo valor (y la misma variable) que usa recstore.js:
+ * estaba escrito fijo acá, así que configurar REC_DIR lo respetaba la mitad del código. */
+const REC_DIR = process.env.REC_DIR || '/recordings';
 const report = require('./report');       // informe ejecutivo del CDR (HTML A4)
 
 /**
@@ -86,7 +89,7 @@ module.exports = function init(deps) {
        * llamadas», así que no hay nada que escuchar. */
       if (propio === '') return res.status(403).json({ error: 'tu usuario no tiene interno asignado' });
       if (propio !== null && ![rows[0].ext, rows[0].src, rows[0].dst].map(v => String(v || '')).includes(propio)) return res.status(403).json({ error: 'no podés acceder a las grabaciones de otra extensión' });
-      const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
+      const _fp = require('path').join(REC_DIR, require('path').basename(rows[0].filename)); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
       if (!r.ok) return res.status(502).end();
       res.set('Content-Type', 'audio/wav');
       res.set('Content-Disposition', 'inline; filename="' + rows[0].filename + '"');
@@ -138,9 +141,9 @@ module.exports = function init(deps) {
   }
   async function doTranscribe(id) {
     const { rows } = await pool.query('SELECT filename, duration FROM pbxng_recordings WHERE id=$1 AND deleted=false', [id]);
-    if (!rows[0]) throw new Error('grabacion no existe');
-    const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
-    if (!r.ok) throw new Error('audio no disponible');
+    if (!rows[0]) throw Object.assign(new Error('grabacion no existe'), { status: 404 });
+    const _fp = require('path').join(REC_DIR, require('path').basename(rows[0].filename)); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
+    if (!r.ok) throw Object.assign(new Error('audio no disponible'), { status: 404 });
     const wav = Buffer.from(await r.arrayBuffer());
     const pc = wavToPcm(wav);
     if (!pc) throw new Error('formato WAV no soportado (se requiere PCM 16-bit)');
@@ -174,7 +177,7 @@ module.exports = function init(deps) {
       const { rows } = await pool.query('SELECT filename, peaks FROM pbxng_recordings WHERE id=$1 AND deleted=false', [req.params.id]);
       if (!rows[0]) return res.status(404).json({ error: 'no existe' });
       if (rows[0].peaks) return res.json(rows[0].peaks);
-      const _fp = '/recordings/' + require('path').basename(rows[0].filename); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
+      const _fp = require('path').join(REC_DIR, require('path').basename(rows[0].filename)); const r = require('fs').existsSync(_fp) ? { ok: true, arrayBuffer: async () => require('fs').readFileSync(_fp) } : { ok: false };
       if (!r.ok) return res.json({ peaks: [], silent: true });
       const pc = wavToPcm(Buffer.from(await r.arrayBuffer()));
       if (!pc) return res.json({ peaks: [], silent: true });
@@ -305,7 +308,7 @@ module.exports = function init(deps) {
   async function indexRecordings() {
     try {
       const _fs = require('fs'); let files = [];
-      try { files = _fs.readdirSync('/recordings').filter(f => f.endsWith('.wav')).map(f => { try { const st = _fs.statSync('/recordings/' + f); return { filename: f, bytes: st.size, mtime: Math.floor(st.mtimeMs / 1000) }; } catch (e) { return null; } }).filter(Boolean); } catch (e) { return; }
+      try { files = _fs.readdirSync(REC_DIR).filter(f => f.endsWith('.wav')).map(f => { try { const st = _fs.statSync(require('path').join(REC_DIR, f)); return { filename: f, bytes: st.size, mtime: Math.floor(st.mtimeMs / 1000) }; } catch (e) { return null; } }).filter(Boolean); } catch (e) { return; }
       const ahora = Math.floor(Date.now() / 1000);
       for (const f of (Array.isArray(files) ? files : [])) {
         if (!f.filename || f.bytes == null || f.bytes < 1200) continue;

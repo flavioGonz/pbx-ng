@@ -209,7 +209,7 @@ async function borrar(nombre) {
 /* Nunca dejar que un nombre de archivo salga del directorio de respaldos. */
 function seguro(nombre) {
   const base = path.basename(String(nombre || ''));
-  if (!base || !base.endsWith('.tar.gz')) throw new Error('nombre de respaldo inválido');
+  if (!base || !base.endsWith('.tar.gz')) throw Object.assign(new Error('nombre de respaldo inválido'), { status: 400 });
   return path.join(DIR, base);
 }
 

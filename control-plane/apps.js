@@ -725,7 +725,13 @@ module.exports = function init(deps) {
   async function saveQueue(b, creating) {
     const name = String(b.name || '').trim();
     const access_exten = String(b.access_exten || '').trim();
-    if (!name) throw new Error('name es obligatorio');
+    if (!name) throw Object.assign(new Error('name es obligatorio'), { status: 400 });
+    /* Editar una cola que no existe reventaba más abajo (queueDialplan de una fila vacía)
+     * con un 500 «Cannot read properties of undefined». */
+    if (!creating) {
+      const { rows: hay } = await pool.query('SELECT 1 FROM pbxng_queues WHERE name=$1', [name]);
+      if (!hay.length) throw Object.assign(new Error('la cola ' + name + ' no existe'), { status: 404 });
+    }
     if (creating && !access_exten) throw Object.assign(new Error('access_exten es obligatorio'), { status: 400 });
     const n = qNative(b);
     const c = await pool.connect();

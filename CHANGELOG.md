@@ -47,6 +47,13 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Errores de entrada que contestaban 500.** Editar una cola que no existe reventaba con
+  «Cannot read properties of undefined» (ahora 404); crear una cola sin nombre, subir un
+  respaldo con un nombre inválido y transcribir una grabación que no existe contestaban 500
+  (ahora 400, 400 y 404). (`control-plane/apps.js`, `backup.js`, `recordings.js`)
+- **`recordings.js` ignoraba `REC_DIR`.** Tenía `/recordings` escrito fijo mientras
+  `recstore.js` leía la variable: configurarla la respetaba la mitad del código. Ahora los
+  dos usan `REC_DIR`, con el mismo valor por defecto. (`control-plane/recordings.js`)
 - **Con la base caída, 25 rutas no contestaban nunca.** Las que abren una transacción
   pedían la conexión con `await pool.connect()` fuera del `try`: si Postgres no respondía,
   la promesa rechazada no la atrapaba nadie y el pedido quedaba colgado (el panel con la
