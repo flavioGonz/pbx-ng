@@ -1,0 +1,60 @@
+dashboard/app/click-to-call/page.jsx
+  s_ace4c2a288c06b::t_ba9bfca5e563ef 21-23
+dashboard/test/porteria-mapa.test.jsx
+  s_ace4c2a288c06b::t_5e7f136c6459b7 1-171
+  s_ace4c2a288c06b::t_1952cb24eaf642 172-174
+dashboard/test/porteria-ficha.test.jsx
+  s_ace4c2a288c06b::t_dadcbccbba7b8d 1-480
+  s_ace4c2a288c06b::t_f65fc1ec7fcdc8 481-491
+dashboard/test/porteria-sala-web.test.jsx
+  s_ace4c2a288c06b::t_3dbd7b7b70a318 1-188
+  s_ace4c2a288c06b::t_b8fe849f939229 189
+dashboard/test/porteria-clientes.test.jsx
+  s_ace4c2a288c06b::t_0e466ba5bb170d 1-261
+  s_ace4c2a288c06b::t_c827d9acb6c27c 262-265
+dashboard/test/helpers/porteria-render.jsx
+  s_ace4c2a288c06b::t_386d1a0c0d32a8 1-91
+  s_ace4c2a288c06b::t_abcfc1f66328fe 92-93
+dashboard/app/clientes/page.jsx
+  s_ace4c2a288c06b::t_f78e574573d7a4 35-40
+dashboard/app/sala/[token]/page.jsx
+  s_ace4c2a288c06b::t_9f3143d9a64c2d 130-139
+dashboard/test/porteria-intercom.test.jsx
+  s_ace4c2a288c06b::t_5cb4513a0f8053 1-221
+  s_ace4c2a288c06b::t_0325dc5e5e8576 222-223
+dashboard/test/porteria-salas.test.jsx
+  s_ace4c2a288c06b::t_03f7f063f72946 1-515
+  s_ace4c2a288c06b::t_d03d76fe73a2b5 516-549
+dashboard/test/porteria-click-to-call.test.jsx
+  s_ace4c2a288c06b::t_8c66723bbdf572 1-178
+  s_ace4c2a288c06b::t_08499039990537 179-199
+dashboard/test/porteria-libreta.test.jsx
+  s_ace4c2a288c06b::t_6f179ce6301a57 1-202
+dashboard/app/SalasPanel.jsx
+  s_ace4c2a288c06b::t_9386a6ba650974 686-689,691
+  s_ace4c2a288c06b::t_68768f684eb002 61,172-173,248,842,870
+CHANGELOG.md
+  s_ace4c2a288c06b::t_5e217204ce5b1c 50-65
+dashboard/app/ClientesLibreta.jsx
+  s_ace4c2a288c06b::t_2c861bec442307 16-18,90,111-114,120,127,133-134,148,150,153
+dashboard/app/clientes/[id]/page.jsx
+  s_ace4c2a288c06b::t_6c8cf80df15252 25-27,62,84-85,91,102,104-105,121-123,231,312,370-371,373-375,397-399,417-418,456,458,463,478,515,517
+dashboard/app/intercom/page.jsx
+  s_ace4c2a288c06b::t_7bf2f0ad87088f 19-21,80,118,121,134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b15662dcf9aff850847a437ce2a90c7c59572efd",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
