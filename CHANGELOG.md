@@ -47,6 +47,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Panel · «Teléfono eliminado» aunque la API no lo hubiera borrado.** El borrado de un
+  teléfono aprovisionado iba por un `fetch` suelto, que no falla con un 403 o un 500. Ahora
+  va por la capa de API y avisa el error.
 - **Panel · la ficha de un cliente se caía al editar un segundo campo.** Los campos leían
   `e.currentTarget.value` adentro del actualizador de estado, que React corre después del
   evento, cuando `currentTarget` ya es null («Cannot read properties of null»). Pasaba en
