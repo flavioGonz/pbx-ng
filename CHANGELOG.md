@@ -47,6 +47,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Con el AMI caído, /health decía que estaba arriba y los pedidos que lo usan quedaban
+  colgados.** La API escuchaba el evento `disconnect`, que asterisk-manager no emite nunca
+  (emite `close`): después de un corte, `state.ami` seguía en verdadero y cada acción se
+  escribía en un socket muerto esperando una respuesta que no llegaba (por ejemplo, pausar
+  a un agente quedaba ~15 s colgado). Ahora un corte se ve en el acto y las acciones fallan
+  enseguida hasta que el AMI vuelve.
+- **Un admin sin interno quedaba anotado como «por: null» al abrir un portón o dar de alta
+  una cámara, y no podía abrir un relé por código.** Se leía `req.user.user`, pero la sesión
+  del panel trae `username`. Lo mismo en el log de quién expulsó a alguien de una sala.
 - **Una llamada al agente de demo tiraba abajo la API si faltaba python3 o Vosk.** El
   reconocedor de voz se lanza como proceso aparte y nadie escuchaba su error de arranque:
   Node lo convertía en una excepción no atrapada y se caía todo el control-plane. Ahora se

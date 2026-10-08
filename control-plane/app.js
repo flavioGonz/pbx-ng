@@ -360,7 +360,13 @@ ami.on('connect', () => {
     for (const f of resincronizar) { try { Promise.resolve(f()).catch(() => {}); } catch (_) {} }
   }, 5000);
 });
-ami.on('disconnect', () => { state.ami = false; });
+/* `close` y no `disconnect`: asterisk-manager reenvía los eventos del socket ('connect',
+ * 'close', 'end') y nunca emite 'disconnect'. Escuchando ese nombre, `state.ami` quedaba
+ * en true para siempre después de un corte: /health decía AMI arriba y cada amiAction
+ * escribía en un socket muerto y esperaba una respuesta que no llega (el pedido HTTP
+ * quedaba colgado hasta que el cliente se cansaba). Con 'close' se rechaza en el acto y
+ * keepConnected() lo vuelve a poner en true en el próximo 'connect'. */
+ami.on('close', () => { state.ami = false; });
 ami.on('error', (e) => logger('AMI').error(e && e.message));
 
 function amiAction(action) {
@@ -651,7 +657,7 @@ app.post('/api/softphone/ota/subir', soloAdminOta, express.json({ limit: '200mb'
     };
     for (const f of resto) await escribir(f);
     for (const f of yml) await escribir(f);
-    log.info({ archivos: archivos.length, por: req.user && req.user.user }, 'instalador subido a mano');
+    log.info({ archivos: archivos.length, por: req.user && req.user.username }, 'instalador subido a mano');
     res.json({ ok: true, ...softphoneLatest() });
   } catch (e) { errorHttp(res, e); }
 });
@@ -3129,6 +3135,9 @@ app.post('/api/devices/:did/rele', async (req,res)=>{ const b=req.body||{}; try{
   const dev = rows[0];
   if(!dev) return res.status(404).json({error:'no existe'});
   if(!dev.enabled) return res.status(409).json({error:'el dispositivo está deshabilitado'});
+  /* La sesión del panel trae `username` (auth.js firma { uid, username, role, ext }); se
+   * leía `user`, que no existe: un admin sin interno quedaba anotado como «por: null» en
+   * la bitácora de aperturas y no podía abrir un relé por código de función. */
   const quien = (req.user && (req.user.ext || req.user.username)) || null;
   const idx = parseInt(b.rele, 10) || 0;
   let r;

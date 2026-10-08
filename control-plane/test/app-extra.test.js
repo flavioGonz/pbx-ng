@@ -193,7 +193,7 @@ test('app.js: captura SIP, IA, ACME y el socket del panel', async (t) => {
   });
 
   await t.test('eventos del AMI: atendida, terminada y registro de internos van al outbox una vez', async () => {
-    const cuenta = async (tipo) => (await ctx.db.query('SELECT count(*)::int n FROM pbxng_outbox WHERE tipo=$1', [tipo])).rows[0].n;
+    const cuenta = async (tipo) => (await ctx.db.query('SELECT count(*)::int n FROM pbxng_eventos_salida WHERE tipo=$1', [tipo])).rows[0].n;
     ami.emitir({ Event: 'DialEnd', DestChannel: 'PJSIP/2001-01', DialStatus: 'ANSWER', CallerIDNum: '099', Linkedid: 'L1', Uniqueid: 'U1' });
     ami.emitir({ Event: 'DialEnd', DestChannel: 'PJSIP/2001-01', DialStatus: 'ANSWER', CallerIDNum: '099', Linkedid: 'L1' });
     ami.emitir({ Event: 'DialEnd', DestChannel: 'Local/x', DialStatus: 'ANSWER' });
@@ -205,12 +205,11 @@ test('app.js: captura SIP, IA, ACME y el socket del panel', async (t) => {
     ami.emitir({ Event: 'ContactStatus', AOR: '2001', ContactStatus: 'Unknown' });
     ami.emitir({ Event: 'Newchannel' });
     const ok = await hasta(async () => (await cuenta('llamada.contestada').catch(() => 0)) >= 1 && (await cuenta('interno.registrado').catch(() => 0)) >= 1, 4000);
-    if (ok) {
-      await dormir(200);
-      assert.equal(await cuenta('llamada.contestada'), 1);
-      assert.equal(await cuenta('interno.registrado'), 1);
-      assert.equal(await cuenta('llamada.terminada'), 1);
-    }
+    assert.ok(ok, 'los eventos del AMI no llegaron al outbox');
+    await dormir(200);
+    assert.equal(await cuenta('llamada.contestada'), 1);
+    assert.equal(await cuenta('interno.registrado'), 1);
+    assert.equal(await cuenta('llamada.terminada'), 1);
   });
 
   await t.test('respaldo manual por la API: con pg_dump caído da error y no deja archivo', async () => {

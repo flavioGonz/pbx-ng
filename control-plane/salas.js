@@ -621,7 +621,7 @@ module.exports = function init(deps) {
       if (!sala) return res.status(404).json({ error: 'no existe esa sala' });
       const p = await canalDeLaSala(sala.name, (req.body || {}).canal);
       await amiAction({ Action: 'ConfbridgeKick', Conference: sala.name, Channel: p.canal });
-      log.info('expulsado ' + p.canal + ' de ' + sala.name + ' por ' + ((req.user && req.user.user) || '?'));
+      log.info('expulsado ' + p.canal + ' de ' + sala.name + ' por ' + ((req.user && req.user.username) || '?'));
       res.json({ ok: true, canal: p.canal });
     } catch (e) { errorHttp(res, e); }
   });
