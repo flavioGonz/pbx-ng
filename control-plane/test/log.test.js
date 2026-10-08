@@ -32,8 +32,8 @@ test('JSON: un registro por línea, warn y error a stderr, los campos y el error
 
 test('texto: legible, con el error sólo por su mensaje (el stack en debug)', () => {
   const r = correr(`const l = logger(); l.info('hola', { a: 1 }); l.error('mal', new Error('boom')); l.info('nada');`, { LOG_FORMAT: 'text' });
-  assert.match(r.stdout, /INFO  \[app\] hola \{"a":1\}/);
-  assert.match(r.stdout, /INFO  \[app\] nada$/m);
+  assert.match(r.stdout, /INFO {2}\[app\] hola \{"a":1\}/);
+  assert.match(r.stdout, /INFO {2}\[app\] nada$/m);
   assert.match(r.stderr, /ERROR \[app\] mal \{"err":"boom"\}/);
   const d = correr(`logger('x').debug('d', new Error('con stack'));`, { LOG_FORMAT: 'text', LOG_LEVEL: 'debug' });
   assert.match(d.stdout, /"stack":/, 'en debug el error va entero');
