@@ -223,13 +223,18 @@ export function useSip() {
 
   const wire = useCallback((s, info) => {
     session.current = s; setCallInfo(info); callInfoRef.current = info; setVideoOn(!!(info && info.video)); setMuted(false); setHeld(false);
+    /* La hora de atención vive acá y no en `info`: `info` es la foto del momento de
+     * marcar (since: 0) y el historial se armaba con ella, así que TODAS las llamadas
+     * WebRTC quedaban con duración 0 aunque se hubiera hablado media hora. */
+    let atendida = 0;
     s.stateChange.addListener((st) => {
       const isActive = session.current === s;
+      if (st === SessionState.Established && !atendida) atendida = Date.now();
       if (isActive) setCall(st);
       try { console.log('[sip] session', st, isActive ? '(activa)' : '(espera)'); } catch {}
       if (st === SessionState.Established && session.current === s) { attachMedia(s); setCallInfo(i => i ? { ...i, since: Date.now() } : i); callInfoRef.current = callInfoRef.current ? { ...callInfoRef.current, since: Date.now() } : callInfoRef.current; stopRinging(); setNote(''); }
       if (st === SessionState.Terminated) {
-        if (info) { const dur = info.since ? Math.round((Date.now() - info.since) / 1000) : 0; pushHist({ ...info, dur, ended: Date.now() }); }
+        if (info) { const desde = atendida || info.since; const dur = desde ? Math.round((Date.now() - desde) / 1000) : 0; pushHist({ ...info, since: desde || 0, dur, ended: Date.now() }); }
         stopRinging(); releaseMedia(s);
         if (heldLine.current && heldLine.current.s === s) { heldLine.current = null; setHeldInfo(null); return; }
         if (session.current === s) {

@@ -116,23 +116,6 @@ export function Reloj({ desde, className }) {
   return <span className={className} style={{ fontVariantNumeric: 'tabular-nums' }}>{dd(hh)}:{dd(mm)}:{dd(ss)}</span>;
 }
 
-/* ── Avatar ───────────────────────────────────────────────────────────────
- * Un círculo liso con las iniciales: nada de sombras ni degradés. Es a propósito —el
- * teléfono que usa el cliente lo dibuja así, y en una pantalla que se mira cincuenta
- * veces por día lo plano cansa menos que lo brillante. */
-function Avatar({ txt, size = 120, entra }) {
-  return (
-    <div className={'cs-avatar' + (entra ? ' cs-avatar-in' : '')}
-      style={{
-        width: size, height: size, borderRadius: '50%', background: colorAvatar(txt),
-        color: T.avatarTxt, display: 'grid', placeItems: 'center', userSelect: 'none',
-        fontSize: Math.round(size * 0.285), fontWeight: 400, letterSpacing: 0.5,
-      }}>
-      {txt}
-    </div>
-  );
-}
-
 /* ── Onda del audio REAL del otro lado ─────────────────────────────────────
  * Es la diferencia entre una animación decorativa y una que informa: si las barras no se
  * mueven mientras el otro habla, hay un problema de audio y se ve sin abrir nada. */
@@ -328,7 +311,8 @@ export default function CallScreen(p) {
     desde,               // marca de tiempo del inicio, para el reloj
     calidad,             // 0..4
     viaTurn,             // true | false | null
-    video,               // hay video activo
+    video,               // hay escena de video (la imagen de la llamada o las cámaras del cliente)
+    anunciaVideo,        // la ENTRANTE trae video; si no se pasa, se deduce de `video`
     getRemoteStream,
     getAudioStream,       // el audio del otro lado, para el orbe y la onda (en nativo NO es el mismo que el video)
     notaVideo = '',       // por qué la cámara no se puede encender, si no se puede
@@ -397,7 +381,11 @@ export default function CallScreen(p) {
    * de llamada terminada el subtítulo ya no es el interno sino la duración, y esa va
    * debajo: meterla entre paréntesis al lado del nombre se leía como otro número. */
   const nombre = subtitulo && estado !== 'terminada' ? titulo + ' (' + subtitulo + ')' : titulo;
-  const leyenda = estado === 'entrante' ? (video ? 'Videollamada entrante' : 'Llamada entrante')
+  /* El rótulo de la entrante sale de lo que trae la LLAMADA, no de la escena: un portero de
+   * audio con las cámaras del cliente a la vista sigue siendo una llamada, y decir
+   * «Videollamada» hace esperar una imagen del otro lado que no va a venir. */
+  const conVideo = anunciaVideo === undefined ? video : anunciaVideo;
+  const leyenda = estado === 'entrante' ? (conVideo ? 'Videollamada entrante' : 'Llamada entrante')
     : estado === 'marcando' ? (nota || 'Timbrando')
       : estado === 'espera' ? 'En espera'
         : estado === 'terminada' ? 'Llamada finalizada'

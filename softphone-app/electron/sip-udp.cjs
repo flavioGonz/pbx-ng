@@ -17,7 +17,7 @@ function muEnc(s) { const BIAS = 0x84, CLIP = 32635; let sign = s < 0 ? 0x80 : 0
 function muDec(u) { u = ~u & 0xFF; const sign = u & 0x80, e = (u >> 4) & 0x07, man = u & 0x0F; let s = ((man << 3) + 0x84) << e; s -= 0x84; return sign ? -s : s; }
 // ---- G.711 A-law (PCMA) — ITU reference ----
 const SEG_END = [0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0x1FFF, 0x3FFF, 0x7FFF];
-function aEnc(pcm) { let mask, seg = 8, aval; if (pcm >= 0) mask = 0xD5; else { mask = 0x55; pcm = -pcm - 1; if (pcm < 0) pcm = 0; } for (let i = 0; i < 8; i++) { if (pcm <= SEG_END[i]) { seg = i; break; } } if (seg >= 8) return (0x7F ^ mask) & 0xFF; aval = seg << 4; aval |= seg < 2 ? (pcm >> 1) & 0x0F : (pcm >> seg) & 0x0F; return (aval ^ mask) & 0xFF; }
+function aEnc(pcm) { let mask, seg = 8, aval; if (pcm >= 0) mask = 0xD5; else { mask = 0x55; pcm = -pcm - 1; } for (let i = 0; i < 8; i++) { if (pcm <= SEG_END[i]) { seg = i; break; } } if (seg >= 8) return (0x7F ^ mask) & 0xFF; aval = seg << 4; aval |= seg < 2 ? (pcm >> 1) & 0x0F : (pcm >> seg) & 0x0F; return (aval ^ mask) & 0xFF; }
 function aDec(a) { a ^= 0x55; let t = (a & 0x0F) << 4; const seg = (a & 0x70) >> 4; if (seg === 0) t += 8; else if (seg === 1) t += 0x108; else { t += 0x108; t <<= seg - 1; } return (a & 0x80) ? t : -t; }
 function encOf(pt) { return pt === 8 ? aEnc : muEnc; }
 function decOf(pt) { return pt === 8 ? aDec : muDec; }
@@ -219,7 +219,12 @@ function start(cfg, onEvent) {
   function doRegister() {
     if (!engine) return; const rq = baseRegister(++engine.cseq);
     sip.send(rq, (rs) => { if (!engine) return; learnNat(rs); log('in', 'REGISTER → ' + rs.status + ' ' + (rs.reason || ''));
-      if (rs.status === 401 || rs.status === 407) { try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = ++engine.cseq; rq.headers.via = []; sip.send(rq, (rs2) => { if (!engine) return; log('in', 'REGISTER(auth) → ' + rs2.status); onRegFinal(rs2); }); } catch (e) { engine.done = true; clearTimeout(engine.timer); failReg('auth: ' + e.message); } }
+      if (rs.status === 401 || rs.status === 407) { try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = ++engine.cseq; rq.headers.via = [];
+        /* El Contact se rearma DESPUÉS de learnNat: el del primer intento lleva la IP privada
+         * y, si se reenvía tal cual, la central queda registrando una dirección a la que no
+         * puede mandar las entrantes hasta el próximo refresco (minutos después). */
+        rq.headers.contact = [{ uri: mkContact() }];
+        sip.send(rq, (rs2) => { if (!engine) return; log('in', 'REGISTER(auth) → ' + rs2.status); onRegFinal(rs2); }); } catch (e) { engine.done = true; clearTimeout(engine.timer); failReg('auth: ' + e.message); } }
       else onRegFinal(rs); });
   }
 
@@ -240,6 +245,14 @@ function start(cfg, onEvent) {
       if (rs.status === 401 || rs.status === 407) { if (authed) return; authed = true; try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = ++engine.cseq; rq.headers.via = []; sip.send(rq, cb); } catch (e) { emit({ type: 'call', state: 'ended', reason: 'auth: ' + e.message }); engine.call = null; } return; }
       if (rs.status >= 100 && rs.status < 200) { if (rs.status === 180 || rs.status === 183) emit({ type: 'call', state: 'ringing' }); return; }
       if (rs.status >= 200 && rs.status < 300) {
+        /* Por UDP la central retransmite el 200 hasta ver el ACK, y la librería nos entrega
+         * cada copia. Sin este corte cada retransmisión volvía a «atender»: reabría el RTP
+         * y mandaba otro `answered`, que en el renderer reinicia el micrófono y el audio. A
+         * la copia sólo se le debe otro ACK. */
+        if (engine.call.established) {
+          try { sip.send({ method: 'ACK', uri: engine.call.remoteTarget, headers: { to: rs.headers.to, from: rs.headers.from, 'call-id': callId, cseq: { method: 'ACK', seq: rs.headers.cseq.seq }, via: [] } }); } catch (_) {}
+          return;
+        }
         const to = rs.headers.to; engine.call.toTag = to && to.params && to.params.tag;
         engine.call.remoteTarget = (rs.headers.contact && rs.headers.contact[0] && rs.headers.contact[0].uri) || rq.uri;
         engine.call.dialog = { callId, localUri: 'sip:' + cfg.ext + '@' + cfg.domain, localTag: fromTag, remoteUri: 'sip:' + n + '@' + cfg.domain, remoteTag: engine.call.toTag, remoteTarget: engine.call.remoteTarget, cseq: rq.headers.cseq.seq };
@@ -251,7 +264,7 @@ function start(cfg, onEvent) {
           startRtp(rem.ip, rem.port, rtpPort, pickAudioPt(rem), findDtmfPt(rem), sctx); engine.call.established = true; emit({ type: 'call', state: 'answered', number: n });
           if (engine.call.video && engine.call.video.wanted && rem.vport) { engine.call.videoActivo = true; engine.call.video.pt = rem.vpt || 96; startVideo(rem.ip, rem.vport, engine.call.video.localPort, rem.vpt); }
         }
-        else emit({ type: 'call', state: 'ended', reason: 'sin SDP remoto' });
+        else cortarSinSdp();
       } else if (rs.status >= 300) { emit({ type: 'call', state: 'ended', reason: rs.status + ' ' + (rs.reason || '') }); engine.call = null; }
     };
     sip.send(rq, cb);
@@ -290,6 +303,11 @@ function start(cfg, onEvent) {
           emit({ type: 'call', state: 'reinvite', remoteHold: remotoEspera });
           return;
         }
+        /* Otra llamada mientras ya hay una (hablando o marcando): este motor maneja UNA sola
+           línea. Antes la nueva pisaba `engine.call` y la llamada en curso quedaba huérfana
+           —sin diálogo para mandarle el BYE, con el otro lado colgado de la línea—. Se
+           contesta 486 y la central hace lo suyo (buzón, siguiente de la cola). */
+        if (c0) { try { sip.send(sip.makeResponse(rq, 486, 'Busy Here')); } catch (_) {} return; }
         const from = (rq.headers.from && rq.headers.from.uri && sip.parseUri(rq.headers.from.uri).user) || 'desconocido';
         const rem = parseSdp(rq.content);
         engine.call = { dir: 'in', number: from, callId: rq.headers['call-id'], rtpPort: freeRtpPort(), inviteRq: rq, established: false, remote: rem, video: { offered: !!rem.vport, localPort: freeRtpPort(), pt: 96 } };
@@ -322,15 +340,21 @@ function start(cfg, onEvent) {
       startRtp(rem.ip, rem.port, c.rtpPort, txPt, dtmfPt, sctx); c.established = true; emit({ type: 'call', state: 'answered', number: c.number });
       if (ansVid && rem.vport) { c.videoActivo = true; c.video.pt = rem.vpt || 96; startVideo(rem.ip, rem.vport, c.video.localPort, rem.vpt); }
     }
-    else emit({ type: 'call', state: 'ended', reason: 'sin SDP remoto' });
+    else cortarSinSdp();
   }
+  function byeDialogo(d) { sip.send({ method: 'BYE', uri: d.remoteTarget, headers: { to: { uri: d.remoteUri, params: { tag: d.remoteTag } }, from: { uri: d.localUri, params: { tag: d.localTag } }, 'call-id': d.callId, cseq: { method: 'BYE', seq: (d.cseq || 1) + 1 }, 'user-agent': 'PBX-NG Softphone', via: [] } }, (rs) => log('in', 'BYE → ' + rs.status)); }
+  /* Una llamada que el otro lado dio por atendida (200 + ACK, o nuestro 200) pero sin SDP
+   * con el que mandar audio: se corta con BYE —si no, la central la deja arriba muda— y se
+   * suelta `engine.call`, que si quedaba puesta hacía rechazar con 486 todas las entrantes
+   * siguientes. */
+  function cortarSinSdp() { const c = engine.call; try { c && c.dialog && byeDialogo(c.dialog); } catch (_) {} engine.call = null; emit({ type: 'call', state: 'ended', reason: 'sin SDP remoto' }); }
   function reject() { if (engine && engine.call && engine.call.dir === 'in') { try { sip.send(sip.makeResponse(engine.call.inviteRq, 486, 'Busy Here')); } catch (_) {} engine.call = null; emit({ type: 'call', state: 'ended', reason: 'rechazada' }); } }
   function hangup() {
     if (!engine || !engine.call) { stopRtp(); return; }
     const c = engine.call;
     try {
       if (c.dir === 'out' && !c.established) { const iv = c.inviteRq; const via = (iv.headers.via && iv.headers.via.length) ? [iv.headers.via[0]] : []; sip.send({ method: 'CANCEL', uri: iv.uri, headers: { to: iv.headers.to, from: iv.headers.from, 'call-id': c.callId, cseq: { method: 'CANCEL', seq: iv.headers.cseq.seq }, via } }); }
-      else if (c.established && c.dialog) { const d = c.dialog; sip.send({ method: 'BYE', uri: d.remoteTarget, headers: { to: { uri: d.remoteUri, params: { tag: d.remoteTag } }, from: { uri: d.localUri, params: { tag: d.localTag } }, 'call-id': d.callId, cseq: { method: 'BYE', seq: (d.cseq || 1) + 1 }, 'user-agent': 'PBX-NG Softphone', via: [] } }, (rs) => log('in', 'BYE → ' + rs.status)); }
+      else if (c.established && c.dialog) byeDialogo(c.dialog);
       else if (c.dir === 'in') sip.send(sip.makeResponse(c.inviteRq, 486, 'Busy Here'));
     } catch (e) { log('info', 'hangup err: ' + e.message); }
     stopRtp(); engine.call = null; emit({ type: 'call', state: 'ended', reason: 'colgaste' });
@@ -472,7 +496,11 @@ function start(cfg, onEvent) {
     const rq = { method: 'SUBSCRIBE', uri: 'sip:' + cfg.ext + '@' + server + ':' + port + tparam, headers: { to: { uri: 'sip:' + cfg.ext + '@' + cfg.domain }, from: { uri: 'sip:' + cfg.ext + '@' + cfg.domain, params: { tag: rstr() } }, 'call-id': cid, cseq: { method: 'SUBSCRIBE', seq: ++engine.cseq }, contact: [{ uri: mkContact() }], event: 'message-summary', accept: 'application/simple-message-summary', expires: 3600, 'user-agent': 'PBX-NG Softphone', via: [] }, content: '' };
     try { sip.send(rq, (rs) => { if (!engine) return; if ((rs.status === 401 || rs.status === 407) && !auth) { try { const ses = {}; digest.signRequest(ses, rq, rs, creds); rq.headers.cseq.seq = ++engine.cseq; rq.headers.via = []; sip.send(rq, () => {}); } catch (_) {} } log('in', 'SUBSCRIBE(mwi) → ' + rs.status); }); } catch (_) {}
   }
-  engine.hold = hold; engine.video = video; engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf; engine.sendVideoFrame = sendVideoFrame; engine.reqKeyframe = reqKeyframe;
+  /* `setVideo` y no `video`: `engine.video` es el RTP de video en curso (lo usan
+   * startVideo/stopRtp). Con el mismo nombre, al arrancar el primer video la función
+   * quedaba pisada por el objeto RTP y apagar la cámara tiraba «engine.video is not a
+   * function»: en modo nativo la cámara se podía prender pero nunca apagar. */
+  engine.hold = hold; engine.setVideo = video; engine.transfer = transfer; engine.placeCall = placeCall; engine.accept = accept; engine.reject = reject; engine.hangup = hangup; engine.pushOut = pushOut; engine.setMuted = (m) => { if (engine && engine.rtp) engine.rtp.muted = !!m; }; engine.dtmf = sendDtmf; engine.sendVideoFrame = sendVideoFrame; engine.reqKeyframe = reqKeyframe;
   function kick() { setTimeout(doRegister, 120); }
   if (wantSrv && !/^[0-9.]+$/.test(server)) {
     try { require('dns').resolveSrv('_sip._' + transport + '.' + server, (err, recs) => { if (!err && recs && recs.length) { recs.sort((a, b) => (a.priority - b.priority) || (b.weight - a.weight)); server = recs[0].name; port = recs[0].port; log('info', 'SRV → ' + server + ':' + port); } kick(); }); }
@@ -490,7 +518,7 @@ function setMuted(m) { engine && engine.setMuted && engine.setMuted(m); }
 function dtmf(d) { engine && engine.dtmf && engine.dtmf(d); }
 function transfer(t) { engine && engine.transfer && engine.transfer(t); }
 function hold(on) { engine && engine.hold && engine.hold(on); }
-function setVideo(on) { engine && engine.video && engine.video(on); }
+function setVideo(on) { engine && engine.setVideo && engine.setVideo(on); }
 function videoOut(b64, ts90) { engine && engine.sendVideoFrame && engine.sendVideoFrame(b64, ts90); }
 function reqKeyframe() { engine && engine.reqKeyframe && engine.reqKeyframe(); }
 module.exports = { start, stop, call, accept, reject, hangup, audioOut, setMuted, dtmf, transfer, hold, setVideo, videoOut, reqKeyframe };
