@@ -3044,7 +3044,7 @@ app.post('/api/clients/:id/devices', camaraAlta, async (req,res)=>{ const b=req.
    * peor. Queda el warn en el log de la API. */
   pool.query('INSERT INTO pbxng_sec_events (kind, severity, detail) VALUES ($1,$2,$3)',
     ['crm', 'info', JSON.stringify({ que: 'alta de camara', cliente: Number(req.params.id), dispositivo: rows[0].id,
-      etiqueta: rows[0].label, por: (req.user && (req.user.ext || req.user.user)) || null,
+      etiqueta: rows[0].label, por: (req.user && (req.user.ext || req.user.username)) || null,
       via: (req.user && req.user.scope === 'phone') ? 'softphone' : 'panel' })])
     .catch((e) => log.warn({ err: e && e.message }, 'no se pudo anotar el alta de camara'));
   res.status(201).json(deviceSafe(rows[0]));
@@ -3102,7 +3102,7 @@ app.post('/api/devices/:did/rele', async (req,res)=>{ const b=req.body||{}; try{
   const dev = rows[0];
   if(!dev) return res.status(404).json({error:'no existe'});
   if(!dev.enabled) return res.status(409).json({error:'el dispositivo está deshabilitado'});
-  const quien = (req.user && (req.user.ext || req.user.user)) || null;
+  const quien = (req.user && (req.user.ext || req.user.username)) || null;
   const idx = parseInt(b.rele, 10) || 0;
   let r;
   try { r = await abrirRele(dev, idx, quien); }
