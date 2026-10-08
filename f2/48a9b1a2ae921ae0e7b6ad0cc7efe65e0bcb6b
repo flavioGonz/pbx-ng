@@ -1,0 +1,21 @@
+control-plane/ai-pipeline.js
+  s_ace4c2a288c06b::t_29dc4836a93981 91,93,209
+control-plane/marcacion.js
+  s_ace4c2a288c06b::t_dfbd37c787de79 1032,1115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f248a9b1a2ae921ae0e7b6ad0cc7efe65e0bcb6b",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
