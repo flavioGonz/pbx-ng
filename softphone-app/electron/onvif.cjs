@@ -19,6 +19,7 @@
 'use strict';
 
 const dgram = require('dgram');
+const os = require('os');
 const crypto = require('crypto');
 const http = require('http');
 const { URL } = require('url');
@@ -106,53 +107,107 @@ function postSoap(urlStr, xml, ms) {
 
 /**
  * WS-Discovery: quien contesta en esta red.
- * @returns {Promise<Array<{xaddr:string, host:string, nombre:string, modelo:string}>>}
+ *
+ * UNA SOCKET POR INTERFAZ, y esta es LA decision de esta funcion.
+ *
+ * La primera version abria una sola socket en 0.0.0.0 y mandaba el Probe al grupo
+ * multicast. Eso anda en una maquina con una sola placa —el contenedor donde lo probe— y
+ * NO anda en la maquina de un tecnico: Windows elige una sola interfaz de salida para el
+ * multicast, por metrica de ruteo, y en una notebook de trabajo esa suele ser una adaptadora
+ * virtual (VPN, Hyper-V, VirtualBox, WSL) y no la placa que esta en la red de las camaras.
+ * El paquete sale por donde no hay nadie, no contesta nadie, y el usuario ve «no contesto
+ * ninguna» sin forma de saber por que. Probarlo en Linux con una sola placa fue probarlo
+ * donde el error no puede aparecer.
+ *
+ * Ahora se abre una socket POR CADA direccion IPv4 real del equipo, atada a esa direccion y
+ * con `setMulticastInterface`, y se pregunta por todas a la vez. Ademas se manda al
+ * broadcast dirigido de cada subred: hay camaras que contestan a eso y no al multicast.
+ *
+ * Devuelve tambien por que interfaces se pregunto: «no contesto ninguna» es una respuesta
+ * muy distinta si se pregunto por la placa correcta que si no se pregunto por ninguna.
+ *
+ * @returns {Promise<{equipos:Array, interfaces:Array<{nombre:string,ip:string}>}>}
  */
 function descubrir(ms) {
-  return new Promise((res) => {
-    const vistos = new Map();
+  const plazo = ms || 4000;
+  const vistos = new Map();
+  const interfaces = [];
+
+  const anotar = (xml) => {
+    const xaddrs = tag(xml, 'XAddrs');
+    if (!xaddrs) return;
+    /* Un equipo puede anunciar varias direcciones (una por interfaz). Se toma la
+     * primera http:// que se pueda parsear: es la que responde en esta red. */
+    const url = xaddrs.split(/\s+/).find((x) => /^http:\/\//i.test(x));
+    if (!url || vistos.has(url)) return;
+    let host = ''; try { host = new URL(url).hostname; } catch (_) {}
+    /* `Scopes` trae pares tipo onvif://www.onvif.org/name/DS-2CD2043 */
+    const scopes = tag(xml, 'Scopes');
+    const scope = (clave) => {
+      const m = new RegExp('onvif://www\\.onvif\\.org/' + clave + '/([^\\s]+)').exec(scopes || '');
+      return m ? decodeURIComponent(m[1]).replace(/_/g, ' ') : '';
+    };
+    vistos.set(url, { xaddr: url, host, nombre: scope('name') || host, modelo: scope('hardware') || '' });
+  };
+
+  const sobreProbe = () => Buffer.from('<?xml version="1.0" encoding="UTF-8"?>'
+    + '<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"'
+    + ' xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing"'
+    + ' xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery"'
+    + ' xmlns:dn="http://www.onvif.org/ver10/network/wsdl">'
+    + '<e:Header><w:MessageID>uuid:' + crypto.randomUUID() + '</w:MessageID>'
+    + '<w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
+    + '<w:Action e:mustUnderstand="true">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action></e:Header>'
+    + '<e:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body></e:Envelope>', 'utf8');
+
+  /* El broadcast dirigido de una subred: 192.168.1.10/255.255.255.0 → 192.168.1.255. */
+  const broadcastDe = (ip, mascara) => {
+    try {
+      const a = ip.split('.').map(Number), m = mascara.split('.').map(Number);
+      if (a.length !== 4 || m.length !== 4) return null;
+      return a.map((x, i) => (x & m[i]) | (~m[i] & 255)).join('.');
+    } catch (_) { return null; }
+  };
+
+  const direcciones = [];
+  try {
+    const ifs = os.networkInterfaces();
+    for (const nombre of Object.keys(ifs)) {
+      for (const d of ifs[nombre] || []) {
+        if (d.family !== 'IPv4' && d.family !== 4) continue;
+        if (d.internal) continue;           // loopback: ahi no hay camaras
+        direcciones.push({ nombre, ip: d.address, bcast: broadcastDe(d.address, d.netmask) });
+      }
+    }
+  } catch (_) {}
+  if (!direcciones.length) return Promise.resolve({ equipos: [], interfaces: [] });
+
+  return Promise.all(direcciones.map((d) => new Promise((listo) => {
     let sock;
-    try { sock = dgram.createSocket({ type: 'udp4', reuseAddr: true }); } catch (e) { return res([]); }
-    const cerrar = () => { try { sock.close(); } catch (_) {} res(Array.from(vistos.values())); };
-    const t = setTimeout(cerrar, ms || 4000);
-
+    try { sock = dgram.createSocket({ type: 'udp4', reuseAddr: true }); } catch (_) { return listo(); }
+    let cerrada = false;
+    const cerrar = () => { if (cerrada) return; cerrada = true; try { sock.close(); } catch (_) {} listo(); };
+    const t = setTimeout(cerrar, plazo);
+    /* Una placa que no deja mandar multicast (una VPN, una virtual sin red) no puede
+     * tumbar la busqueda entera: se cierra esa y las otras siguen. */
     sock.on('error', () => { clearTimeout(t); cerrar(); });
-    sock.on('message', (buf) => {
-      const xml = buf.toString('utf8');
-      const xaddrs = tag(xml, 'XAddrs');
-      if (!xaddrs) return;
-      /* Un equipo puede anunciar varias direcciones (una por interfaz). Se toma la
-       * primera http:// que se pueda parsear: es la que responde en esta red. */
-      const url = xaddrs.split(/\s+/).find((x) => /^http:\/\//i.test(x));
-      if (!url || vistos.has(url)) return;
-      let host = ''; try { host = new URL(url).hostname; } catch (_) {}
-      /* `Scopes` trae pares tipo onvif://www.onvif.org/name/DS-2CD2043 */
-      const scopes = tag(xml, 'Scopes');
-      const scope = (clave) => {
-        const m = new RegExp('onvif://www\\.onvif\\.org/' + clave + '/([^\\s]+)').exec(scopes || '');
-        return m ? decodeURIComponent(m[1]).replace(/_/g, ' ') : '';
-      };
-      vistos.set(url, { xaddr: url, host, nombre: scope('name') || host, modelo: scope('hardware') || '' });
-    });
-
-    sock.bind(() => {
-      try { sock.setBroadcast(true); sock.setMulticastTTL(2); } catch (_) {}
-      const msg = '<?xml version="1.0" encoding="UTF-8"?>'
-        + '<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"'
-        + ' xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing"'
-        + ' xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery"'
-        + ' xmlns:dn="http://www.onvif.org/ver10/network/wsdl">'
-        + '<e:Header><w:MessageID>uuid:' + crypto.randomUUID() + '</w:MessageID>'
-        + '<w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
-        + '<w:Action e:mustUnderstand="true">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action></e:Header>'
-        + '<e:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body></e:Envelope>';
-      const b = Buffer.from(msg, 'utf8');
-      /* Se manda tres veces: el Probe es UDP y en una red con wifi de por medio se pierde
-       * sin que nadie avise. Tres intentos separados cuestan nada y cambian el resultado. */
-      const mandar = () => { try { sock.send(b, 0, b.length, PUERTO_WSD, MULTICAST); } catch (_) {} };
-      mandar(); setTimeout(mandar, 500); setTimeout(mandar, 1400);
-    });
-  });
+    sock.on('message', (buf) => { try { anotar(buf.toString('utf8')); } catch (_) {} });
+    try {
+      sock.bind(0, d.ip, () => {
+        try { sock.setBroadcast(true); sock.setMulticastTTL(2); } catch (_) {}
+        try { sock.setMulticastInterface(d.ip); } catch (_) {}
+        interfaces.push({ nombre: d.nombre, ip: d.ip });
+        const b = sobreProbe();
+        /* Tres veces: el Probe es UDP y con wifi de por medio se pierde sin avisar. Tres
+         * intentos cuestan nada y cambian el resultado. */
+        const mandar = () => {
+          try { sock.send(b, 0, b.length, PUERTO_WSD, MULTICAST); } catch (_) {}
+          if (d.bcast) { try { sock.send(b, 0, b.length, PUERTO_WSD, d.bcast); } catch (_) {} }
+        };
+        mandar(); setTimeout(mandar, 500); setTimeout(mandar, 1400);
+      });
+    } catch (_) { clearTimeout(t); cerrar(); }
+  }))).then(() => ({ equipos: Array.from(vistos.values()), interfaces }));
 }
 
 /* La direccion del servicio Media. Muchas camaras anuncian el device service en el XAddr

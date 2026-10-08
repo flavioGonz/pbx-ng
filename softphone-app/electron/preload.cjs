@@ -62,6 +62,10 @@ contextBridge.exposeInMainWorld('sphone', {
    * tener que adivinar el path del canal (que cambia por fabricante y por modelo). */
   onvifDescubrir: (ms) => ipcRenderer.invoke('onvif-descubrir', ms),
   onvifPerfiles: (o) => ipcRenderer.invoke('onvif-perfiles', o),
+  /* Clientes del aparato a Excel y de vuelta. El dialogo de archivo lo abre el proceso
+   * principal: el renderer no toca el disco. */
+  clientesExportar: (o) => ipcRenderer.invoke('clientes-exportar', o),
+  clientesImportar: () => ipcRenderer.invoke('clientes-importar'),
   /* Probar una camara antes de guardarla: devuelve { ok, codec } o { ok:false, motivo }. */
   camaraProbar: (rtsp) => ipcRenderer.invoke('camara-probar', rtsp),
   // proxy go2rtc (MSE) por el main

@@ -15,6 +15,7 @@ import { gEnter, gPop, gSplash, gModal, gStagger } from './anim.js';
 import * as sounds from './sounds.js';
 import { testIce, refrescarIce, iceEfectivos } from './ice.js';
 import QrProvision from './QrProvision.jsx';
+import ReproductorAudio from './ReproductorAudio.jsx';
 
 function withVT(fn) { try { if (typeof document !== 'undefined' && document.startViewTransition) { document.startViewTransition(() => flushSync(fn)); return; } } catch {} fn(); }
 const initials = (n) => (String(n || '?')).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
@@ -41,6 +42,9 @@ const IcMicOff = (p = {}) => <Svg {...p}><path d="M1 1l22 22M9 9v3a3 3 0 0 0 5 1
 const IcVideo = IcCam;
 const IcVideoOff = (p = {}) => <Svg {...p}><path d="M1 1l22 22M16 16v2a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2m4 0h5a2 2 0 0 1 2 2v3l4-3v9" /></Svg>;
 const IcSpeaker = (p = {}) => <Svg {...p}><path d="M11 5L6 9H2v6h4l5 4V5z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></Svg>;
+const IcPlay = (p = {}) => <Svg {...p}><path d="M7 4l12 8-12 8z" /></Svg>;
+const IcDown = (p = {}) => <Svg {...p}><path d="M12 3v12M7 11l5 5 5-5" /><path d="M4 20h16" /></Svg>;
+const IcTexto = (p = {}) => <Svg {...p}><path d="M5 4h14M5 9h14M5 14h9M5 19h6" /></Svg>;
 const IcPause = (p = {}) => <Svg {...p}><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></Svg>;
 const IcSwap = (p = {}) => <Svg {...p}><path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></Svg>;
 const IcShield = (p = {}) => <Svg {...p}><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z" /></Svg>;
@@ -401,8 +405,105 @@ export default function App() {
     guardarLocales(l);
     return c;
   }
-  /* El alta: `null` = cerrado; `{ tipo:'cliente' }` o `{ tipo:'camara', cliente }`. */
+  /* El alta: `null` = cerrado; `{ tipo:'cliente' }`, `{ tipo:'camara', cliente }`, o
+   * `{ tipo:'cliente', editar: <cliente local> }` para modificar uno que ya existe. */
   const [alta, setAlta] = useState(null);
+  const [msgCli, setMsgCli] = useState('');
+
+  /* Borrar un cliente del aparato. Se pregunta porque no hay papelera: lo que se guarda
+   * acá no está en ninguna central de la que recuperarlo. */
+  function borrarLocal(c) {
+    if (!c || !esLocal(c)) return;
+    const cams = (c.devices || []).length;
+    const aviso = 'Borrar «' + (c.name || 'cliente') + '»'
+      + (cams ? ' y sus ' + cams + ' cámara(s)' : '')
+      + '. Está sólo en este teléfono: no se puede recuperar.';
+    if (!window.confirm(aviso)) return;
+    guardarLocales(locales.filter((x) => x.id !== c.id));
+    if (selClient && selClient.id === c.id) setSelClient(null);
+  }
+
+  /* ── Excel ────────────────────────────────────────────────────────────────
+   * Una fila por CÁMARA, con el cliente repetido: un cliente sin cámaras ocupa una fila
+   * con la columna de cámara vacía. Es feo de mirar y es lo correcto — la alternativa,
+   * meter las cámaras en una sola celda separadas por algo, convierte la planilla en un
+   * formato que hay que parsear a mano y que se rompe el día que una etiqueta lleve ese
+   * separador. Así se edita en Excel como cualquier tabla. */
+  const COLS_XLS = ['Cliente', 'Teléfonos', 'Cámara', 'Tipo', 'URL'];
+  async function exportarLocales() {
+    const sp = typeof window !== 'undefined' ? window.sphone : null;
+    if (!sp || !sp.clientesExportar) { setMsgCli('Exportar necesita el softphone de escritorio.'); return; }
+    if (!locales.length) { setMsgCli('No hay clientes de este teléfono para exportar.'); return; }
+    const filas = [COLS_XLS];
+    for (const c of locales) {
+      const tels = (c.phones || []).join(', ');
+      const devs = (c.devices || []).filter((d) => d && d.rtsp);
+      if (!devs.length) filas.push([c.name || '', tels, '', '', '']);
+      else for (const d of devs) filas.push([c.name || '', tels, d.label || '', d.type === 'intercom' ? 'portero' : 'cámara', d.rtsp]);
+    }
+    try {
+      const r = await sp.clientesExportar({ filas, nombre: 'clientes-softphone.xlsx' });
+      if (r && r.ok) setMsgCli('Exportado: ' + r.ruta);
+      else if (!(r && r.cancelado)) setMsgCli('No se pudo exportar: ' + ((r && r.motivo) || 'error'));
+    } catch (e) { setMsgCli('No se pudo exportar: ' + ((e && e.message) || 'error')); }
+  }
+
+  async function importarLocales() {
+    const sp = typeof window !== 'undefined' ? window.sphone : null;
+    if (!sp || !sp.clientesImportar) { setMsgCli('Importar necesita el softphone de escritorio.'); return; }
+    let r;
+    try { r = await sp.clientesImportar(); } catch (e) { setMsgCli('No se pudo leer: ' + ((e && e.message) || 'error')); return; }
+    if (!r || !r.ok) { if (!(r && r.cancelado)) setMsgCli('No se pudo leer: ' + ((r && r.motivo) || 'error')); return; }
+    const filas = (r.filas || []).slice();
+    if (!filas.length) { setMsgCli('La planilla está vacía.'); return; }
+    /* Se saltea el encabezado sólo si de verdad lo es: una planilla hecha a mano puede
+     * no tenerlo, y comerse la primera fila de datos sería perder un cliente en silencio. */
+    const prim = (filas[0] || []).map((x) => String(x || '').trim().toLowerCase());
+    if (prim[0] === 'cliente' || prim[0] === 'nombre') filas.shift();
+
+    /* Se junta por nombre: las filas de un mismo cliente vienen seguidas, pero no se
+     * confía en eso. */
+    const porNombre = new Map();
+    let camaras = 0, saltadas = 0;
+    for (const f of filas) {
+      const nombre = String((f || [])[0] || '').trim();
+      if (!nombre) { saltadas++; continue; }
+      if (!porNombre.has(nombre)) {
+        porNombre.set(nombre, {
+          id: nuevoIdLocal(), name: nombre,
+          phones: String((f || [])[1] || '').split(/[,;]+/).map((x) => x.trim()).filter(Boolean),
+          devices: [],
+        });
+      }
+      const c = porNombre.get(nombre);
+      const etiqueta = String((f || [])[2] || '').trim();
+      const url = String((f || [])[4] || '').trim();
+      if (url) {
+        c.devices.push({ id: nuevoIdLocal(), label: etiqueta || 'Cámara',
+          type: /portero|intercom/i.test(String((f || [])[3] || '')) ? 'intercom' : 'camera', rtsp: url });
+        camaras++;
+      }
+    }
+    const nuevos = Array.from(porNombre.values());
+    if (!nuevos.length) { setMsgCli('No se encontró ningún cliente en la planilla.'); return; }
+
+    /* Un nombre que ya existe SE REEMPLAZA, no se duplica: lo normal es exportar, editar
+     * en Excel y volver a importar, y duplicar todo en cada vuelta haría la función
+     * inservible a la segunda. Se avisa cuántos se reemplazaron. */
+    const existentes = new Map(locales.map((c) => [String(c.name || '').trim().toLowerCase(), c]));
+    let reemplazados = 0;
+    const quedan = locales.filter((c) => {
+      const choca = nuevos.some((n) => String(n.name).trim().toLowerCase() === String(c.name || '').trim().toLowerCase());
+      if (choca) reemplazados++;
+      return !choca;
+    });
+    if (!window.confirm('Importar ' + nuevos.length + ' cliente(s) y ' + camaras + ' cámara(s).'
+      + (reemplazados ? '\n' + reemplazados + ' cliente(s) con el mismo nombre se van a REEMPLAZAR.' : '')
+      + (saltadas ? '\n' + saltadas + ' fila(s) sin nombre se saltean.' : ''))) return;
+    guardarLocales(quedan.concat(nuevos));
+    setMsgCli('Importados ' + nuevos.length + ' cliente(s)' + (reemplazados ? ' (' + reemplazados + ' reemplazados)' : '') + '.');
+  }
+
   const [splash, setSplash] = useState(true); const [splashOut, setSplashOut] = useState(false); const splashRef = useRef(null);
   useEffect(() => { if (splash && splashRef.current) return gSplash(splashRef.current); }, [splash]);
   const [accts, setAccts] = useState(() => cfgGetAccounts()); const [showAccts, setShowAccts] = useState(false);
@@ -860,6 +961,13 @@ export default function App() {
       const name = String(datos.name || '').trim();
       if (!name) { setAltaMsg('Falta el nombre.'); return; }
       const phones = String(datos.phones || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+      /* Editar uno que ya existe: se conservan sus cámaras y su id. Crear uno nuevo con
+       * los datos cambiados perdería las cámaras sin que nadie lo pida. */
+      if (alta.editar) {
+        const prev = locales.find((x) => x.id === alta.editar.id) || alta.editar;
+        const c = upsertLocal({ ...prev, name, phones });
+        setSelClient(c); setAlta(null); return;
+      }
       if (datos.destino === 'central' && apiOn) {
         try { const c = await api.clientCreate({ name, phones }); setClsFull(null); setSelClient(c); setAlta(null); return; }
         catch (e) { setAltaMsg('La central no lo aceptó: ' + (e.message || 'error') + '. Podés guardarlo en este teléfono.'); return; }
@@ -1224,13 +1332,19 @@ export default function App() {
                         <button style={S.actBtn(C.green)} title="Llamar" onClick={() => callNow(String(from).replace(/[^\d*#+]/g, ''))}>{IcPhone({ c: C.green, s: 16 })}</button>
                         <button style={S.actBtn(C.red)} title="Eliminar" onClick={() => vmDelete(id, folder)}>{IcX({ c: C.red, s: 16 })}</button>
                       </div>
-                      {vmAudio[id] ? <audio controls autoPlay src={vmAudio[id]} style={{ width: '100%' }} /> :
-                        <button onClick={() => vmPlay(id, folder)} style={{ ...S.chip('rgba(26,115,242,.1)', '#7cb0ff'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px' }}>▶ Escuchar</button>}
-                      {apiOn && (vmTx[id] ? (
-                        vmTx[id].loading ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: C.sub }}><span className="spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: C.accent, display: 'block' }} /> Transcribiendo…</div> :
-                        vmTx[id].error ? <div style={{ fontSize: 12, color: C.red }}>✕ {vmTx[id].error}</div> :
-                        <div style={{ background: C.soft, border: `1px solid ${C.line}`, borderRadius: 10, padding: '9px 12px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: .4, color: C.sub, marginBottom: 4 }}>{IcVoicemail({ c: C.accent, s: 13 })} TRANSCRIPCIÓN{vmTx[id].analysis && vmTx[id].analysis.summary ? '' : ''}</div><div style={{ fontSize: 13, color: C.ink, lineHeight: 1.45 }}>{vmTx[id].text}</div></div>
-                      ) : <button onClick={() => transcribeVm(id, folder)} style={{ ...S.chip('rgba(139,92,246,.1)', '#b794f6'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{IcVoicemail({ c: '#b794f6', s: 14 })} Transcribir</button>)}
+                      {/* El mismo reproductor que las grabaciones del panel —onda, velocidad,
+                          volumen, descarga y transcripción— pero dibujando la onda con
+                          WebAudio en vez de bajarse wavesurfer de la central: esta app tiene
+                          que andar con la central lejos. El <audio controls> del navegador
+                          no tiene velocidad ni onda, y la transcripción quedaba suelta
+                          abajo en vez de ser parte del mensaje. */}
+                      {vmAudio[id]
+                        ? <ReproductorAudio
+                            src={vmAudio[id]} nombre={'buzon-' + from} autoPlay C={C} S={S}
+                            iconos={{ IcPlay, IcPause, IcDown, IcVol: IcSpeaker, IcTexto }}
+                            tx={vmTx[id]}
+                            onTranscribir={apiOn ? () => transcribeVm(id, folder) : undefined} />
+                        : <button onClick={() => vmPlay(id, folder)} style={{ ...S.chip('rgba(26,115,242,.1)', '#7cb0ff'), border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 7, fontWeight: 600 }}>{IcPlay({ c: '#7cb0ff', s: 13 })} Escuchar</button>}
                     </div>); })}
               </div>
             </div>
@@ -1279,6 +1393,18 @@ export default function App() {
                   <button onClick={() => setAlta({ tipo: 'cliente' })} title="Agregar cliente"
                     style={{ marginLeft: 'auto', border: `1px solid ${C.line}`, background: 'none', borderRadius: 8, padding: '4px 9px', cursor: 'pointer', color: C.sub, fontSize: 18, lineHeight: 1 }}>+</button>
                 </div>
+                {/* Excel va acá y no en la ficha: es una acción sobre la LISTA, no sobre un
+                    cliente. Sólo aparece en el escritorio, que es donde hay disco y diálogo
+                    de archivo; en la PWA el botón no tendría a dónde escribir. */}
+                {typeof window !== 'undefined' && window.sphone && window.sphone.clientesExportar && (
+                  <div style={{ padding: '0 14px 8px', display: 'flex', gap: 7 }}>
+                    <button onClick={exportarLocales} disabled={!locales.length} title={locales.length ? 'Exportar los clientes de este teléfono' : 'No hay clientes de este teléfono'}
+                      style={{ flex: 1, padding: '6px 10px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: locales.length ? C.sub : C.line, cursor: locales.length ? 'pointer' : 'default', fontSize: 11.5, fontWeight: 600 }}>Exportar a Excel</button>
+                    <button onClick={importarLocales} title="Importar desde una planilla"
+                      style={{ flex: 1, padding: '6px 10px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontSize: 11.5, fontWeight: 600 }}>Importar</button>
+                  </div>
+                )}
+                {msgCli && <div style={{ padding: '0 14px 8px', fontSize: 11, color: C.sub, lineHeight: 1.4, wordBreak: 'break-all' }}>{msgCli}</div>}
                 {clientesU.length > 0 && <div style={{ padding: '0 14px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 9, border: `1px solid ${C.line}`, borderRadius: 10, padding: '0 12px', background: C.card }}>{IcSearch({ c: C.sub, s: 16 })}<input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ flex: 1, border: 'none', outline: 'none', background: 'none', fontSize: 14, padding: '9px 0' }} />{clientQ && <button onClick={() => setClientQ('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.sub, fontSize: 17 }}>×</button>}</div></div>}
                 <div style={S.scroll}>
                   {apiOn && clsFull === null && !clientesU.length ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
@@ -1296,7 +1422,17 @@ export default function App() {
                   <div style={{ padding: '18px 22px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
                       <Ava txt={initials(ficha.name)} size={56} bg="linear-gradient(160deg,#8b5cf6,#6d28d9)" />
-                      <div style={{ minWidth: 0 }}><div style={{ fontSize: 20, fontWeight: 700 }}>{ficha.name}</div><div style={{ fontSize: 13, color: C.sub, display: 'flex', gap: 10, flexWrap: 'wrap' }}>{ficha.doc ? <span>Doc: {ficha.doc}</span> : null}<span>{(ficha.persons || []).length} personas</span><span>{(ficha.spaces || []).length} espacios</span><span>{(ficha.devices || []).length} disp.</span></div></div>
+                      <div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 20, fontWeight: 700 }}>{ficha.name}</div><div style={{ fontSize: 13, color: C.sub, display: 'flex', gap: 10, flexWrap: 'wrap' }}>{ficha.doc ? <span>Doc: {ficha.doc}</span> : null}<span>{(ficha.persons || []).length} personas</span><span>{(ficha.spaces || []).length} espacios</span><span>{(ficha.devices || []).length} disp.</span></div></div>
+                      {/* Sólo para los del teléfono: los del sistema se editan en el panel,
+                          que es donde están sus personas, espacios y permisos. */}
+                      {esLocal(ficha) && (
+                        <div style={{ display: 'flex', gap: 7, marginLeft: 'auto' }}>
+                          <button onClick={() => setAlta({ tipo: 'cliente', editar: ficha })}
+                            style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Editar</button>
+                          <button onClick={() => borrarLocal(ficha)} title="Borrar de este teléfono"
+                            style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.red, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Borrar</button>
+                        </div>
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: 2, marginBottom: 14, borderBottom: `1px solid ${C.line}` }}>
                       {[['datos', 'Datos', IcUser, null], ['personas', 'Personas', IcUsers, (ficha.persons || []).length], ['espacios', 'Espacios', IcGrid, (ficha.spaces || []).length], ['disp', 'Dispositivos', IcCam, (ficha.devices || []).length]].map(([id, lbl, Ic, n]) => { const on = cliTab === id; return (
@@ -1942,6 +2078,7 @@ function Onvif({ onElegir }) {
   const [abierto, setAbierto] = useState(false);
   const [paso, setPaso] = useState('buscar');     // buscar | credenciales | perfiles
   const [equipos, setEquipos] = useState(null);
+  const [ifaces, setIfaces] = useState([]);
   const [sel, setSel] = useState(null);
   const [manual, setManual] = useState('');
   const [cred, setCred] = useState({ user: 'admin', pass: '' });
@@ -1955,7 +2092,8 @@ function Onvif({ onElegir }) {
   async function buscar() {
     setCargando(true); setErr(''); setEquipos(null);
     try {
-      const r = await sp.onvifDescubrir(4500);
+      const r = await sp.onvifDescubrir(5000);
+      setIfaces((r && r.interfaces) || []);
       if (!r.ok) { setErr(r.motivo || 'no se pudo buscar'); setEquipos([]); }
       else setEquipos(r.equipos || []);
     } catch (e) { setErr((e && e.message) || 'error'); setEquipos([]); }
@@ -2011,9 +2149,19 @@ function Onvif({ onElegir }) {
         ))}
         {!cargando && equipos && equipos.length === 0 && (
           <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.45, marginBottom: 8 }}>
-            No contestó ninguna. Muchas cámaras traen el descubrimiento apagado de fábrica, y por wifi el
-            multicast se pierde: que no aparezca no quiere decir que no hable ONVIF. Poné su IP acá abajo.
+            No contestó ninguna.
+            {/* Decir POR DÓNDE se preguntó: si la red de las cámaras no está en esta lista,
+                el problema es la placa, no la cámara — y eso no se puede adivinar. */}
+            {ifaces.length > 0
+              ? <> Se preguntó por {ifaces.map((x) => x.ip).join(', ')}. Si la red de las cámaras no está
+                  en esa lista, el teléfono no está en esa red.</>
+              : <> No se encontró ninguna placa de red por la que preguntar.</>}
+            {' '}Muchas cámaras traen el descubrimiento apagado de fábrica, y por wifi el multicast se
+            pierde: que no aparezca no quiere decir que no hable ONVIF. Poné su IP acá abajo.
           </div>
+        )}
+        {!cargando && equipos && equipos.length > 0 && ifaces.length > 0 && (
+          <div style={{ fontSize: 10.5, color: C.sub, margin: '2px 0 6px' }}>Buscado por {ifaces.map((x) => x.ip).join(', ')}</div>
         )}
         {!cargando && <div style={{ display: 'flex', gap: 7, marginTop: 4 }}>
           <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="IP de la cámara"
@@ -2074,7 +2222,13 @@ function PanelAlta({ alta, apiOn, msg, onCerrar, onGuardar }) {
   const cli = alta.cliente;
   const cliLocal = !!(cli && typeof cli.id === 'string' && cli.id.indexOf('loc_') === 0);
   const puedeCentral = apiOn && (esCam ? !cliLocal : true);
-  const [f, setF] = useState({ name: '', phones: '', label: '', rtsp: '', type: 'camera', destino: puedeCentral ? 'central' : 'local' });
+  const edita = !esCam && alta.editar;
+  const [f, setF] = useState({
+    name: edita ? (alta.editar.name || '') : '',
+    phones: edita ? (alta.editar.phones || []).join(', ') : '',
+    label: '', rtsp: '', type: 'camera',
+    destino: puedeCentral ? 'central' : 'local',
+  });
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const enviar = () => onGuardar(f);
   /* La prueba se borra cada vez que cambia la URL: un tilde verde al lado de una URL que
@@ -2093,7 +2247,7 @@ function PanelAlta({ alta, apiOn, msg, onCerrar, onGuardar }) {
     <div style={S.modalWrap} onClick={onCerrar}>
       <div ref={gModal} onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 16, padding: 22, width: 400, maxHeight: '84vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 17 }}>{esCam ? 'Agregar cámara' : 'Agregar cliente'}</div>
+          <div style={{ fontWeight: 700, fontSize: 17 }}>{esCam ? 'Agregar cámara' : edita ? 'Editar cliente' : 'Agregar cliente'}</div>
           <button onClick={onCerrar} style={{ marginLeft: 'auto', ...S.actBtn(C.sub) }}>{IcX({ c: C.sub, s: 16 })}</button>
         </div>
         {esCam && <div style={{ fontSize: 12.5, color: C.sub, marginBottom: 12 }}>Para <b style={{ color: C.txt }}>{(cli && cli.name) || 'el cliente'}</b>.</div>}
@@ -2130,7 +2284,7 @@ function PanelAlta({ alta, apiOn, msg, onCerrar, onGuardar }) {
           </div>
         </>}
 
-        <div style={{ padding: '10px 0 2px' }}>
+        {!edita && <div style={{ padding: '10px 0 2px' }}>
           <div style={S.fieldLbl}>Dónde queda</div>
           {puedeCentral ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
@@ -2152,7 +2306,7 @@ function PanelAlta({ alta, apiOn, msg, onCerrar, onGuardar }) {
                 : 'No hay sesión con el sistema; conectate en Ajustes si la querés en la central.'}
             </div>
           )}
-        </div>
+        </div>}
 
         {msg && <div style={{ color: C.red, fontSize: 12, marginTop: 10, lineHeight: 1.45 }}>{msg}</div>}
         <button onClick={enviar} style={{ ...S.primary, marginTop: 14 }}>Guardar</button>

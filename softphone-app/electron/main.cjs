@@ -134,13 +134,50 @@ ipcMain.handle('g2local-parar', () => { try { g2local && g2local.parar(); } catc
 let onvif = null; try { onvif = require('./onvif.cjs'); } catch (e) { if (DEBUG) console.log('[onvif] no disponible:', e && e.message); }
 ipcMain.handle('onvif-descubrir', async (_e, ms) => {
   if (!onvif) return { ok: false, motivo: 'descubrimiento no disponible en esta version' };
-  try { return { ok: true, equipos: await onvif.descubrir(Math.min(8000, Math.max(2000, parseInt(ms, 10) || 4000))) }; }
-  catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
+  try {
+    const r = await onvif.descubrir(Math.min(8000, Math.max(2000, parseInt(ms, 10) || 4000)));
+    /* Las interfaces van a la pantalla: «no contesto ninguna» es una respuesta muy
+     * distinta si se pregunto por la placa que esta en la red de las camaras que si no se
+     * pregunto por ninguna, y el usuario no tiene otra forma de distinguirlas. */
+    return { ok: true, equipos: r.equipos || [], interfaces: r.interfaces || [] };
+  } catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
 });
 ipcMain.handle('onvif-perfiles', async (_e, o) => {
   if (!onvif) return { ok: false, motivo: 'ONVIF no disponible en esta version' };
   try { return { ok: true, perfiles: await onvif.perfiles(o || {}) }; }
   catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
+});
+
+/* ---- Clientes del aparato: exportar e importar en Excel ----
+ * El dialogo de archivo y el disco son del proceso principal; el renderer sólo manda las
+ * filas o pide que le lean un archivo. Escribir el .xlsx desde el renderer significaria
+ * meter el armador de ZIP en el bundle de la pantalla, que no es donde vive. */
+let xlsx = null; try { xlsx = require('./xlsx.cjs'); } catch (e) { if (DEBUG) console.log('[xlsx] no disponible:', e && e.message); }
+ipcMain.handle('clientes-exportar', async (_e, o) => {
+  if (!xlsx) return { ok: false, motivo: 'exportación no disponible en esta versión' };
+  try {
+    const { dialog } = require('electron');
+    const r = await dialog.showSaveDialog(win, {
+      title: 'Exportar clientes',
+      defaultPath: (o && o.nombre) || 'clientes-softphone.xlsx',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+    });
+    if (r.canceled || !r.filePath) return { ok: false, cancelado: true };
+    fs.writeFileSync(r.filePath, xlsx.escribir((o && o.filas) || [], 'Clientes'));
+    return { ok: true, ruta: r.filePath };
+  } catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
+});
+ipcMain.handle('clientes-importar', async () => {
+  if (!xlsx) return { ok: false, motivo: 'importación no disponible en esta versión' };
+  try {
+    const { dialog } = require('electron');
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Importar clientes', properties: ['openFile'],
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+    });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, cancelado: true };
+    return { ok: true, filas: xlsx.leer(fs.readFileSync(r.filePaths[0])), ruta: r.filePaths[0] };
+  } catch (e) { return { ok: false, motivo: (e && e.message) || 'no se pudo leer el archivo' }; }
 });
 
 /* ---- Probar una URL de camara ANTES de guardarla ----
