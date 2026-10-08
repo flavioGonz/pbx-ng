@@ -1,0 +1,27 @@
+.github/workflows/ci.yml
+  s_ace4c2a288c06b::t_9f7c26963d96f6 36-38
+control-plane/test/app-ramas-crm.test.js
+  s_ace4c2a288c06b::t_53c1903c11b335 24,59-62
+control-plane/test/app-ramas-resto.test.js
+  s_ace4c2a288c06b::t_f573e3a109fa01 21,212-215
+control-plane/test/app-ramas-sistema.test.js
+  s_ace4c2a288c06b::t_63a23a7b654b19 22,40-43
+control-plane/test/ia-ramas-pipeline.test.js
+  s_ace4c2a288c06b::t_74d43e84d9b104 21-26,77-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c5e7bb74d2cf381f6d9996e937db89bb94c422cc",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
