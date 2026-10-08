@@ -47,6 +47,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Softphone · un mensaje de buzón con un códec que el navegador no abre dejaba un
+  AudioContext abierto.** Chromium tiene un tope por página: unos cuantos así y ya no se
+  podía dibujar ninguna onda más, tampoco la de la llamada. Ahora el contexto se cierra
+  siempre.
 - **Softphone · la cámara de una llamada nativa no se podía apagar** («engine.video is not
   a function»): el motor SIP usaba el mismo nombre para la función que prende o apaga el
   video y para el objeto RTP del video, y el primer video pisaba la función.

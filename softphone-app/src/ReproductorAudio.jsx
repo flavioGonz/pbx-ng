@@ -55,17 +55,22 @@ export default function ReproductorAudio({ src, nombre, C, S, autoPlay, onTransc
     let vivo = true;
     setPicos(null); setErr('');
     (async () => {
+      /* El contexto se cierra SIEMPRE, también cuando decodificar falla. Antes quedaba
+       * abierto en ese caso, y Chromium tiene un tope de AudioContext por página: unos
+       * cuantos mensajes con un códec que no abre y ya no se podía crear ninguno más
+       * (tampoco el de la onda de la llamada). */
+      let ctx = null;
       try {
         const buf = await (await fetch(src)).arrayBuffer();
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (!Ctx) return;
-        const ctx = new Ctx();
+        ctx = new Ctx();
         const audio = await ctx.decodeAudioData(buf.slice(0));
-        if (!vivo) { try { ctx.close(); } catch (_) {} return; }
+        if (!vivo) return;
         setPicos(picosDe(audio, 160));
         setDur((d) => d || audio.duration);
-        try { ctx.close(); } catch (_) {}
       } catch (_) { /* sin onda, pero con audio */ }
+      finally { try { if (ctx) ctx.close(); } catch (_) {} }
     })();
     return () => { vivo = false; };
   }, [src]);

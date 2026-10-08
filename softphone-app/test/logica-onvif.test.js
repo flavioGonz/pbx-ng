@@ -12,6 +12,7 @@ import { EventEmitter } from 'node:events';
 const require = createRequire(import.meta.url);
 const onvif = require('../electron/onvif.cjs');
 const dgram = require('dgram');
+const os = require('os');
 
 let srv, base, pedidos, responder;
 beforeEach(async () => {
@@ -132,60 +133,90 @@ describe('perfiles', () => {
   });
 });
 
-describe('descubrir (WS-Discovery)', () => {
+/* Descubrimiento: desde 0.21.0 se abre UNA socket por cada IPv4 real del equipo (atada a
+ * esa dirección y con setMulticastInterface) y se pregunta también al broadcast dirigido de
+ * cada subred. En Windows el multicast sale por UNA sola placa elegida por métrica —muchas
+ * veces una VPN o una virtual—: preguntar por todas es lo que hace que aparezcan las
+ * cámaras. Y se devuelve por qué interfaces se preguntó, para que la pantalla lo diga. */
+describe('descubrir (WS-Discovery por interfaz)', () => {
+  let socks;
   function sockFalso() {
     const s = new EventEmitter();
     s.enviados = [];
-    s.bind = (cb) => setTimeout(cb, 0);
-    s.setBroadcast = vi.fn(); s.setMulticastTTL = vi.fn();
+    s.bind = vi.fn((port, ip, cb) => { s.atada = { port, ip }; setTimeout(cb, 0); });
+    s.setBroadcast = vi.fn(); s.setMulticastTTL = vi.fn(); s.setMulticastInterface = vi.fn();
     s.send = vi.fn((b, o, l, port, host) => s.enviados.push({ xml: b.toString(), port, host }));
     s.close = vi.fn();
+    socks.push(s);
     return s;
   }
+  const IFS = {
+    Ethernet: [{ family: 'IPv4', address: '192.168.1.10', netmask: '255.255.255.0', internal: false }, { family: 'IPv6', address: 'fe80::1', internal: false }],
+    'vEthernet (WSL)': [{ family: 4, address: '172.20.0.1', netmask: '255.255.240.0', internal: false }],
+    lo: [{ family: 'IPv4', address: '127.0.0.1', netmask: '255.0.0.0', internal: true }],
+    raro: null,
+  };
+  beforeEach(() => { socks = []; });
   const respuesta = (xaddrs, scopes = '') => Buffer.from(`<d:ProbeMatches><d:ProbeMatch><d:Scopes>${scopes}</d:Scopes><d:XAddrs>${xaddrs}</d:XAddrs></d:ProbeMatch></d:ProbeMatches>`);
 
-  it('manda el Probe 3 veces al multicast y junta las cámaras sin repetir', async () => {
-    const s = sockFalso();
-    vi.spyOn(dgram, 'createSocket').mockReturnValue(s);
+  it('una socket por IPv4 real (no loopback ni IPv6), atada a su IP, con Probe al multicast y al broadcast 3 veces', async () => {
+    vi.spyOn(os, 'networkInterfaces').mockReturnValue(IFS);
+    vi.spyOn(dgram, 'createSocket').mockImplementation(sockFalso);
     const p = onvif.descubrir(1600);
     await new Promise((r) => setTimeout(r, 5));
-    s.emit('message', respuesta('http://[fe80::1]/onvif http://192.168.1.50/onvif/device_service', 'onvif://www.onvif.org/name/Portero_Calle onvif://www.onvif.org/hardware/DS-KV6113'));
-    s.emit('message', respuesta('http://192.168.1.50/onvif/device_service'));
-    s.emit('message', respuesta('http://192.168.1.51/onvif'));
-    s.emit('message', respuesta('https://solo.https/onvif'));
-    s.emit('message', Buffer.from('<otra>cosa</otra>'));
+    expect(socks).toHaveLength(2);
+    expect(socks.map((s) => s.atada)).toEqual([{ port: 0, ip: '192.168.1.10' }, { port: 0, ip: '172.20.0.1' }]);
+    expect(socks[0].setMulticastInterface).toHaveBeenCalledWith('192.168.1.10');
+    socks[0].emit('message', respuesta('http://[fe80::1]/onvif http://192.168.1.50/onvif/device_service', 'onvif://www.onvif.org/name/Portero_Calle onvif://www.onvif.org/hardware/DS%2DKV6113'));
+    socks[1].emit('message', respuesta('http://192.168.1.51/onvif'));   // la misma cámara contesta por las dos placas
+    socks[0].emit('message', respuesta('http://192.168.1.51/onvif'));
+    socks[0].emit('message', respuesta('https://solo.https/onvif'));
+    socks[0].emit('message', Buffer.from('<otra>cosa</otra>'));
     const r = await p;
-    expect(s.enviados).toHaveLength(3);
-    expect(s.enviados[0]).toMatchObject({ port: 3702, host: '239.255.255.250' });
-    expect(s.enviados[0].xml).toContain('dn:NetworkVideoTransmitter');
-    // de cada equipo se toma la PRIMERA http:// (acá la IPv6), y uno repetido no se duplica
-    expect(r.map((x) => x.xaddr)).toEqual(['http://[fe80::1]/onvif', 'http://192.168.1.50/onvif/device_service', 'http://192.168.1.51/onvif']);
-    expect(r[0]).toEqual({ xaddr: 'http://[fe80::1]/onvif', host: '[fe80::1]', nombre: 'Portero Calle', modelo: 'DS-KV6113' });
-    expect(r[1]).toEqual({ xaddr: 'http://192.168.1.50/onvif/device_service', host: '192.168.1.50', nombre: '192.168.1.50', modelo: '' });
-    expect(s.close).toHaveBeenCalled();
+    const destinos = socks[0].enviados.map((e) => e.host + ':' + e.port);
+    expect(destinos).toEqual(Array(3).fill(['239.255.255.250:3702', '192.168.1.255:3702']).flat());
+    expect(socks[1].enviados.map((e) => e.host)).toContain('172.20.15.255');
+    expect(socks[0].enviados[0].xml).toContain('dn:NetworkVideoTransmitter');
+    expect(r.interfaces).toEqual([{ nombre: 'Ethernet', ip: '192.168.1.10' }, { nombre: 'vEthernet (WSL)', ip: '172.20.0.1' }]);
+    expect(r.equipos.map((x) => x.xaddr)).toEqual(['http://[fe80::1]/onvif', 'http://192.168.1.51/onvif']);
+    expect(r.equipos[0]).toEqual({ xaddr: 'http://[fe80::1]/onvif', host: '[fe80::1]', nombre: 'Portero Calle', modelo: 'DS-KV6113' });
+    expect(r.equipos[1].nombre).toBe('192.168.1.51');
+    expect(socks.every((s) => s.close.mock.calls.length === 1)).toBe(true);
   });
 
-  it('toma nombre y modelo de los Scopes', async () => {
-    const s = sockFalso();
-    vi.spyOn(dgram, 'createSocket').mockReturnValue(s);
-    const p = onvif.descubrir(30);
-    await new Promise((r) => setTimeout(r, 5));
-    s.emit('message', respuesta('http://10.0.0.9/onvif', 'onvif://www.onvif.org/name/Portero_Calle onvif://www.onvif.org/hardware/DS%2DKV6113'));
-    expect(await p).toEqual([{ xaddr: 'http://10.0.0.9/onvif', host: '10.0.0.9', nombre: 'Portero Calle', modelo: 'DS-KV6113' }]);
+  it('sin interfaces de red (o si leerlas falla) devuelve vacío y dice que no preguntó por ninguna', async () => {
+    vi.spyOn(os, 'networkInterfaces').mockReturnValue({ lo: IFS.lo });
+    expect(await onvif.descubrir()).toEqual({ equipos: [], interfaces: [] });
+    os.networkInterfaces.mockImplementation(() => { throw new Error('x'); });
+    expect(await onvif.descubrir()).toEqual({ equipos: [], interfaces: [] });
   });
 
-  it('error de socket o sin poder crearlo: lista vacía, sin colgarse', async () => {
-    const s = sockFalso();
-    s.setBroadcast = () => { throw new Error('x'); };
-    s.send = () => { throw new Error('x'); };
-    s.close = () => { throw new Error('x'); };
-    vi.spyOn(dgram, 'createSocket').mockReturnValue(s);
-    const p = onvif.descubrir(5000);
-    await new Promise((r) => setTimeout(r, 5));
-    s.emit('error', new Error('EADDRINUSE'));
-    expect(await p).toEqual([]);
-    dgram.createSocket.mockImplementation(() => { throw new Error('x'); });
-    expect(await onvif.descubrir()).toEqual([]);
+  it('una placa que falla (error, bind que tira, socket que no se crea) no tumba a las otras', async () => {
+    vi.spyOn(os, 'networkInterfaces').mockReturnValue({
+      a: [{ family: 'IPv4', address: '10.0.0.2', netmask: 'basura', internal: false }],
+      b: [{ family: 'IPv4', address: '10.0.1.2', netmask: '255.255.255.0', internal: false }],
+      c: [{ family: 'IPv4', address: '10.0.2.2', netmask: '255.255.255.0', internal: false }],
+      d: [{ family: 'IPv4', address: '10.0.3.2', netmask: undefined, internal: false }],
+    });
+    let n = 0;
+    vi.spyOn(dgram, 'createSocket').mockImplementation(() => {
+      n++;
+      if (n === 3) throw new Error('sin sockets');
+      const s = sockFalso();
+      if (n === 2) s.bind = () => { throw new Error('EADDRNOTAVAIL'); };
+      if (n === 1) { s.setBroadcast = () => { throw new Error('x'); }; s.setMulticastInterface = () => { throw new Error('x'); }; s.send = () => { throw new Error('x'); }; s.close = () => { throw new Error('x'); }; }
+      return s;
+    });
+    vi.useFakeTimers();
+    const p = onvif.descubrir(3000);
+    await vi.advanceTimersByTimeAsync(10);
+    socks[2].emit('error', new Error('red caída'));       // la cuarta placa: error en vuelo
+    socks[2].emit('error', new Error('otra vez'));        // cerrar dos veces no rompe
+    socks[2].emit('message', { toString: () => { throw new Error('x'); } });
+    await vi.advanceTimersByTimeAsync(3000);
+    const r = await p;
+    expect(r.interfaces.map((i) => i.ip)).toEqual(['10.0.0.2', '10.0.3.2']);
+    expect(r.equipos).toEqual([]);
   });
 });
 
@@ -195,13 +226,14 @@ describe('onvif: bordes', () => {
     const spy = vi.spyOn(http, 'request').mockImplementation(() => { setTimeout(() => req.emit('error', new Error('nada')), 0); return req; });
     await expect(onvif.perfiles({ xaddr: 'http://camara.local/onvif' })).rejects.toThrow('nada');
     expect(spy.mock.calls[0][0]).toMatchObject({ hostname: 'camara.local', port: 80 });
+    vi.spyOn(os, 'networkInterfaces').mockReturnValue({ e: [{ family: 'IPv4', address: '10.9.9.9', netmask: '255.0.0.0', internal: false }] });
     const s = new EventEmitter();
-    s.bind = (cb) => cb(); s.setBroadcast = vi.fn(); s.setMulticastTTL = vi.fn(); s.send = vi.fn(); s.close = vi.fn();
+    s.bind = (p, ip, cb) => cb(); s.setBroadcast = vi.fn(); s.setMulticastTTL = vi.fn(); s.setMulticastInterface = vi.fn(); s.send = vi.fn(); s.close = vi.fn();
     vi.spyOn(dgram, 'createSocket').mockReturnValue(s);
     vi.useFakeTimers();
     const p = onvif.descubrir();
     s.emit('message', Buffer.from('<XAddrs>http://[malo/onvif</XAddrs>'));
-    vi.advanceTimersByTime(4000);
-    expect(await p).toEqual([{ xaddr: 'http://[malo/onvif', host: '', nombre: '', modelo: '' }]);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect((await p).equipos).toEqual([{ xaddr: 'http://[malo/onvif', host: '', nombre: '', modelo: '' }]);
   });
 });

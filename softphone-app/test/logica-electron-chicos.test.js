@@ -37,6 +37,7 @@ describe('preload: window.sphone', () => {
       ['miniShow', [true], 'mini-show', [true]], ['g2localAsegurar', [[1]], 'g2local-asegurar', [[1]]],
       ['g2localEstado', [], 'g2local-estado', []], ['g2localParar', [], 'g2local-parar', []],
       ['onvifDescubrir', [3000], 'onvif-descubrir', [3000]], ['onvifPerfiles', [{}], 'onvif-perfiles', [{}]],
+      ['clientesExportar', [{ filas: [] }], 'clientes-exportar', [{ filas: [] }]], ['clientesImportar', [], 'clientes-importar', []],
       ['camaraProbar', ['rtsp://x'], 'camara-probar', ['rtsp://x']], ['go2rtcOpen', [{}], 'go2rtc-open', [{}]],
     ];
     for (const [fn, args, canal, esperado] of invocaciones) {

@@ -6,7 +6,7 @@
  * correcto (supervisar con el modo pedido, escuchar/borrar/transcribir el mensaje que se
  * tocó) y mostrar el error de la central cuando lo hay, porque un «no pasa nada» al tocar
  * «Escuchar» es indistinguible de un softphone colgado. */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { montar, avanzar, estado, mApi, CFG_OK, irA } from './helpers/pantallas-app.jsx';
 
@@ -218,16 +218,26 @@ describe('buzón de voz', () => {
     expect(screen.getByText('Cargando…')).toBeTruthy();
   });
 
-  it('escuchar trae el audio y lo marca leído; borrar lo quita', async () => {
+  /* Desde 0.21 «Escuchar» abre el reproductor con onda (ReproductorAudio), y la
+   * transcripción vive ADENTRO de ese reproductor: primero se escucha, después se
+   * transcribe. El reproductor decodifica con fetch + WebAudio; acá fetch falla y queda
+   * la barra lisa, que es el camino que no depende del códec. */
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('sin red')))); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const escuchar = async (i = 0) => { fireEvent.click(screen.getAllByText('Escuchar')[i]); await avanzar(0); };
+
+  it('escuchar trae el audio, lo marca leído y abre el reproductor; borrar lo quita', async () => {
     mApi.vmList.mockResolvedValue([MSGS[0], MSGS[1]]);
     const { container } = await conCentral();
     irA('Voz');
     await avanzar(0);
-    fireEvent.click(screen.getAllByText('▶ Escuchar')[0]);
-    await avanzar(0);
+    await escuchar(0);
     expect(mApi.vmAudioUrl).toHaveBeenCalledWith('2001', 'INBOX', 'm1');
     expect(mApi.vmRead).toHaveBeenCalledWith('2001', 'INBOX', 'm1');
-    expect(container.querySelector('audio[controls][src="blob:vm"]')).toBeTruthy();
+    expect(container.querySelector('audio[src="blob:vm"]').autoplay).toBe(true);
+    // la descarga lleva el nombre de quien dejó el mensaje
+    expect(container.querySelector('a[download]').getAttribute('download')).toBe('buzon-"Ana" <2002>.wav');
+    expect(screen.getAllByText('Escuchar').length).toBe(1);
     const llamadas = mApi.vmList.mock.calls.length;
     fireEvent.click(screen.getAllByTitle('Eliminar')[1]);
     await avanzar(0);
@@ -242,32 +252,35 @@ describe('buzón de voz', () => {
     await conCentral();
     irA('Voz');
     await avanzar(0);
-    fireEvent.click(screen.getByText('▶ Escuchar'));
-    await avanzar(0);
+    await escuchar();
     expect(mApi.vmRead).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('▶ Escuchar'));
-    await avanzar(0);
-    expect(screen.getByText('▶ Escuchar')).toBeTruthy();
+    await escuchar();
+    expect(screen.getByText('Escuchar')).toBeTruthy();
+    expect(screen.queryByText('Transcribir')).toBeNull();
     fireEvent.click(screen.getByTitle('Eliminar'));
     await avanzar(0);
     expect(screen.getByText('"Ana" <2002>')).toBeTruthy();
   });
 
-  it('transcribir muestra el texto, el vacío, o el error de la central', async () => {
+  it('transcribir (dentro del reproductor) muestra el texto, el vacío, o el error de la central', async () => {
     mApi.vmList.mockResolvedValue([MSGS[0], MSGS[1], MSGS[2], MSGS[3]]);
     mApi.vmTranscribe
-      .mockImplementationOnce(() => new Promise((r) => setTimeout(() => r({ transcript: ' Hola, soy Ana ', analysis: { summary: 's' } }), 50)))
+      .mockImplementationOnce(() => new Promise((r) => setTimeout(() => r({ transcript: ' Hola, soy Ana ', analysis: { words: 3, keywords: ['puerta'] } }), 50)))
       .mockResolvedValueOnce({ transcript: '  ' })
       .mockResolvedValueOnce({ error: 'sin motor de IA' })
       .mockRejectedValueOnce(new Error('caída'));
     await conCentral();
     irA('Voz');
     await avanzar(0);
+    expect(screen.queryByText('Transcribir')).toBeNull();
+    for (let i = 0; i < 4; i++) await escuchar(0);
     const botones = () => screen.getAllByText('Transcribir');
     fireEvent.click(botones()[0]);
     expect(screen.getByText('Transcribiendo…')).toBeTruthy();
     await avanzar(60);
     expect(screen.getByText('Hola, soy Ana')).toBeTruthy();
+    expect(screen.getByText('3 palabras')).toBeTruthy();
+    expect(screen.getByText('puerta')).toBeTruthy();
     expect(mApi.vmTranscribe).toHaveBeenCalledWith('2001', 'INBOX', 'm1');
     fireEvent.click(botones()[0]);
     await avanzar(0);
@@ -278,6 +291,9 @@ describe('buzón de voz', () => {
     fireEvent.click(botones()[0]);
     await avanzar(0);
     expect(screen.getByText('✕ caída')).toBeTruthy();
+    // «Rehacer» vuelve a pedir la del primero
+    fireEvent.click(screen.getAllByText('Rehacer')[0]);
+    expect(mApi.vmTranscribe).toHaveBeenLastCalledWith('2001', 'INBOX', 'm1');
   });
 
   it('una respuesta vacía de la transcripción se muestra como error', async () => {
@@ -286,6 +302,7 @@ describe('buzón de voz', () => {
     await conCentral();
     irA('Voz');
     await avanzar(0);
+    await escuchar();
     fireEvent.click(screen.getByText('Transcribir'));
     await avanzar(0);
     expect(screen.getByText('✕ no se pudo transcribir')).toBeTruthy();

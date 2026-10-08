@@ -359,7 +359,7 @@ describe('buscar la cámara por ONVIF', () => {
   const EQUIPOS = [{ xaddr: 'http://10.0.0.20/onvif/device_service', host: '10.0.0.20', nombre: 'Hikvision', modelo: 'DS-2CD' }, { xaddr: 'http://10.0.0.21/x', host: '10.0.0.21' }];
   const PERFILES = [{ nombre: 'Principal', rtsp: 'rtsp://10.0.0.20/101', resolucion: '1920x1080', codec: 'H264', fps: 25 }, { nombre: 'Secundario', rtsp: 'rtsp://10.0.0.20/102' }];
   async function abrirAlta(extra) {
-    const sphone = { onvifDescubrir: vi.fn(() => Promise.resolve({ ok: true, equipos: EQUIPOS })), onvifPerfiles: vi.fn(() => Promise.resolve({ ok: true, perfiles: PERFILES })), ...extra };
+    const sphone = { onvifDescubrir: vi.fn(() => Promise.resolve({ ok: true, equipos: EQUIPOS, interfaces: [{ ip: '10.0.0.5' }, { ip: '192.168.1.20' }] })), onvifPerfiles: vi.fn(() => Promise.resolve({ ok: true, perfiles: PERFILES })), ...extra };
     await montar({ cfg: CFG_OK, clientes: [{ id: 'loc_a', name: 'Almacén', devices: [] }], sphone });
     irA('Clientes');
     fireEvent.click(screen.getByText('Almacén'));
@@ -382,7 +382,9 @@ describe('buscar la cámara por ONVIF', () => {
     fireEvent.click(screen.getByText(/Buscar la cámara en la red/));
     expect(screen.getByText('Buscando… (unos segundos)')).toBeTruthy();
     await avanzar(0);
-    expect(sp.onvifDescubrir).toHaveBeenCalledWith(4500);
+    expect(sp.onvifDescubrir).toHaveBeenCalledWith(5000);
+    // con equipos encontrados también dice por qué placas se preguntó
+    expect(screen.getByText('Buscado por 10.0.0.5, 192.168.1.20')).toBeTruthy();
     expect(screen.getByText('10.0.0.20 · DS-2CD')).toBeTruthy();
     fireEvent.click(screen.getByText('Hikvision'));
     expect(screen.getByText('Usuario de la cámara')).toBeTruthy();
@@ -420,10 +422,15 @@ describe('buscar la cámara por ONVIF', () => {
   });
 
   it('si nadie contesta explica por qué y deja poner la IP a mano', async () => {
-    const sp = await abrirAlta({ onvifDescubrir: vi.fn(() => Promise.resolve({ ok: true })) });
+    const sp = await abrirAlta({ onvifDescubrir: vi.fn().mockResolvedValueOnce({ ok: true, interfaces: [{ ip: '10.0.0.5' }] }).mockResolvedValueOnce({ ok: true }) });
     fireEvent.click(screen.getByText(/Buscar la cámara en la red/));
     await avanzar(0);
     expect(screen.getByText(/No contestó ninguna/)).toBeTruthy();
+    // dice POR DÓNDE se preguntó: si la red de las cámaras no está, el problema es la placa
+    expect(screen.getByText(/Se preguntó por 10\.0\.0\.5\./)).toBeTruthy();
+    fireEvent.click(screen.getByTitle('Buscar de nuevo'));
+    await avanzar(0);
+    expect(screen.getByText(/No se encontró ninguna placa de red por la que preguntar/)).toBeTruthy();
     fireEvent.click(screen.getByText('Usar'));
     expect(screen.queryByText('Usuario de la cámara')).toBeNull();
     escribir(screen.getByPlaceholderText('IP de la cámara'), ' 10.0.0.30 ');
@@ -463,5 +470,205 @@ describe('buscar la cámara por ONVIF', () => {
     expect(screen.getByText('Cámaras en esta red')).toBeTruthy();
     fireEvent.click(screen.getAllByText('×').find((b) => b.tagName === 'BUTTON' && b.closest('[style*="dashed"]') === null && b.parentElement.textContent.includes('Cámaras en esta red')));
     expect(screen.getByText(/Buscar la cámara en la red/)).toBeTruthy();
+  });
+});
+
+/* ── Clientes del aparato: editar, borrar y Excel (0.21) ────────────────────
+ * Lo que está en el aparato no está en ninguna central de la que recuperarlo: borrar
+ * pregunta, editar conserva el id y las cámaras, e importar REEMPLAZA por nombre (lo
+ * normal es exportar, editar en Excel y volver a importar; duplicar en cada vuelta haría
+ * la función inservible). El Excel va por el puente de Electron: acá se mockea. */
+describe('editar y borrar un cliente del aparato', () => {
+  async function fichaLocal(clientes = [LOCAL], opts = {}) {
+    await montar({ cfg: CFG_OK, clientes, ...opts });
+    irA('Clientes');
+    await avanzar(0);
+    fireEvent.click(screen.getByText(clientes[0].name));
+  }
+
+  it('editar trae los datos, no ofrece destino, y conserva id y cámaras', async () => {
+    await fichaLocal([{ ...LOCAL, phones: ['2070', '099'] }], { central: true });
+    fireEvent.click(screen.getByText('Editar'));
+    expect(screen.getByText('Editar cliente')).toBeTruthy();
+    expect(screen.queryByText('Dónde queda')).toBeNull();
+    const nombre = screen.getByPlaceholderText('Ej. Edificio Rambla 1200');
+    expect(nombre.value).toBe('Almacén Local');
+    expect(screen.getByPlaceholderText('2001, 099123456').value).toBe('2070, 099');
+    escribir(nombre, 'Almacén Centro');
+    escribir(screen.getByPlaceholderText('2001, 099123456'), '2072');
+    fireEvent.click(screen.getByText('Guardar'));
+    await avanzar(0);
+    expect(mApi.clientCreate).not.toHaveBeenCalled();
+    expect(store.clientes).toEqual([{ ...LOCAL, name: 'Almacén Centro', phones: ['2072'] }]);
+    expect(screen.queryByText('Editar cliente')).toBeNull();
+    expect(screen.getAllByText('Almacén Centro').length).toBe(2);
+    // editar sin nombre no se guarda
+    fireEvent.click(screen.getByText('Editar'));
+    escribir(screen.getByPlaceholderText('Ej. Edificio Rambla 1200'), ' ');
+    fireEvent.click(screen.getByText('Guardar'));
+    expect(screen.getByText('Falta el nombre.')).toBeTruthy();
+  });
+
+  it('un cliente de la central no se edita ni se borra desde acá', async () => {
+    mApi.clientsFull.mockResolvedValue(SISTEMA);
+    mApi.clientDetail.mockResolvedValue(FICHA);
+    await montar({ cfg: CFG_OK, central: true });
+    irA('Clientes');
+    await avanzar(0);
+    fireEvent.click(screen.getByText('Casa Pérez'));
+    await avanzar(0);
+    expect(screen.queryByText('Editar')).toBeNull();
+    expect(screen.queryByTitle('Borrar de este teléfono')).toBeNull();
+  });
+
+  it('borrar pregunta (diciendo cuántas cámaras se van) y sólo borra si se acepta', async () => {
+    const conf = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await fichaLocal([LOCAL, { id: 'loc_b', name: 'Bodega', phones: [], devices: [] }]);
+    fireEvent.click(screen.getByTitle('Borrar de este teléfono'));
+    expect(conf).toHaveBeenCalledWith('Borrar «Almacén Local» y sus 1 cámara(s). Está sólo en este teléfono: no se puede recuperar.');
+    expect(store.clientes.length).toBe(2);
+    fireEvent.click(screen.getByTitle('Borrar de este teléfono'));
+    expect(store.clientes.map((c) => c.id)).toEqual(['loc_b']);
+    expect(screen.getByText('Elegí un cliente para ver su ficha.')).toBeTruthy();
+  });
+
+  it('un cliente sin cámaras ni nombre se borra con el aviso corto', async () => {
+    const conf = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await montar({ cfg: CFG_OK, clientes: [{ id: 'loc_c', name: '', devices: [] }] });
+    irA('Clientes');
+    fireEvent.click(document.querySelector('.ph-row'));
+    fireEvent.click(screen.getByTitle('Borrar de este teléfono'));
+    expect(conf).toHaveBeenCalledWith('Borrar «cliente». Está sólo en este teléfono: no se puede recuperar.');
+    expect(store.clientes).toEqual([]);
+  });
+});
+
+describe('Excel', () => {
+  const CLIENTES = [
+    { id: 'loc_a', name: 'Almacén Local', phones: ['2070', '099'], devices: [{ id: 'd1', label: 'Puerta', type: 'intercom', rtsp: 'rtsp://u:p@10.0.0.9/1' }, { id: 'd2', label: '', type: 'camera', rtsp: 'rtsp://10.0.0.8/1' }, { id: 'd3', label: 'sin url' }] },
+    { id: 'loc_b', name: 'Bodega', devices: [] },
+    { id: 'loc_c', devices: [null] },
+  ];
+  async function lista(sphone, clientes = CLIENTES) {
+    const r = await montar({ cfg: CFG_OK, clientes, sphone });
+    irA('Clientes');
+    await avanzar(0);
+    return r;
+  }
+
+  it('en la PWA no hay botones de Excel', async () => {
+    await lista(null);
+    expect(screen.queryByText('Exportar a Excel')).toBeNull();
+  });
+
+  it('exportar arma una fila por cámara, con el cliente repetido, y dice dónde quedó', async () => {
+    const clientesExportar = vi.fn().mockResolvedValueOnce({ ok: true, ruta: 'C:\\Users\\op\\clientes-softphone.xlsx' })
+      .mockResolvedValueOnce({ cancelado: true }).mockResolvedValueOnce({ ok: false, motivo: 'disco lleno' })
+      .mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('EPERM')).mockRejectedValueOnce({});
+    await lista({ clientesExportar, clientesImportar: vi.fn() });
+    const exp = screen.getByText('Exportar a Excel');
+    fireEvent.click(exp);
+    await avanzar(0);
+    expect(clientesExportar).toHaveBeenCalledWith({
+      nombre: 'clientes-softphone.xlsx',
+      filas: [
+        ['Cliente', 'Teléfonos', 'Cámara', 'Tipo', 'URL'],
+        ['Almacén Local', '2070, 099', 'Puerta', 'portero', 'rtsp://u:p@10.0.0.9/1'],
+        ['Almacén Local', '2070, 099', '', 'cámara', 'rtsp://10.0.0.8/1'],
+        ['Bodega', '', '', '', ''],
+        ['', '', '', '', ''],
+      ],
+    });
+    expect(screen.getByText('Exportado: C:\\Users\\op\\clientes-softphone.xlsx')).toBeTruthy();
+    fireEvent.click(exp); await avanzar(0);
+    // cancelar el diálogo no es un error: queda el mensaje anterior
+    expect(screen.getByText(/^Exportado:/)).toBeTruthy();
+    fireEvent.click(exp); await avanzar(0);
+    expect(screen.getByText('No se pudo exportar: disco lleno')).toBeTruthy();
+    fireEvent.click(exp); await avanzar(0);
+    expect(screen.getByText('No se pudo exportar: error')).toBeTruthy();
+    fireEvent.click(exp); await avanzar(0);
+    expect(screen.getByText('No se pudo exportar: EPERM')).toBeTruthy();
+    fireEvent.click(exp); await avanzar(0);
+    expect(screen.getByText('No se pudo exportar: error')).toBeTruthy();
+  });
+
+  it('sin clientes del aparato el botón de exportar está apagado', async () => {
+    await lista({ clientesExportar: vi.fn(), clientesImportar: vi.fn() }, []);
+    const exp = screen.getByText('Exportar a Excel');
+    expect(exp.disabled).toBe(true);
+    expect(exp.title).toBe('No hay clientes de este teléfono');
+  });
+
+  it('importar sin el puente de lectura lo explica', async () => {
+    await lista({ clientesExportar: vi.fn() });
+    fireEvent.click(screen.getByText('Importar'));
+    await avanzar(0);
+    expect(screen.getByText('Importar necesita el softphone de escritorio.')).toBeTruthy();
+  });
+
+  it('importar junta por nombre, reemplaza los que ya estaban y saltea filas sin nombre', async () => {
+    const conf = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const clientesImportar = vi.fn().mockResolvedValue({ ok: true, filas: [
+      ['Cliente', 'Teléfonos', 'Cámara', 'Tipo', 'URL'],
+      ['Bodega', '2080; 2081', 'Portón', 'Portero', 'rtsp://10.0.0.1/1'],
+      ['', 'x'],
+      ['Nuevo', '099', '', '', ''],
+      [' Bodega ', '', '', 'cámara', ' rtsp://10.0.0.2/1 '],
+      null,
+    ] });
+    await lista({ clientesExportar: vi.fn(), clientesImportar });
+    fireEvent.click(screen.getByText('Importar'));
+    await avanzar(0);
+    expect(conf).toHaveBeenCalledWith('Importar 2 cliente(s) y 2 cámara(s).\n1 cliente(s) con el mismo nombre se van a REEMPLAZAR.\n2 fila(s) sin nombre se saltean.');
+    expect(store.clientes.map((c) => c.name)).toEqual(['Almacén Local', undefined, 'Bodega', 'Nuevo']);
+    const bodega = store.clientes.find((c) => c.name === 'Bodega');
+    expect(bodega.id).toMatch(/^loc_/);
+    expect(bodega.phones).toEqual(['2080', '2081']);
+    expect(bodega.devices).toEqual([
+      { id: expect.stringMatching(/^loc_/), label: 'Portón', type: 'intercom', rtsp: 'rtsp://10.0.0.1/1' },
+      { id: expect.stringMatching(/^loc_/), label: 'Cámara', type: 'camera', rtsp: 'rtsp://10.0.0.2/1' },
+    ]);
+    expect(screen.getByText('Importados 2 cliente(s) (1 reemplazados).')).toBeTruthy();
+  });
+
+  it('una planilla sin encabezado no pierde la primera fila; cancelar no toca nada', async () => {
+    const conf = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const clientesImportar = vi.fn().mockResolvedValue({ ok: true, filas: [['Garaje Norte', '2090']] });
+    await lista({ clientesExportar: vi.fn(), clientesImportar }, [LOCAL]);
+    fireEvent.click(screen.getByText('Importar'));
+    await avanzar(0);
+    expect(conf).toHaveBeenCalledWith('Importar 1 cliente(s) y 0 cámara(s).');
+    expect(store.clientes).toEqual([LOCAL]);
+    fireEvent.click(screen.getByText('Importar'));
+    await avanzar(0);
+    expect(store.clientes.map((c) => c.name)).toEqual(['Almacén Local', 'Garaje Norte']);
+    expect(screen.getByText('Importados 1 cliente(s).')).toBeTruthy();
+    expect(screen.getByText('Garaje Norte')).toBeTruthy();
+  });
+
+  it.each([
+    [{ ok: true, filas: [] }, 'La planilla está vacía.'],
+    [{ ok: true }, 'La planilla está vacía.'],
+    [{ ok: true, filas: [['Nombre', 'Tel'], ['', '1']] }, 'No se encontró ningún cliente en la planilla.'],
+    [{ ok: false, motivo: 'no es un xlsx' }, 'No se pudo leer: no es un xlsx'],
+    [null, 'No se pudo leer: error'],
+  ])('importar %j avisa «%s»', async (resp, txt) => {
+    await lista({ clientesExportar: vi.fn(), clientesImportar: vi.fn().mockResolvedValue(resp) });
+    fireEvent.click(screen.getByText('Importar'));
+    await avanzar(0);
+    expect(screen.getByText(txt)).toBeTruthy();
+  });
+
+  it('importar: cancelar el diálogo no dice nada; un error de lectura sí', async () => {
+    const clientesImportar = vi.fn().mockResolvedValueOnce({ cancelado: true }).mockRejectedValueOnce(new Error('EBUSY')).mockRejectedValueOnce({});
+    await lista({ clientesExportar: vi.fn(), clientesImportar });
+    const imp = screen.getByText('Importar');
+    fireEvent.click(imp); await avanzar(0);
+    expect(screen.queryByText(/No se pudo leer/)).toBeNull();
+    fireEvent.click(imp); await avanzar(0);
+    expect(screen.getByText('No se pudo leer: EBUSY')).toBeTruthy();
+    fireEvent.click(imp); await avanzar(0);
+    expect(screen.getByText('No se pudo leer: error')).toBeTruthy();
   });
 });

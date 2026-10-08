@@ -26,7 +26,7 @@ function montar({ empaquetado = false, lock = true, cifrado = true, sinSip = fal
   E = electronFalso({ empaquetado, lock, userData: tmp, cifrado });
   sipNat = { start: vi.fn(() => ({ ok: true })), stop: vi.fn(), call: vi.fn(), accept: vi.fn(), videoOut: vi.fn(), reqKeyframe: vi.fn(), reject: vi.fn(), hangup: vi.fn(), setMuted: vi.fn(), audioOut: vi.fn(), dtmf: vi.fn(), transfer: vi.fn(), hold: vi.fn(), setVideo: vi.fn() };
   g2local = { asegurar: vi.fn(async () => ({ ok: true, base: 'http://127.0.0.1:1984' })), estado: vi.fn(() => ({ disponible: true })), parar: vi.fn() };
-  onvif = { descubrir: vi.fn(async (ms) => [{ ms }]), perfiles: vi.fn(async () => [{ rtsp: 'rtsp://x' }]) };
+  onvif = { descubrir: vi.fn(async (ms) => ({ equipos: [{ ms }], interfaces: [{ nombre: 'Ethernet', ip: '10.0.0.2' }] })), perfiles: vi.fn(async () => [{ rtsp: 'rtsp://x' }]) };
   updater = Object.assign(new EventEmitter(), { setFeedURL: vi.fn(), checkForUpdates: vi.fn(async () => {}), quitAndInstall: vi.fn() });
   wsCreados = [];
   if (argv) process.argv = argv;
@@ -389,9 +389,13 @@ describe('video: proxy go2rtc, go2rtc local, ONVIF y prueba de cámara', () => {
     expect(await E.invocar('g2local-parar')).toEqual({ ok: true });
     g2local.parar.mockImplementation(() => { throw new Error('x'); });
     expect(await E.invocar('g2local-parar')).toEqual({ ok: true });
-    expect(await E.invocar('onvif-descubrir', 100)).toEqual({ ok: true, equipos: [{ ms: 2000 }] });
-    expect(await E.invocar('onvif-descubrir', 99999)).toEqual({ ok: true, equipos: [{ ms: 8000 }] });
-    expect(await E.invocar('onvif-descubrir', 'x')).toEqual({ ok: true, equipos: [{ ms: 4000 }] });
+    const IF = [{ nombre: 'Ethernet', ip: '10.0.0.2' }];
+    // además de los equipos, por qué placas se preguntó: la pantalla lo muestra
+    expect(await E.invocar('onvif-descubrir', 100)).toEqual({ ok: true, equipos: [{ ms: 2000 }], interfaces: IF });
+    expect(await E.invocar('onvif-descubrir', 99999)).toEqual({ ok: true, equipos: [{ ms: 8000 }], interfaces: IF });
+    expect(await E.invocar('onvif-descubrir', 'x')).toEqual({ ok: true, equipos: [{ ms: 4000 }], interfaces: IF });
+    onvif.descubrir.mockResolvedValueOnce({});
+    expect(await E.invocar('onvif-descubrir')).toEqual({ ok: true, equipos: [], interfaces: [] });
     onvif.descubrir.mockRejectedValueOnce(new Error('red'));
     expect(await E.invocar('onvif-descubrir')).toEqual({ ok: false, motivo: 'red' });
     expect(await E.invocar('onvif-perfiles', { xaddr: 'x' })).toEqual({ ok: true, perfiles: [{ rtsp: 'rtsp://x' }] });
@@ -832,5 +836,57 @@ describe('robustez del main', () => {
     g2local.asegurar.mockImplementation(async () => ({ ok: true, base: 'http://h' }));
     g2local.parar.mockImplementation(() => { throw new Error('x'); });
     expect((await E.invocar('camara-probar', 'rtsp://x')).ok).toBe(false);
+  });
+});
+
+/* Clientes del aparato a Excel: el diálogo y el disco son del main; el renderer sólo manda
+ * filas o pide leer. Cancelar el diálogo no es un error. */
+describe('clientes a Excel', () => {
+  function conDialogo(dialog) { montar(); E.electron.dialog = dialog; }
+
+  it('exportar escribe un .xlsx donde eligió el usuario; cancelar no es error', async () => {
+    const ruta = path.join(tmp, 'salida.xlsx');
+    const dialog = { showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: ruta })) };
+    conDialogo(dialog);
+    const r = await E.invocar('clientes-exportar', { nombre: 'mis.xlsx', filas: [['Cliente'], ['Sol & Luna']] });
+    expect(r).toEqual({ ok: true, ruta });
+    expect(dialog.showSaveDialog.mock.calls[0][1]).toMatchObject({ defaultPath: 'mis.xlsx', filters: [{ name: 'Excel', extensions: ['xlsx'] }] });
+    const xlsx = require('../electron/xlsx.cjs');
+    expect(xlsx.leer(fs.readFileSync(ruta))).toEqual([['Cliente'], ['Sol & Luna']]);
+    await E.invocar('clientes-exportar');
+    expect(dialog.showSaveDialog.mock.calls[1][1].defaultPath).toBe('clientes-softphone.xlsx');
+    dialog.showSaveDialog.mockResolvedValueOnce({ canceled: true });
+    expect(await E.invocar('clientes-exportar', {})).toEqual({ ok: false, cancelado: true });
+    dialog.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: path.join(tmp, 'no', 'existe', 'x.xlsx') });
+    expect((await E.invocar('clientes-exportar', {})).motivo).toMatch(/ENOENT/);
+    dialog.showSaveDialog.mockRejectedValueOnce({});
+    expect(await E.invocar('clientes-exportar', {})).toEqual({ ok: false, motivo: 'error' });
+  });
+
+  it('importar lee la primera hoja; cancelar, archivo inválido y sin elegir nada', async () => {
+    const ruta = path.join(tmp, 'entrada.xlsx');
+    fs.writeFileSync(ruta, require('../electron/xlsx.cjs').escribir([['A', 'B'], ['1', '2']]));
+    const dialog = { showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: [ruta] })) };
+    conDialogo(dialog);
+    expect(await E.invocar('clientes-importar')).toEqual({ ok: true, filas: [['A', 'B'], ['1', '2']], ruta });
+    expect(dialog.showOpenDialog.mock.calls[0][1].properties).toEqual(['openFile']);
+    dialog.showOpenDialog.mockResolvedValueOnce({ canceled: true });
+    expect(await E.invocar('clientes-importar')).toEqual({ ok: false, cancelado: true });
+    dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [] });
+    expect(await E.invocar('clientes-importar')).toEqual({ ok: false, cancelado: true });
+    dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false });
+    expect(await E.invocar('clientes-importar')).toEqual({ ok: false, cancelado: true });
+    fs.writeFileSync(ruta, 'nombre;telefono');
+    expect(await E.invocar('clientes-importar')).toEqual({ ok: false, motivo: 'el archivo no es un .xlsx válido' });
+    dialog.showOpenDialog.mockRejectedValueOnce({});
+    expect(await E.invocar('clientes-importar')).toEqual({ ok: false, motivo: 'no se pudo leer el archivo' });
+  });
+
+  it('sin el módulo xlsx empaquetado lo dice (y en desarrollo lo anota)', async () => {
+    E = electronFalso({ userData: tmp });
+    ({ restaurar } = cargarCjs('electron/main.cjs', { electron: E.electron, './xlsx.cjs': new Error('sin xlsx'), './sip-udp.cjs': {}, './go2rtc-local.cjs': () => ({}), './onvif.cjs': {}, ws: WSFalso, 'electron-updater': new Error('x') }, { mantener: true }));
+    expect(await E.invocar('clientes-exportar', {})).toEqual({ ok: false, motivo: 'exportación no disponible en esta versión' });
+    expect(await E.invocar('clientes-importar')).toEqual({ ok: false, motivo: 'importación no disponible en esta versión' });
+    expect(console.log).toHaveBeenCalledWith('[xlsx] no disponible:', 'sin xlsx');
   });
 });
