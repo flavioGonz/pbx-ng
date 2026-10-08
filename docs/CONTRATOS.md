@@ -266,8 +266,10 @@ de cada archivo y en `.claude/agents/api.md`.
   cadencia que no existía. Se borró con el resto del código muerto del panel.)
   4) ningún poll pide nada con `document.hidden` (lo garantiza `usePoll`; los pocos
   `setInterval` que quedan lo comprueban a mano). Con esto una pestaña abierta en el Resumen
-  hace 5 pedidos por minuto (`/system/overview` cada 30 s + `/trunks`, `/asterisk/core` y
-  `/topology` cada 60 s) contra los ~44 de antes, y cero en segundo plano.
+  hace 6 pedidos por minuto (`/system/overview` cada 30 s + `/trunks`, `/topology`,
+  `/security` y `/turn/estado` cada 60 s) contra los ~44 de antes, y cero en segundo plano.
+  (`/asterisk/core` figuraba acá y se seguía pidiendo cada 60 s sin mostrarse en ningún
+  lado; el Resumen ya no lo pide.)
 - `GET /api/metrics` ya **no lo usa ninguna pantalla**: su contenido es un subconjunto de
   `GET /api/system/overview` (el nodo `core` es el mismo `os.*` del host y `storage.db.bytes`
   es el `db_size`), así que el Resumen pide uno solo de los dos. La ruta sigue existiendo para

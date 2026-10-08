@@ -18,6 +18,7 @@ import { IconRefresh, IconBuildingStore, IconTool, IconDoorEnter, IconShieldLock
 import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
 import { IconMicrophone2 } from '@tabler/icons-react';
 import { toast } from '../notify';
+import { api, apiGet, apiPost, apiPut, apiDel } from '../api';
 
 /* Los proveedores, con la única diferencia que le importa a quien elige: dónde corre. */
 const PROVIDERS = [
@@ -81,7 +82,9 @@ export default function AiAgents() {
    * lista que se desincroniza, y en esta pantalla eso significa ofrecer una herramienta
    * que el backend no sabe ejecutar. */
   async function cargarCatalogo() {
-    try { setCatalogo(await fetch('/backend/api/ai-agents/herramientas').then(r => r.json())); } catch (_) {}
+    /* Antes era un fetch suelto: un 403/500 con cuerpo JSON dejaba `catalogo` en un objeto
+     * `{error}` y la solapa Herramientas reventaba en `catalogo.filter`. */
+    try { const d = await apiGet('/ai-agents/herramientas'); setCatalogo(Array.isArray(d) ? d : []); } catch (e) { toast(e.message, 'bad'); }
   }
   /* El registro de acciones. No es un log de depuración: es la respuesta a «¿quién abrió
    * el portón a las 3 de la mañana?». Por eso vive en la misma pantalla que los agentes
@@ -91,24 +94,27 @@ export default function AiAgents() {
   const [soloRechazos, setSoloRechazos] = useState(false);
   const [herrFiltro, setHerrFiltro] = useState('');
   async function cargarAcciones() {
-    try { setAcciones(await fetch('/backend/api/ai-agents/acciones?limite=200').then(r => r.json())); } catch (_) { setAcciones([]); }
+    try { const d = await apiGet('/ai-agents/acciones?limite=200'); setAcciones(Array.isArray(d) ? d : []); } catch (_) { setAcciones((a) => a || []); }
   }
   const previewRef = useRef(null);
 
   async function load() {
-    try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) { setList([]); }
+    /* Mismo problema que el catálogo: con un error de la API `list` quedaba en `{error}` y la
+     * pantalla entera se caía en `list.filter`. Ahora el error se dice y la lista queda como
+     * estaba (vacía si nunca cargó). */
+    try { const d = await apiGet('/ai-agents'); setList(Array.isArray(d) ? d : []); } catch (e) { toast(e.message, 'bad'); setList((l) => l || []); }
     try {
-      const l = await fetch('/backend/api/ai-agents/live').then(r => r.json());
+      const l = (await apiGet('/ai-agents/live')) || {};
       /* El chequeo periódico manda sobre el último error visto en una llamada: si la cuenta
        * ya se recuperó (cargaron saldo), el banner tiene que irse solo. */
       if (l.salud && l.salud.estado !== 'ok' && l.salud.estado !== 'sin_clave') setProblema({ que: l.salud.que, arreglo: l.salud.arreglo, ts: l.salud.ts });
       else if (l.salud && l.salud.estado === 'ok') setProblema(null);
       else setProblema(l.problema || null);
-    } catch (_) {}
+    } catch (_) { /* el banner de salud es informativo: sin él la pantalla sigue sirviendo */ }
   }
-  async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (_) {} }
+  async function loadVozList() { try { const v = (await apiGet('/voz/voices')) || {}; setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (e) { toast(e.message, 'bad'); } }
   async function cargarModelos() {
-    try { setRtModelos(await fetch('/backend/api/ai-agents/modelos').then(r => r.json())); } catch (_) { setRtModelos({ ok: false }); }
+    try { setRtModelos((await apiGet('/ai-agents/modelos')) || { ok: false }); } catch (_) { setRtModelos({ ok: false }); }
   }
   useEffect(() => { load(); loadVozList(); cargarCatalogo(); cargarAcciones(); const t = setInterval(() => { if (!document.hidden) { load(); cargarAcciones(); } }, 30000); return () => clearInterval(t); }, []);
 
@@ -137,42 +143,45 @@ export default function AiAgents() {
   async function save() {
     if (!form.name || !form.exten) { toast('El nombre y el número de acceso son obligatorios', 'bad'); setPaso('identidad'); return; }
     setSaving(true);
-    const url = form.id ? '/backend/api/ai-agents/' + form.id : '/backend/api/ai-agents';
-    const r = await fetch(url, { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }).then(x => x.json()).catch(() => ({ error: 'red' }));
+    try {
+      if (form.id) await apiPut('/ai-agents/' + form.id, form); else await apiPost('/ai-agents', form);
+      toast(form.id ? 'Agente actualizado' : 'Agente creado · marcá ' + form.exten, 'ok'); setOpened(false); load();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
     setSaving(false);
-    if (r.error) toast('Error: ' + r.error, 'bad');
-    else { toast(form.id ? 'Agente actualizado' : 'Agente creado · marcá ' + form.exten, 'ok'); setOpened(false); load(); }
   }
+  /* Antes se ignoraba la respuesta: un borrado rechazado (403, o el agente en uso por una
+   * cola) avisaba «Agente eliminado» igual. */
   async function del(a) {
     if (!confirm('¿Eliminar el agente ' + a.name + '?')) return;
-    await fetch('/backend/api/ai-agents/' + a.id, { method: 'DELETE' });
-    toast('Agente eliminado', 'info'); load();
+    try { await apiDel('/ai-agents/' + a.id); toast('Agente eliminado', 'info'); load(); }
+    catch (e) { toast(e.message, 'bad'); }
   }
   /* Probar la caja del backoffice sin llamar por teléfono. Lo importante de lo que
    * devuelve no es «anda»: es qué se descartó y por qué. */
   async function probarBackoffice() {
     setProbandoBo(true); setPruebaBo(null);
-    const r = await fetch('/backend/api/ai-agents/probar-backoffice', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: herr('remoto').url, token: herr('remoto').token, tope_ms: herr('remoto').tope_ms }),
-    }).then(x => x.json()).catch(() => ({ ok: false, error: 'no se pudo contactar la central' }));
+    let r;
+    try { r = (await apiPost('/ai-agents/probar-backoffice', { url: herr('remoto').url, token: herr('remoto').token, tope_ms: herr('remoto').tope_ms })) || {}; }
+    catch (e) { r = { ok: false, error: e.message }; }
+    r = { ...r, herramientas: r.herramientas || [] };
     setProbandoBo(false); setPruebaBo(r);
     toast(r.ok ? 'El backoffice publicó ' + r.herramientas.length + ' herramienta(s)' : 'El backoffice no publicó nada usable', r.ok ? 'ok' : 'bad');
   }
   async function probarConexion() {
     setProbando(true); setPrueba(null);
-    const r = await fetch('/backend/api/ai-agents/probar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: form.model, voice: form.voice }) })
-      .then(x => x.json()).catch(() => ({ ok: false, error: 'no se pudo contactar la central' }));
+    let r;
+    try { r = (await apiPost('/ai-agents/probar', { model: form.model, voice: form.voice })) || { ok: false }; }
+    catch (e) { r = { ok: false, error: e.message }; }
     setProbando(false); setPrueba(r);
     toast(r.ok ? 'El modelo contestó: ya se puede marcar ' + (form.exten || 'el interno') : 'La prueba falló', r.ok ? 'ok' : 'bad');
   }
   async function preview(voice) {
     try {
-      const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }) });
-      if (!r.ok) { toast('No se pudo generar el audio', 'bad'); return; }
+      // `raw` porque la respuesta es el WAV sintetizado, no JSON.
+      const r = await api('/voz/test', { method: 'POST', body: { text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }, raw: true });
       const b = await r.blob();
       if (previewRef.current) { previewRef.current.src = URL.createObjectURL(b); previewRef.current.play().catch(() => {}); }
-    } catch (_) {}
+    } catch (e) { toast('No se pudo generar el audio', 'bad', { description: e.message }); }
   }
 
   const filtrados = (list || []).filter(a => !filtro
@@ -501,7 +510,7 @@ export default function AiAgents() {
                 <Switch mb={form.inact1_s > 0 ? 'md' : 0}
                   label={form.inact1_s > 0 ? 'La central consulta y, si no hay nadie, corta' : 'Apagado: la llamada queda abierta hasta que alguien cuelgue'}
                   checked={form.inact1_s > 0}
-                  onChange={e => setForm(s2 => ({ ...s2, ...(e.currentTarget.checked ? INACT_DEF : { inact1_s: 0, inact2_s: 0, cierre_s: 0 }) }))} />
+                  onChange={({ currentTarget: { checked } }) => setForm(s2 => ({ ...s2, ...(checked ? INACT_DEF : { inact1_s: 0, inact2_s: 0, cierre_s: 0 }) }))} />
                 {form.inact1_s > 0 && <>
                   <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md" mb="md">
                     <NumberInput label="¿Sigue ahí?" description="Silencio antes de consultar" suffix=" s" min={1} max={120}

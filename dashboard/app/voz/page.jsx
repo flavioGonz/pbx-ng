@@ -98,8 +98,8 @@ export default function VozConsole({ section = null }) {
   const ask = (cfg) => setConfirmCfg(cfg);
   const doConfirm = async () => { const fn = confirmCfg && confirmCfg.onConfirm; setConfirmCfg(null); if (fn) await fn(); };
 
-  /* El estado del servicio se sondea solo cada 4 s (igual que antes), pero `usePoll`
-     lo frena mientras la pestaña está oculta: son 15 pedidos/minuto por pestaña. */
+  /* El estado del servicio se sondea cada 30 s, y `usePoll` lo frena mientras la pestaña
+     está oculta. */
   const { data: vozData, error: vozError, recargar: loadVoz } = usePoll('/voz', 30000);
   useEffect(() => {
     if (vozError) { setVoz({ ok: false }); return; }
@@ -114,7 +114,8 @@ export default function VozConsole({ section = null }) {
     try { const s = await apiGet('/settings'); if (s.voz_url) setUrl(s.voz_url); if (s.voz_length_scale) setSpeed(s.voz_length_scale); } catch (e) { toast(e.message, 'bad'); }
   }
   async function loadLogs() { try { const j = await apiGet('/voz/logs'); setLogs(j.logs || ''); } catch (e) { toast(e.message, 'bad'); } }
-  async function loadSp() { try { setSp(await apiGet('/sysprompts')); } catch (e) { toast(e.message, 'bad'); } }
+  // Una respuesta que no es lista (proxy, error con 200) no puede tumbar la tabla en `sp.filter`.
+  async function loadSp() { try { const d = await apiGet('/sysprompts'); setSp(Array.isArray(d) ? d : []); } catch (e) { toast(e.message, 'bad'); } }
   async function spSeed() {
     setBusy('seed');
     try { await apiPost('/sysprompts/seed'); toast('Catálogo cargado', 'ok'); loadSp(); }

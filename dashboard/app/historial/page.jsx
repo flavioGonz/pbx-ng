@@ -6,6 +6,9 @@ import { TableSkeleton } from '../Skeletons';
 import PageHeader from '../PageHeader';
 import { useLive } from '../useLive';
 import RecordingPlayer from '../RecordingPlayer';
+import { usePoll } from '../api';
+import { fmtDur } from '../fmt';
+import { toast } from '../notify';
 
 const dispColor = (d) => d === 'ANSWERED' ? 'teal' : d === 'NO ANSWER' ? 'yellow' : d === 'BUSY' ? 'orange' : d === 'FAILED' ? 'red' : 'gray';
 const dispLabel = (d) => ({ ANSWERED: 'Atendida', 'NO ANSWER': 'Sin respuesta', BUSY: 'Ocupado', FAILED: 'Fallida', CONGESTION: 'Congestión' }[d] || d || '—');
@@ -23,22 +26,23 @@ const MEDIA = {
   troncal: { label: 'Troncal', color: 'indigo', icon: IconRouteAltLeft },
   ia: { label: 'IA', color: 'pink', icon: IconRobot },
 };
-const fmtDur = (s) => { s = s || 0; const m = Math.floor(s / 60), ss = s % 60; return m ? `${m}m ${ss}s` : `${ss}s`; };
+const SIN_FILAS = [];
 const clidName = (clid) => { if (!clid) return ''; const m = clid.match(/"?([^"<]*)"?\s*<?/); const n = (m && m[1] || '').trim(); return n && !/^\d+$/.test(n) ? n : ''; };
 const Th = ({ icon, children, tip }) => <Table.Th><Tooltip label={tip} disabled={!tip} withArrow><Group gap={6} wrap="nowrap" style={{ whiteSpace: 'nowrap', cursor: tip ? 'help' : 'default' }}><span style={{ opacity: .55, display: 'flex' }}>{icon}</span>{children}</Group></Tooltip></Table.Th>;
 
 export default function Historial({ embedded = false }) {
   const { snap } = useLive();
-  const [rows, setRows] = useState([]); const [recs, setRecs] = useState([]); const [loading, setLoading] = useState(true);
   const [q, setQ] = useState(''); const [tab, setTab] = useState('all'); const [playId, setPlayId] = useState(null); const [shown, setShown] = useState(80);
-  async function load() {
-    try { const d = await fetch('/backend/api/cdr?limit=300').then(r => r.json()); setRows(Array.isArray(d) ? d : []); } catch (_) { setRows([]); }
-    try { const d = await fetch('/backend/api/recordings').then(r => r.json()); setRecs(Array.isArray(d) ? d : []); } catch (_) {}
-    setLoading(false);
-  }
-  // CDR + grabaciones: 300 filas y el índice de audio por vuelta. Con la pestaña oculta,
-  // nada; visible, cada 30 s (una llamada que terminó hace 20 s no urge en una lista).
-  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
+  /* CDR + grabaciones: 300 filas y el índice de audio por vuelta, cada 30 s y pausado con
+   * la pestaña oculta (una llamada que terminó hace 20 s no urge en una lista). Antes era
+   * un fetch suelto que tragaba el error: un 500 o un 403 se veía como «Aún no hay
+   * llamadas registradas», que es justo lo contrario de lo que pasaba. */
+  const { data: cdrData, error: cdrError, cargando } = usePoll('/cdr?limit=300', 30000);
+  const { data: recData } = usePoll('/recordings', 30000);
+  useEffect(() => { if (cdrError) toast(cdrError.message, 'bad'); }, [cdrError]);
+  const rows = Array.isArray(cdrData) ? cdrData : SIN_FILAS;
+  const recs = Array.isArray(recData) ? recData : SIN_FILAS;
+  const loading = cargando && !cdrData;
   useEffect(() => { setShown(80); }, [tab, q]);
 
   const eps = snap?.extensions || [];
@@ -51,8 +55,8 @@ export default function Historial({ embedded = false }) {
     if (la === 'stasis' || chans.includes('audiosocket') || dc.includes('ai') || dc.includes('c2c')) return 'ia';
     if (dc.includes('ivr') || /^7[0-9]{3}$/.test(dst)) return 'ivr';
     const sInt = internalSet.has(src), dInt = internalSet.has(dst);
-    const dstLong = dst.replace(/[^0-9]/g, '').length >= 6; const srcLong = src.replace(/[^0-9]/g, '').length >= 6;
-    if (dc.includes('trunk') || (!sInt && dInt) || (!sInt && srcLong && dInt)) return 'inbound';
+    const dstLong = dst.replace(/[^0-9]/g, '').length >= 6;
+    if (dc.includes('trunk') || (!sInt && dInt)) return 'inbound';
     if (sInt && !dInt && dstLong) return 'outbound';
     if (sInt && dInt) return 'internal';
     if (sInt || dInt) return 'internal';
@@ -143,7 +147,7 @@ export default function Historial({ embedded = false }) {
           </Group>
         </Group>
         {loading ? <TableSkeleton rows={8} cols={7} /> :
-          fr.length === 0 ? <Text c="dimmed" ta="center" py="xl">{rows.length ? 'Sin resultados en esta vista.' : 'Aún no hay llamadas registradas.'}</Text> :
+          fr.length === 0 ? <Text c="dimmed" ta="center" py="xl">{rows.length ? 'Sin resultados en esta vista.' : cdrError ? 'No se pudo cargar el historial: ' + cdrError.message : 'Aún no hay llamadas registradas.'}</Text> :
             <Table.ScrollContainer minWidth={900}>
               <Table striped highlightOnHover verticalSpacing="sm">
                 <Table.Thead><Table.Tr>

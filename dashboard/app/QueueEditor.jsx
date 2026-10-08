@@ -59,7 +59,7 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
       // `raw` porque la respuesta es el WAV sintetizado, no JSON.
       const r = await api('/queues/preview-announce', { method: 'POST', body: { text, voice: f.voice }, raw: true });
       const b = await r.blob();
-      if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play(); }
+      if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); }
     } catch (e) { toast('No se pudo generar el audio: ' + e.message, 'bad'); }
     finally { setPlay(''); }
   }
@@ -90,13 +90,16 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
       solapa={solapa} onSolapa={setSolapa}
       pie={
         <Group justify="space-between">
+          {/* El <audio> va en el pie y no dentro de una solapa: DrawerNG sólo monta la solapa
+              activa, y el «Escuchar» está en Anuncios — con el audio en Básico, `audioRef`
+              quedaba en null y la vista previa se sintetizaba pero nunca sonaba. */}
+          <audio ref={audioRef} style={{ display: 'none' }} />
           <Button variant="subtle" color="gray" onClick={onClose}>Cancelar</Button>
           <Button leftSection={<IconDeviceFloppy size={16} />} loading={busy} onClick={save}>{creating ? 'Crear cola' : 'Guardar cambios'}</Button>
         </Group>
       }
       solapas={[
         { value: 'basico', label: 'Básico', icon: <IconSettings size={15} />, contenido: (
-          <><audio ref={audioRef} style={{ display: 'none' }} />
           <Stack gap="sm">
             <Group grow>
               <TextInput label="Nombre" description="Identificador interno, sin espacios. Ej: ventas." value={f.name || ''} disabled={!creating} onChange={e => up('name', e.target.value)} required />
@@ -122,7 +125,7 @@ export default function QueueEditor({ queue, opened, onClose, onSaved, voices = 
               {sel('Destino', 'timeout_dest', DEST)}
               <TextInput label="Valor del destino" description="Extensión, buzón, nombre de cola o número de IVR" disabled={f.timeout_dest === 'hangup'} value={f.timeout_value || ''} onChange={e => up('timeout_value', e.target.value)} />
             </Group>
-          </Stack></>
+          </Stack>
         ) },
         { value: 'anuncios', label: 'Anuncios', icon: <IconSparkles size={15} />, contenido: (
           <Stack gap="sm">

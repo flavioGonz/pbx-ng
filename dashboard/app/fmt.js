@@ -54,7 +54,8 @@ export function fmtHora(v, { segundos = false } = {}) {
 export function fmtFechaHora(v) {
   const d = aFecha(v);
   if (!d) return VACIO;
-  return d.toLocaleString(LOCALE, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  // hour12:false explícito: es-UY en ICU sale en 12 h («02:05 p. m.»), distinto de fmtHora.
+  return d.toLocaleString(LOCALE, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 /** Bytes legibles (`1,5 GB`). Una sola decimal debajo de 10 y sólo a partir de KB. */

@@ -50,7 +50,6 @@ function RecPlay({ row }) {
   const urlRef = useRef(null);
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
   async function toggle() {
-    if (state === 'ready') { const a = audioRef.current; if (a) { a.paused ? a.play() : a.pause(); } return; }
     setState('loading');
     try {
       const ts = row.start ? Date.parse(row.start) : 0;

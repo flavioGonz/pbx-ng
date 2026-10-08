@@ -114,7 +114,9 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
    * comía dos 403 en cada carga de /cdr sin haber apretado nada. */
   const admin = useEsAdmin();
   // Listado y ocupación se refrescaban cada 12 s con `setInterval`; misma cadencia, ahora con pausa.
-  const { data: listData, cargando, recargar: load } = usePoll('/recordings', 30000);
+  const { data: listData, error: listError, cargando, recargar: load } = usePoll('/recordings', 30000);
+  /* Sin esto un 500 o un 403 del listado se veía como «Aún no hay grabaciones». */
+  useEffect(() => { if (listError) toast(listError.message, 'bad'); }, [listError]);
   const { data: usage, recargar: loadUsage } = usePoll(admin ? '/recordings/storage/usage' : null, 60000);
   /* La configuración se edita en pantalla, así que la respuesta de la API sólo siembra el
    * formulario: si se recargara sola pisaría lo que el usuario está tipeando. */
@@ -185,7 +187,7 @@ export default function Grabaciones({ embedded = false, section = 'list' }) {
         </Group>
       </Group>
       {loading ? <TableSkeleton rows={6} cols={8} /> :
-        fl.length === 0 ? <Text c="dimmed" ta="center" py="xl">{list.length ? 'Sin resultados.' : 'Aún no hay grabaciones. Iniciá una desde el softphone (botón Grabar).'}</Text> :
+        fl.length === 0 ? <Text c="dimmed" ta="center" py="xl">{list.length ? 'Sin resultados.' : listError ? 'No se pudieron cargar las grabaciones: ' + listError.message : 'Aún no hay grabaciones. Iniciá una desde el softphone (botón Grabar).'}</Text> :
           <Table.ScrollContainer minWidth={900}>
             <Table striped highlightOnHover verticalSpacing="sm">
               <Table.Thead><Table.Tr><Th icon={<IconHash size={13} />} tip="Identificador único de la grabación">ID</Th><Th icon={<IconClock size={13} />}>Fecha</Th><Th icon={<IconWaveSine size={13} />} tip="De dónde salió: un interno, una cola, una sala de reunión, un agente de IA o un menú de voz">Origen</Th><Th icon={<IconUser size={13} />} tip="El interno grabado; en una cola o sala es el nombre de la cola o el número de la sala">Interno / objeto</Th><Th icon={<IconClock size={13} />}>Duración</Th><Th icon={<IconDatabase size={13} />}>Tamaño</Th><Th icon={<IconServer size={13} />} tip="Dónde está guardada: Local, NAS o S3">Almac.</Th><Th icon={<IconWaveSine size={13} />}>Audio</Th><Th icon={<IconWaveSine size={13} />}>Reproducir</Th><Table.Th /></Table.Tr></Table.Thead>

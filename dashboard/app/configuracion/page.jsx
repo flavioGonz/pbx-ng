@@ -162,7 +162,13 @@ export default function Configuracion() {
                   </SimpleGrid>
                 </Tabs.Panel>
               ))}
-              <Tabs.Panel value="integraciones">
+            </Tabs>}
+        </Tabs.Panel>
+
+        {/* Integraciones vivía ADENTRO de las solapas de Componentes (que sólo tienen los
+            grupos como valores), así que la solapa «Integraciones» de arriba abría vacía y
+            Telegram/WhatsApp no se podían configurar desde ningún lado. */}
+        <Tabs.Panel value="integraciones">
           <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
             <Card withBorder radius="lg" padding="lg" shadow="sm">
               <Group justify="space-between" mb="md">
@@ -190,8 +196,6 @@ export default function Configuracion() {
               </Stack>
             </Card>
           </SimpleGrid>
-        </Tabs.Panel>
-      </Tabs>}
         </Tabs.Panel>
 
         <Tabs.Panel value="email">

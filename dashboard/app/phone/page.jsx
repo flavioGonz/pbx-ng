@@ -136,7 +136,9 @@ export default function Phone() {
   useEffect(() => { if (dnd && sp.incoming) sp.rejectIncoming?.(); }, [dnd, sp.incoming]);
   useEffect(() => { if (dnd && pendIn && !pendIn.missed) { wantAccept.current = false; sp.rejectIncoming?.(); setPendIn(null); } }, [dnd, pendIn]);
   useEffect(() => { setContacts(loadC()); }, []);
-  useEffect(() => { if (registered && localStorage.getItem('pbxng_geo') !== '0' && navigator.geolocation) { navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 }); } }, [registered]);
+  /* Con el storage bloqueado (navegador en modo estricto) `getItem` tira: sin el try, el
+   * efecto rompía la pantalla entera apenas el teléfono quedaba registrado. */
+  useEffect(() => { let geo = true; try { geo = localStorage.getItem('pbxng_geo') !== '0'; } catch (_) {} if (registered && geo && navigator.geolocation) { navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 }); } }, [registered]);
   useEffect(() => { fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(d => setAppVer(d.version || '')).catch(() => {}); }, []);
   // Llamada entrante abierta desde la notificación push (?incall=) -> pantalla full-screen
   useEffect(() => {
@@ -293,6 +295,9 @@ export default function Phone() {
   if (!registered) {
     return (
       <div style={S.loginWrap}>
+        {/* Los avisos del QR («inválido o expirado», «no se pudo abrir la cámara») salen
+            justo en esta pantalla: sin esto se calculaban y no se veían nunca. */}
+        {flash && <div style={S.flash}>{flash}</div>}
         <div style={S.loginCard}>
           <svg width="56" height="56" viewBox="0 0 48 48"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5b8fd6" /><stop offset="1" stopColor="#1e40af" /></linearGradient></defs><path d="M24 2 L42 9 V25 C42 36 34 43 24 46 C14 43 6 36 6 25 V9 Z" fill="url(#lg)" /><text x="24" y="30" textAnchor="middle" fontWeight="800" fontSize="15" fill="#fff">IES</text></svg>
           <div style={{ fontSize: 24, fontWeight: 700, marginTop: 14 }}>PBX-NG Phone</div>

@@ -5,7 +5,7 @@ import '@xyflow/react/dist/style.css';
 import { Modal, Stack, Group, Button, TextInput, NumberInput, Select, ActionIcon, Text, Badge, FileButton, Tooltip, Divider, Box, Textarea, Paper, Switch, useComputedColorScheme } from '@mantine/core';
 import { IconPlus, IconTrash, IconDeviceFloppy, IconPlayerPlay, IconUpload, IconPhoneCall, IconList, IconMail, IconUsersGroup, IconArrowsSplit, IconHandStop, IconRobot, IconArrowLeft, IconVolume, IconSparkles, IconMicrophone2 } from '@tabler/icons-react';
 import { toast } from './notify';
-import { api, apiGet, apiPost, apiPut, BASE } from './api';
+import { api, apiGet, apiPost, apiPut } from './api';
 import DrawerNG, { BloqueNG } from './DrawerNG';
 
 const DEST = {
@@ -142,7 +142,16 @@ export default function IvrDesigner({ ivr, prompts: promptsProp, onClose, onSave
 
   async function playGreeting() {
     const p = prompts.find(x => x.name === greeting);
-    if (p) { if (audioRef.current) { audioRef.current.src = BASE + '/prompts/' + p.id + '/audio'; audioRef.current.play().catch(() => {}); } return; }
+    /* Se baja con `api(..., raw)` y no poniendo la URL en `<audio src>`: el `src` no pasa
+     * por el parche de fetch de auth.jsx, viaja sin el token y la API contesta 401. */
+    if (p) {
+      try {
+        const r = await api('/prompts/' + p.id + '/audio', { raw: true });
+        const b = await r.blob();
+        if (audioRef.current) { audioRef.current.src = URL.createObjectURL(b); audioRef.current.play().catch(() => {}); }
+      } catch (e) { toast(e.message, 'bad'); }
+      return;
+    }
     const a = ivrAudios.find(x => x.ref === greeting);
     if (a) {
       try {
