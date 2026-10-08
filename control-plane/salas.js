@@ -909,20 +909,28 @@ module.exports = function init(deps) {
    *  Esas filas se cierran al arrancar y quedan MARCADAS (`fin_estimado`): el panel lo dice
    *  en vez de mostrar una duración inventada.
    * ══════════════════════════════════════════════════════════════════════════ */
-  const abiertas = new Map();   // sala -> id de la reunión en curso
+  /* sala -> PROMESA del id de la reunión en curso. Se guarda la promesa y no el id: al
+   * arrancar una reunión entran varios casi juntos, y si cada entrada buscaba la reunión en
+   * la base por su cuenta, todas veían «no hay ninguna» y creaba cada una la suya (el
+   * historial mostraba dos reuniones de pico 1 en vez de una de pico 2). */
+  const abiertas = new Map();
 
-  async function reunionDe(sala, grabada) {
-    if (abiertas.has(sala)) return abiertas.get(sala);
-    /* Puede existir una reunión abierta en la base y no en memoria: la central se reinició
-     * en el medio. Se sigue la misma, en vez de partir la reunión en dos. */
-    const { rows } = await pool.query('SELECT id FROM pbxng_conf_reuniones WHERE sala=$1 AND fin IS NULL ORDER BY inicio DESC LIMIT 1', [sala]);
-    let id = rows[0] && rows[0].id;
-    if (!id) {
+  async function buscarOAbrir(sala, grabada) {
+    try {
+      /* Puede existir una reunión abierta en la base y no en memoria: la central se reinició
+       * en el medio. Se sigue la misma, en vez de partir la reunión en dos. */
+      const { rows } = await pool.query('SELECT id FROM pbxng_conf_reuniones WHERE sala=$1 AND fin IS NULL ORDER BY inicio DESC LIMIT 1', [sala]);
+      if (rows[0]) return rows[0].id;
       const r = await pool.query('INSERT INTO pbxng_conf_reuniones (sala, grabada) VALUES ($1,$2) RETURNING id', [sala, !!grabada]);
-      id = r.rows[0].id;
+      return r.rows[0].id;
+    } catch (e) {
+      abiertas.delete(sala);   // que la próxima entrada lo vuelva a intentar
+      throw e;
     }
-    abiertas.set(sala, id);
-    return id;
+  }
+  function reunionDe(sala, grabada) {
+    if (!abiertas.has(sala)) abiertas.set(sala, buscarOAbrir(sala, grabada));
+    return abiertas.get(sala);
   }
 
   async function alEntrar(e) {
@@ -951,8 +959,10 @@ module.exports = function init(deps) {
   async function alTerminar(e) {
     const sala = campo(e, 'Conference'); if (!sala) return;
     try {
-      const id = abiertas.get(sala);
+      const pendiente = abiertas.get(sala);
       abiertas.delete(sala);
+      let id = null;
+      try { id = await pendiente; } catch (_) { /* no se pudo abrir: se cierra por sala */ }
       await pool.query('UPDATE pbxng_conf_presencias SET salio=now() WHERE sala=$1 AND salio IS NULL', [sala]);
       await pool.query('UPDATE pbxng_conf_reuniones SET fin=now() WHERE ' + (id ? 'id=$1' : 'sala=$1 AND fin IS NULL'), [id || sala]);
     } catch (err) { log.warn('historial: no se pudo cerrar la reunión', err.message); }

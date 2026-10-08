@@ -570,3 +570,43 @@ test('arranque: a los 9 s se vuelca la AstDB y después se republica; un fallo q
   assert.deepEqual(orden, ['sync', 'republicar']);
   assert.ok(avisos.some((a) => a[0] === 'republicar salas'));
 });
+
+test('historial: dos que entran a la vez no parten la reunión en dos (carrera vista en la suite, 07/10)', async () => {
+  /* Al arrancar una reunión entran varios casi juntos. Si cada entrada busca la reunión en
+   * la base por su cuenta, las dos ven «no hay ninguna abierta» y crean una cada una: el
+   * historial muestra dos reuniones de pico 1 en vez de una de pico 2. */
+  let n = 0;
+  const { ami, sql } = armar({
+    q: async (s, a) => {
+      if (/SELECT grabar FROM pbxng_conferences/.test(s)) return { rows: [{ grabar: false }] };
+      if (/SELECT id FROM pbxng_conf_reuniones/.test(s)) { await new Promise((r) => setTimeout(r, 5)); return { rows: [] }; }
+      if (/INSERT INTO pbxng_conf_reuniones/.test(s)) return { rows: [{ id: 100 + (++n) }] };
+      return undefined;
+    },
+  });
+  ami.emit('managerevent', { event: 'ConfbridgeJoin', conference: 'directorio', channel: 'PJSIP/2001-1', calleridnum: '2001' });
+  ami.emit('managerevent', { event: 'ConfbridgeJoin', conference: 'directorio', channel: 'PJSIP/2002-2', calleridnum: '2002' });
+  await new Promise((r) => setTimeout(r, 30));
+  await tandas();
+  assert.equal(sql.filter((x) => /INSERT INTO pbxng_conf_reuniones/.test(x.q)).length, 1, 'se crearon dos reuniones');
+  const ids = sql.filter((x) => /INSERT INTO pbxng_conf_presencias/.test(x.q)).map((x) => x.args[0]);
+  assert.deepEqual(ids, [101, 101]);
+});
+
+test('historial: si no se puede abrir la reunión, la próxima entrada lo vuelve a intentar', async () => {
+  let falla = true;
+  const { ami, sql } = armar({
+    q: (s) => {
+      if (/SELECT grabar FROM pbxng_conferences/.test(s)) return { rows: [{ grabar: false }] };
+      if (/SELECT id FROM pbxng_conf_reuniones/.test(s)) return falla ? pgCaida() : { rows: [] };
+      if (/INSERT INTO pbxng_conf_reuniones/.test(s)) return { rows: [{ id: 9 }] };
+      return undefined;
+    },
+  });
+  ami.emit('managerevent', { event: 'ConfbridgeJoin', conference: 'directorio', channel: 'PJSIP/2001-1' });
+  await tandas();
+  falla = false;
+  ami.emit('managerevent', { event: 'ConfbridgeJoin', conference: 'directorio', channel: 'PJSIP/2002-2' });
+  await tandas();
+  assert.deepEqual(sql.filter((x) => /INSERT INTO pbxng_conf_presencias/.test(x.q)).map((x) => x.args[0]), [9]);
+});

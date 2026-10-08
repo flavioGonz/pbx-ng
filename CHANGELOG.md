@@ -47,6 +47,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Dos personas que entraban a la vez a una sala partían la reunión en dos en el
+  historial.** Cada entrada buscaba la reunión abierta en la base por su cuenta; si llegaban
+  juntas (lo normal al arrancar una reunión), ninguna la encontraba y cada una creaba la
+  suya: el historial mostraba dos reuniones de pico 1 en vez de una de pico 2. Ahora la
+  segunda entrada espera a la reunión que está abriendo la primera.
 - **Con el AMI caído, /health decía que estaba arriba y los pedidos que lo usan quedaban
   colgados.** La API escuchaba el evento `disconnect`, que asterisk-manager no emite nunca
   (emite `close`): después de un corte, `state.ami` seguía en verdadero y cada acción se
