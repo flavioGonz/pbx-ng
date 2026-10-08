@@ -16,6 +16,9 @@ import {
 import { toast } from '../notify';
 
 const API = '/backend/api';
+/* Los onChange toman `currentTarget` en el argumento (`({ currentTarget: el })`) y no adentro
+ * del actualizador de estado: React corre ese actualizador DESPUÉS del evento, cuando
+ * `e.currentTarget` ya es null, y la pantalla se caía al tipear ("reading 'value'"). */
 const j = (u, o) => fetch(u, o).then(r => r.ok ? r.json() : Promise.reject(r)).catch(() => null);
 const initials = (n) => (n || '?').split(/[\s.]+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 const typeMeta = (t) => t === 'intercom'
@@ -74,7 +77,7 @@ export default function IntercomAdmin() {
 
       <Card withBorder radius="lg" p="sm" shadow="sm">
         <Group justify="space-between" mb="xs">
-          <TextInput w={320} size="sm" radius="md" leftSection={<IconSearch size={15} />} placeholder="Buscar cliente…" value={q} onChange={e => setQ(e.currentTarget.value)} />
+          <TextInput w={320} size="sm" radius="md" leftSection={<IconSearch size={15} />} placeholder="Buscar cliente…" value={q} onChange={({ currentTarget: el }) => setQ(el.value)} />
           <Tooltip label="Recargar"><ActionIcon variant="light" size={34} onClick={load}><IconRefresh size={17} /></ActionIcon></Tooltip>
         </Group>
         <ScrollArea>
@@ -112,10 +115,10 @@ export default function IntercomAdmin() {
             <Card withBorder radius="md" p="sm">
               <Text fw={700} fz="sm" mb={8}>Asociar dispositivo</Text>
               <Group gap={8} align="flex-end">
-                <TextInput style={{ flex: 1 }} size="xs" label="Etiqueta" placeholder="Portero principal" value={nd.label} onChange={e => setNd(v => ({ ...v, label: e.currentTarget.value }))} />
+                <TextInput style={{ flex: 1 }} size="xs" label="Etiqueta" placeholder="Portero principal" value={nd.label} onChange={({ currentTarget: el }) => setNd(v => ({ ...v, label: el.value }))} />
                 <Select size="xs" w={130} label="Tipo" data={[{ value: 'intercom', label: 'Portero' }, { value: 'camera', label: 'Cámara' }]} value={nd.type} onChange={v => setNd(s => ({ ...s, type: v }))} />
               </Group>
-              <TextInput mt={8} size="xs" label="URL RTSP" leftSection={<IconMovie size={13} />} placeholder="rtsp://usuario:pass@ip:554/Streaming/Channels/101" value={nd.rtsp_url} onChange={e => setNd(v => ({ ...v, rtsp_url: e.currentTarget.value }))} />
+              <TextInput mt={8} size="xs" label="URL RTSP" leftSection={<IconMovie size={13} />} placeholder="rtsp://usuario:pass@ip:554/Streaming/Channels/101" value={nd.rtsp_url} onChange={({ currentTarget: el }) => setNd(v => ({ ...v, rtsp_url: el.value }))} />
               <Group justify="flex-end" mt={8}><Button size="xs" leftSection={<IconPlus size={14} />} onClick={addDevice}>Asociar</Button></Group>
             </Card>
 
@@ -128,7 +131,7 @@ export default function IntercomAdmin() {
                       <Group justify="space-between" wrap="nowrap">
                         <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
                           <ThemeIcon size={30} radius="md" variant="light" color={m.color}>{m.icon}</ThemeIcon>
-                          <div style={{ minWidth: 0 }}><Text fz="sm" fw={600} truncate>{d.label} <Badge size="xs" variant="light" color={m.color}>{m.label}</Badge></Text><Text fz={11} c="dimmed" truncate>{d.rtsp_url || 'sin URL RTSP'}</Text></div>
+                          <div style={{ minWidth: 0 }}><Text component="div" fz="sm" fw={600} truncate>{d.label} <Badge size="xs" variant="light" color={m.color}>{m.label}</Badge></Text><Text fz={11} c="dimmed" truncate>{d.rtsp_url || 'sin URL RTSP'}</Text></div>
                         </Group>
                         <ActionIcon variant="subtle" color="red" onClick={() => delDevice(d.id)}><IconTrash size={15} /></ActionIcon>
                       </Group>

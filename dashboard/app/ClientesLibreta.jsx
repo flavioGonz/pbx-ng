@@ -13,6 +13,9 @@ import {
 import { toast } from './notify';
 
 const API = '/backend/api';
+/* Los onChange toman `currentTarget` en el argumento (`({ currentTarget: el })`) y no adentro
+ * del actualizador de estado: React corre ese actualizador DESPUÉS del evento, cuando
+ * `e.currentTarget` ya es null, y la pantalla se caía al tipear ("reading 'value'"). */
 const j = (u, o) => fetch(u, o).then(r => r.ok ? r.json() : Promise.reject(r)).catch(() => null);
 
 function Section({ icon, title, color, children, right }) {
@@ -84,7 +87,7 @@ export default function ClientesLibreta({ opened, onClose }) {
       {tab === 'clientes' && (
         <div style={{ display: 'grid', gridTemplateColumns: sel ? '300px 1fr' : '1fr', gap: 14 }}>
           <Stack gap={8}>
-            <Group gap={8}><TextInput style={{ flex: 1 }} size="sm" radius="md" leftSection={<IconSearch size={14} />} placeholder="Buscar cliente…" value={q} onChange={e => setQ(e.currentTarget.value)} /><ActionIcon size={36} variant="light" color="teal" onClick={newClient}><IconPlus size={18} /></ActionIcon></Group>
+            <Group gap={8}><TextInput style={{ flex: 1 }} size="sm" radius="md" leftSection={<IconSearch size={14} />} placeholder="Buscar cliente…" value={q} onChange={({ currentTarget: el }) => setQ(el.value)} /><ActionIcon size={36} variant="light" color="teal" onClick={newClient}><IconPlus size={18} /></ActionIcon></Group>
             <ScrollArea h={560}>
               <Stack gap={6}>
                 {fc.length === 0 ? <Text c="dimmed" ta="center" py="lg" fz="sm">Sin clientes. Creá uno con +</Text> : fc.map(c => (
@@ -105,30 +108,30 @@ export default function ClientesLibreta({ opened, onClose }) {
             <ScrollArea h={600}>
               <Group justify="space-between"><Text fw={800} fz="lg">{form.name || 'Cliente'}</Text><Group gap={6}><Button size="xs" variant="light" color="teal" leftSection={<IconDeviceFloppy size={15} />} onClick={saveClient}>Guardar</Button><ActionIcon variant="light" color="red" onClick={delClient}><IconTrash size={16} /></ActionIcon></Group></Group>
               <Stack gap={8} mt="sm">
-                <Group grow><TextInput label="Nombre" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.currentTarget.value }))} /><TextInput label="Documento" value={form.doc} onChange={e => setForm(f => ({ ...f, doc: e.currentTarget.value }))} /></Group>
-                <TextInput label="Teléfonos (separados por coma)" description="Se usan para identificar al que llama" value={form.phones} onChange={e => setForm(f => ({ ...f, phones: e.currentTarget.value }))} />
-                <TextInput label="Dirección" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.currentTarget.value }))} />
-                <Textarea label="Notas" autosize minRows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.currentTarget.value }))} />
+                <Group grow><TextInput label="Nombre" value={form.name} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, name: el.value }))} /><TextInput label="Documento" value={form.doc} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, doc: el.value }))} /></Group>
+                <TextInput label="Teléfonos (separados por coma)" description="Se usan para identificar al que llama" value={form.phones} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, phones: el.value }))} />
+                <TextInput label="Dirección" value={form.address} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, address: el.value }))} />
+                <Textarea label="Notas" autosize minRows={2} value={form.notes} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, notes: el.value }))} />
               </Stack>
 
               <Section icon={<IconUserCheck size={15} />} color="blue" title={'Personas autorizadas (' + (sel.persons?.length || 0) + ')'}>
                 <Stack gap={6}>
                   {(sel.persons || []).map(p => <Group key={p.id} justify="space-between" wrap="nowrap"><Text fz="sm"><b>{p.name}</b>{p.relation ? ' · ' + p.relation : ''}{p.doc ? ' · ' + p.doc : ''}{p.valid_until ? ' · vence ' + p.valid_until : ''}</Text><ActionIcon size="sm" variant="subtle" color="red" onClick={() => delPerson(p.id)}><IconTrash size={14} /></ActionIcon></Group>)}
-                  <Group gap={6} align="flex-end"><TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre" value={np.name} onChange={e => setNp(v => ({ ...v, name: e.currentTarget.value }))} /><TextInput size="xs" w={110} placeholder="Vínculo" value={np.relation} onChange={e => setNp(v => ({ ...v, relation: e.currentTarget.value }))} /><TextInput size="xs" w={110} placeholder="Documento" value={np.doc} onChange={e => setNp(v => ({ ...v, doc: e.currentTarget.value }))} /><Button size="xs" variant="light" onClick={addPerson}>Agregar</Button></Group>
+                  <Group gap={6} align="flex-end"><TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre" value={np.name} onChange={({ currentTarget: el }) => setNp(v => ({ ...v, name: el.value }))} /><TextInput size="xs" w={110} placeholder="Vínculo" value={np.relation} onChange={({ currentTarget: el }) => setNp(v => ({ ...v, relation: el.value }))} /><TextInput size="xs" w={110} placeholder="Documento" value={np.doc} onChange={({ currentTarget: el }) => setNp(v => ({ ...v, doc: el.value }))} /><Button size="xs" variant="light" onClick={addPerson}>Agregar</Button></Group>
                 </Stack>
               </Section>
 
               <Section icon={<IconBuilding size={15} />} color="teal" title={'Espacios (' + (sel.spaces?.length || 0) + ')'}>
                 <Stack gap={6}>
                   {(sel.spaces || []).map(s => <Group key={s.id} justify="space-between" wrap="nowrap"><Text fz="sm"><b>{s.name}</b>{s.kind ? ' · ' + s.kind : ''}</Text><ActionIcon size="sm" variant="subtle" color="red" onClick={() => delSpace(s.id)}><IconTrash size={14} /></ActionIcon></Group>)}
-                  <Group gap={6} align="flex-end"><TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre / unidad" value={nsp.name} onChange={e => setNsp(v => ({ ...v, name: e.currentTarget.value }))} /><TextInput size="xs" w={140} placeholder="Tipo" value={nsp.kind} onChange={e => setNsp(v => ({ ...v, kind: e.currentTarget.value }))} /><Button size="xs" variant="light" onClick={addSpace}>Agregar</Button></Group>
+                  <Group gap={6} align="flex-end"><TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre / unidad" value={nsp.name} onChange={({ currentTarget: el }) => setNsp(v => ({ ...v, name: el.value }))} /><TextInput size="xs" w={140} placeholder="Tipo" value={nsp.kind} onChange={({ currentTarget: el }) => setNsp(v => ({ ...v, kind: el.value }))} /><Button size="xs" variant="light" onClick={addSpace}>Agregar</Button></Group>
                 </Stack>
               </Section>
 
               <Section icon={<IconDeviceCctv size={15} />} color="grape" title={'Dispositivos de video (' + (sel.devices?.length || 0) + ')'}>
                 <Stack gap={6}>
-                  {(sel.devices || []).map(d => <Group key={d.id} justify="space-between" wrap="nowrap"><div style={{ minWidth: 0 }}><Text fz="sm"><b>{d.label}</b> <Badge size="xs" variant="light" color={d.type === 'intercom' ? 'orange' : 'grape'}>{d.type}</Badge></Text><Text fz={11} c="dimmed" truncate>{d.rtsp_url || 'sin URL'} · src: {d.go2rtc_src}</Text></div><ActionIcon size="sm" variant="subtle" color="red" onClick={() => delDevice(d.id)}><IconTrash size={14} /></ActionIcon></Group>)}
-                  <Group gap={6} align="flex-end"><TextInput size="xs" w={130} placeholder="Etiqueta" value={nd.label} onChange={e => setNd(v => ({ ...v, label: e.currentTarget.value }))} /><Select size="xs" w={110} data={[{ value: 'intercom', label: 'Intercom' }, { value: 'camera', label: 'Cámara' }]} value={nd.type} onChange={v => setNd(s => ({ ...s, type: v }))} /><TextInput style={{ flex: 1 }} size="xs" placeholder="rtsp://usuario:pass@ip:554/stream" value={nd.rtsp_url} onChange={e => setNd(v => ({ ...v, rtsp_url: e.currentTarget.value }))} /><Button size="xs" variant="light" color="grape" onClick={addDevice}>Agregar</Button></Group>
+                  {(sel.devices || []).map(d => <Group key={d.id} justify="space-between" wrap="nowrap"><div style={{ minWidth: 0 }}><Text component="div" fz="sm"><b>{d.label}</b> <Badge size="xs" variant="light" color={d.type === 'intercom' ? 'orange' : 'grape'}>{d.type}</Badge></Text><Text fz={11} c="dimmed" truncate>{d.rtsp_url || 'sin URL'} · src: {d.go2rtc_src}</Text></div><ActionIcon size="sm" variant="subtle" color="red" onClick={() => delDevice(d.id)}><IconTrash size={14} /></ActionIcon></Group>)}
+                  <Group gap={6} align="flex-end"><TextInput size="xs" w={130} placeholder="Etiqueta" value={nd.label} onChange={({ currentTarget: el }) => setNd(v => ({ ...v, label: el.value }))} /><Select size="xs" w={110} data={[{ value: 'intercom', label: 'Intercom' }, { value: 'camera', label: 'Cámara' }]} value={nd.type} onChange={v => setNd(s => ({ ...s, type: v }))} /><TextInput style={{ flex: 1 }} size="xs" placeholder="rtsp://usuario:pass@ip:554/stream" value={nd.rtsp_url} onChange={({ currentTarget: el }) => setNd(v => ({ ...v, rtsp_url: el.value }))} /><Button size="xs" variant="light" color="grape" onClick={addDevice}>Agregar</Button></Group>
                 </Stack>
               </Section>
             </ScrollArea>
@@ -142,12 +145,12 @@ export default function ClientesLibreta({ opened, onClose }) {
           {fields.map((f, i) => (
             <Card key={i} withBorder radius="md" p="sm">
               <Group gap={8} align="flex-end">
-                <TextInput style={{ flex: 1 }} size="xs" label="Etiqueta" value={f.label} onChange={e => setF(i, 'label', e.currentTarget.value)} />
+                <TextInput style={{ flex: 1 }} size="xs" label="Etiqueta" value={f.label} onChange={({ currentTarget: el }) => setF(i, 'label', el.value)} />
                 <Select size="xs" w={130} label="Tipo" data={[{ value: 'text', label: 'Texto' }, { value: 'select', label: 'Lista' }, { value: 'rating', label: 'Puntaje 1-5' }, { value: 'bool', label: 'Sí/No' }]} value={f.ftype} onChange={v => setF(i, 'ftype', v)} />
-                <Switch size="sm" label="Obligatorio" checked={!!f.required} onChange={e => setF(i, 'required', e.currentTarget.checked)} />
+                <Switch size="sm" label="Obligatorio" checked={!!f.required} onChange={({ currentTarget: el }) => setF(i, 'required', el.checked)} />
                 <ActionIcon variant="subtle" color="red" onClick={() => delField(i)}><IconTrash size={16} /></ActionIcon>
               </Group>
-              {f.ftype === 'select' && <TextInput mt={6} size="xs" label="Opciones (separadas por coma)" value={(f.options || []).join(', ')} onChange={e => setF(i, 'options', e.currentTarget.value.split(',').map(x => x.trim()).filter(Boolean))} />}
+              {f.ftype === 'select' && <TextInput mt={6} size="xs" label="Opciones (separadas por coma)" value={(f.options || []).join(', ')} onChange={({ currentTarget: el }) => setF(i, 'options', el.value.split(',').map(x => x.trim()).filter(Boolean))} />}
             </Card>
           ))}
         </Stack>

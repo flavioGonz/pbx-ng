@@ -47,6 +47,22 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Panel · la ficha de un cliente se caía al editar un segundo campo.** Los campos leían
+  `e.currentTarget.value` adentro del actualizador de estado, que React corre después del
+  evento, cuando `currentTarget` ya es null («Cannot read properties of null»). Pasaba en
+  la ficha del cliente, en /intercom y en la libreta de clientes del supervisor.
+- **Panel · /click-to-call quedaba en blanco sin permiso o con la API fallando.** Un
+  `{error}` se guardaba como si fuera la lista de enlaces y la pantalla se rompía entera.
+- **Panel · «entrar como moderador» avisaba que el navegador había bloqueado la ventana**
+  aunque la sala se abría: con `noopener`, `window.open` devuelve siempre null. Ahora se
+  abre sin esa opción y se corta el `opener` a mano.
+- **Panel · «Encuesta guardada» salía aunque la API no la guardara.** Ahora avisa el error.
+- **Panel · la pared de video del cliente quedaba en negro después de tocar un portero**
+  si go2rtc contestaba `{streams:[…]}`: la recarga sólo aceptaba la lista suelta.
+- **Sala web · el moderador que salía volvía a una tarjeta vacía.** Ahora se le explica que
+  la entrada es de un solo uso y que tiene que volver a entrar desde el panel.
+- **Panel · «2 invitaciónes enviadas»** (con tilde en el plural) en el aviso de invitar a
+  una sala.
 - **Dos personas que entraban a la vez a una sala partían la reunión en dos en el
   historial.** Cada entrada buscaba la reunión abierta en la base por su cuenta; si llegaban
   juntas (lo normal al arrancar una reunión), ninguna la encontraba y cada una creaba la

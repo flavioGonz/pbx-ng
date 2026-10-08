@@ -58,7 +58,7 @@ const pinAzar = () => String(Math.floor(Math.random() * 1000000)).padStart(6, '0
 /* `onEstado` le pasa al cajón lo que necesita para dibujar el pie fijo (guardando, y la
  * función de guardar): el botón de guardar de un formulario largo no puede vivir al final
  * del scroll —hay que bajar hasta el fondo cada vez para apretarlo—. */
-function SalaForm({ sala, onListo, onCancelar, onEstado }) {
+function SalaForm({ sala, onListo, onEstado }) {
   const editando = !!sala;
   const [f, setF] = useState(() => (sala
     ? { ...VACIA, ...sala, agenda_inicio: fmtInputFechaHora(sala.agenda_inicio), agenda_min: sala.agenda_min || 60 }
@@ -169,7 +169,8 @@ function Invitar({ sala, onCerrar }) {
     try {
       const r = await apiPost('/salas/' + sala.name + '/invitar', { destinatarios: lista, moderador, mensaje });
       const n = (r.enviados || []).length;
-      toast(n + ' invitación' + (n === 1 ? '' : 'es') + ' enviada' + (n === 1 ? '' : 's'), n ? 'ok' : 'bad',
+      // El plural pierde la tilde: «invitaciones», no «invitaciónes» (así salía en el aviso).
+      toast(n + (n === 1 ? ' invitación enviada' : ' invitaciones enviadas'), n ? 'ok' : 'bad',
         (r.fallados || []).length ? { description: 'No salieron: ' + r.fallados.map((x) => x.destino).join(', ') } : undefined);
       if (n) onCerrar();
     } catch (e) { toast(e.message, 'bad'); }
@@ -244,7 +245,7 @@ function Invitar({ sala, onCerrar }) {
  * El token ES la llave: quien lo tiene entra sin PIN, siempre como participante. Por eso
  * el cajón deja rotarlo y revocarlo de un clic — es lo que un PIN de cuatro dígitos nunca
  * pudo darte— y lo dice con todas las letras en vez de dejarlo a la intuición. */
-function EnlaceWeb({ sala, onCerrar, onCambio }) {
+function EnlaceWeb({ sala, onCambio }) {
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState('');
   const [cargando, setCargando] = useState(true);
@@ -682,9 +683,12 @@ export default function SalasPanel({ conEncabezado = true }) {
     setAbriendo(s.name);
     try {
       const r = await apiPost('/salas/' + s.name + '/moderar', {});
-      const w = window.open(r.url, '_blank', 'noopener');
+      /* Sin 'noopener' en las opciones: con él, window.open devuelve SIEMPRE null (así lo
+       * define el estándar) y el panel avisaba «el navegador bloqueó la ventana» aunque la
+       * sala se hubiera abierto. Se corta el `opener` a mano, que es lo que 'noopener' hacía. */
+      const w = window.open(r.url, '_blank');
       if (!w) toast('El navegador bloqueó la ventana nueva. Permitila y probá otra vez.', 'bad');
-      else toast('Abriendo la sala como moderador', 'ok');
+      else { w.opener = null; toast('Abriendo la sala como moderador', 'ok'); }
       recargar();
     } catch (e) { toast(e.message, 'bad'); }
     setAbriendo('');
@@ -835,7 +839,7 @@ export default function SalasPanel({ conEncabezado = true }) {
         subtitulo="Un número al que entran varios y se escuchan entre todos"
         solapas={[{ value: 'sala', label: 'Sala', contenido: (
           form ? <SalaForm sala={editar === 'nueva' ? null : editar} onListo={listo}
-            onCancelar={() => { cerrarForm(); setEditar(null); }} onEstado={setFormEstado} /> : null
+            onEstado={setFormEstado} /> : null
         ) }]}
         pie={
           <Group justify="space-between">
@@ -863,7 +867,7 @@ export default function SalasPanel({ conEncabezado = true }) {
         titulo={enlace ? 'Enlace de «' + (enlace.label || enlace.name) + '»' : ''}
         subtitulo="Para entrar a la reunión desde el navegador, sin ser interno"
         solapas={[{ value: 'enlace', label: 'Enlace', contenido: (
-          enlace ? <EnlaceWeb sala={enlace} onCerrar={() => setEnlace(null)} onCambio={recargar} /> : null
+          enlace ? <EnlaceWeb sala={enlace} onCambio={recargar} /> : null
         ) }]}
       />
 
