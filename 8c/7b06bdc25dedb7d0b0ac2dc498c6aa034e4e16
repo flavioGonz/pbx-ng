@@ -1,0 +1,45 @@
+control-plane/test/app-ramas-crm.test.js
+  s_ace4c2a288c06b::t_c01853fcde5b92 1-229
+  s_ace4c2a288c06b::t_b26d0899dacf85 230-239
+control-plane/test/app-ramas-caida.test.js
+  s_ace4c2a288c06b::t_745623af71736c 152-156
+  s_ace4c2a288c06b::t_66f3b3b8a38274 1-151,157-164
+control-plane/test/app-ramas-resto.test.js
+  s_ace4c2a288c06b::t_3784379ea3c5f2 1-206
+  s_ace4c2a288c06b::t_bcda9a5c69afec 207-246
+control-plane/test/app-ramas-arranque.test.js
+  s_ace4c2a288c06b::t_07380e87681944 1-138
+  s_ace4c2a288c06b::t_a0b0e752fe7dac 139-217
+control-plane/test/app-ramas-sistema.test.js
+  s_ace4c2a288c06b::t_75de46ed7a09e3 246-255
+  s_ace4c2a288c06b::t_a580e61b5abf53 1-245,256-415
+  s_ace4c2a288c06b::t_132cb4c9b433e0 416-421
+control-plane/test/app-ramas-eventos.test.js
+  s_ace4c2a288c06b::t_00bf9fb4cd5550 1-208
+  s_ace4c2a288c06b::t_a05c8a5ef58b10 209-231
+control-plane/app.js
+  s_ace4c2a288c06b::t_abf12973db003d 363-369
+  s_ace4c2a288c06b::t_3982542911638c 660,3080,3138-3141
+CHANGELOG.md
+  s_ace4c2a288c06b::t_383e8ec443ac2d 50-58
+control-plane/salas.js
+  s_ace4c2a288c06b::t_b4a584c8fa17ea 624
+control-plane/test/app-extra.test.js
+  s_ace4c2a288c06b::t_802ff0f857cc9e 196,208-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8c7b06bdc25dedb7d0b0ac2dc498c6aa034e4e16",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
