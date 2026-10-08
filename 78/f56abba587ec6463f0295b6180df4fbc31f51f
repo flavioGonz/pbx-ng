@@ -1,0 +1,23 @@
+CHANGELOG.md
+  s_ace4c2a288c06b::t_1b8db2d1699684 50-54
+control-plane/salas.js
+  s_ace4c2a288c06b::t_4ec0dc0b80f9be 912-923,925-928,930-933,962,964-965
+control-plane/test/sec-ramas-salas.test.js
+  s_ace4c2a288c06b::t_8bedc0c2d9f698 573-612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "78f56abba587ec6463f0295b6180df4fbc31f51f",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
