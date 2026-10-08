@@ -1,0 +1,31 @@
+softphone-app/electron/main.cjs
+  s_ace4c2a288c06b::t_4cab96785c433d 137-143,151-182
+softphone-app/electron/onvif.cjs
+  s_ace4c2a288c06b::t_6608c07f6eadc2 22,110-129,132-134,136-151,153-210
+softphone-app/electron/preload.cjs
+  s_ace4c2a288c06b::t_a437054035194d 65-68
+softphone-app/electron/xlsx.cjs
+  s_ace4c2a288c06b::t_ebfa696a176338 1-191
+softphone-app/package.json
+  s_ace4c2a288c06b::t_fa4a193a9a5593 3
+softphone-app/src/App.jsx
+  s_ace4c2a288c06b::t_96d8f920e62b20 17,42-45,349-350,352-447,908-914,1283-1295,1344-1355,1373-1383,2024,2038-2039,2095-2103,2106-2108,2168-2174,2193,2230,2252
+softphone-app/src/ReproductorAudio.jsx
+  s_ace4c2a288c06b::t_8906842b283ae4 1-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "365e864bbdd4ab6b9cdec8221dd0b5cac5f58986",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
