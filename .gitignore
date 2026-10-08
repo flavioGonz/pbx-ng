@@ -44,3 +44,5 @@ sbc-ng/
 # Binario de go2rtc que viaja en el instalador del softphone: lo baja
 # softphone-app/scripts/fetch-go2rtc.sh en el build (ver el porque ahi).
 softphone-app/vendor/
+# Reportes de cobertura de las pruebas (vitest / node --test)
+coverage/
