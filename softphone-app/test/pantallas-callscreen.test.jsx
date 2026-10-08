@@ -14,6 +14,16 @@ import CallScreen, { Reloj, colorAvatar, T } from '../src/CallScreen.jsx';
 beforeEach(() => { vi.useFakeTimers({ toFake: RELOJES }); vi.setSystemTime(new Date('2026-10-08T12:00:00')); localStorage.clear(); });
 afterEach(() => { vi.useRealTimers(); quitarAudio(); });
 const pasar = (ms) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+/* El gesto se pone en el cuadro siguiente (requestAnimationFrame). En el runner del CI,
+ * más lento, a veces React necesita otra vuelta para aplicarlo: se avanza de a un cuadro,
+ * dejando correr una vuelta real entre medio, hasta que aparece (o se agota el tope). */
+async function hastaGesto(container, clase) {
+  for (let i = 0; i < 30 && !container.querySelector(clase); i++) {
+    await pasar(16);
+    await act(() => new Promise((r) => setImmediate(r)));
+  }
+  return container.querySelector(clase);
+}
 
 function acciones() {
   return {
@@ -93,14 +103,11 @@ describe('estados', () => {
     const { rerender, container } = render(<CallScreen {...base({ estado: 'entrante' })} />);
     expect(container.querySelector('.cs-entra')).toBeTruthy();
     rerender(<CallScreen {...base({ estado: 'hablando' })} />);
-    await pasar(20);
-    expect(container.querySelector('.cs-asienta')).toBeTruthy();
+    expect(await hastaGesto(container, '.cs-asienta')).toBeTruthy();
     rerender(<CallScreen {...base({ estado: 'terminada' })} />);
-    await pasar(20);
-    expect(container.querySelector('.cs-apaga')).toBeTruthy();
+    expect(await hastaGesto(container, '.cs-apaga')).toBeTruthy();
     rerender(<CallScreen {...base({ estado: 'marcando' })} />);
-    await pasar(20);
-    expect(container.querySelector('.cs-entra')).toBeTruthy();
+    expect(await hastaGesto(container, '.cs-entra')).toBeTruthy();
     // un estado desconocido usa el color de «hablando» y no rompe
     rerender(<CallScreen {...base({ estado: 'transfiriendo' })} />);
     expect(container.querySelector('.cs-centro')).toBeTruthy();
