@@ -495,7 +495,6 @@ module.exports = function init(deps) {
    * avisa al bridge y el panel quedaría mostrando otra cosa). app_confbridge publica
    * exactamente eso por AMI: ConfbridgeList / ConfbridgeMute / ConfbridgeUnmute /
    * ConfbridgeKick. Es el mismo camino que ya usa el aparcado con ParkedCalls. */
-  const evs = (r) => { const e = (r && (r.events || r.eventlist)) || []; return Array.isArray(e) ? e : []; };
   const campo = (e, ...ks) => { for (const k of ks) { if (e[k] !== undefined) return e[k]; if (e[k.toLowerCase()] !== undefined) return e[k.toLowerCase()]; } return ''; };
   const si = (v) => String(v || '').toLowerCase() === 'yes';
 

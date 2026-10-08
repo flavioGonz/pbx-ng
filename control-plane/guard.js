@@ -236,7 +236,6 @@ module.exports = function initGuard(deps) {
     for (const k of BOOLES) if (b[k] !== undefined) s[k] = !!b[k] && b[k] !== '0' && b[k] !== 'false';
     if (s.max_fallos < 1) throw err(400, 'max_fallos tiene que ser al menos 1');
     if (s.ventana_s < 5) throw err(400, 'la ventana tiene que ser de al menos 5 segundos');
-    if (s.ban_s < 0) throw err(400, 'ban_s no puede ser negativo (0 = permanente)');
     const c = await pool.connect();
     try {
       await c.query('BEGIN');

@@ -82,17 +82,15 @@ function rms(buf) {
   for (let i = 0; i < buf.length - 1; i += 2) { const s = buf.readInt16LE(i); sum += s * s; }
   return n ? Math.sqrt(sum / n) : 0;
 }
-function uuidToBytes(u) { return Buffer.from(u.replace(/-/g, ''), 'hex'); }
 function bytesToUuid(b) { const h = b.toString('hex'); return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join('-'); }
 
 // ============================================================
 //  Proveedores STT / LLM / TTS
 // ============================================================
 // --- TTS offline (espeak-ng -> sox -> slin16) ---
-function espeakTTS(text, voice) {
+function espeakTTS(text) {
   return new Promise((resolve) => {
-    const v = (voice && /^es/i.test(voice)) ? 'es-419' : 'es-419';
-    const esp = spawn('espeak-ng', ['-v', v, '-s', '150', '-p', '40', '--stdout', text]);
+    const esp = spawn('espeak-ng', ['-v', 'es-419', '-s', '150', '-p', '40', '--stdout', text]);
     const sox = spawn('sox', ['-t', 'wav', '-', '-t', 'raw', '-r', String(RATE), '-e', 'signed', '-b', '16', '-c', '1', '-']);
     const chunks = [];
     esp.stdout.pipe(sox.stdin);
@@ -208,7 +206,7 @@ async function speak(session, text) {
   let pcm = null;
   if (session.useOpenAI && session.keys.openai) pcm = await openaiTTS(text, session.agent.voice, session.keys.openai);
   if ((!pcm || !pcm.length) && session.vozUrl) pcm = await neuralTTS(text, session.vozUrl, session.agent.voice, session.vozSpeed);
-  if (!pcm || !pcm.length) pcm = await espeakTTS(text, session.agent.voice);
+  if (!pcm || !pcm.length) pcm = await espeakTTS(text);
   if (!pcm || !pcm.length || session.closed) return;
   // enviar en frames de 20ms; cancelable por barge-in
   const token = ++session.speakToken;
