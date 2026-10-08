@@ -47,6 +47,59 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Softphone · la cámara de una llamada nativa no se podía apagar** («engine.video is not
+  a function»): el motor SIP usaba el mismo nombre para la función que prende o apaga el
+  video y para el objeto RTP del video, y el primer video pisaba la función.
+- **Softphone · una segunda llamada entrante dejaba colgada la que estaba en curso** (modo
+  SIP nativo): la nueva pisaba a la activa, que quedaba sin forma de mandarle el BYE. Ahora
+  se contesta 486 Ocupado: **con la línea ocupada, la central manda la llamada nueva al
+  buzón o al siguiente de la cola**.
+- **Softphone · cada copia del 200 OK que retransmite la central volvía a «atender»**
+  (modo nativo, UDP): reabría el RTP y reiniciaba micrófono y audio. A una copia sólo se le
+  contesta otro ACK.
+- **Softphone · una llamada atendida sin SDP quedaba arriba muda en la central.** Ahora se
+  corta con BYE y la línea se libera.
+- **Softphone · detrás de NAT, el REGISTER firmado mandaba la IP privada en el Contact**
+  aunque ya se había aprendido la pública: la central registraba una dirección inalcanzable
+  hasta el refresco siguiente.
+- **Softphone · toda llamada WebRTC atendida quedaba en el historial con duración 0**
+  («No establecido»): el historial usaba la foto del momento de marcar.
+- **Softphone · una llamada nueva en los 1,8 s del cartel «Llamada finalizada» quedaba
+  trabada en ese cartel**, sin botones para atender ni cortar.
+- **Softphone · el login decía «No se pudo conectar» sin decir por qué**: el motivo (401 de
+  la central, tiempo agotado, datos incompletos) se guardaba y no se mostraba.
+- **Softphone · un portero sin video se anunciaba como «Videollamada entrante»** cuando el
+  cliente tenía cámaras: el rótulo dependía de la escena y no de la llamada.
+- **Softphone · después de «Probar» una cámara, el motor de video quedaba vivo con la URL de
+  prueba** (con la clave de la cámara adentro). Ahora se para al terminar la prueba.
+- **Softphone · con el almacenamiento del navegador bloqueado, el modo nativo dejaba la
+  pantalla en blanco al arrancar.**
+- **Panel · la solapa «Integraciones» de Configuración abría vacía**: Telegram y WhatsApp no
+  se podían configurar desde ningún lado (el panel estaba dentro de las solapas de otra
+  sección).
+- **Panel · el saludo del IVR y la vista previa de los anuncios de una cola no sonaban.** El
+  saludo se pedía sin token (401); la vista previa buscaba un `<audio>` que sólo existía en
+  otra solapa.
+- **Panel · la descarga de una captura .pcap bajaba un 401**: se abría la URL sin token.
+- **Panel · la pizarra se rompía al abrirse desde /phone** («reading 'getImageData'»).
+- **Panel · tipear en el segundo campo de APNs, en un buzón nuevo o tocar el interruptor de
+  inactividad de un agente de IA tiraba abajo la pantalla** (el mismo error de
+  `currentTarget` ya leído después del evento).
+- **Panel · /ai-agents se caía con un error de la API, y un borrado fallido decía
+  «eliminado».** La pantalla pasó a la capa de API del panel.
+- **Panel · un error de la API en /historial o /grabaciones se veía como «Aún no hay
+  llamadas / grabaciones».** Ahora se avisa el error.
+- **Panel · «Lo que se va a ejecutar» se abría solo después de confirmar o cancelar un
+  cambio de modo de red**, tapando el aviso.
+- **Panel · los avisos del QR del teléfono web («QR inválido o expirado») no se veían nunca**
+  en la pantalla de ingreso, que es donde salen.
+- **Panel · con el almacenamiento bloqueado, el teléfono web se rompía apenas quedaba
+  registrado.**
+- **Panel · un error lanzado sin valor (`throw null`) tiraba abajo el panel entero**, menú
+  incluido, en vez de quedar encerrado en la pantalla que falló.
+- **Panel · fecha y hora en formato de 12 h** («02:05 p. m.») en las pantallas que usan
+  `fmtFechaHora`; el resto del panel usa 24 h.
+- **Panel · el Resumen pedía `/asterisk/core` cada minuto sin mostrarlo en ningún lado.**
 - **Panel · «Teléfono eliminado» aunque la API no lo hubiera borrado.** El borrado de un
   teléfono aprovisionado iba por un `fetch` suelto, que no falla con un 403 o un 500. Ahora
   va por la capa de API y avisa el error.

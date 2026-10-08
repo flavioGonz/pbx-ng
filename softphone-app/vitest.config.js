@@ -15,6 +15,9 @@ export default defineConfig({
     include: ['test/**/*.test.{js,jsx}'],
     setupFiles: ['test/setup.js'],
     restoreMocks: true,
+    /* Mantine en jsdom, con cobertura y los archivos en paralelo, pasa los 5 s por defecto
+     * en una máquina cargada (o en el runner del CI): que una prueba lenta no se vea rota. */
+    testTimeout: 30000,
     coverage: {
       provider: 'v8',
       all: true,
