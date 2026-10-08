@@ -21,7 +21,7 @@ const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
-const { entorno, puertoLibre } = require('./helpers/db');
+const { entorno } = require('./helpers/db');
 const { amiFalso } = require('./helpers/ami-falso');
 const { httpFalso, crudo } = require('./helpers/http-falso');
 
@@ -56,7 +56,10 @@ test('porteros, click-to-call, aprovisionamiento y push con datos incompletos', 
   const g2 = await httpFalso();
   const portero = await httpFalso();
   const push = await pushFalso();
-  const cerrado = await puertoLibre();
+  /* «El servicio está caído»: el puerto 1 de 127.0.0.1. Uno pedido libre y soltado no sirve:
+   * con la suite en paralelo otra prueba lo toma para su propio servidor falso (pasó en el
+   * CI con un SMTP que rechazaba la clave), y sin root nadie puede escuchar en el 1. */
+  const cerrado = 1;
   /* go2rtc: el primer candidato no contesta y el segundo sí; la API se queda con ése. */
   const ctx = await entorno(t, Object.assign({}, ami.env, { GO2RTC_MGMT: 'http://127.0.0.1:' + cerrado + ',' + g2.url, NODE_TLS_REJECT_UNAUTHORIZED: '0' }));
   t.after(async () => { if (ctx) await ctx.cerrar(); await ami.cerrar(); await g2.cerrar(); await portero.cerrar(); if (push) await push.cerrar(); });

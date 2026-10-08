@@ -33,7 +33,9 @@ jobs:
   api:
     name: api (lint + test)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 y no 15: con la regla del 90 % la suite pasó de ~600 a más de 1000 pruebas, muchas
+    # con un Postgres y la API levantados, y el runner tiene 2 núcleos.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16-alpine

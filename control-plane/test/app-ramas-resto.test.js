@@ -18,7 +18,7 @@ const os = require('os');
 const path = require('path');
 const net = require('net');
 const WebSocket = require('ws');
-const { entorno, puertoLibre } = require('./helpers/db');
+const { entorno } = require('./helpers/db');
 const { amiFalso } = require('./helpers/ami-falso');
 const { httpFalso, crudo } = require('./helpers/http-falso');
 
@@ -209,7 +209,10 @@ test('lo que queda de app.js: cuerpos ilegibles, subidas, teléfonos, NPM, ACME,
   });
 
   await t.test('probar un agente: dos clics seguidos abren UNA sesión; si el modelo no contesta, falla en el paso sesión', async () => {
-    const cerrado = await puertoLibre();
+    /* «El servicio está caído»: el puerto 1 de 127.0.0.1. Uno pedido libre y soltado no sirve:
+     * con la suite en paralelo otra prueba lo toma para su propio servidor falso (pasó en el
+     * CI con un SMTP que rechazaba la clave), y sin root nadie puede escuchar en el 1. */
+    const cerrado = 1;
     await db.query("INSERT INTO pbxng_settings (key,value) VALUES ('openai_api_key','sk-prueba'),('realtime_url',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", ['ws://127.0.0.1:' + cerrado]);
     const body = { model: 'gpt-realtime-2.1' };
     const [a, b] = await Promise.all([api('POST', '/api/ai-agents/probar', { token: admin, body, timeout: 30000 }), api('POST', '/api/ai-agents/probar', { token: admin, body, timeout: 30000 })]);

@@ -19,7 +19,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { entorno, puertoLibre } = require('./helpers/db');
+const { entorno } = require('./helpers/db');
 const { amiFalso } = require('./helpers/ami-falso');
 const { httpFalso, crudo } = require('./helpers/http-falso');
 const { smtpFalso } = require('./helpers/smtp-falso');
@@ -37,7 +37,10 @@ test('sistema: las otras puertas de las rutas (fallas, datos raros, valores por 
   const ami = await amiFalso();
   const f = await httpFalso();
   const smtp = await smtpFalso();
-  const cerrado = await puertoLibre();   // nadie escucha acá: «el servicio está caído»
+  /* «El servicio está caído»: el puerto 1 de 127.0.0.1. Uno pedido libre y soltado no sirve:
+   * con la suite en paralelo otra prueba lo toma para su propio servidor falso (pasó en el
+   * CI con un SMTP que rechazaba la clave), y sin root nadie puede escuchar en el 1. */
+  const cerrado = 1;
   const ctx = await entorno(t, Object.assign({}, ami.env, { AST_AGENT: f.url, TURN_AGENT: f.url, NPM_HOST: '10.9.9.9', DOMAIN: 'pbx.ejemplo.uy' }));
   /* Primero la API (que reconecta el AMI sola) y después los falsos: al revés, el
    * server.close() del AMI falso espera conexiones que la API vuelve a abrir. */

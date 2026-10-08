@@ -18,6 +18,12 @@
  *  Todo con un ARI y una base de mentira; el log se captura para ver que se anotó.
  * ==========================================================================*/
 'use strict';
+/* Esta prueba lee el log de la API como JSON (ver capturarLog). El formato y el nivel se
+ * fijan acá, ANTES de cargar nada que use log.js (lo lee al cargarse): el CI corre con
+ * LOG_FORMAT=text y LOG_LEVEL=warn, y con eso no se veía ninguna línea, la primera prueba
+ * fallaba con el puerto todavía ocupado y el proceso quedaba colgado hasta el tope del job. */
+process.env.LOG_FORMAT = 'json';
+process.env.LOG_LEVEL = 'debug';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('net');
@@ -68,7 +74,10 @@ function ariFalso(extra = {}) {
 test('init: el puerto ocupado se anota y el próximo init lo abre; la base caída no tira la IA externa', async (t) => {
   const lineas = capturarLog(t);
   const ocupa = net.createServer();
-  await new Promise((ok) => ocupa.listen(AS_PORT, '0.0.0.0', ok));
+  await new Promise((ok, mal) => { ocupa.once('error', mal); ocupa.listen(AS_PORT, '0.0.0.0', ok); });
+  /* Si algo de acá falla, el servidor que ocupa el puerto se cierra igual: abierto, no deja
+   * terminar al proceso y una falla se vuelve un cuelgue. */
+  t.after(() => new Promise((ok) => (ocupa.listening ? ocupa.close(() => ok()) : ok())));
   estado.agentesFalla = true;
   pipe.init(ariFalso(), pool);
   assert.ok(await hasta(() => hay(lineas, /AudioSocket/) && lineas.some((l) => l.level === 'error')), 'el puerto ocupado no se anotó');
