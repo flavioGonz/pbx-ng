@@ -14,9 +14,21 @@ set -e
 # Los .conf horneados hacen #include de pbxng.d/. Si el panel todavía no escribió nada,
 # dejamos los archivos vacíos para que Asterisk no avise por cada include faltante.
 mkdir -p /etc/asterisk/pbxng.d
-for f in parking.conf moh.conf features.conf pjsip.conf rtp.conf pjsip-security.conf; do
+for f in parking.conf moh.conf features.conf pjsip.conf pjsip-security.conf; do
   [ -f "/etc/asterisk/pbxng.d/$f" ] || echo "; generado por el panel PBX-NG (vacío por ahora)" > "/etc/asterisk/pbxng.d/$f"
 done
+# rtp.conf no arranca vacío: el rtp.conf horneado ya no trae el rango RTP ni el STUN (si
+# los trajera, taparían los del panel) y Asterisk caería en 5000-31000. Estos son los de
+# fábrica del panel (DEFAULTS de control-plane/sipconf.js; imagen-asterisk.test.js los compara).
+[ -f /etc/asterisk/pbxng.d/rtp.conf ] || cat > /etc/asterisk/pbxng.d/rtp.conf <<'EOF'
+; generado por el panel PBX-NG (de fábrica, hasta que la API escriba el suyo)
+
+[general](+)
+rtpstart=10000
+rtpend=20000
+icesupport=yes
+stunaddr=stun.l.google.com:19302
+EOF
 # Carpeta de audios de música en espera administrada desde el panel.
 mkdir -p /var/lib/asterisk/sounds/custom/moh 2>/dev/null || true
 # Directorio de la astdb (asterisk.conf, astdbdir): acá monta el volumen asterisk_db. Si no

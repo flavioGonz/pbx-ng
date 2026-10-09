@@ -109,9 +109,12 @@ test('reiniciar Asterisk: cuando convenga, o ya', async () => {
 });
 
 test('al arrancar se regeneran los archivos; un endpoint nuevo hereda temporizadores y ToS', async () => {
-  const { sc, archivos } = armar({ guardado: { general: { default_realm: 'x.uy' } } });
+  const { sc, archivos, comandos } = armar({ guardado: { general: { default_realm: 'x.uy' }, rtp: { stunaddr: '' } } });
   await sc.ensure();
   assert.match(archivos['pjsip.conf'], /default_realm=x\.uy/);
+  /* Los dos módulos: con solo res_pjsip, el "sin STUN" guardado no entraba al arrancar. */
+  assert.match(archivos['rtp.conf'], /^; stunaddr= \(sin STUN\)$/m);
+  assert.deepEqual(comandos, ['module reload res_pjsip.so', 'module reload res_rtp_asterisk.so']);
   const hechos = [];
   await sc.afterCreate({ query: async (sql, a) => { hechos.push(a); } }, 2001);
   assert.deepEqual(hechos[0], ['2001', 'yes', '90', '1800', 'ef']);

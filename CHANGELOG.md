@@ -47,6 +47,19 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
   migración 0029, pantalla de Agentes IA)
 
 ### Fixed
+- **Configuración → SIP · el STUN, ICE y el rango RTP del panel no tenían efecto.** El
+  `rtp.conf` horneado los fijaba en `[general]`, y Asterisk se queda con la primera
+  aparición de cada opción, así que el `pbxng.d/rtp.conf` del panel nunca los pisaba:
+  «sin STUN» seguía consultando `stun.l.google.com`. Desde una red donde ese STUN no
+  responde, cada flujo RTP esperaba 3 × 3 s y una llamada con audio y video tardaba 18 s
+  en armarse: el navegador del portero ya había dado el ICE por perdido y la derivación
+  quedaba sin medio. Ahora esas opciones viven solo en el archivo del panel; el entrypoint
+  de Asterisk deja las de fábrica en un volumen nuevo, y al arrancar la API recarga
+  también `res_rtp_asterisk` (antes solo `res_pjsip`). **Al desplegar:** reconstruir las
+  imágenes de Asterisk y de la API; quien tenga «sin STUN» u otro valor guardado pasa a
+  usarlo de verdad. (`docker/config/asterisk/rtp.conf`,
+  `docker/images/asterisk/docker-entrypoint.sh`, `control-plane/sipconf.js`,
+  `control-plane/app.js`)
 - **Softphone · un mensaje de buzón con un códec que el navegador no abre dejaba un
   AudioContext abierto.** Chromium tiene un tope por página: unos cuantos así y ya no se
   podía dibujar ninguna onda más, tampoco la de la llamada. Ahora el contexto se cierra

@@ -213,9 +213,12 @@ module.exports = function initSipConf(deps) {
     return { ok: true, mode: now ? 'now' : 'when-convenient', out: String(out || '').trim().slice(0, 300) };
   }));
 
-  /* Al arrancar: dejar los archivos como dice la base (volumen nuevo, restore, etc.). */
+  /* Al arrancar: dejar los archivos como dice la base (volumen nuevo, restore, etc.) y
+   * recargar los dos módulos. Antes app.js recargaba solo res_pjsip, y un rtp.conf
+   * regenerado (el STUN, por ejemplo) no entraba hasta el próximo Guardar del panel. */
   async function ensure() {
-    try { write(await load()); } catch (e) { L('no se pudo generar la config SIP:', e.message); }
+    try { write(await load()); } catch (e) { L('no se pudo generar la config SIP:', e.message); return; }
+    await reload();
   }
 
   /* Códecs por defecto para internos y troncales nuevos (los usa app.js). */
