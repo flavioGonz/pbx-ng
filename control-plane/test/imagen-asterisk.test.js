@@ -252,3 +252,56 @@ test('el AudioSocket de la IA esta publicado en los dos compose, y en loopback',
       `${f}: MEDIA_HOST es lo que marca ASTERISK desde la red del host; con el 9092 en loopback va 127.0.0.1`);
   }
 });
+
+/* rtp.conf: lo que escribe el panel no puede estar tambien en el rtp.conf horneado.
+ *
+ * Asterisk lee cada opcion de [general] con ast_variable_retrieve, que se queda con la
+ * PRIMERA aparicion, y el `[general](+)` de pbxng.d/rtp.conf se agrega al final. Asi el
+ * stunaddr horneado tapo durante meses el del panel: "sin STUN" seguia consultando
+ * stun.l.google.com, cada flujo RTP esperaba 3 x 3 s la respuesta que no llegaba y una
+ * derivacion con video tardaba 18 s en armarse (con el ICE del portero ya caido). Y como el
+ * horneado ya no las trae, el entrypoint tiene que dejar las de fabrica del panel hasta que
+ * la API escriba las suyas: sin eso Asterisk arrancaria en 5000-31000. */
+async function rtpDelPanel(guardado) {
+  const initSipConf = require('../sipconf');
+  const archivos = {};
+  const pool = { query: async () => ({ rows: guardado ? [{ value: JSON.stringify(guardado) }] : [] }) };
+  const sc = initSipConf({ app: { get() {}, post() {} }, pool, amiCommand: async () => '', escribir: (n, t) => { archivos[n] = t; }, log: () => {} });
+  await sc.ensure();
+  return { sc, txt: archivos['rtp.conf'] };
+}
+const opciones = (txt) => {
+  const out = {};
+  let seccion = null;
+  for (const linea of txt.split('\n')) {
+    const l = linea.replace(/;.*$/, '').trim();
+    const s = /^\[([^\]]+)\]/.exec(l);
+    if (s) { seccion = s[1]; continue; }
+    const kv = /^([a-z_0-9]+)\s*=\s*(.*)$/.exec(l);
+    if (kv && seccion === 'general') out[kv[1]] = kv[2];
+  }
+  return out;
+};
+
+test('el rtp.conf horneado no fija nada de lo que escribe el panel', async () => {
+  /* Con todo cargado (STUN incluido) para ver cada clave que el panel puede escribir. */
+  const { txt } = await rtpDelPanel({ rtp: { stunaddr: 'stun.ejemplo.uy:3478' } });
+  const delPanel = Object.keys(opciones(txt));
+  assert.ok(delPanel.includes('stunaddr') && delPanel.includes('rtpstart'), 'el panel dejo de escribir el STUN o el rango RTP');
+  const horneado = opciones(leer('config/asterisk/rtp.conf'));
+  for (const k of delPanel) {
+    assert.ok(!(k in horneado), `config/asterisk/rtp.conf fija ${k}=${horneado[k]}: Asterisk se queda con la primera aparicion y el valor del panel no entra nunca`);
+  }
+  assert.match(leer('config/asterisk/rtp.conf'), /^#include "pbxng\.d\/rtp\.conf"$/m, 'el rtp.conf horneado dejo de incluir el del panel');
+});
+
+test('el rtp.conf que deja el entrypoint es el de fabrica del panel', async () => {
+  const ep = leer('images/asterisk/docker-entrypoint.sh');
+  const m = /\/etc\/asterisk\/pbxng\.d\/rtp\.conf <<'EOF'\n([\s\S]*?)\nEOF/.exec(ep);
+  assert.ok(m, 'el entrypoint no deja un pbxng.d/rtp.conf de fabrica: Asterisk arrancaria con el rango 5000-31000');
+  const deFabrica = opciones(m[1]);
+  const { sc } = await rtpDelPanel(null);
+  for (const k of ['rtpstart', 'rtpend', 'icesupport', 'stunaddr']) {
+    assert.equal(deFabrica[k], String(sc.DEFAULTS.rtp[k]), `el entrypoint y DEFAULTS de sipconf.js no coinciden en ${k}`);
+  }
+});

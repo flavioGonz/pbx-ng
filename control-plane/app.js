@@ -496,7 +496,7 @@ const outbox = require('./outbox')({
 });
 apiV1.cerrar();
 app.use('/api/v1', apiV1.router);
-setTimeout(() => { sipConf.ensure().then(() => amiCommand('module reload res_pjsip.so').catch(() => {})).catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados antes de que el panel toque nada
+setTimeout(() => { sipConf.ensure().catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados (y recargados) antes de que el panel toque nada
 
 async function getExtensions() {
   /* El contexto `c2c` queda AFUERA. Son los invitados de las llamadas desde la web: la
