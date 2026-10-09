@@ -1,0 +1,21 @@
+control-plane/test/ia-externa-relay.test.js
+  s_ace4c2a288c06b::t_10f19941b64312 408-410
+dashboard/test/apps-cdr.test.jsx
+  s_ace4c2a288c06b::t_0c0cb6c44e3c0c 69-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7e454e9c02f2a2dc8fed687a4c1f5083d77bd521",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
