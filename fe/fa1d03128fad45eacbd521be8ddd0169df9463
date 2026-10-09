@@ -1,0 +1,52 @@
+dashboard/test/telefonia-horarios.test.jsx
+  s_ace4c2a288c06b::t_cb5da6ba23f78f 1-319
+  s_ace4c2a288c06b::t_0bcb560078bbb2 320
+dashboard/test/helpers/telefonia-render.jsx
+  s_ace4c2a288c06b::t_4522f0da67fddb 1-95
+  s_ace4c2a288c06b::t_703cfa3795454c 96-107
+dashboard/test/telefonia-funciones.test.jsx
+  s_ace4c2a288c06b::t_8b868ed525d18a 1-341
+dashboard/test/telefonia-nube.test.jsx
+  s_ace4c2a288c06b::t_24f0d1ff5fd566 1-270
+  s_ace4c2a288c06b::t_a54019d4b5d26f 271-276
+dashboard/test/telefonia-crud.test.jsx
+  s_ace4c2a288c06b::t_8a5436fb3c8e25 1-154,169-186
+  s_ace4c2a288c06b::t_87478af6b78235 155-168
+dashboard/test/telefonia-config.test.jsx
+  s_ace4c2a288c06b::t_bb8f2eb0f0da99 1-421
+  s_ace4c2a288c06b::t_6f5a14e9986201 422-434
+dashboard/test/telefonia-buzones-sbc.test.jsx
+  s_ace4c2a288c06b::t_c2e301af739556 1-281
+  s_ace4c2a288c06b::t_dc819eb935f855 282-291
+dashboard/test/telefonia-internos.test.jsx
+  s_ace4c2a288c06b::t_d1cd2a5422637d 1-417
+  s_ace4c2a288c06b::t_97f4e322f5099b 418
+dashboard/test/telefonia-rutas.test.jsx
+  s_ace4c2a288c06b::t_058ad13998bad4 1-362
+  s_ace4c2a288c06b::t_521f1ed16daba3 363-423
+dashboard/test/telefonia-troncales.test.jsx
+  s_ace4c2a288c06b::t_49c5516ca1ce40 1-545
+  s_ace4c2a288c06b::t_a594406b9c045d 546-554
+CHANGELOG.md
+  s_ace4c2a288c06b::t_d28232732aa415 50-52
+dashboard/app/telefonos/page.jsx
+  s_ace4c2a288c06b::t_577754754f4732 7,64-71
+dashboard/app/troncales/page.jsx
+  s_ace4c2a288c06b::t_a2c230b33b8e57 5-6,10,49-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fefa1d03128fad45eacbd521be8ddd0169df9463",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

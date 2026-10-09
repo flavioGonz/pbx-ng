@@ -1,0 +1,24 @@
+control-plane/test/ia-externa-llamada.test.js
+  s_ace4c2a288c06b::t_347847b2060398 1-199
+  s_ace4c2a288c06b::t_a2cdb849771605 200-202
+control-plane/test/ai-pipeline.test.js
+  s_ace4c2a288c06b::t_f8e92234886ea3 21,77
+control-plane/test/helpers/llamada-ia.js
+  s_ace4c2a288c06b::t_b48370b1732d67 1-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c33c74afaf2433cf56b70671badd51ad69da9b61",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

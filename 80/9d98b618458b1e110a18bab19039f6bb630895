@@ -1,0 +1,20 @@
+control-plane/test/emails.test.js
+  s_ace4c2a288c06b::t_d7cc3a3ba9568e 1-92
+  s_ace4c2a288c06b::t_c74cf424c0f240 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "809d98b618458b1e110a18bab19039f6bb630895",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

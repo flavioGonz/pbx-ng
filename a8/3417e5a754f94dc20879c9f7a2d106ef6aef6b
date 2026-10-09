@@ -1,0 +1,21 @@
+control-plane/test/alerts.test.js
+  s_ace4c2a288c06b::t_ee8b864ab41cc9 1-14,16-55,57,60-249
+  s_ace4c2a288c06b::t_d29d68c7df4509 56,58-59
+  s_ace4c2a288c06b::t_526d80696d4833 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a83417e5a754f94dc20879c9f7a2d106ef6aef6b",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

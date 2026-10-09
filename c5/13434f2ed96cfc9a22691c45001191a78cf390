@@ -1,0 +1,25 @@
+control-plane/test/app-sistema.test.js
+  s_ace4c2a288c06b::t_5cc8513f1d3bf8 253
+  s_ace4c2a288c06b::t_0e0f2fc0437555 188
+  s_ace4c2a288c06b::t_ec08af8b4d16f6 1-187,189-252,254-280
+control-plane/test/helpers/ami-falso.js
+  s_ace4c2a288c06b::t_16bc6d5aa872fc 1-116
+control-plane/test/helpers/http-falso.js
+  s_ace4c2a288c06b::t_fc28950ec68576 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c513434f2ed96cfc9a22691c45001191a78cf390",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+control-plane/ai-pipeline.js
+  s_ace4c2a288c06b::t_4930bd92805ffb 1029-1033
+  s_ace4c2a288c06b::t_1ddb15042be551 23-26
+CHANGELOG.md
+  s_ace4c2a288c06b::t_117e0b7e437d13 50-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "30c3eb7fa1fc918954024104b4a56d8c82f0eae6",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

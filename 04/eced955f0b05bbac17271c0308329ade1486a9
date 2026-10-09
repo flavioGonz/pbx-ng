@@ -1,0 +1,25 @@
+.github/workflows/ci.yml
+  s_ace4c2a288c06b::t_54ce32aa07ac2e 6,105,129-131,136-162
+CHANGELOG.md
+  s_ace4c2a288c06b::t_fc6f47aeada56a 50-102
+dashboard/vitest.config.mjs
+  s_ace4c2a288c06b::t_ea67888d6b0ba8 14-16
+softphone-app/vitest.config.js
+  s_ace4c2a288c06b::t_493c8a8d7c80e6 18-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "04eced955f0b05bbac17271c0308329ade1486a9",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

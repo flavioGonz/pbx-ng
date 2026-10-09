@@ -1,0 +1,112 @@
+softphone-app/test/pantallas-login.test.jsx
+  s_ace4c2a288c06b::t_094c3d3d9a37ba 1-283
+softphone-app/test/pantallas-ajustes.test.jsx
+  s_ace4c2a288c06b::t_56950c09c1f25f 1-494
+softphone-app/test/pantallas-marcador.test.jsx
+  s_ace4c2a288c06b::t_258b1f533456ec 1-318
+softphone-app/test/pantallas-demo.test.jsx
+  s_ace4c2a288c06b::t_3b15b259fbfdbd 1-181
+  s_ace4c2a288c06b::t_796e6f821d8472 182-219
+softphone-app/test/pantallas-llamada.test.jsx
+  s_ace4c2a288c06b::t_df6fd0c673b88e 1-540,543,547
+  s_ace4c2a288c06b::t_a2bc8647212044 541-542,544-546
+softphone-app/test/pantallas-callscreen.test.jsx
+  s_ace4c2a288c06b::t_d1f74f7a8022cd 1-325
+  s_ace4c2a288c06b::t_dc21cc80b68c48 326-333
+softphone-app/test/pantallas-qr.test.jsx
+  s_ace4c2a288c06b::t_bdbf06c060afbf 1-245
+  s_ace4c2a288c06b::t_8b836f88b28d0b 246-270
+softphone-app/test/pantallas-contactos.test.jsx
+  s_ace4c2a288c06b::t_b50f6dcc984d46 1-292
+  s_ace4c2a288c06b::t_a580022d285d36 293
+softphone-app/src/App.jsx
+  s_ace4c2a288c06b::t_e4aacb8c3b23c9 1133-1135
+  s_ace4c2a288c06b::t_e6be3a5f39111c 675-678,1271-1273,1415,1428-1430,1459,1518-1519,1754
+softphone-app/test/pantallas-intercom.test.jsx
+  s_ace4c2a288c06b::t_b415cf2f4de6d1 1-469
+softphone-app/test/helpers/pantallas-medios.js
+  s_ace4c2a288c06b::t_622b8eb5a8bb06 1-55
+  s_ace4c2a288c06b::t_4bddce41bf5fe0 56-60
+softphone-app/test/pantallas-clientes.test.jsx
+  s_ace4c2a288c06b::t_02aac9d20a6feb 1-465
+  s_ace4c2a288c06b::t_146f74aeddaa00 466-467
+softphone-app/test/pantallas-graficos.test.jsx
+  s_ace4c2a288c06b::t_f87c29d0dccf2d 1-294
+softphone-app/test/pantallas-cuenta.test.jsx
+  s_ace4c2a288c06b::t_cf3e3ac0ef532d 1-293
+softphone-app/test/helpers/pantallas-app.jsx
+  s_ace4c2a288c06b::t_ca64dc6c528143 1-217
+  s_ace4c2a288c06b::t_626b91f2fc0245 218-239
+softphone-app/electron/main.cjs
+  s_ace4c2a288c06b::t_fb35999327f14c 217-220
+softphone-app/electron/sip-udp.cjs
+  s_ace4c2a288c06b::t_030108ba6bbd65 20,222-227,248-255,267,306-310,343,345-350,357,499-503,521
+softphone-app/src/CallScreen.jsx
+  s_ace4c2a288c06b::t_72c14c700e5098 314-315,384-388
+softphone-app/src/DemoLlamada.jsx
+  s_ace4c2a288c06b::t_3b70375d259939 117,151-153
+softphone-app/src/useSip.js
+  s_ace4c2a288c06b::t_4428f770c32f08 226-229,232,237
+softphone-app/src/useSipNative.js
+  s_ace4c2a288c06b::t_80c5b4ea16e8d3 40-42
+softphone-app/test/helpers/logica-cjs.js
+  s_ace4c2a288c06b::t_a34bf8fdb4a7cc 1-28
+softphone-app/test/helpers/logica-electron.js
+  s_ace4c2a288c06b::t_bb40f10cc624bf 1-77
+softphone-app/test/helpers/logica-red.js
+  s_ace4c2a288c06b::t_b55f0e5b095dd4 1-35
+softphone-app/test/helpers/logica-sipfake.js
+  s_ace4c2a288c06b::t_a12d25727f2445 1-94
+softphone-app/test/helpers/logica-sippeer.js
+  s_ace4c2a288c06b::t_976fbf0c9dbec7 1-92
+softphone-app/test/helpers/logica-storage.js
+  s_ace4c2a288c06b::t_8ee0ed4922d57c 1-20
+softphone-app/test/logica-api.test.js
+  s_ace4c2a288c06b::t_9d47aa2d51d285 1-295
+softphone-app/test/logica-config.test.js
+  s_ace4c2a288c06b::t_b21ff496e1e55e 1-193
+softphone-app/test/logica-electron-chicos.test.js
+  s_ace4c2a288c06b::t_702ee5a3f06b78 1-299
+softphone-app/test/logica-ice.test.js
+  s_ace4c2a288c06b::t_0fb26c0b5f3949 1-210
+softphone-app/test/logica-main.test.js
+  s_ace4c2a288c06b::t_1851bc48885172 1-836
+softphone-app/test/logica-onvif.test.js
+  s_ace4c2a288c06b::t_8e3a8e970f42ba 1-207
+softphone-app/test/logica-prov.test.js
+  s_ace4c2a288c06b::t_d966213cebd6ad 1-102
+softphone-app/test/logica-rtp-video.test.js
+  s_ace4c2a288c06b::t_ea30c643d06f24 1-131
+softphone-app/test/logica-sip-udp-bordes.test.js
+  s_ace4c2a288c06b::t_f5134f85245ad6 1-667
+softphone-app/test/logica-sip-udp.test.js
+  s_ace4c2a288c06b::t_7b2d719f578843 1-791
+softphone-app/test/logica-sonidos.test.js
+  s_ace4c2a288c06b::t_eb00ccb04be276 1-120
+softphone-app/test/logica-srtp.test.js
+  s_ace4c2a288c06b::t_5cbbefaa4f9f03 1-5,7-9,11-103
+softphone-app/test/logica-usesip.test.js
+  s_ace4c2a288c06b::t_96e6fb104f11a5 1-1129
+softphone-app/test/logica-usesipnative.test.js
+  s_ace4c2a288c06b::t_1d1e52429ec65e 1-446
+softphone-app/test/logica-video-native.test.js
+  s_ace4c2a288c06b::t_f12eef9d983ccb 1-271
+softphone-app/test/setup.js
+  s_ace4c2a288c06b::t_9be7fb19636619 4-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4f83f14bccbeb36065564a38f53c59a6dfe2f7ee",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}

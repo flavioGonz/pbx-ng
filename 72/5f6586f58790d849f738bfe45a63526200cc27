@@ -1,0 +1,149 @@
+dashboard/test/apps-reportes.test.jsx
+  s_ace4c2a288c06b::t_df7b79b10e5eaf 1-288
+  s_ace4c2a288c06b::t_997d0443ae0fc2 289-301
+dashboard/test/nucleo-fmt.test.js
+  s_ace4c2a288c06b::t_ded770ca5e39a6 1-164
+dashboard/test/nucleo-api.test.jsx
+  s_ace4c2a288c06b::t_abb14d1f2e91db 1-248
+dashboard/test/apps-colas.test.jsx
+  s_ace4c2a288c06b::t_8424413a274de2 1-349
+  s_ace4c2a288c06b::t_a7efd170014a88 350-352
+dashboard/test/nucleo-login.test.jsx
+  s_ace4c2a288c06b::t_4e554736ee7398 1-234
+dashboard/test/sistema-pizarra.test.jsx
+  s_ace4c2a288c06b::t_073c45ba15bafd 1-150
+dashboard/test/apps-visual.test.jsx
+  s_ace4c2a288c06b::t_5c10d7cfa3b6b7 1-518
+  s_ace4c2a288c06b::t_d6439056865e19 519-525
+dashboard/test/helpers/sistema-render.jsx
+  s_ace4c2a288c06b::t_79fbe35dc7ee05 1-69
+  s_ace4c2a288c06b::t_92b918ca6d372d 70-86
+dashboard/test/nucleo-componentes.test.jsx
+  s_ace4c2a288c06b::t_9d13974a9be24c 1-408
+  s_ace4c2a288c06b::t_674dd0eb423492 409-413
+dashboard/test/apps-supervision.test.jsx
+  s_ace4c2a288c06b::t_d4152353fe6339 1-271
+  s_ace4c2a288c06b::t_36c5eef82cbe27 272-274
+dashboard/test/nucleo-usesoftphone.test.jsx
+  s_ace4c2a288c06b::t_48fd3f2901fffd 1-894
+  s_ace4c2a288c06b::t_b4927371cd6883 895
+dashboard/test/nucleo-utiles.test.jsx
+  s_ace4c2a288c06b::t_6dcd0d24d9fc83 1-348
+  s_ace4c2a288c06b::t_efe81a96172d8f 349
+dashboard/test/apps-iavoz.test.jsx
+  s_ace4c2a288c06b::t_1b26508b9d509e 1-42
+dashboard/test/apps-agente.test.jsx
+  s_ace4c2a288c06b::t_4351e0402346c6 1-359
+  s_ace4c2a288c06b::t_23b76e4972a54d 360-364
+dashboard/test/sistema-red.test.jsx
+  s_ace4c2a288c06b::t_b85063ce0e9d60 1-804
+  s_ace4c2a288c06b::t_3a5d2437d15988 805-844
+dashboard/test/sistema-paneles.test.jsx
+  s_ace4c2a288c06b::t_e9c760aa825d92 1-526
+  s_ace4c2a288c06b::t_1c32798615e1a4 527-541
+dashboard/test/nucleo-server.test.js
+  s_ace4c2a288c06b::t_3f06b076d18c25 1-314,316-317
+  s_ace4c2a288c06b::t_6bd938e067828e 315,318-374
+dashboard/test/apps-cdr.test.jsx
+  s_ace4c2a288c06b::t_a8f90d1c6441cd 1-438
+  s_ace4c2a288c06b::t_d54f1207ee6414 439-447
+dashboard/test/nucleo-shell.test.jsx
+  s_ace4c2a288c06b::t_570aee6ca09f54 1-268
+  s_ace4c2a288c06b::t_c7be8a3b41feec 269-270
+dashboard/test/apps-aiagents.test.jsx
+  s_ace4c2a288c06b::t_91aa07e1b93581 1-498,501,504,506-507
+  s_ace4c2a288c06b::t_bf92f95756649c 499-500,502-503,505,508-517
+dashboard/test/nucleo-softphone-ui.test.jsx
+  s_ace4c2a288c06b::t_7347d51588be5e 1-305
+  s_ace4c2a288c06b::t_2bd4f7e9bac0e1 306-316
+dashboard/test/sistema-paginas.test.jsx
+  s_ace4c2a288c06b::t_fe014132eb8f91 1-965
+  s_ace4c2a288c06b::t_e5013ecaa3ecd0 966-971
+dashboard/test/sistema-seguridad.test.jsx
+  s_ace4c2a288c06b::t_5a0bcaec7b18b7 1-619
+  s_ace4c2a288c06b::t_b997d3eab66901 620-711
+dashboard/test/nucleo-paginas.test.jsx
+  s_ace4c2a288c06b::t_45a2fe7a8d8841 1-370
+  s_ace4c2a288c06b::t_734125e65af5ad 371-385
+dashboard/test/apps-resumen.test.jsx
+  s_ace4c2a288c06b::t_b5bb0c5353e32f 1-191
+  s_ace4c2a288c06b::t_4f97e63cc3741d 192-195
+dashboard/app/IvrDesigner.jsx
+  s_ace4c2a288c06b::t_d1b9ceee539859 145-154
+  s_ace4c2a288c06b::t_fd038aea0f2dc2 8
+dashboard/test/apps-ivr.test.jsx
+  s_ace4c2a288c06b::t_d763c01692bf07 1-340
+  s_ace4c2a288c06b::t_699fd414a9e8a2 341-362
+dashboard/test/apps-voz.test.jsx
+  s_ace4c2a288c06b::t_2aafb984d72c87 1-409
+  s_ace4c2a288c06b::t_e7c5587aea2733 410-419
+dashboard/test/nucleo-auth.test.jsx
+  s_ace4c2a288c06b::t_d38ffdb14a9849 1-230
+dashboard/test/helpers/nucleo-sip.js
+  s_ace4c2a288c06b::t_07e2c8f4cf8c9b 1-135
+dashboard/test/nucleo-phone.test.jsx
+  s_ace4c2a288c06b::t_100461057c7a1f 1-890
+  s_ace4c2a288c06b::t_1627e2d987392c 891-899
+dashboard/app/BuzonesPanel.jsx
+  s_ace4c2a288c06b::t_1469dbfd9f70b1 209,211,214
+dashboard/app/ErrorBoundary.jsx
+  s_ace4c2a288c06b::t_4bc91a1a9df662 20-23
+dashboard/app/NetMode.jsx
+  s_ace4c2a288c06b::t_f4b450f9d2dd53 97-101,103,115,204,267
+dashboard/app/PcapCapture.jsx
+  s_ace4c2a288c06b::t_4ef8b033c85ef8 8,23-25,33-34,36,39-52,91
+dashboard/app/QueueEditor.jsx
+  s_ace4c2a288c06b::t_9e83352cd286a8 62,93-96,128
+dashboard/app/RecordingPlayer.jsx
+  s_ace4c2a288c06b::t_87be423f1d37cd 5-6,62-64,71-73,113
+dashboard/app/Scratchpad.jsx
+  s_ace4c2a288c06b::t_902d49e8eb79c2 18-21
+dashboard/app/ai-agents/page.jsx
+  s_ace4c2a288c06b::t_4b95eef0782700 21,85-87,97,102-105,107,113,115,117,146-149,152-153,156-157,163-166,172-174,180-181,184,513
+dashboard/app/configuracion/page.jsx
+  s_ace4c2a288c06b::t_53b5c6039d9692 165-171
+dashboard/app/fmt.js
+  s_ace4c2a288c06b::t_7d1f331f40e4ed 57-58
+dashboard/app/grabaciones/page.jsx
+  s_ace4c2a288c06b::t_f262b2eafefaf3 117-119,190
+dashboard/app/historial/page.jsx
+  s_ace4c2a288c06b::t_956ef91f8cda6a 9-11,29,36-45,58-59,150
+dashboard/app/notificaciones/page.jsx
+  s_ace4c2a288c06b::t_90d8eec980faaa 74-77,79-80,82-83
+dashboard/app/page.jsx
+  s_ace4c2a288c06b::t_ed0820c8f810b9 128
+dashboard/app/phone/page.jsx
+  s_ace4c2a288c06b::t_4e41edd11f0478 139-141,298-300
+dashboard/app/voz/page.jsx
+  s_ace4c2a288c06b::t_4fb4c1fe5bea8e 101-102,117-118
+dashboard/app/wallboard/page.jsx
+  s_ace4c2a288c06b::t_5545b0c65f1c58 2
+dashboard/server.js
+  s_ace4c2a288c06b::t_d2bf8af6edc4c3 165,184
+dashboard/test/helpers/apps-render.jsx
+  s_ace4c2a288c06b::t_ff952616fe659f 1-71
+dashboard/test/helpers/apps-xyflow.jsx
+  s_ace4c2a288c06b::t_5732e465910212 1-37
+dashboard/test/helpers/nucleo-render.jsx
+  s_ace4c2a288c06b::t_ee80c6c8c31696 1-206
+dashboard/test/setup.js
+  s_ace4c2a288c06b::t_09455a4c01fe48 4-9,22-45
+docs/CONTRATOS.md
+  s_ace4c2a288c06b::t_633991ef29ec66 269-272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "725f6586f58790d849f738bfe45a63526200cc27",
+  "prompts": {},
+  "sessions": {
+    "s_ace4c2a288c06b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d9683b-7c35-459d-b1e3-6f20f381c0d5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
