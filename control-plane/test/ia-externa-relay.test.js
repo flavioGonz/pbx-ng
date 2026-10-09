@@ -405,7 +405,9 @@ test('relay: sin respuesta al latido, se da por cortado y se reabre', async (t) 
   });
   t.after(() => r.cerrar());
   r.iniciar();
-  await hasta(() => conexiones.length >= 2, 2000);
+  /* Se espera el AVISO de la segunda conexión, no sólo que se abra: en el runner del CI el
+   * mensaje a veces todavía no había llegado y `recibido[0]` era undefined. */
+  await hasta(() => conexiones.length >= 2 && conexiones[1].recibido.length >= 1, 2000);
   assert.equal(conexiones[1].recibido[0].reanudar, true);
   assert.ok(logs.some((l) => /no contesta el latido en 200 ms/.test(l)), logs.join(' | '));
 });

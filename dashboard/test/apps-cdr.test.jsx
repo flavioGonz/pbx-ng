@@ -66,7 +66,14 @@ describe('Historial', () => {
     renderNG(<Historial />);
     expect(await screen.findByText('Ana')).toBeTruthy();
     expect(f.de('GET', '/cdr')[0].ruta).toBe('/cdr?limit=300');
-    const tipo = (src, dst) => [...document.querySelectorAll('tbody tr')].find((tr) => tr.textContent.includes(src) && tr.textContent.includes(dst));
+    /* La fila de «src → dst»: se busca en las celdas SIN la fecha y cada número entero. Mirando
+     * todo el texto, «1003 → 55» agarró la fila de la IVR de 1003 porque su hora era «05:55»
+     * (falló en el CI según la hora a la que corrió). */
+    const entero = (txt, n) => new RegExp('(^|[^0-9])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^0-9]|$)').test(txt);
+    const tipo = (src, dst) => [...document.querySelectorAll('tbody tr')].find((tr) => {
+      const txt = [...tr.querySelectorAll('td')].slice(1).map((td) => td.textContent).join(' | ');
+      return entero(txt, src) && entero(txt, dst);
+    });
     expect(tipo('1001', '1002').textContent).toMatch(/Interna.*WebRTC/);
     expect(tipo('099123456', '1001').textContent).toMatch(/Entrante.*Troncal/);
     expect(tipo('1002', '099765432').textContent).toMatch(/Saliente.*Troncal.*Sin respuesta/);
