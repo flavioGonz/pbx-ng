@@ -1,0 +1,32 @@
+docker/config/asterisk/rtp.conf
+  s_ad6c37c0ae4107::t_125f113059ba01 5-10
+docker/images/asterisk/docker-entrypoint.sh
+  s_ad6c37c0ae4107::t_9eddd9b59eed10 30
+  s_ad6c37c0ae4107::t_4a94f34fde30aa 17,20-29,31
+control-plane/sipconf.js
+  s_ad6c37c0ae4107::t_5b33fb31c6c884 216-218,220-221
+control-plane/app.js
+  s_ad6c37c0ae4107::t_13a6658e418253 499
+CHANGELOG.md
+  s_ad6c37c0ae4107::t_1c38a50d7b842d 50-62
+control-plane/test/sipconf.test.js
+  s_ad6c37c0ae4107::t_2fb918645c424a 112,115-117
+control-plane/test/imagen-asterisk.test.js
+  s_ad6c37c0ae4107::t_12d09941baabc4 255-307
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ef8646cd42003a003bf846328d69fb9d6018b190",
+  "prompts": {},
+  "sessions": {
+    "s_ad6c37c0ae4107": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c913ad9-9e9c-426f-a998-08e872cb90ed",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
