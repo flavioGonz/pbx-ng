@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Group, Text, ActionIcon, Slider, Box, Tooltip, Button, Badge, Loader, Divider, useMantineColorScheme } from '@mantine/core';
 import { IconPlayerPlay, IconPlayerPause, IconDownload, IconVolume, IconWaveSine, IconFileText, IconMoodSad, IconMoodSmile, IconMoodNeutral, IconAlertTriangle } from '@tabler/icons-react';
+import { apiGet, apiPost } from './api';
+import { fmtReloj } from './fmt';
 
 const SENT = {
   negativo: { c: 'red', t: 'Negativo', i: IconMoodSad },
@@ -25,7 +27,6 @@ function loadWS() {
   });
   return wsPromise;
 }
-const fmt = (s) => { s = Math.floor(s || 0); const m = Math.floor(s / 60), ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; };
 
 /* Las grabaciones dejaron de ser publicas (antes se bajaban enumerando ids: /1, /2, /3…).
  * wavesurfer y el boton de descarga usan una URL directa, que no manda cabeceras, asi
@@ -58,17 +59,18 @@ export default function RecordingPlayer({ src, label, download = true, recId }) 
 
   useEffect(() => {
     if (!recId) return; let dead = false;
-    fetch('/backend/api/recordings/' + recId + '/transcript').then((r) => r.json()).then((d) => { if (dead) return; if (d.transcript) { setTr(d.transcript); setAn(d.analysis); setTopen(true); } }).catch(() => {});
+    /* Si no hay transcripción guardada (o no se puede leer) queda el botón «Transcribir»:
+     * no es un error para mostrar, es el estado normal de una grabación nueva. */
+    apiGet('/recordings/' + recId + '/transcript').then((d) => { if (dead || !d) return; if (d.transcript) { setTr(d.transcript); setAn(d.analysis); setTopen(true); } }).catch(() => {});
     return () => { dead = true; };
   }, [recId]);
 
   const transcribe = async () => {
     setTl(true); setTopen(true);
     try {
-      const d = await fetch('/backend/api/recordings/' + recId + '/transcribe', { method: 'POST' }).then((r) => r.json());
-      if (d.error) { setTr('No se pudo transcribir: ' + d.error); setAn(null); }
-      else { setTr(d.transcript || '(sin habla detectada)'); setAn(d.analysis || null); }
-    } catch (_) { setTr('Error de transcripcion'); }
+      const d = (await apiPost('/recordings/' + recId + '/transcribe')) || {};
+      setTr(d.transcript || '(sin habla detectada)'); setAn(d.analysis || null);
+    } catch (e) { setTr('No se pudo transcribir: ' + e.message); setAn(null); }
     setTl(false);
   };
 
@@ -108,7 +110,7 @@ export default function RecordingPlayer({ src, label, download = true, recId }) 
         <ActionIcon size={46} radius="xl" color="teal" variant="filled" onClick={toggle} loading={!ready && !err} disabled={err}>{playing ? <IconPlayerPause size={22} /> : <IconPlayerPlay size={22} />}</ActionIcon>
         <div style={{ flex: 1, minWidth: 0 }}>
           {err ? <Text size="sm" c="red">No se pudo cargar el audio.</Text> : <div ref={ref} style={{ width: '100%' }} />}
-          <Group justify="space-between" mt={2}><Text size="xs" c="dimmed" ff="monospace">{fmt(cur)}</Text><Text size="xs" c="dimmed" ff="monospace">{fmt(dur)}</Text></Group>
+          <Group justify="space-between" mt={2}><Text size="xs" c="dimmed" ff="monospace">{fmtReloj(cur)}</Text><Text size="xs" c="dimmed" ff="monospace">{fmtReloj(dur)}</Text></Group>
         </div>
         <Group gap={3} wrap="nowrap">{[0.75, 1, 1.25, 1.5, 2].map((rr) => (
           <Box key={rr} onClick={() => setSpeed(rr)} style={{ cursor: 'pointer', padding: '3px 8px', borderRadius: 8, fontSize: 12, fontWeight: 700, lineHeight: 1, background: rate === rr ? 'var(--mantine-color-teal-filled)' : 'transparent', color: rate === rr ? '#fff' : 'var(--mantine-color-dimmed)', transition: 'all .15s' }}>{rr}x</Box>

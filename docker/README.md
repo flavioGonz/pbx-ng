@@ -84,7 +84,7 @@ Los dos caminos anotan `backup_last_run` en `pbxng_settings`, así el panel mues
 corrida venga de donde venga y el planificador no repite el de hoy si el cron ya lo hizo.
 Detalles que importan:
 
-- Los automáticos se llaman `pbxng-auto-AAAAMMDD-HHMM.tar.gz`. **La retención borra sólo
+- Los automáticos se llaman `pbxng-auto-AAAAMMDD-HHMMSS.tar.gz`. **La retención borra sólo
   esos**; un respaldo hecho a mano desde el panel (`pbxng-…` sin `auto`) no se toca nunca.
   Si la creación falla, no se poda nada.
 - La hora del planificador es la del contenedor de la API, que sin `TZ` es **UTC**. El cron

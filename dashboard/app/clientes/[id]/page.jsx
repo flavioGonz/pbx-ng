@@ -22,6 +22,9 @@ import Intercom from '../../Intercom';
 import RecordingPlayer from '../../RecordingPlayer';
 
 const API = '/backend/api';
+/* Los onChange toman `currentTarget` en el argumento (`({ currentTarget: el })`) y no adentro
+ * del actualizador de estado: React corre ese actualizador DESPUÉS del evento, cuando
+ * `e.currentTarget` ya es null, y la pantalla se caía al tipear ("reading 'value'"). */
 
 /* Los tres modos de apertura, escritos una vez. No se parecen entre si y conviene que el
  * que elige lea POR QUE elegiria cada uno, no solo como se llama. */
@@ -56,7 +59,7 @@ function PorteroCampos({ ed, setEd, dev }) {
         <TextInput size="xs" w={120} label="Interno"
           description="Para llamarlo"
           placeholder="5001" value={ed.ext || ''}
-          onChange={(e) => setEd((v) => ({ ...v, ext: e.currentTarget.value.replace(/[^0-9*#]/g, '') }))} />
+          onChange={({ currentTarget: el }) => setEd((v) => ({ ...v, ext: el.value.replace(/[^0-9*#]/g, '') }))} />
         <Select size="xs" w={240} label="Cómo abre" placeholder="Sin apertura"
           data={MODOS_RELE} value={ed.rele_modo || null} clearable
           onChange={(v) => setEd((x) => ({ ...x, rele_modo: v || '' }))} />
@@ -78,14 +81,14 @@ function PorteroCampos({ ed, setEd, dev }) {
           <Group gap={6} align="flex-end" wrap="wrap" mt={6}>
             <Select size="xs" w={130} label="Marca" data={[{ value: 'akuvox', label: 'Akuvox y compat.' }, { value: 'hikvision', label: 'Hikvision' }]}
               value={cfg.marca || 'akuvox'} onChange={(v) => setCfg({ marca: v })} />
-            <TextInput size="xs" w={150} label="Dirección" placeholder="192.168.1.60" value={cfg.host || ''} onChange={(e) => setCfg({ host: e.currentTarget.value })} />
-            <TextInput size="xs" w={120} label="Usuario" value={cfg.user || ''} onChange={(e) => setCfg({ user: e.currentTarget.value })} />
+            <TextInput size="xs" w={150} label="Dirección" placeholder="192.168.1.60" value={cfg.host || ''} onChange={({ currentTarget: el }) => setCfg({ host: el.value })} />
+            <TextInput size="xs" w={120} label="Usuario" value={cfg.user || ''} onChange={({ currentTarget: el }) => setCfg({ user: el.value })} />
             {/* Misma regla que la URL RTSP: la central la tiene, la pantalla no. Vacío
                 significa «no la toques», que es lo que evita borrarla al guardar otra cosa. */}
             <TextInput size="xs" w={140} label="Clave" type="password"
               description={cfg.pass_set ? 'Hay una guardada' : 'Todavía no tiene'}
               placeholder={cfg.pass_set ? '••••••••' : ''}
-              value={cfg.pass || ''} onChange={(e) => setCfg({ pass: e.currentTarget.value })} />
+              value={cfg.pass || ''} onChange={({ currentTarget: el }) => setCfg({ pass: el.value })} />
           </Group>
         </>
       )}
@@ -96,10 +99,10 @@ function PorteroCampos({ ed, setEd, dev }) {
           {reles.length === 0 && <Text fz={11} c="dimmed" ta="center" py={4}>Sin relés: el botón de abrir no va a aparecer.</Text>}
           {reles.map((r, i) => (
             <Group key={i} gap={6} align="flex-end" mb={6} wrap="nowrap">
-              <TextInput size="xs" style={{ flex: 1 }} placeholder="Nombre (Puerta, Portón…)" value={r.nombre || ''} onChange={(e) => setRele(i, { nombre: e.currentTarget.value })} />
+              <TextInput size="xs" style={{ flex: 1 }} placeholder="Nombre (Puerta, Portón…)" value={r.nombre || ''} onChange={({ currentTarget: el }) => setRele(i, { nombre: el.value })} />
               {ed.rele_modo === 'http'
-                ? <TextInput size="xs" w={90} placeholder="Nº relé" value={r.num == null ? '' : r.num} onChange={(e) => setRele(i, { num: parseInt(e.currentTarget.value, 10) || 1 })} />
-                : <TextInput size="xs" w={120} placeholder={ed.rele_modo === 'dtmf' ? 'Tono (ej. #)' : 'Código (ej. *71)'} value={r.codigo || ''} onChange={(e) => setRele(i, { codigo: e.currentTarget.value })} />}
+                ? <TextInput size="xs" w={90} placeholder="Nº relé" value={r.num == null ? '' : r.num} onChange={({ currentTarget: el }) => setRele(i, { num: parseInt(el.value, 10) || 1 })} />
+                : <TextInput size="xs" w={120} placeholder={ed.rele_modo === 'dtmf' ? 'Tono (ej. #)' : 'Código (ej. *71)'} value={r.codigo || ''} onChange={({ currentTarget: el }) => setRele(i, { codigo: el.value })} />}
               <ActionIcon size="sm" variant="subtle" color="red" onClick={() => sacar(i)}><IconTrash size={13} /></ActionIcon>
             </Group>
           ))}
@@ -115,6 +118,9 @@ function PorteroCampos({ ed, setEd, dev }) {
 }
 
 const j = (u, o) => fetch(u, o).then(r => (r.ok ? r.json() : Promise.reject(r))).catch(() => null);
+/* La carga inicial aceptaba `[...]` o `{streams:[...]}` y la recarga después de tocar un
+ * portero sólo la lista: con la segunda forma, editar un portero dejaba la pared en negro. */
+const listaFlujos = (d) => (Array.isArray(d) ? d : (d && Array.isArray(d.streams) ? d.streams : []));
 const initials = (n) => (n || '?').split(/[\s.]+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 const fmtDur = (s) => { s = s || 0; const m = Math.floor(s / 60), ss = s % 60; return m ? `${m}m ${ss}s` : `${ss}s`; };
 const fmtDate = (d) => (d ? new Date(d).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
@@ -222,7 +228,7 @@ export default function ClienteFicha() {
   }
   useEffect(() => { reload(); }, [id]);
   useEffect(() => {
-    j(API + '/intercom/streams?client=' + id).then(d => setStreams(Array.isArray(d) ? d : (d && d.streams) || []));
+    j(API + '/intercom/streams?client=' + id).then(d => setStreams(listaFlujos(d)));
     j(API + '/clients/' + id + '/calls').then(d => setCalls(Array.isArray(d) ? d : []));
     j(API + '/clients/' + id + '/interventions').then(d => d && setInter(d));
     j(API + '/recordings').then(d => setRecs(Array.isArray(d) ? d : []));
@@ -303,7 +309,7 @@ export default function ClienteFicha() {
     else toast('La cámara no responde', 'bad', { description: res.motivo });
   }
   // Refrescar la pared después de tocar un portero, sin recargar la pantalla entera.
-  function recargarVideo() { setTimeout(() => j(API + '/intercom/streams?client=' + id).then(d => setStreams(Array.isArray(d) ? d : [])), 1500); }
+  function recargarVideo() { setTimeout(() => j(API + '/intercom/streams?client=' + id).then(d => setStreams(listaFlujos(d))), 1500); }
 
   if (loading && !sel) return <Group justify="center" py={80}><Loader /></Group>;
   if (!sel) return <Card withBorder radius="lg" p="xl"><Text c="dimmed" ta="center">Cliente no encontrado. <Anchor onClick={() => router.push('/clientes')}>Volver</Anchor></Text></Card>;
@@ -361,12 +367,12 @@ export default function ClienteFicha() {
             <Card withBorder radius="lg" p="lg" shadow="sm">
               <Stack gap={10}>
                 <Group grow>
-                  <TextInput label="Nombre" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.currentTarget.value }))} />
-                  <TextInput label="Documento" leftSection={<IconId size={14} />} value={form.doc} onChange={e => setForm(f => ({ ...f, doc: e.currentTarget.value }))} />
+                  <TextInput label="Nombre" value={form.name} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, name: el.value }))} />
+                  <TextInput label="Documento" leftSection={<IconId size={14} />} value={form.doc} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, doc: el.value }))} />
                 </Group>
-                <TextInput label="Teléfonos (separados por coma)" description="Con esto la central reconoce al que llama y le abre la ficha al agente" leftSection={<IconPhone size={14} />} value={form.phones} onChange={e => setForm(f => ({ ...f, phones: e.currentTarget.value }))} />
-                <TextInput label="Dirección" description="Se usa para ubicarlo en el mapa" leftSection={<IconMapPin size={14} />} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.currentTarget.value }))} />
-                <Textarea label="Notas" autosize minRows={3} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.currentTarget.value }))} />
+                <TextInput label="Teléfonos (separados por coma)" description="Con esto la central reconoce al que llama y le abre la ficha al agente" leftSection={<IconPhone size={14} />} value={form.phones} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, phones: el.value }))} />
+                <TextInput label="Dirección" description="Se usa para ubicarlo en el mapa" leftSection={<IconMapPin size={14} />} value={form.address} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, address: el.value }))} />
+                <Textarea label="Notas" autosize minRows={3} value={form.notes} onChange={({ currentTarget: el }) => setForm(f => ({ ...f, notes: el.value }))} />
               </Stack>
             </Card>
           </div>
@@ -388,9 +394,9 @@ export default function ClienteFicha() {
                   ))}
                   <Divider my={4} />
                   <Group gap={6} align="flex-end">
-                    <TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre" value={np.name} onChange={e => setNp(v => ({ ...v, name: e.currentTarget.value }))} />
-                    <TextInput size="xs" w={100} placeholder="Vínculo" value={np.relation} onChange={e => setNp(v => ({ ...v, relation: e.currentTarget.value }))} />
-                    <TextInput size="xs" w={100} placeholder="Documento" value={np.doc} onChange={e => setNp(v => ({ ...v, doc: e.currentTarget.value }))} />
+                    <TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre" value={np.name} onChange={({ currentTarget: el }) => setNp(v => ({ ...v, name: el.value }))} />
+                    <TextInput size="xs" w={100} placeholder="Vínculo" value={np.relation} onChange={({ currentTarget: el }) => setNp(v => ({ ...v, relation: el.value }))} />
+                    <TextInput size="xs" w={100} placeholder="Documento" value={np.doc} onChange={({ currentTarget: el }) => setNp(v => ({ ...v, doc: el.value }))} />
                     <Button size="xs" variant="light" onClick={addPerson}>Agregar</Button>
                   </Group>
                 </Stack>
@@ -408,8 +414,8 @@ export default function ClienteFicha() {
                   ))}
                   <Divider my={4} />
                   <Group gap={6} align="flex-end">
-                    <TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre / unidad" value={nsp.name} onChange={e => setNsp(v => ({ ...v, name: e.currentTarget.value }))} />
-                    <TextInput size="xs" w={130} placeholder="Tipo" value={nsp.kind} onChange={e => setNsp(v => ({ ...v, kind: e.currentTarget.value }))} />
+                    <TextInput style={{ flex: 1 }} size="xs" placeholder="Nombre / unidad" value={nsp.name} onChange={({ currentTarget: el }) => setNsp(v => ({ ...v, name: el.value }))} />
+                    <TextInput size="xs" w={130} placeholder="Tipo" value={nsp.kind} onChange={({ currentTarget: el }) => setNsp(v => ({ ...v, kind: el.value }))} />
                     <Button size="xs" variant="light" color="teal" onClick={addSpace}>Agregar</Button>
                   </Group>
                 </Stack>
@@ -447,14 +453,14 @@ export default function ClienteFicha() {
                   if (editando) return (
                     <Card key={d.id} withBorder radius="md" p="sm">
                       <Group gap={6} align="flex-end" wrap="wrap">
-                        <TextInput size="xs" w={140} label="Etiqueta" value={ed.label} onChange={e => setEd(v => ({ ...v, label: e.currentTarget.value }))} />
+                        <TextInput size="xs" w={140} label="Etiqueta" value={ed.label} onChange={({ currentTarget: el }) => setEd(v => ({ ...v, label: el.value }))} />
                         <Select size="xs" w={110} label="Tipo" data={[{ value: 'intercom', label: 'Portero' }, { value: 'camera', label: 'Cámara' }]} value={ed.type} onChange={v => setEd(s => ({ ...s, type: v }))} />
-                        <Switch size="sm" mb={6} label="Habilitado" checked={!!ed.enabled} onChange={e => setEd(v => ({ ...v, enabled: e.currentTarget.checked }))} />
+                        <Switch size="sm" mb={6} label="Habilitado" checked={!!ed.enabled} onChange={({ currentTarget: el }) => setEd(v => ({ ...v, enabled: el.checked }))} />
                       </Group>
                       <TextInput mt={6} size="xs" label="Nueva URL RTSP"
                         description={d.rtsp_set ? 'Dejalo vacío para conservar la que ya está cargada' : 'Todavía no tiene URL cargada'}
                         placeholder={d.rtsp_url || 'rtsp://usuario:clave@ip:554/stream'}
-                        value={ed.rtsp_nueva} onChange={e => setEd(v => ({ ...v, rtsp_nueva: e.currentTarget.value }))} />
+                        value={ed.rtsp_nueva} onChange={({ currentTarget: el }) => setEd(v => ({ ...v, rtsp_nueva: el.value }))} />
                       {/* Un portero no es una cámara que además suena: se le habla y abre una
                           puerta. Esos dos datos —su interno y sus relés— sólo aparecen cuando
                           el tipo es portero, para no llenar de campos muertos el alta de una
@@ -469,7 +475,7 @@ export default function ClienteFicha() {
                   return (
                     <Group key={d.id} justify="space-between" wrap="nowrap" className="pbx-row">
                       <div style={{ minWidth: 0 }}>
-                        <Text fz="sm"><b>{d.label}</b>{' '}
+                        <Text component="div" fz="sm"><b>{d.label}</b>{' '}
                           <Badge size="xs" variant="light" color={d.type === 'intercom' ? 'orange' : 'grape'} leftSection={d.type === 'intercom' ? <IconBell size={10} /> : <IconDeviceCctv size={10} />}>
                             {d.type === 'intercom' ? 'Portero' : 'Cámara'}
                           </Badge>
@@ -506,9 +512,9 @@ export default function ClienteFicha() {
                 })}
                 <Divider my={4} />
                 <Group gap={6} align="flex-end">
-                  <TextInput size="xs" w={130} placeholder="Etiqueta" value={nd.label} onChange={e => setNd(v => ({ ...v, label: e.currentTarget.value }))} />
+                  <TextInput size="xs" w={130} placeholder="Etiqueta" value={nd.label} onChange={({ currentTarget: el }) => setNd(v => ({ ...v, label: el.value }))} />
                   <Select size="xs" w={110} data={[{ value: 'intercom', label: 'Portero' }, { value: 'camera', label: 'Cámara' }]} value={nd.type} onChange={v => setNd(s => ({ ...s, type: v }))} />
-                  <TextInput style={{ flex: 1 }} size="xs" placeholder="rtsp://usuario:clave@ip:554/stream" value={nd.rtsp_url} onChange={e => setNd(v => ({ ...v, rtsp_url: e.currentTarget.value }))} />
+                  <TextInput style={{ flex: 1 }} size="xs" placeholder="rtsp://usuario:clave@ip:554/stream" value={nd.rtsp_url} onChange={({ currentTarget: el }) => setNd(v => ({ ...v, rtsp_url: el.value }))} />
                   <Button size="xs" variant="light" color="grape" onClick={addDevice}>Agregar</Button>
                 </Group>
               </Stack>

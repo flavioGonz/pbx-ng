@@ -63,7 +63,7 @@ RUN set -e; \
              app_directory.so app_read.so func_hangupcause.so; do \
       [ -f "/usr/lib/asterisk/modules/$m" ] || { echo "FALTA el modulo REQUERIDO $m (modules.conf lo pide con require =): sin el Asterisk sale con codigo 2 al arrancar. Revisar las dependencias de build (-dev) y el menuselect de arriba"; exit 1; }; \
     done; \
-    for m in app_disa.so \
+    for m in app_disa.so bridge_softmix.so \
              app_confbridge.so res_config_pgsql.so cdr_pgsql.so res_srtp.so chan_pjsip.so; do \
       [ -f "/usr/lib/asterisk/modules/$m" ] || { echo "FALTA el modulo $m: revisar las dependencias de build (-dev) y el menuselect de arriba"; exit 1; }; \
     done

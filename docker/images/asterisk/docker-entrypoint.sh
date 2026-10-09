@@ -91,6 +91,27 @@ done
 # --- resolver la URL de la API en el dialplan (wake webhook, etc.) ---
 sed -i "s|@@API_URL@@|${API_URL:-127.0.0.1:3000}|g" /etc/asterisk/extensions.conf 2>/dev/null || true
 
+# --- zona de tono (indications.conf) ---
+# Sin zona la central no genera ningun tono por audio, y sobre un canal ya atendido (una
+# derivacion de la IA) quien llama escucha silencio mientras suena el interno. El pais de
+# fabrica es el de [general] de indications.conf; TONE_COUNTRY lo cambia. Solo se acepta un
+# codigo de dos letras que tenga su seccion en el archivo: un pais sin zona dejaria la tabla
+# sin tono por defecto, que es justo el silencio que se quiere evitar.
+if [ -n "${TONE_COUNTRY:-}" ]; then
+  TONE_COUNTRY="$(printf '%s' "$TONE_COUNTRY" | tr '[:upper:]' '[:lower:]')"   # "UY" tambien vale: las secciones van en minuscula
+  if [[ "$TONE_COUNTRY" =~ ^[a-z]{2}$ ]] && grep -q "^\[${TONE_COUNTRY}\]" /etc/asterisk/indications.conf 2>/dev/null; then
+    # Con `set -e`, un sed que falla (disco lleno, archivo de solo lectura) tiraria el
+    # contenedor entero por un tono: se avisa y se sigue con el pais que haya en el archivo.
+    sed -i "s|^country=.*|country=${TONE_COUNTRY}|" /etc/asterisk/indications.conf \
+      || echo "AVISO: no se pudo poner TONE_COUNTRY=${TONE_COUNTRY} en /etc/asterisk/indications.conf; queda country=$(sed -n 's/^country=//p' /etc/asterisk/indications.conf 2>/dev/null)."
+  else
+    # El pais que quedo EN EL ARCHIVO, que no siempre es el de fabrica: si el contenedor ya
+    # arranco antes con otro TONE_COUNTRY valido, el sed de entonces sigue ahi.
+    echo "AVISO: TONE_COUNTRY=${TONE_COUNTRY} no tiene zona en /etc/asterisk/indications.conf;"
+    echo "       queda country=$(sed -n 's/^country=//p' /etc/asterisk/indications.conf 2>/dev/null)."
+  fi
+fi
+
 # --- token compartido en el CURL del wake ---
 # El wake despierta la PWA de un interno sin contacto registrado y NO lleva sesion: la API
 # lo acepta por loopback y, si el CURL trae token, lo exige correcto. El archivo lo genera
@@ -149,7 +170,9 @@ done
 # corta si el modulo no se compilo (ver images/asterisk/Dockerfile); esto es la red de
 # seguridad para una imagen vieja o armada a mano: el aviso queda en el log del arranque en
 # vez de aparecer como "no such application" en medio de una llamada.
-for m in app_disa.so app_confbridge.so; do
+# bridge_softmix.so: el puente del agente de IA (ai-pipeline.js, `video_sfu`); sin el, la IA
+# no puede armar su puente y la llamada va al respaldo.
+for m in app_disa.so app_confbridge.so bridge_softmix.so; do
   [ -f "/usr/lib/asterisk/modules/$m" ] || echo "aviso: falta el modulo $m en esta imagen; las funciones que lo usan van a fallar en tiempo de llamada"
 done
 

@@ -18,7 +18,9 @@ export default function Click2Call() {
   const [qr, setQr] = useState(null);
   const base = typeof window !== 'undefined' ? window.location.origin : '';
   const urlOf = (t) => base + '/call/' + t;
-  async function load() { try { setList(await fetch('/backend/api/c2c').then(r => r.json())); } catch (_) {} }
+  /* Sólo una lista entra al estado: un 403/500 trae `{error}` y `list.map` tiraba la
+   * pantalla entera abajo (pantalla en blanco para el que entraba sin permiso). */
+  async function load() { try { const d = await fetch('/backend/api/c2c').then(r => r.json()); setList(Array.isArray(d) ? d : []); } catch (_) {} }
   // Lista de enlaces: pura configuración, y los cambios propios ya llaman a `load()`.
   useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(t); }, []);
   const up = (k, v) => setForm(s => ({ ...s, [k]: v }));

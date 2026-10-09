@@ -32,7 +32,12 @@ export default function ClientesList() {
     const c = await j(API + '/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Nuevo cliente' }) });
     if (c && c.id) router.push('/clientes/' + c.id);
   }
-  async function saveFields() { await j(API + '/survey/fields', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) }); toast('Encuesta guardada', 'ok'); }
+  /* `j` devuelve null si la API no guardó: antes se festejaba igual, y el supervisor se iba
+   * creyendo que el agente ya veía los campos nuevos al cortar. */
+  async function saveFields() {
+    const r = await j(API + '/survey/fields', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+    if (r) toast('Encuesta guardada', 'ok'); else toast('No se pudo guardar la encuesta', 'bad');
+  }
   const setF = (i, k, v) => setFields(f => f.map((x, idx) => idx === i ? { ...x, [k]: v } : x));
   const addField = () => setFields(f => [...f, { label: 'Nuevo campo', ftype: 'text', options: [], required: false }]);
   const delField = (i) => setFields(f => f.filter((_, idx) => idx !== i));

@@ -75,15 +75,23 @@ const pesar = async (f) => { try { return (await fsp.stat(f)).size; } catch (_) 
 
 async function asegurarDir() { await fsp.mkdir(DIR, { recursive: true }); }
 
-/* Nombre estable y ordenable: pbxng-20260720-1432.tar.gz. Los programados llevan
- * `auto` en el nombre (pbxng-auto-20260720-0300.tar.gz): la retención decide por el
+/* Nombre estable y ordenable: pbxng-20260720-143205.tar.gz. Los programados llevan
+ * `auto` en el nombre (pbxng-auto-20260720-030000.tar.gz): la retención decide por el
  * nombre y no por el manifiesto, así no hay que abrir catorce tar.gz cada noche para
  * saber cuáles se pueden borrar. Un respaldo hecho a mano desde el panel nunca
- * entra en esa poda, justamente porque no tiene ese prefijo. */
+ * entra en esa poda, justamente porque no tiene ese prefijo.
+ *
+ * El nombre NO puede repetirse. Iba por minuto, y el respaldo de seguridad que saca
+ * `restaurar()` antes de tocar nada caía con el MISMO nombre que el respaldo a
+ * restaurar si los dos eran del mismo minuto: lo pisaba, y se terminaba «restaurando»
+ * el estado actual. Ahora lleva los segundos y, si aun así existe, un sufijo. */
 const PREFIJO_AUTO = 'pbxng-auto-';
-function nombreNuevo(programado) {
+async function nombreNuevo(programado) {
   const d = new Date(), z = (n) => String(n).padStart(2, '0');
-  return `${programado ? PREFIJO_AUTO : 'pbxng-'}${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.tar.gz`;
+  const base = `${programado ? PREFIJO_AUTO : 'pbxng-'}${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`;
+  let nombre = base + '.tar.gz';
+  for (let i = 2; await existe(path.join(DIR, nombre)); i++) nombre = `${base}-${i}.tar.gz`;
+  return nombre;
 }
 const esProgramado = (nombre) => String(nombre || '').startsWith(PREFIJO_AUTO);
 
@@ -105,7 +113,7 @@ async function versionPg() {
 async function crear({ grabaciones = false, nota = '', programado = false } = {}) {
   await asegurarDir();
   const trabajo = await fsp.mkdtemp('/tmp/pbxng-bk-');
-  const nombre = nombreNuevo(programado);
+  const nombre = await nombreNuevo(programado);
   const destino = path.join(DIR, nombre);
 
   try {
@@ -201,7 +209,7 @@ async function borrar(nombre) {
 /* Nunca dejar que un nombre de archivo salga del directorio de respaldos. */
 function seguro(nombre) {
   const base = path.basename(String(nombre || ''));
-  if (!base || !base.endsWith('.tar.gz')) throw new Error('nombre de respaldo inválido');
+  if (!base || !base.endsWith('.tar.gz')) throw Object.assign(new Error('nombre de respaldo inválido'), { status: 400 });
   return path.join(DIR, base);
 }
 

@@ -2,6 +2,271 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [SemVer](https://semver.org).
 
+## [Unreleased]
+### Changed
+- **BREAKING · IA externa, contrato v2: el backend del asistente en varias instancias, y
+  llamadas que se retoman.** Todo lo de una llamada va ahora por su relay: el aviso
+  (`llamada_nueva`, primer mensaje), los eventos de la sesión y los hechos numerados
+  (`seq`), y las órdenes del backend con sus acks. El canal de control queda solo para
+  `refrescar_config` y el latido, y sin él la llamada se atiende igual. Si el relay se
+  corta (la instancia del backend se cae, o se apaga y cierra con 4001 «reubicar»), la
+  central lo reabre enseguida y después cada 1 s durante `resumeWindowMs` (lo publica el
+  backend; 20 s por defecto), avisa que es una reanudación y reenvía desde donde el backend
+  diga; otra instancia retoma la llamada sin cortarla. Las órdenes ya ejecutadas se
+  recuerdan por llamada, así una repetida por un relay reabierto no se ejecuta dos veces.
+  Los hechos con el relay cerrado van por HTTP (`POST /api/pbx/llamadas/:id/hechos`, tres
+  intentos). El relay tiene latido (ping cada 2 s; sin respuesta en 6 s se reabre) y al
+  terminar la llamada espera la respuesta de las órdenes en curso antes de cerrarse.
+  **Incompatible con un backend v1:** se despliegan juntos. Verificado el `RelayLlamada`
+  solo (sin Asterisk ni ARI) contra el backend real con dos instancias: con `kill` de la
+  instancia, retomada a los ~0,5 s; con `SIGTERM`, a los ~0,4 s, sin repetir el saludo; y
+  la orden final por el relay nuevo. Con la central entera (llamadas reales, 01/10): retomada
+  a los 24 a 26 ms, sin volver a saludar. El relay y el canal se abren con un tope de 3 s: un
+  balanceador que manda la conexión a una instancia apagada la dejaba colgada hasta 60 s.
+  Contrato en `docs/CONTRATOS.md` §11. (`control-plane/ia-externa.js`,
+  `control-plane/ai-pipeline.js`, migración 0031, `test/ia-externa-relay.test.js`)
+
+### Added
+- **IA externa: la central avisa quién atendió la derivación.** Después de un
+  `transferir` que salió bien, manda el hecho `atendio { pbxCallId, interno }` por HTTP
+  (`POST /api/pbx/llamadas/:id/hechos`): el interno que contestó, tomado del `DialEnd`
+  con `ANSWER` de AMI de la misma llamada (el primero, en un grupo de timbre), o `null` si
+  quien llama cortó sin que nadie contestara. Se avisa una sola vez y se deja de vigilar a
+  los 10 min. Compatible para los dos lados: un backend anterior lo rechaza con 4xx (sin
+  reintento). Contrato en `docs/CONTRATOS.md` §11. (`control-plane/ai-pipeline.js`,
+  `control-plane/app.js`, `test/ia-externa-relay.test.js`)
+- **Proveedor «IA externa»: el agente lo conduce el backend del asistente de voz.** La
+  central abre la sesión de GPT-Live por el mismo WebSocket de siempre, pero con la
+  configuración que publica el backend —sin prompt, saludo, herramientas ni inactividad
+  nuestros— y le hace de relay: cada evento de la sesión va al backend, y el backend
+  manda las frases y el cierre. Las órdenes de telefonía (colgar, transferir, el DTMF que
+  abre el portón) llegan por un canal de control y se confirman después de ejecutarse.
+  Sin backend o sin configuración, la llamada va al destino de respaldo del agente, sin
+  quedar muda. Contrato en `docs/CONTRATOS.md` §11. (`control-plane/ia-externa.js`,
+  `control-plane/ai-pipeline.js`, `control-plane/realtime.js`, `control-plane/apps.js`,
+  migración 0029, pantalla de Agentes IA)
+
+### Fixed
+- **Softphone · un mensaje de buzón con un códec que el navegador no abre dejaba un
+  AudioContext abierto.** Chromium tiene un tope por página: unos cuantos así y ya no se
+  podía dibujar ninguna onda más, tampoco la de la llamada. Ahora el contexto se cierra
+  siempre.
+- **Softphone · la cámara de una llamada nativa no se podía apagar** («engine.video is not
+  a function»): el motor SIP usaba el mismo nombre para la función que prende o apaga el
+  video y para el objeto RTP del video, y el primer video pisaba la función.
+- **Softphone · una segunda llamada entrante dejaba colgada la que estaba en curso** (modo
+  SIP nativo): la nueva pisaba a la activa, que quedaba sin forma de mandarle el BYE. Ahora
+  se contesta 486 Ocupado: **con la línea ocupada, la central manda la llamada nueva al
+  buzón o al siguiente de la cola**.
+- **Softphone · cada copia del 200 OK que retransmite la central volvía a «atender»**
+  (modo nativo, UDP): reabría el RTP y reiniciaba micrófono y audio. A una copia sólo se le
+  contesta otro ACK.
+- **Softphone · una llamada atendida sin SDP quedaba arriba muda en la central.** Ahora se
+  corta con BYE y la línea se libera.
+- **Softphone · detrás de NAT, el REGISTER firmado mandaba la IP privada en el Contact**
+  aunque ya se había aprendido la pública: la central registraba una dirección inalcanzable
+  hasta el refresco siguiente.
+- **Softphone · toda llamada WebRTC atendida quedaba en el historial con duración 0**
+  («No establecido»): el historial usaba la foto del momento de marcar.
+- **Softphone · una llamada nueva en los 1,8 s del cartel «Llamada finalizada» quedaba
+  trabada en ese cartel**, sin botones para atender ni cortar.
+- **Softphone · el login decía «No se pudo conectar» sin decir por qué**: el motivo (401 de
+  la central, tiempo agotado, datos incompletos) se guardaba y no se mostraba.
+- **Softphone · un portero sin video se anunciaba como «Videollamada entrante»** cuando el
+  cliente tenía cámaras: el rótulo dependía de la escena y no de la llamada.
+- **Softphone · después de «Probar» una cámara, el motor de video quedaba vivo con la URL de
+  prueba** (con la clave de la cámara adentro). Ahora se para al terminar la prueba.
+- **Softphone · con el almacenamiento del navegador bloqueado, el modo nativo dejaba la
+  pantalla en blanco al arrancar.**
+- **Panel · la solapa «Integraciones» de Configuración abría vacía**: Telegram y WhatsApp no
+  se podían configurar desde ningún lado (el panel estaba dentro de las solapas de otra
+  sección).
+- **Panel · el saludo del IVR y la vista previa de los anuncios de una cola no sonaban.** El
+  saludo se pedía sin token (401); la vista previa buscaba un `<audio>` que sólo existía en
+  otra solapa.
+- **Panel · la descarga de una captura .pcap bajaba un 401**: se abría la URL sin token.
+- **Panel · la pizarra se rompía al abrirse desde /phone** («reading 'getImageData'»).
+- **Panel · tipear en el segundo campo de APNs, en un buzón nuevo o tocar el interruptor de
+  inactividad de un agente de IA tiraba abajo la pantalla** (el mismo error de
+  `currentTarget` ya leído después del evento).
+- **Panel · /ai-agents se caía con un error de la API, y un borrado fallido decía
+  «eliminado».** La pantalla pasó a la capa de API del panel.
+- **Panel · un error de la API en /historial o /grabaciones se veía como «Aún no hay
+  llamadas / grabaciones».** Ahora se avisa el error.
+- **Panel · «Lo que se va a ejecutar» se abría solo después de confirmar o cancelar un
+  cambio de modo de red**, tapando el aviso.
+- **Panel · los avisos del QR del teléfono web («QR inválido o expirado») no se veían nunca**
+  en la pantalla de ingreso, que es donde salen.
+- **Panel · con el almacenamiento bloqueado, el teléfono web se rompía apenas quedaba
+  registrado.**
+- **Panel · un error lanzado sin valor (`throw null`) tiraba abajo el panel entero**, menú
+  incluido, en vez de quedar encerrado en la pantalla que falló.
+- **Panel · fecha y hora en formato de 12 h** («02:05 p. m.») en las pantallas que usan
+  `fmtFechaHora`; el resto del panel usa 24 h.
+- **Panel · el Resumen pedía `/asterisk/core` cada minuto sin mostrarlo en ningún lado.**
+- **Panel · «Teléfono eliminado» aunque la API no lo hubiera borrado.** El borrado de un
+  teléfono aprovisionado iba por un `fetch` suelto, que no falla con un 403 o un 500. Ahora
+  va por la capa de API y avisa el error.
+- **Panel · la ficha de un cliente se caía al editar un segundo campo.** Los campos leían
+  `e.currentTarget.value` adentro del actualizador de estado, que React corre después del
+  evento, cuando `currentTarget` ya es null («Cannot read properties of null»). Pasaba en
+  la ficha del cliente, en /intercom y en la libreta de clientes del supervisor.
+- **Panel · /click-to-call quedaba en blanco sin permiso o con la API fallando.** Un
+  `{error}` se guardaba como si fuera la lista de enlaces y la pantalla se rompía entera.
+- **Panel · «entrar como moderador» avisaba que el navegador había bloqueado la ventana**
+  aunque la sala se abría: con `noopener`, `window.open` devuelve siempre null. Ahora se
+  abre sin esa opción y se corta el `opener` a mano.
+- **Panel · «Encuesta guardada» salía aunque la API no la guardara.** Ahora avisa el error.
+- **Panel · la pared de video del cliente quedaba en negro después de tocar un portero**
+  si go2rtc contestaba `{streams:[…]}`: la recarga sólo aceptaba la lista suelta.
+- **Sala web · el moderador que salía volvía a una tarjeta vacía.** Ahora se le explica que
+  la entrada es de un solo uso y que tiene que volver a entrar desde el panel.
+- **Panel · «2 invitaciónes enviadas»** (con tilde en el plural) en el aviso de invitar a
+  una sala.
+- **Dos personas que entraban a la vez a una sala partían la reunión en dos en el
+  historial.** Cada entrada buscaba la reunión abierta en la base por su cuenta; si llegaban
+  juntas (lo normal al arrancar una reunión), ninguna la encontraba y cada una creaba la
+  suya: el historial mostraba dos reuniones de pico 1 en vez de una de pico 2. Ahora la
+  segunda entrada espera a la reunión que está abriendo la primera.
+- **Con el AMI caído, /health decía que estaba arriba y los pedidos que lo usan quedaban
+  colgados.** La API escuchaba el evento `disconnect`, que asterisk-manager no emite nunca
+  (emite `close`): después de un corte, `state.ami` seguía en verdadero y cada acción se
+  escribía en un socket muerto esperando una respuesta que no llegaba (por ejemplo, pausar
+  a un agente quedaba ~15 s colgado). Ahora un corte se ve en el acto y las acciones fallan
+  enseguida hasta que el AMI vuelve.
+- **Un admin sin interno quedaba anotado como «por: null» al abrir un portón o dar de alta
+  una cámara, y no podía abrir un relé por código.** Se leía `req.user.user`, pero la sesión
+  del panel trae `username`. Lo mismo en el log de quién expulsó a alguien de una sala.
+- **Una llamada al agente de demo tiraba abajo la API si faltaba python3 o Vosk.** El
+  reconocedor de voz se lanza como proceso aparte y nadie escuchaba su error de arranque:
+  Node lo convertía en una excepción no atrapada y se caía todo el control-plane. Ahora se
+  avisa en el log y la llamada sigue (sin reconocimiento) hasta que se corta.
+- **El agente de demo nunca decía «no te entendí».** El contador de turnos ya incluía la
+  frase actual, así que la primera frase que no se entendía recibía «Entiendo. Puedo
+  derivarte…». Ahora la primera vez pide que se repita y recién después ofrece las opciones.
+- **La alerta «ataque en curso» no saltaba nunca en una instalación nueva.** El chequeo
+  tomaba «ahora» como marca de la vuelta anterior cuando no había ninguna guardada, y no la
+  guardaba: cada vuelta veía que no había pasado la ventana y salía sin escribir nada. Sin
+  la fila `sec` en `pbxng_alert_state` (que nada crea) la regla `security.attack` quedaba
+  muda. Ahora la primera vuelta guarda la marca y las siguientes comparan contra ella.
+- **`/api/v1/llamadas` decía «no hay llamadas» con la central caída.** Sin ARI tenía que
+  contestar 503 («no lo sé»), y así lo dice el contrato, pero `getChannels()` devuelve una
+  lista vacía en vez de fallar: el 503 no salía nunca y el backoffice mostraba un tablero
+  vacío durante la caída. (`control-plane/v1.js`)
+- **Una troncal «Unregistered» se mostraba «Registrada».** El estado buscaba `Registered` en
+  la línea de `pjsip show registrations`, y «Unregistered» lo contiene: la troncal sin
+  registro salía en verde y el failover no la salteaba. Ahora se busca la palabra entera.
+  (`control-plane/trunks.js`)
+- **Las grabaciones de internos no encontraban su llamada en el CDR.** El indexador
+  comparaba la hora del archivo contra `cdr.start` como si estuviera en UTC, pero Asterisk
+  la escribe en la hora local de la central (`cdr_pgsql` sin `timezone`, contenedor con
+  `TZ=America/Montevideo`): en Montevideo la ventana quedaba corrida tres horas, y la
+  grabación quedaba sin origen, sin destino y sin `call_id` (no se podía pedir por llamada
+  desde `/api/v1`). Ahora se compara en la zona de la central, igual que `ccreport.js`. Las
+  grabaciones ya indexadas antes de este arreglo siguen sin emparejar: el indexador no las
+  vuelve a mirar. (`control-plane/recordings.js`)
+- **Errores de entrada que contestaban 500.** Editar una cola que no existe reventaba con
+  «Cannot read properties of undefined» (ahora 404); crear una cola sin nombre, subir un
+  respaldo con un nombre inválido y transcribir una grabación que no existe contestaban 500
+  (ahora 400, 400 y 404). (`control-plane/apps.js`, `backup.js`, `recordings.js`)
+- **`recordings.js` ignoraba `REC_DIR`.** Tenía `/recordings` escrito fijo mientras
+  `recstore.js` leía la variable: configurarla la respetaba la mitad del código. Ahora los
+  dos usan `REC_DIR`, con el mismo valor por defecto. (`control-plane/recordings.js`)
+- **Con la base caída, 25 rutas no contestaban nunca.** Las que abren una transacción
+  pedían la conexión con `await pool.connect()` fuera del `try`: si Postgres no respondía,
+  la promesa rechazada no la atrapaba nadie y el pedido quedaba colgado (el panel con la
+  rueda girando hasta que el navegador se rendía). Entre ellas, el alta y la baja de
+  internos, agentes de IA, IVR, colas, grupos, voceo, buzones, salas, troncales, el
+  geo-bloqueo y las sesiones públicas de click-to-call y de salas. Ahora contestan 503,
+  con el mismo arreglo que ya tenían `auth.js`, `telefonia.js` y parte de `trunks.js`.
+  Además, el `ROLLBACK` de los `catch` ya no puede tirar: si la base moría en medio de la
+  transacción, ese `ROLLBACK` también colgaba el pedido.
+  (`control-plane/app.js`, `apps.js`, `guard.js`, `salas.js`, `trunks.js`, `auth.js`)
+- **El freno del enlace web de las salas no agrupaba las IPv6.** El de click-to-call y el
+  del login pasan la IP por `ipKeyGenerator` (una IPv6 cuenta por su /64); este no, así que
+  con IPv6 se podía rotar de dirección en cada intento y saltarse el cupo de 10 cada 5
+  minutos. `express-rate-limit` lo avisaba al arrancar. (`control-plane/salas.js`)
+- **Si el modelo realtime no abría, la llamada se colgaba en vez de pasar a una persona.**
+  El camino previsto es disculparse con TTS local y derivar al destino por defecto, pero un
+  socket que no conecta emite `error` y enseguida `close`, y el manejador del cierre
+  cortaba la llamada un instante antes de que sonara la disculpa. Ahora, si la sesión
+  nunca llegó a abrir, el cierre deja actuar a la degradación. (`control-plane/ai-pipeline.js`)
+- **Restaurar un respaldo del mismo minuto restauraba el estado actual.** Los respaldos se
+  nombraban por minuto, y el respaldo de seguridad que se saca antes de restaurar caía con el
+  mismo nombre y pisaba al que se iba a restaurar. Lo mismo con dos respaldos a mano en el
+  mismo minuto: el segundo borraba al primero. Ahora el nombre lleva los segundos
+  (`pbxng-AAAAMMDD-HHMMSS.tar.gz`) y, si aun así existe, un sufijo. La retención sigue
+  reconociendo los automáticos por el prefijo `pbxng-auto-`. (`control-plane/backup.js`)
+- **La tabla del aparcado mostraba todas las plazas libres aunque hubiera llamadas
+  aparcadas.** Leía las filas de la respuesta de `ParkedCalls`, y la librería de AMI las
+  entrega como eventos sueltos. Mismo error y mismo arreglo que la vista en vivo de las
+  salas: se juntan con `amiList`. (`control-plane/apps.js`)
+- **`/api/v1/cdr` repetía o salteaba llamadas al paginar.** `cdr.start` guarda la hora
+  de la central sin zona, y el cursor la mandaba en UTC: en Montevideo la comparación
+  quedaba corrida tres horas. Ahora el cursor viaja en la misma hora de pared que la
+  columna. Los cursores emitidos antes de esto se siguen aceptando, pero conviene volver
+  a pedir la primera página. (`control-plane/v1.js`)
+- **Una autorización de portería con vencimiento en texto vencía un día antes.**
+  `'2026-09-20'` se leía como medianoche UTC, que en Montevideo es el 19 a las 21 h. Lo
+  que viene de la base no estaba afectado; el mensaje de vencida además mostraba la fecha
+  como «Sun Sep 20» en vez de `2026-09-20`. (`control-plane/porteria.js`)
+- **ARI: la API reconecta si Asterisk pierde la app.** El WebSocket de eventos del ARI podía
+  quedar medio abierto (un corte de la red de Docker, la máquina que se durmió) sin que
+  `ari-client` avisara: la API seguía diciendo «ok», pero Asterisk ya no tenía la app `pbxng`
+  y cortaba cada llamada a un agente de IA con «Stasis app 'pbxng' doesn't exist», hasta
+  reiniciar la API (visto en desarrollo el 04/10, con la conexión muerta desde el 02/10).
+  Ahora un vigía (`control-plane/ari-vigia.js`) pregunta cada 30 s por
+  `GET /ari/applications/pbxng`: un 404 lo da por desconectado, como un `WebSocketClose`, y
+  reconecta; un error de red no dispara nada. Con pruebas en `test/ari-vigia.test.js`.
+- **El agente no veía la cámara del portero después de una derivación de la IA.** El puente
+  del agente (`mixing`) usaba, con dos canales, el puente simple de Asterisk, que iguala las
+  negociaciones de las dos puntas: como el canal de audio de la IA no tiene video, le mandaba
+  al portero un re-INVITE con `m=video 0`, y la derivación al agente salía solo con audio.
+  Visto con el registro SIP en la central local. Ahora el puente es `mixing,video_sfu`, la
+  única opción de ARI que fuerza el softmix, que no toca la negociación del portero: el
+  `Dial` al agente ofrece el video y el agente ve la cámara. Verificado en vivo (1001 con
+  cámara al 8000, derivado al 1002). La imagen de Asterisk verifica `bridge_softmix.so` como
+  módulo esperado. (`control-plane/ai-pipeline.js`, `docker/images/asterisk/Dockerfile`,
+  `docker/images/asterisk/docker-entrypoint.sh`, `test/puente-ia.test.js`)
+- **La derivación de la IA se cortaba cuando el agente tardaba en atender.** Mientras
+  sonaba el interno, quien llama escuchaba silencio, y el softphone del panel colgaba solo
+  a los ~8 s por su vigilante de RTP: en la primera llamada real se cortaron dos
+  derivaciones a los 9 s.
+  - **La causa eran las zonas de tono, no el 180.** La llamada que sale de la IA ya está
+    atendida, y sobre un canal atendido el tono lo genera la central por audio, con la
+    zona de tono. La imagen de Asterisk no traía `indications.conf`, así que no sonaba nada.
+    Ahora trae las zonas `uy` y `ar` con los valores de la UIT (Anexo al Boletín de
+    Explotación 781, 1.II.2003). Uruguay: 425 Hz, llamada 1 s sonando y 4 s de silencio,
+    ocupado 0,5/0,5 s y congestión 0,25/0,25 s. El país sale de `TONE_COUNTRY` en
+    `docker/.env`, `uy` por defecto; para cambiarlo se recrea el contenedor de Asterisk
+    (`docker compose up -d asterisk`).
+  - **`DIAL_OPCIONES=r` en la derivación y en el respaldo.** La central la pone en el canal
+    antes de sacar la llamada de la IA. La leen el `Dial` del interno, el del sígueme, el de
+    los grupos de timbre y el de la opción de IVR que marca un interno. Las llamadas comunes
+    directas entre internos no cambian.
+  - **Tono mientras se despierta un interno dormido:** con la variable puesta, el tramo que
+    espera a que el teléfono se registre, de hasta unos 14 s, arranca con `Ringing()`. El
+    tono empieza cuando vuelve el `CURL` del despertar (hasta ~6 s), en el primer `Wait` del
+    poll: el `CURL` bloquea el canal y el generador no produce audio mientras tanto.
+  - **Qué cambia fuera de la IA, para bien:** las zonas valen para cualquier llamada ya
+    atendida, así que una llamada a un IVR que marca un interno y una transferencia ciega
+    hecha por una persona ahora también escuchan el tono. Las llamadas directas entre
+    internos no cambian: el tono lo sigue armando el teléfono que llama.
+  - **Efectos laterales aceptados:** con las zonas cargadas, `Busy()` y `Congestion()` sobre
+    canales atendidos pasan a sonar; en el sígueme de una derivación se pierde el audio
+    temprano del celular; la grabación de la transferencia incluye el tono.
+  - **Los grupos de timbre e IVR que ya existían** toman el cambio con la migración
+    `0030_tono_derivaciones.sql`, que les agrega `,${DIAL_OPCIONES}` a los `Dial` con la
+    forma que escribía el panel. Es idempotente y no toca otras filas.
+  - **`ring_time` de los grupos de timbre:** ahora tiene que ser un entero de 5 a 120 s
+    (400 si no). Entraba crudo al `Dial`, y una coma metía opciones propias.
+  - **Hay que reconstruir la imagen de Asterisk**, porque `indications.conf` y
+    `extensions.conf` van adentro.
+
+  (`docker/config/asterisk/indications.conf`, `docker/config/asterisk/extensions.conf`,
+  `docker/images/asterisk/docker-entrypoint.sh`, los dos compose, `docker/.env.example`,
+  `control-plane/ai-pipeline.js`, `control-plane/apps.js`, migración 0030)
+
 ## [1.37.0] - 2026-10-05
 
 Tanda del softphone de escritorio y de los porteros.

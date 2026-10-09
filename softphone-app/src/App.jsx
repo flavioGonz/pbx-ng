@@ -10,7 +10,6 @@ import { loadConfig, saveConfig, isComplete, getAccounts as cfgGetAccounts, setA
 import * as api from './api.js';
 import { decodeProv } from './prov.js';
 import QRCode from 'qrcode';
-import { gsap } from 'gsap';
 import { gEnter, gPop, gSplash, gModal, gStagger } from './anim.js';
 import * as sounds from './sounds.js';
 import { testIce, refrescarIce, iceEfectivos } from './ice.js';
@@ -31,14 +30,12 @@ const IcUser = (p = {}) => <Svg {...p}><circle cx="12" cy="8" r="4" /><path d="M
 const IcUsers = (p = {}) => <Svg {...p}><circle cx="9" cy="8" r="3.4" /><path d="M2.5 21a6.5 6.5 0 0 1 13 0" /><path d="M16 5.5a3.4 3.4 0 0 1 0 6.6M17 15a6.5 6.5 0 0 1 4.5 6" /></Svg>;
 const IcCam = (p = {}) => <Svg {...p}><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></Svg>;
 const IcBell = (p = {}) => <Svg {...p}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" /></Svg>;
-const IcMini = (p = {}) => <Svg {...p}><rect x="3" y="4" width="18" height="14" rx="2" /><rect x="12" y="11" width="7" height="5" rx="1" /></Svg>;
 const IcSearch = (p = {}) => <Svg {...p}><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></Svg>;
 const IcAudioCloud = (p = {}) => <Svg {...p}><path d="M17.5 18a4.5 4.5 0 0 0 .3-9 6 6 0 0 0-11.5-1.6A4 4 0 0 0 6.5 18" /><path d="M9.4 13.2a2.4 2.4 0 0 1 0 3.2" /><path d="M14.2 12a4 4 0 0 1 0 5.6" /></Svg>;
 const IcQr = (p = {}) => <Svg {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><line x1="14" y1="15" x2="14" y2="21" /><line x1="18" y1="14" x2="21" y2="14" /><line x1="18" y1="18" x2="21" y2="21" /></Svg>;
 const IcGear = (p = {}) => <Svg {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8 2 2 0 1 1-2.8 2.8 1.6 1.6 0 0 0-2.8 1.2 2 2 0 1 1-4 0 1.6 1.6 0 0 0-2.8-1.2 2 2 0 1 1-2.8-2.8A1.6 1.6 0 0 0 4.6 15a2 2 0 1 1 0-4 1.6 1.6 0 0 0 1.2-2.8 2 2 0 1 1 2.8-2.8A1.6 1.6 0 0 0 11 4.6a2 2 0 1 1 4 0 1.6 1.6 0 0 0 2.8 1.2 2 2 0 1 1 2.8 2.8A1.6 1.6 0 0 0 19.4 11a2 2 0 1 1 0 4z" /></Svg>;
 const IcBack = (p = {}) => <Svg {...p}><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" /><path d="M18 9l-6 6M12 9l6 6" /></Svg>;
 const IcMic = (p = {}) => <Svg {...p}><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 19v3" /></Svg>;
-const IcMicOff = (p = {}) => <Svg {...p}><path d="M1 1l22 22M9 9v3a3 3 0 0 0 5 1M15 9.3V5a3 3 0 0 0-5.7-1.3M5 10a7 7 0 0 0 10.7 6M12 19v3" /></Svg>;
 const IcVideo = IcCam;
 const IcVideoOff = (p = {}) => <Svg {...p}><path d="M1 1l22 22M16 16v2a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2m4 0h5a2 2 0 0 1 2 2v3l4-3v9" /></Svg>;
 const IcSpeaker = (p = {}) => <Svg {...p}><path d="M11 5L6 9H2v6h4l5 4V5z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></Svg>;
@@ -46,14 +43,12 @@ const IcPlay = (p = {}) => <Svg {...p}><path d="M7 4l12 8-12 8z" /></Svg>;
 const IcDown = (p = {}) => <Svg {...p}><path d="M12 3v12M7 11l5 5 5-5" /><path d="M4 20h16" /></Svg>;
 const IcTexto = (p = {}) => <Svg {...p}><path d="M5 4h14M5 9h14M5 14h9M5 19h6" /></Svg>;
 const IcPause = (p = {}) => <Svg {...p}><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></Svg>;
-const IcSwap = (p = {}) => <Svg {...p}><path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></Svg>;
 const IcShield = (p = {}) => <Svg {...p}><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z" /></Svg>;
 const IcX = (p = {}) => <Svg {...p}><path d="M18 6L6 18M6 6l12 12" /></Svg>;
 const IcCal = (p = {}) => <Svg {...p}><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></Svg>;
 const IcVoicemail = (p = {}) => <Svg {...p}><circle cx="6" cy="12" r="4" /><circle cx="18" cy="12" r="4" /><line x1="6" y1="16" x2="18" y2="16" /></Svg>;
 const IcPower = (p = {}) => <Svg {...p}><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><path d="M12 2v10" /></Svg>;
 const IcHead = (p = {}) => <Svg {...p}><path d="M3 14v-2a9 9 0 0 1 18 0v2" /><rect x="1" y="14" width="5" height="7" rx="2" /><rect x="18" y="14" width="5" height="7" rx="2" /></Svg>;
-const IcPlus = (p = {}) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>;
 const IcRec = (p = {}) => <Svg {...p}><circle cx="12" cy="12" r="7" /></Svg>;
 const IcReload = (p = {}) => <Svg {...p}><path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15" /></Svg>;
 
@@ -99,32 +94,12 @@ const S = {
   inp: { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 14, outline: 'none', background: '#1f2229', color: C.ink },
   sel: { width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 9, border: `1px solid ${C.line}`, fontSize: 14, background: '#1f2229', color: C.ink, outline: 'none' },
   primary: { width: '100%', padding: 12, borderRadius: 10, border: 'none', background: C.accent, color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' },
-  overlay: { position: 'fixed', inset: 0, background: 'linear-gradient(180deg,#132038,#0b1220)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 100 },
   modalWrap: { position: 'fixed', inset: 0, background: 'rgba(10,16,30,.45)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modal: { width: 440, maxWidth: '90%', background: C.card, color: C.ink, borderRadius: 16, border: `1px solid ${C.line}`, boxShadow: '0 24px 60px rgba(0,0,0,.5)', overflow: 'hidden' },
-  ctlGrid: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginTop: 22, width: 300 },
-  ctl: (on) => ({ width: 64, height: 64, borderRadius: '50%', border: '1px solid rgba(255,255,255,.16)', background: on ? '#fff' : 'rgba(255,255,255,.12)', color: on ? '#000' : '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, justifySelf: 'center', fontSize: 10 }),
-  hang: { width: 66, height: 66, borderRadius: '50%', border: 'none', background: C.red, color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(239,68,68,.4)' },
   fieldLbl: { fontSize: 12, color: C.sub, marginBottom: 3 },
   section: { fontSize: 12, color: C.sub, margin: '0 2px 6px', fontWeight: 700, letterSpacing: .3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
 };
 
-function Ringing({ size, active = true, children }) {
-  return (
-    <div style={{ position: 'relative', width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-      {active && <><span className="ringp" /><span className="ringp" style={{ animationDelay: '.6s' }} /><span className="ringp" style={{ animationDelay: '1.2s' }} /></>}
-      {children}
-    </div>
-  );
-}
-const IcPhoneRing = ({ s = 20, c = '#fff' }) => <span className="ring-shake"><Svg s={s} c={c}><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L9.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z" /></Svg></span>;
-const Eq = () => <span className="eq"><span /><span /><span /><span /><span /></span>;
-function Timer({ since }) {
-  const [s, setS] = useState(0);
-  useEffect(() => { const t = setInterval(() => setS(since ? Math.floor((Date.now() - since) / 1000) : 0), 500); return () => clearInterval(t); }, [since]);
-  if (!since) return <span>conectando…</span>;
-  return <span>{Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}</span>;
-}
 /* El estado del TURN, en la barra de título.
  *
  * Era una pastilla de color con fondo, borde de 20 px y texto en negrita: al lado del
@@ -151,9 +126,6 @@ function TurnChip({ cfg, sp, t }) {
       {label}
     </span>
   );
-}
-function CtlBtn({ on, onClick, icon, iconOff, label }) {
-  return <button className="ph-key" style={S.ctl(on)} onClick={onClick}>{(on && iconOff ? iconOff : icon)({ c: on ? '#000' : '#fff', s: 22 })}<span>{label}</span></button>;
 }
 function Section({ title, icon, right, children }) {
   return <div>{(title || right) ? <div style={S.section}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>{icon}{title}</span>{right || null}</div> : null}<div style={S.card}>{children}</div></div>;
@@ -315,37 +287,6 @@ function WinCtl({ dark }) {
       <button title="Cerrar" style={base} onClick={() => window.sphone.winClose()} onMouseEnter={e => { e.currentTarget.style.background = '#eb4c46'; e.currentTarget.style.color = '#fff'; }} onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = dark ? '#cfe0ff' : '#5b6b8c'; }}><svg width="12" height="12" viewBox="0 0 12 12"><line x1="2.6" y1="2.6" x2="9.4" y2="9.4" stroke="currentColor" strokeWidth="1.4" /><line x1="9.4" y1="2.6" x2="2.6" y2="9.4" stroke="currentColor" strokeWidth="1.4" /></svg></button>
     </div>
   );
-}
-function RingBell({ size = 110 }) {
-  const b = useRef(null);
-  useEffect(() => { const el = b.current; if (!el) return; gsap.set(el, { transformOrigin: '50% 16%' }); const tl = gsap.timeline({ repeat: -1, repeatDelay: 0.35 }); tl.to(el, { rotation: 16, duration: 0.1, ease: 'power1.out' }).to(el, { rotation: -16, duration: 0.2, ease: 'power1.inOut' }).to(el, { rotation: 12, duration: 0.18, ease: 'power1.inOut' }).to(el, { rotation: -9, duration: 0.16, ease: 'power1.inOut' }).to(el, { rotation: 0, duration: 0.16, ease: 'power1.inOut' }); return () => tl.kill(); }, []);
-  return (
-    <div style={{ position: 'relative', width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <span className="bell-ring" style={{ width: size, height: size }} />
-      <span className="bell-ring" style={{ width: size, height: size, animationDelay: '.8s' }} />
-      <div style={{ width: Math.round(size * 0.62), height: Math.round(size * 0.62), borderRadius: '50%', background: 'linear-gradient(160deg,#4c9dff,#2f6bd6)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 30px rgba(26,115,242,.5)' }}>
-        <svg ref={b} width={Math.round(size * 0.34)} height={Math.round(size * 0.34)} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
-      </div>
-    </div>
-  );
-}
-function LiveWave({ getStream, bars = 9, h = 28, color = '#7ee2a6' }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    let stream; try { stream = getStream && getStream(); } catch {}
-    if (!stream || !ref.current) return;
-    let ctx, analyser, src, data, raf = 0, alive = true;
-    try {
-      ctx = new (window.AudioContext || window.webkitAudioContext)(); try { ctx.resume(); } catch {}
-      src = ctx.createMediaStreamSource(stream); analyser = ctx.createAnalyser(); analyser.fftSize = 128; analyser.smoothingTimeConstant = 0.75;
-      src.connect(analyser); data = new Uint8Array(analyser.frequencyBinCount);
-    } catch { return; }
-    const spans = Array.from(ref.current.children);
-    const tick = () => { if (!alive) return; analyser.getByteFrequencyData(data); const n = spans.length; for (let i = 0; i < n; i++) { const idx = 2 + i * 3; const v = (data[idx] || 0) / 255; if (spans[i]) spans[i].style.transform = 'scaleY(' + Math.max(0.15, Math.min(1, v * 1.35)).toFixed(2) + ')'; } raf = requestAnimationFrame(tick); };
-    tick();
-    return () => { alive = false; cancelAnimationFrame(raf); try { src.disconnect(); } catch {} try { ctx.close(); } catch {} };
-  }, [getStream]);
-  return <div ref={ref} style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 3, height: h }}>{Array.from({ length: bars }).map((_, i) => <span key={i} style={{ width: 4, height: '100%', background: color, borderRadius: 3, transformOrigin: 'center bottom', transform: 'scaleY(0.2)', transition: 'transform .07s linear' }} />)}</div>;
 }
 export default function App() {
   const [cfg, setCfg] = useState(loadConfig);
@@ -731,7 +672,10 @@ export default function App() {
     }
     prevInCall.current = sp.inCall;
   }, [sp.inCall]); // eslint-disable-line
-  useEffect(() => { if (sp.incoming || sp.inCall) { finTimers.current.forEach(clearTimeout); finTimers.current = []; setCerrandoLlamada(false); } }, [sp.incoming, sp.inCall]);
+  /* Si arranca otra llamada mientras se muestra «finalizada», el cartel se va YA. Antes se
+   * cancelaban los timers que lo sacaban pero el cartel quedaba: la llamada nueva se veía
+   * para siempre como «Llamada finalizada», sin botones para atender ni cortar. */
+  useEffect(() => { if (sp.incoming || sp.inCall) { finTimers.current.forEach(clearTimeout); finTimers.current = []; setCerrandoLlamada(false); setFinCall(null); } }, [sp.incoming, sp.inCall]);
   useEffect(() => () => finTimers.current.forEach(clearTimeout), []);
   useEffect(() => { if (callStats) { const t = setTimeout(() => setCallStats(null), 9000); return () => clearTimeout(t); } }, [callStats]);
   useEffect(() => { if (!window.sphone || !window.sphone.onUpdate) return; const off = window.sphone.onUpdate(m => setUpd(m)); return off; }, []);
@@ -1186,6 +1130,9 @@ export default function App() {
                 </div>
                 <div style={{ fontSize: 19, fontWeight: 700, marginBottom: 4 }}>{diag.error ? 'No se pudo conectar' : 'Verificando conexión…'}</div>
                 <div style={{ fontSize: 13, color: '#8fa6cc', marginBottom: 18 }}>{diag.error ? 'Revisá los datos e intentá de nuevo.' : 'Comprobando el registro con la central PBX-NG.'}</div>
+                {/* El motivo se guardaba (el 401 de la central, el timeout, el dato que
+                    falta) y no se mostraba: la pantalla decia «no se pudo» sin decir por que. */}
+                {diag.error && <div role="alert" style={{ fontSize: 12.5, color: '#f87171', margin: '-10px 0 16px' }}>{diag.error}</div>}
                 <div style={{ textAlign: 'left', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 14, padding: '14px 16px' }}>
                   {rows.map((lb, i) => { const n = i + 1; const state = cur > n ? 'done' : cur === n ? (diag.error ? 'error' : 'active') : 'pending'; return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0' }}>
@@ -1321,8 +1268,9 @@ export default function App() {
             <div style={S.listCol}>
               <div style={S.listHdr}>Buzón de voz {vm ? <span style={{ fontSize: 12, color: C.sub, fontWeight: 400 }}>{vm.length} · {vmUnread} nuevos</span> : null}</div>
               <div style={S.scroll}>
-                {!apiOn ? <EmptySystem onGo={() => setTab('ajustes')} /> :
-                  vm === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
+                {/* Sin central la solapa Voz no existe (el efecto de arriba la cierra), así que
+                    acá no hace falta el cartel de «conectá el sistema». */}
+                {vm === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
                   vm.length === 0 ? <div style={{ color: C.sub, textAlign: 'center', padding: 44 }}>No tenés mensajes de voz.</div> :
                   vm.map((m, i) => { const id = String(m.id || m.msgid || m.msg_id || i); const folder = m.folder || 'INBOX'; const from = m.callerid || m.from || m.caller || m.cid || 'desconocido'; const unread = (m.folder || 'INBOX') === 'INBOX'; const when = m.origtime ? fmtDate(m.origtime * 1000) : (m.date || m.time || ''); return (
                     <div key={i} style={{ ...S.row, flexDirection: 'column', alignItems: 'stretch', gap: 8, cursor: 'default' }}>
@@ -1464,7 +1412,7 @@ export default function App() {
           {tab === 'intercom' && (
             <>
               <div style={{ width: 300, borderRight: `1px solid ${C.line}`, background: C.card, display: 'flex', flexDirection: 'column' }}>
-                <div style={S.listHdr}>{tab === 'clientes' ? 'Clientes' : 'Intercom'}</div>
+                <div style={S.listHdr}>Intercom</div>
                 {clientesConCam.length > 0 && <div style={{ padding: '0 14px 8px' }}><input value={clientQ} onChange={e => setClientQ(e.target.value)} placeholder="Buscar cliente…" style={{ ...S.inp, padding: '9px 12px' }} /></div>}
                 <div style={S.scroll}>
                   {apiOn && cls === null && !clientesConCam.length ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
@@ -1477,12 +1425,11 @@ export default function App() {
                 </div>
               </div>
               <div style={S.listCol}>
-                <div style={S.listHdr}>{selClient ? selClient.name : (tab === 'intercom' ? 'Cámaras y porteros' : 'Dispositivos')}{tab === 'intercom' && selClient && <button onClick={() => setSelClient({ ...selClient })} style={{ background: 'none', border: `1px solid ${C.line}`, borderRadius: 8, padding: '5px 10px', cursor: 'pointer', color: C.sub, display: 'inline-flex', gap: 5, alignItems: 'center', fontSize: 13 }}>{IcReload({ c: C.sub, s: 14 })} Refrescar</button>}</div>
-                <div style={{ ...S.scroll, padding: tab === 'intercom' ? '0 18px 18px' : S.scroll.padding }}>
-                  {!selClient ? <div style={{ color: C.sub, textAlign: 'center', padding: 40 }}>Elegí un cliente para ver sus {tab === 'intercom' ? 'cámaras/porteros en vivo' : 'dispositivos'}.</div> :
+                <div style={S.listHdr}>{selClient ? selClient.name : 'Cámaras y porteros'}{selClient && <button onClick={() => setSelClient({ ...selClient })} style={{ background: 'none', border: `1px solid ${C.line}`, borderRadius: 8, padding: '5px 10px', cursor: 'pointer', color: C.sub, display: 'inline-flex', gap: 5, alignItems: 'center', fontSize: 13 }}>{IcReload({ c: C.sub, s: 14 })} Refrescar</button>}</div>
+                <div style={{ ...S.scroll, padding: '0 18px 18px' }}>
+                  {!selClient ? <div style={{ color: C.sub, textAlign: 'center', padding: 40 }}>Elegí un cliente para ver sus cámaras/porteros en vivo.</div> :
                     streams === null ? <div style={{ color: C.sub, textAlign: 'center', padding: 30 }}>Cargando…</div> :
                     streams.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: errStreams ? '#b91c1c' : C.sub }}>{errStreams ? 'No se pudieron leer las cámaras: ' + errStreams : 'Este cliente no tiene dispositivos.'}</div> :
-                    tab === 'intercom' ?
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 14 }}>{streams.map((d, i) => (
                         <div key={(d.id || i) + ':' + (d.src || d.rtsp || '')}>
                           <MseTile stream={fuenteDeCamara(d, g2l)} onSubir={esLocal(d) && apiOn && !esLocal(selClient) ? () => subirCamara(selClient, d) : undefined} />
@@ -1509,13 +1456,7 @@ export default function App() {
                               {releMsg && releMsg.did === d.id && <span style={{ fontSize: 11.5, color: releMsg.mal ? C.red : '#4ade80', fontWeight: 600 }}>{releMsg.texto}</span>}
                             </div>
                           )}
-                        </div>))}</div> :
-                      streams.map((d, i) => (
-                        <div key={i} className="ph-row" style={S.row}>
-                          <Ava txt="" size={38} bg="#0f1a30" />
-                          <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600 }}>{d.label}</div><div style={{ fontSize: 12, color: C.sub }}>{d.type || 'dispositivo'}{d.src ? ' · ' + d.src : ''}</div></div>
-                          <button onClick={() => { setSelClient(selClient); setTab('intercom'); }} style={{ marginLeft: 'auto', ...S.chip('rgba(26,115,242,.12)', '#7cb0ff'), border: 'none', cursor: 'pointer' }}>{IcCam({ c: '#7cb0ff', s: 14 })} Ver en vivo</button>
-                        </div>))}
+                        </div>))}</div>}
                 </div>
               </div>
             </>
@@ -1574,7 +1515,8 @@ export default function App() {
                     </div>
                     <button style={{ ...S.primary, margin: '4px 0 6px' }} disabled={!isComplete(cfg)} onClick={connectNow}>{registered ? 'Reconectar' : 'Conectar'}</button>
                     <button onClick={() => setShowDiag(true)} style={{ width: '100%', padding: 9, borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, color: C.sub, cursor: 'pointer', fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>{IcShield({ c: C.sub, s: 15 })} Diagnóstico</button>
-                    {sipMode && sipMsg && <div style={{ fontSize: 12, color: sipReg === 'registered' ? '#4ade80' : C.red, marginBottom: 6 }}>{sipReg === 'registered' ? '✓ ' : '✗ '}{sipMsg}</div>}
+                    {/* Al registrar el mensaje se borra: si hay mensaje, es un error. */}
+                    {sipMode && sipMsg && <div style={{ fontSize: 12, color: C.red, marginBottom: 6 }}>✗ {sipMsg}</div>}
                     {sipMode && sipLogs.length > 0 && <div style={{ fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 11, lineHeight: 1.5, background: '#0f1a30', color: '#a9c2ea', borderRadius: 8, padding: '8px 10px', marginBottom: 8, maxHeight: 150, overflowY: 'auto' }}>{sipLogs.map((l, i) => <div key={i} style={{ color: /40[0-9]|48[0-9]|50[0-9]|✗|sin respuesta|error/i.test(l) ? '#ff9a9a' : /200|registered/i.test(l) ? '#8ce6a6' : '#a9c2ea' }}>{l}</div>)}</div>}
                   </Section>}
 
@@ -1809,6 +1751,7 @@ export default function App() {
                 calidad={sp.quality ? sp.quality.score : 0}
                 viaTurn={sp.usingRelay}
                 video={videoVivo}
+                anunciaVideo={!!sp.incomingVideo}
                 videoNodes={nodosVideo}
                 principalEsCamara={String(principalReal || '').startsWith('cam:')}
                 getRemoteStream={sp.getRemoteStream}

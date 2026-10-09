@@ -37,7 +37,9 @@ export function useSipNative() {
   const [note, setNote] = useState('');
   const [quality, setQuality] = useState(null);
   const [hist, setHist] = useState(loadHist);
-  const [volume, setVol] = useState(() => { const v = parseFloat(localStorage.getItem('sp_volume')); return isNaN(v) ? 1 : v; });
+  /* Con el almacenamiento bloqueado getItem TIRA, y sin el try el hook entero se caía al
+   * montar (pantalla en blanco). useSip ya lo leía protegido; acá faltaba. */
+  const [volume, setVol] = useState(() => { let v = NaN; try { v = parseFloat(localStorage.getItem('sp_volume')); } catch {} return isNaN(v) ? 1 : v; });
   const audio = useRef({ ctx: null, mic: null, cap: null, play: null, ring: [], vol: 1, msd: null });
   const infoRef = useRef(null);
   /* El audio entrante ya no sale directo a la placa: pasa por un destino de MediaStream y

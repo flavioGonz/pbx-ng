@@ -114,6 +114,7 @@ export default function DemoLlamada() {
         desde={paso.estado === 'entrante' ? 0 : (paso.video ? Date.now() - 74000 : desde)}
         calidad={3}
         video={!!paso.video}
+        anunciaVideo={false}
         videoNodes={nodos}
         principalEsCamara={princ.startsWith('cam:')}
         extra={paso.ficha ? (
@@ -147,7 +148,9 @@ export default function DemoLlamada() {
         <span className="dm-tag">vista de prueba</span>
         <div className="dm-seg">
           {PASOS.map((x, n) => (
-            <button key={x.estado} className={'dm-chip' + (n === i ? ' dm-on' : '')}
+            /* La clave es el rótulo y no el estado: hay tres pasos «hablando» y dos
+               «entrante», y con claves repetidas React mezclaba los botones. */
+            <button key={x.corto} className={'dm-chip' + (n === i ? ' dm-on' : '')}
               title={x.desc} onClick={() => { setAuto(false); setI(n); }}>{x.corto}</button>
           ))}
         </div>

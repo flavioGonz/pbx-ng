@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { SimpleGrid, Card, Text, Title, Stack, Table, Badge, Group, ThemeIcon, RingProgress, Progress, ActionIcon, Tooltip, Box } from '@mantine/core';
 import { IconPhone, IconUsers, IconHeadset, IconBolt, IconPhoneIncoming, IconPhoneOutgoing, IconPhoneOff, IconClock, IconMaximize, IconMinimize, IconArrowDownLeft, IconArrowUpRight, IconActivity, IconPhoneCall, IconUserCheck } from '@tabler/icons-react';
 import { useLive } from '../useLive';
@@ -39,7 +39,6 @@ export default function Wallboard() {
   const [fs, setFs] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const lastRef = useRef(-1);
 
   // El reloj de la cabecera no es un refresco de datos: sigue latiendo aunque no se mire.
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
@@ -52,7 +51,6 @@ export default function Wallboard() {
   const eps = snap?.extensions || [], ch = snap?.channels || [], qs = snap?.queues || [];
   useEffect(() => {
     if (!snap) return;
-    if (lastRef.current !== ch.length) { lastRef.current = ch.length; }
     setHist(h => [...h, ch.length].slice(-30));
   }, [snap?.ts]);
 

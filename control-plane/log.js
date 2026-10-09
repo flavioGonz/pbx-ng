@@ -85,6 +85,11 @@ function logger(mod) {
   return { debug: hacer('debug'), info: hacer('info'), warn: hacer('warn'), error: hacer('error'), mod: m };
 }
 
+/* El logger de un módulo armado sin `logger` (pruebas, scripts): no dice nada. Uno solo
+ * y no una copia por módulo. */
+const mudo = Object.freeze({ debug() {}, info() {}, warn() {}, error() {} });
+
 module.exports = logger;
+module.exports.mudo = mudo;
 module.exports.logger = logger;
 module.exports.NIVELES = NIVELES;

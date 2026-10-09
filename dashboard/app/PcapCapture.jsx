@@ -5,6 +5,7 @@ import { Button, Group, Stack, Text, SegmentedControl, NumberInput, Badge, Actio
 import { IconWaveSine, IconPlayerPlay, IconPlayerStop, IconDownload, IconTrash, IconRefresh } from '@tabler/icons-react';
 import { toast } from './notify';
 import DrawerNG from './DrawerNG';
+import { api, apiGet, apiPost, apiDel } from './api';
 
 const PRESETS = [{ label: 'SIP (5060)', value: 'sip' }, { label: 'SIP + RTP', value: 'siprtp' }, { label: 'Todo', value: 'all' }];
 const STCOL = { pending: 'gray', running: 'blue', done: 'teal', error: 'red', stopping: 'orange' };
@@ -19,7 +20,9 @@ export default function PcapCapture() {
   const [list, setList] = useState([]);
   const timer = useRef(null);
 
-  const load = async () => { try { const d = await fetch('/backend/api/capture/list').then((r) => r.json()); if (Array.isArray(d)) setList(d); } catch (_) {} };
+  /* La lista se refresca cada 2 s: si un pedido falla no se avisa en cada vuelta (sería
+   * un toast cada dos segundos), la tabla se queda con lo último que se vio. */
+  const load = async () => { try { const d = await apiGet('/capture/list'); if (Array.isArray(d)) setList(d); } catch (_) {} };
   /* 2 s se justifica: es el progreso de una captura que está corriendo ahora y se la
    * mira para saber cuándo pararla. Sólo con el panel abierto y la pestaña a la vista. */
   useEffect(() => { if (open) { load(); timer.current = setInterval(() => { if (!document.hidden) load(); }, 2000); } return () => clearInterval(timer.current); }, [open]);
@@ -27,15 +30,26 @@ export default function PcapCapture() {
   const start = async () => {
     setStarting(true);
     try {
-      const r = await fetch('/backend/api/capture/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ node, preset, duration: dur }) }).then((x) => x.json());
-      if (r.error) toast('Error: ' + r.error, 'bad'); else toast('Captura iniciada en ' + node + ' · ' + dur + 's', 'ok');
+      await apiPost('/capture/start', { node, preset, duration: dur });
+      toast('Captura iniciada en ' + node + ' · ' + dur + 's', 'ok');
       load();
-    } catch (_) { toast('Error al iniciar', 'bad'); }
+    } catch (e) { toast('No se pudo iniciar: ' + e.message, 'bad'); }
     setStarting(false);
   };
-  const stop = async (id) => { try { await fetch('/backend/api/capture/' + id + '/stop', { method: 'POST' }); } catch (_) {} load(); };
-  const del = async (id) => { try { await fetch('/backend/api/capture/' + id, { method: 'DELETE' }); } catch (_) {} load(); };
-  const dl = (id) => { window.open('/backend/api/capture/' + id + '/download', '_blank'); };
+  const stop = async (id) => { try { await apiPost('/capture/' + id + '/stop'); } catch (e) { toast(e.message, 'bad'); } load(); };
+  const del = async (id) => { try { await apiDel('/capture/' + id); } catch (e) { toast(e.message, 'bad'); } load(); };
+  /* La descarga va CON el token: un `window.open` a /api no pasa por el parche de
+   * `fetch` de auth.jsx, y la API (deny-by-default) le contestaba 401 al .pcap. */
+  const dl = async (c) => {
+    try {
+      const r = await api('/capture/' + c.id + '/download', { raw: true });
+      const u = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a');
+      a.href = u; a.download = c.filename || ('captura-' + c.id + '.pcap');
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 1000);
+    } catch (e) { toast(e.message, 'bad'); }
+  };
 
   return (
     <>
@@ -74,7 +88,7 @@ export default function PcapCapture() {
                   <Table.Td fz="xs">{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</Table.Td>
                   <Table.Td ta="right"><Group gap={4} justify="flex-end" wrap="nowrap">
                     {(c.status === 'running' || c.status === 'pending') && <Tooltip label="Detener"><ActionIcon size="sm" variant="light" color="orange" onClick={() => stop(c.id)}><IconPlayerStop size={14} /></ActionIcon></Tooltip>}
-                    {c.status === 'done' && <Tooltip label="Descargar .pcap"><ActionIcon size="sm" variant="light" color="teal" onClick={() => dl(c.id)}><IconDownload size={14} /></ActionIcon></Tooltip>}
+                    {c.status === 'done' && <Tooltip label="Descargar .pcap"><ActionIcon size="sm" variant="light" color="teal" onClick={() => dl(c)}><IconDownload size={14} /></ActionIcon></Tooltip>}
                     <Tooltip label="Borrar"><ActionIcon size="sm" variant="subtle" color="red" onClick={() => del(c.id)}><IconTrash size={14} /></ActionIcon></Tooltip>
                   </Group></Table.Td>
                 </Table.Tr>

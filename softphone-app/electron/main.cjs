@@ -214,8 +214,10 @@ ipcMain.handle('camara-probar', async (_e, rtsp) => {
   } catch (e) { return { ok: false, motivo: (e && e.message) || 'error' }; }
   finally {
     /* La prueba NO deja su stream levantado: la lista de camaras vivas la manda la
-     * pantalla, y al volver a pedirla el go2rtc se reinicia sin el de prueba. */
-    try { await g2local.asegurar([]); } catch (_) {}
+     * pantalla, y al volver a pedirla el go2rtc arranca sin el de prueba. Se para el
+     * motor (antes se llamaba `asegurar([])`, que con la lista vacia vuelve sin hacer
+     * nada: el go2rtc quedaba vivo con la URL de prueba, clave incluida). */
+    try { g2local.parar(); } catch (_) {}
   }
 });
 

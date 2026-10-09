@@ -172,12 +172,20 @@ const REALTIME = {
 /* El modelo que RAZONA detrás de la voz cuando hay herramientas. Se puede cambiar por
  * agente desde el panel; este default es el más común y existe para que encender una
  * herramienta no requiera además elegir un modelo. */
-const MODELO_RAZONA = 'gpt-5.1';
+const MODELO_RAZONA = 'gpt-6-sol';
+/* Modelos que el proveedor apaga. Un agente que tenga uno guardado razona con el default:
+ * la llamada sigue andando el día del apagón en vez de caer a «no puedo atenderte». */
+const RETIRADOS = ['gpt-5.1'];
+const vigente = (m) => (m && !RETIRADOS.includes(m) ? m : '');
 
 const LIVE = {
   url: (model, base) => (base ? String(base).replace(/\/+$/, '') : 'wss://api.openai.com/v1/live/sessions'),
   cabeceras: (key, base) => (base && /azure/i.test(String(base)) ? { 'api-key': key } : { Authorization: 'Bearer ' + key }),
   configurar: (o) => {
+    /* IA EXTERNA: la configuración la arma el backend del asistente y se manda TAL CUAL.
+     * La central no le agrega instrucciones, saludo ni herramientas: la lógica del
+     * agente es del backend, que controla la sesión por el relay (ia-externa.js). */
+    if (o.sessionCruda) return { type: 'session.start', session: o.sessionCruda };
     const session = {
       model: o.model || 'gpt-live-1',
       instructions: o.instrucciones || '',
@@ -196,7 +204,7 @@ const LIVE = {
       session.delegation = {
         type: 'responses',
         responses: {
-          model: o.delegacionModel || MODELO_RAZONA,
+          model: vigente(o.delegacionModel) || MODELO_RAZONA,
           tools: o.herramientas,
           tool_choice: 'auto',
           /* De a una por vez: dos acciones simultáneas en una portería es abrir la puerta
@@ -204,6 +212,10 @@ const LIVE = {
           parallel_tool_calls: false,
         },
       };
+      /* Sol razona «medium» si no se le dice nada, y en una llamada eso son segundos de
+       * silencio antes de cada herramienta. Sólo a Sol: otros modelos (gpt-5-nano) no
+       * aceptan 'none' y la sesión no abriría. */
+      if (/^gpt-6-sol/.test(session.delegation.responses.model)) session.delegation.responses.reasoning = { effort: 'none' };
       if (o.instrucciones) session.delegation.responses.instructions = o.instrucciones;
     } else if (o.delegacion === 'responses') {
       /* Sin herramientas, pero delegando igual: es el segundo escalón de la prueba de
@@ -348,6 +360,9 @@ function abrir(opts) {
     let msg;
     try { msg = JSON.parse(String(data)); } catch (_) { return; }
     anotar(String(msg.type || '?'));
+    /* Cada evento, tal cual llegó: el relay de la IA externa se lo reenvía al backend sin
+     * interpretarlo. Sale antes que nada para que el backend lo vea en el mismo orden. */
+    ev.emit('crudo', msg);
     const r = P.leer(msg);
     switch (r.clase) {
       case 'arranco': marcarListo(); break;
@@ -425,7 +440,17 @@ function abrir(opts) {
     o.herramientas = (o.herramientas || []).concat(lista);
     enviar(P.configurar(o));
   };
-  ev.enviarAudio = (pcm8) => { if (pcm8 && pcm8.length) enviar(P.audioEntra(subir(pcm8).toString('base64'))); };
+  ev.enviarAudio = (pcm8) => {
+    if (!pcm8 || !pcm8.length) return;
+    const msg = P.audioEntra(subir(pcm8).toString('base64'));
+    enviar(msg);
+    /* El audio que le manda la central al modelo: el backend lo necesita para grabar y
+     * para saber cuándo terminó de hablar quien llama (el sideband lo reflejaba solo). */
+    ev.emit('audio-salida', msg);
+  };
+  /* Un mensaje armado afuera (lo que manda el backend por el relay), sin tocarlo. Quien
+   * llama decide qué tipos deja pasar: acá no se filtra. */
+  ev.enviarCrudo = (obj) => enviar(obj);
   ev.saludar = (texto) => { esperandoDesde = Date.now(); enviar(P.saludar(texto)); };
   ev.responderHerramienta = (callId, salida) => { enviar(P.respuestaHerramienta(callId, salida)); enviar(P.pedirRespuesta()); };
   ev.metricas = () => {
@@ -537,4 +562,4 @@ async function unIntento(o, esc, live) {
   return r;
 }
 
-module.exports = { abrir, probar, elegirProtocolo, MODELO_RAZONA, REALTIME, LIVE, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };
+module.exports = { abrir, probar, elegirProtocolo, MODELO_RAZONA, RETIRADOS, vigente, REALTIME, LIVE, subir, creaBajador, explicar, PROTOCOLO, RATE_TEL, RATE_MODELO };

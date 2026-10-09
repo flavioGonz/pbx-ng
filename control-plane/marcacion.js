@@ -84,7 +84,7 @@ const crearFiltroCentral = require('./desde-la-central');   // ¿el pedido lo hi
  */
 module.exports = function init(deps) {
   const { app, pool, amiAction, setDialplan, exigirExt, clientIp, errorHttp, broadcastSoon, logger } = deps;
-  const log = logger ? logger('marcacion') : { info() {}, warn() {}, error() {} };
+  const log = logger ? logger('marcacion') : require('./log').mudo;
 
   /* URL con la que ASTERISK ve a esta API (mismo criterio y misma variable que telefonia.js). */
   const API_URL = String(process.env.AST_API_URL || process.env.API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -1029,7 +1029,7 @@ module.exports = function init(deps) {
 
       if (accion === 'pin') {
         if (bloqueado(id, cid)) { await registrar('disa', id, cid, 'bloqueado', null, 'origen bloqueado por intentos'); return texto(res, 'bloqueado'); }
-        const ok = await bcrypt.compare(String(b.pin || ''), d.pin_hash || '').catch(() => false);
+        const ok = await bcrypt.compare(String(b.pin || ''), d.pin_hash || '');
         if (!ok) {
           const seBloqueo = sumarFallo(id, cid, d);
           await registrar('disa', id, cid, seBloqueo ? 'bloqueado' : 'pin_mal', null, seBloqueo ? 'bloqueado ' + d.bloqueo_min + ' min' : null);
@@ -1112,7 +1112,7 @@ module.exports = function init(deps) {
         // El bloqueo se mira ANTES de comparar: si no, el que está probando PINes sigue
         // gastando comparaciones de bcrypt (~100 ms cada una) aunque ya esté bloqueado.
         if (bloqueado('cb' + id, kcid)) { await registrar('callback', id, cid, 'bloqueado', cid, 'bloqueado por intentos'); return texto(res, 'no'); }
-        const ok = await bcrypt.compare(String(b.pin || ''), cb.pin_hash || '').catch(() => false);
+        const ok = await bcrypt.compare(String(b.pin || ''), cb.pin_hash || '');
         if (!ok) {
           const seBloqueo = sumarFallo('cb' + id, kcid, { max_intentos: 3, bloqueo_min: 15 });
           await registrar('callback', id, cid, seBloqueo ? 'bloqueado' : 'pin_mal', cid, null);

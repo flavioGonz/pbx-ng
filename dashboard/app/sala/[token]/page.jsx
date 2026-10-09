@@ -127,6 +127,16 @@ export default function SalaWeb() {
           <p style={{ color: '#9aa4ba', fontSize: 12, marginTop: 14 }}>Se usará tu micrófono{sala.video && conVideo ? ' y tu cámara' : ''}. No necesitás instalar nada ni marcar ningún PIN.</p>
         </>}
 
+        {/* El moderador que sale o al que le falló la entrada volvía a una tarjeta vacía, sin
+            nada que tocar: la entrada es de un solo uso (el servidor la quema al levantarla),
+            así que reintentar acá no sirve. Se le dice de dónde sacar otra. */}
+        {fase === 'idle' && entrada && autoRef.current && (
+          <p style={{ color: '#3c465c', fontSize: 14 }}>
+            La entrada de moderador sirve una sola vez. Para volver a entrar, apretá otra vez
+            «entrar como moderador» en el panel.
+          </p>
+        )}
+
         {fase === 'entrando' && <div style={{ padding: '14px 0' }}>
           <div className="c2c-pulse" style={{ width: 64, height: 64, margin: '0 auto 14px', borderRadius: '50%', background: 'rgba(47,116,230,.15)', display: 'grid', placeItems: 'center', color: '#2f74e6' }}><Ico s={26} d={icoGente} /></div>
           <p style={{ color: '#3c465c', fontWeight: 600 }}>Entrando a la reunión…</p>

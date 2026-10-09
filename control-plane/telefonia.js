@@ -62,7 +62,7 @@ module.exports = function init(deps) {
   /* Avisa al carril rápido del estado en vivo (estados.js) que el DND o un desvío de un
    * interno acaba de cambiar. Sin esto la insignia del panel esperaba al reconciliado. */
   const estadoTocado = deps.estadoTocado || (() => {});
-  const log = logger ? logger('telefonia') : { info() {}, warn() {}, error() {} };
+  const log = logger ? logger('telefonia') : require('./log').mudo;
 
   /* URL con la que ASTERISK ve a esta API. Asterisk corre en la red del host y la API
    * publica :3000 sólo en loopback, así que 127.0.0.1:3000 es el caso normal; se puede

@@ -329,3 +329,22 @@ nocturno —que es donde más duele cubrir con gente y donde un error tiene meno
 
 Y dos cosas para resolver con ese cliente, no acá: **el aviso al visitante** de que la
 llamada se graba y se fotografía, y **cuánto tiempo se guardan** esas capturas.
+
+---
+
+## 8. IA externa: cuando la conversación la conduce otro sistema (2026-09-29)
+
+Además del agente propio, hay un proveedor **`ia-externa`** en el que la central **no decide nada de la conversación**. La conduce el backend del asistente de voz del equipo de Horizon: qué decir, cuándo verificar a alguien, abrir, derivar o cortar. La central atiende, pone el audio con el mismo puente de `realtime.js` y ejecuta las órdenes de telefonía (colgar, transferir y el DTMF que abre el portón).
+
+Por qué existe:
+- la lógica de negocio del asistente vive en un solo lugar;
+- el backend se engancha a la sesión de GPT-Live;
+- a una sesión abierta por WebSocket el sideband de OpenAI no se puede enganchar (da 404), así que la central le hace de relay.
+
+Qué se reusa y qué no:
+- **Se reusan** el ritmo del audio, el barge-in, el destino **Por defecto** como respaldo, el tono de **Abrir el portón** como DTMF de apertura y el registro de acciones (`pbxng_ia_acciones`).
+- **No se usan** el prompt, el saludo, las herramientas ni la escalera de inactividad del agente: los hace el backend.
+
+**El backend en varias instancias (contrato v2, 01/10):** cada llamada va entera por su relay (el aviso, los eventos, los hechos y las órdenes), así cualquier instancia del backend detrás de su balanceador puede conducirla. Si la instancia se cae o se apaga, la central reabre el relay en otra, que retoma la llamada sin cortarla y sin volver a saludar. El canal de control queda solo para bajar la configuración.
+
+Contrato: `docs/CONTRATOS.md` §11.

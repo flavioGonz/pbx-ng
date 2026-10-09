@@ -125,12 +125,12 @@ export default function Resumen() {
    *   - lo que cambia poco (versión del motor, transportes, módulos, troncales,
    *     topología medida) va a 60 s;
    *   - /system son tres comandos AMI y sólo lista módulos: una sola vez.
+   *   - /asterisk/core se pedía cada 60 s y no se mostraba en ningún lado: se fue.
    * Total en régimen: 2 + 1 + 1 + 1 = 5 pedidos por minuto, y CERO con la pestaña
    * en segundo plano (usePoll se frena solo). Ver "pedido a api" en el informe:
    * con troncales y topología dentro del snapshot esto bajaría a 2 por minuto. */
   const { data: ov } = usePoll('/system/overview', 30000);
   const { data: trunksData } = usePoll('/trunks', 60000);
-  const { data: core } = usePoll('/asterisk/core', 60000);
   const { data: sys } = useApi('/system');
   /* Antes era `useApi` (una sola carga): el cartel "Hay componentes caídos" se
    * dibujaba con la medición del momento en que abriste la pestaña y no se

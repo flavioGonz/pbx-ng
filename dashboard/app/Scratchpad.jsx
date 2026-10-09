@@ -15,7 +15,10 @@ export default function Scratchpad({ room, onClose }) {
   const sizeCanvas = useCallback(() => {
     const c = cvs.current; if (!c) return;
     const r = c.getBoundingClientRect();
-    const snap = c.width ? ctx.current.getImageData(0, 0, c.width, c.height) : null;
+    /* Un <canvas> recién montado ya mide 300×150 (el tamaño de fábrica del navegador),
+     * pero todavía no tiene contexto: preguntar sólo por el ancho rompía la pizarra al
+     * abrirla, con «Cannot read properties of null (reading 'getImageData')». */
+    const snap = c.width && ctx.current ? ctx.current.getImageData(0, 0, c.width, c.height) : null;
     c.width = r.width; c.height = r.height;
     ctx.current = c.getContext('2d'); ctx.current.lineCap = 'round'; ctx.current.lineJoin = 'round';
     if (snap) try { ctx.current.putImageData(snap, 0, 0); } catch (_) {}

@@ -29,7 +29,8 @@ const vmpin = require('./vmpin');
  * deps:
  *   app            Express (las rutas se registran acá, DESPUÉS del gate)
  *   pool           pg.Pool
- *   amiAction      (action) => respuesta AMI (ParkedCalls para las plazas del aparcado)
+ *   amiList        (action, {evento, fin}) => eventos de una acción que contesta en lista
+ *                  (ParkedCalls para las plazas del aparcado; app.js)
  *   amiCommand     (cmd) => salida del CLI de Asterisk por AMI (queue show, reloads)
  *   astFwd         (method, path, body, ms) llamada al agente de Asterisk (desplegar audios TTS)
  *   vozBase        () => URL base del servicio de voz (TTS/STT), de pbxng_settings o NODES.voz
@@ -47,8 +48,14 @@ const vmpin = require('./vmpin');
  * útiles para pruebas; vmList para quien necesite el buzón sin pasar por HTTP).
  */
 module.exports = function init(deps) {
-  const { app, pool, amiAction, amiCommand, astFwd, vozBase, setDialplan, astconf,
+  const { app, pool, amiCommand, astFwd, vozBase, setDialplan, astconf,
     exigirExt, wavToPcm, analyzeText, smtpHint, errorHttp, broadcastSoon, logger } = deps;
+  /* Acciones AMI que contestan con una lista de eventos (ParkedCalls). Opcional para que
+   * las pruebas que arman este módulo a mano no tengan que darla. */
+  const amiList = deps.amiList || (() => Promise.resolve([]));
+  /* IA externa: al guardar o borrar un agente, se abren o cierran sus canales con el
+   * backend (ai-pipeline.js). Opcional: sin pipeline (pruebas), no hace nada. */
+  const recargarIaExterna = deps.recargarIaExterna || (() => {});
 
   // ---------------------------------------------------------------------------
   //  Buzon de voz: se lee DIRECTO del volumen compartido con Asterisk (/voicemail).
@@ -417,7 +424,8 @@ module.exports = function init(deps) {
     /* El modelo que razona detrás de la voz cuando hay herramientas. Va en el mismo JSON
      * porque es parte de «cómo funcionan las herramientas de este agente». */
     if (dentro.delegacion && typeof dentro.delegacion === 'object') {
-      out.delegacion = { model: String(dentro.delegacion.model || '').slice(0, 80) };
+      /* Un modelo retirado no se guarda: vacío es «el default», que siempre es vigente. */
+      out.delegacion = { model: require('./realtime').vigente(String(dentro.delegacion.model || '').slice(0, 80)) };
     }
     if (dentro.remoto && typeof dentro.remoto === 'object') {
       const rm = dentro.remoto;
@@ -437,7 +445,7 @@ module.exports = function init(deps) {
   });
 
   app.get('/api/ai-agents', async (req, res) => {
-    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,record,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
+    try { const { rows } = await pool.query('SELECT id,name,exten,greeting,system_prompt,voice,provider,model,enabled,record,sales_exten,support_exten,default_exten,crm_webhook,greeting_text,inact1_s,inact2_s,cierre_s,inact1_text,inact2_text,despedida_text,herramientas,externo_url,externo_token,agentes_exten FROM pbxng_ai_agents ORDER BY id'); res.json(rows); }
     catch (e) { errorHttp(res, e); }
   });
   /* Proveedores que el pipeline entiende. La validación existe por un motivo concreto:
@@ -445,10 +453,35 @@ module.exports = function init(deps) {
    * guardaba sin chistar y la llamada caía al modo demo —el de reglas, sin IA— sin un
    * solo error. El agente «no funcionaba» y no había nada que mirar. */
   const PROVEEDORES = {
+    'ia-externa': 'la conversación la conduce el backend del asistente: la central pone el audio y ejecuta sus órdenes (colgar, transferir, DTMF)',
     'openai-realtime': 'un solo socket con el modelo (audio entra / audio sale): la opción de menor latencia',
     openai: 'STT → LLM → TTS en tres pasos (Whisper + chat + TTS)',
     demo: 'sin IA: Vosk local + reglas + espeak, para probar sin clave ni internet',
   };
+  /* Lo propio de la IA externa: sin la URL y el token del backend, el agente no tiene con
+   * quién hablar y cada llamada iría al respaldo sin que nadie entienda por qué. */
+  const camposExterno = (b) => ({
+    externo_url: String(b.externo_url || '').trim().slice(0, 500),
+    externo_token: String(b.externo_token || '').trim().slice(0, 200),
+    agentes_exten: String(b.agentes_exten || '').trim().slice(0, 40),
+  });
+  const externoOk = (provider, ext, body, res) => {
+    if (provider !== 'ia-externa') return true;
+    const iaExterna = require('./ia-externa');
+    const url = iaExterna.urlPermitida(ext.externo_url);
+    const fallas = [];
+    if (!url.ok) fallas.push(url.motivo);
+    if (!ext.externo_token) fallas.push('falta el token del backend');
+    /* Sin destino, el backend rechaza cada llamada y el visitante queda en silencio. */
+    if (!ext.agentes_exten && !String(body.default_exten || '').trim()) fallas.push('falta un destino: el de agentes o el Por defecto');
+    const porton = ((body.herramientas || {}).abrir_porton) || {};
+    if (porton.on && (porton.modo || 'dtmf') === 'dtmf' && porton.dtmf && !iaExterna.DTMF.test(String(porton.dtmf).trim())) fallas.push('el tono de apertura solo puede tener 0-9, *, # y A-D');
+    if (!fallas.length) return true;
+    res.status(400).json({ error: 'la IA externa no se puede guardar: ' + fallas.join('; ') });
+    return false;
+  };
+  const guardarExterno = (c, id, ext) =>
+    c.query('UPDATE pbxng_ai_agents SET externo_url=$1,externo_token=$2,agentes_exten=$3 WHERE id=$4', [ext.externo_url, ext.externo_token, ext.agentes_exten, id]);
   const proveedorOk = (p, res) => {
     if (Object.prototype.hasOwnProperty.call(PROVEEDORES, p)) return true;
     res.status(400).json({ error: 'proveedor desconocido: ' + p, proveedores: PROVEEDORES });
@@ -500,7 +533,9 @@ module.exports = function init(deps) {
     const ia = camposInact(req.body || {});
     const herr = camposHerr(req.body || {});
     if (!proveedorOk(provider, res)) return;
-    const c = await pool.connect();
+    const ext = camposExterno(req.body || {});
+    if (!externoOk(provider, ext, req.body || {}, res)) return;
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows } = await c.query(
@@ -508,43 +543,47 @@ module.exports = function init(deps) {
         + ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
           ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr), !!record]);
+      await guardarExterno(c, rows[0].id, ext);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, rows[0].id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-      await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: rows[0].id, exten });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+      await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.status(201).json({ created: rows[0].id, exten });
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.put('/api/ai-agents/:id', async (req, res) => {
     const { id } = req.params;
     const { name, exten, greeting = 'demo-congrats', system_prompt = '', voice = 'es-ES', provider = 'openai', model = 'gpt-4o-mini', enabled = true, record = false, sales_exten = '', support_exten = '', default_exten = '', crm_webhook = '', greeting_text = '' } = req.body || {};
     if (!proveedorOk(provider, res)) return;
+    const ext = camposExterno(req.body || {});
+    if (!externoOk(provider, ext, req.body || {}, res)) return;
     const ia = camposInact(req.body || {});
     const herr = camposHerr(req.body || {});
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows: old } = await c.query('SELECT exten FROM pbxng_ai_agents WHERE id=$1', [id]);
-      if (!old[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'agente no existe' }); }
+      if (!old[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'agente no existe' }); }
       await c.query(
         'UPDATE pbxng_ai_agents SET name=$1,exten=$2,greeting=$3,system_prompt=$4,voice=$5,provider=$6,model=$7,enabled=$8,'
         + 'sales_exten=$10,support_exten=$11,default_exten=$12,crm_webhook=$13,greeting_text=$14,'
         + 'inact1_s=$15,inact2_s=$16,cierre_s=$17,inact1_text=$18,inact2_text=$19,despedida_text=$20,herramientas=$21,record=$22 WHERE id=$9',
         [name, exten, greeting, system_prompt, voice, provider, model, enabled, id, sales_exten, support_exten, default_exten, crm_webhook, greeting_text,
           ia.inact1_s, ia.inact2_s, ia.cierre_s, ia.inact1_text, ia.inact2_text, ia.despedida_text, JSON.stringify(herr), !!record]);
+      await guardarExterno(c, id, ext);
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [old[0].exten]);
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of aiAgentDialplan(exten, id, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
-      await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+      await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.json({ updated: id, exten });
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.delete('/api/ai-agents/:id', async (req, res) => {
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows } = await c.query('SELECT exten FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
       if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]);
       await c.query('DELETE FROM pbxng_ai_agents WHERE id=$1', [req.params.id]);
-      await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: req.params.id });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+      await c.query('COMMIT'); broadcastSoon(); recargarIaExterna(); res.json({ deleted: req.params.id });
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.get('/api/ivr', async (req, res) => {
@@ -565,7 +604,11 @@ module.exports = function init(deps) {
     options.forEach((o, i) => {
       const b = 100 + i * 10; const v = o.dest_value;
       rows.push(['ivr', exten, b, 'NoOp', `Opcion ${o.digit} -> ${o.dest_type}:${v || ''}`]);
-      if (o.dest_type === 'extension') { rows.push(['ivr', exten, b + 1, 'Dial', `PJSIP/${v},30`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
+      /* ${DIAL_OPCIONES}: la pone ai-pipeline.js en `r` cuando la IA deriva, y la llamada
+       * puede caer en un IVR. Vacía (una llamada común), el Dial queda como siempre. Ver
+       * el Dial del interno en extensions.conf; los IVR guardados antes los actualiza la
+       * migración 0030. */
+      if (o.dest_type === 'extension') { rows.push(['ivr', exten, b + 1, 'Dial', `PJSIP/${v},30,\${DIAL_OPCIONES}`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
       else if (o.dest_type === 'ringgroup') rows.push(['ivr', exten, b + 1, 'Goto', `internal,${v},1`]);
       else if (o.dest_type === 'queue') { rows.push(['ivr', exten, b + 1, 'Queue', v]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
       else if (o.dest_type === 'voicemail') { rows.push(['ivr', exten, b + 1, 'VoiceMail', `${v}@default,u`]); rows.push(['ivr', exten, b + 2, 'Hangup', '']); }
@@ -577,7 +620,7 @@ module.exports = function init(deps) {
   app.post('/api/ivr', async (req, res) => {
     const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], tenant_id = 1, flow = null, record = false } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows } = await c.query('INSERT INTO pbxng_ivr (name,exten,greeting,timeout,tenant_id,flow,record) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [name, exten, greeting, timeout, tenant_id, flow, !!record]);
@@ -586,17 +629,17 @@ module.exports = function init(deps) {
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of buildIvrDialplan(exten, greeting, timeout, options, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); res.status(201).json({ created: id, exten });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.put('/api/ivr/:id', async (req, res) => {
     const { id } = req.params;
     const { name, exten, greeting = 'demo-congrats', timeout = 10, options = [], flow = null, record = false } = req.body || {};
     if (!name || !exten) return res.status(400).json({ error: 'name y exten son obligatorios' });
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows: old } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]);
-      if (!old[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'IVR no existe' }); }
+      if (!old[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'IVR no existe' }); }
       await c.query('UPDATE pbxng_ivr SET name=$1,exten=$2,greeting=$3,timeout=$4,flow=$5,record=$7 WHERE id=$6', [name, exten, greeting, timeout, flow, id, !!record]);
       await c.query('DELETE FROM pbxng_ivr_options WHERE ivr_id=$1', [id]);
       for (const o of options) await c.query('INSERT INTO pbxng_ivr_options (ivr_id,digit,dest_type,dest_value) VALUES ($1,$2,$3,$4)', [id, o.digit, o.dest_type, o.dest_value]);
@@ -604,13 +647,13 @@ module.exports = function init(deps) {
       if (exten !== old[0].exten) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [exten]);
       for (const r of buildIvrDialplan(exten, greeting, timeout, options, !!record)) await c.query('INSERT INTO extensions (context,exten,priority,app,appdata) VALUES ($1,$2,$3,$4,$5)', r);
       await c.query('COMMIT'); broadcastSoon(); res.json({ updated: id, exten });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.delete('/api/ivr/:id', async (req, res) => {
-    const { id } = req.params; const c = await pool.connect();
+    const { id } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
     try { await c.query('BEGIN'); const { rows } = await c.query('SELECT exten FROM pbxng_ivr WHERE id=$1', [id]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].exten]); await c.query('DELETE FROM pbxng_ivr WHERE id=$1', [id]); await c.query('COMMIT'); res.json({ deleted: id }); }
-    catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   // ---------------------------------------------------------------------------
@@ -682,7 +725,13 @@ module.exports = function init(deps) {
   async function saveQueue(b, creating) {
     const name = String(b.name || '').trim();
     const access_exten = String(b.access_exten || '').trim();
-    if (!name) throw new Error('name es obligatorio');
+    if (!name) throw Object.assign(new Error('name es obligatorio'), { status: 400 });
+    /* Editar una cola que no existe reventaba más abajo (queueDialplan de una fila vacía)
+     * con un 500 «Cannot read properties of undefined». */
+    if (!creating) {
+      const { rows: hay } = await pool.query('SELECT 1 FROM pbxng_queues WHERE name=$1', [name]);
+      if (!hay.length) throw Object.assign(new Error('la cola ' + name + ' no existe'), { status: 404 });
+    }
     if (creating && !access_exten) throw Object.assign(new Error('access_exten es obligatorio'), { status: 400 });
     const n = qNative(b);
     const c = await pool.connect();
@@ -758,9 +807,9 @@ module.exports = function init(deps) {
     } catch (e) { errorHttp(res, e); }
   });
   app.delete('/api/queues/:name', async (req, res) => {
-    const { name } = req.params; const c = await pool.connect();
+    const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
     try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_queues WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM queue_members WHERE queue_name=$1', [name]); await c.query('DELETE FROM queues WHERE name=$1', [name]); await c.query('DELETE FROM pbxng_queues WHERE name=$1', [name]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: name }); }
-    catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   app.post('/api/queues/:name/members', async (req, res) => {
     const { name } = req.params; const { ext } = req.body || {};
@@ -773,25 +822,36 @@ module.exports = function init(deps) {
 
   app.get('/api/ringgroups', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members,strategy,ring_time FROM pbxng_ringgroups ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
   app.post('/api/ringgroups', async (req, res) => {
-    const { name, label, access_exten, members, strategy = 'ringall', ring_time = 25 } = req.body || {};
+    const { name, label, access_exten, members, strategy = 'ringall' } = req.body || {};
     if (!name || !access_exten || !members) return res.status(400).json({ error: 'name, access_exten y members son obligatorios' });
+    /* El timbre entra al appdata del Dial como segundo argumento: crudo, una coma metía
+     * opciones propias («20,m») y corría las nuestras (${DIAL_OPCIONES}) a un cuarto argumento
+     * que Dial no lee. Se exige un entero en el mismo rango que acota el dialplan al TIMBRE
+     * del interno (5 a 120 s). Vacío: los 25 s de siempre. */
+    const rt = req.body && req.body.ring_time;
+    const ring_time = (rt === undefined || rt === null || rt === '') ? 25 : (/^\d+$/.test(String(rt).trim()) ? parseInt(String(rt).trim(), 10) : NaN);
+    if (!(ring_time >= 5 && ring_time <= 120)) return res.status(400).json({ error: 'ring_time tiene que ser un número entero de segundos, de 5 a 120' });
     const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const dialStr = list.map(e => 'PJSIP/' + e).join('&');
-    const c = await pool.connect();
-    try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_ringgroups (name,label,access_exten,members,strategy,ring_time) VALUES ($1,$2,$3,$4,$5,$6)', [name, label || name, access_exten, list.join(','), strategy, ring_time]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Ring group ' + name], [2, 'Dial', dialStr + ',' + ring_time], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-    catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    /* ${DIAL_OPCIONES} como opciones del Dial: cuando la IA deriva a un grupo, la llamada ya
+     * está atendida y el tono lo tiene que generar la central (`r`, que pone ai-pipeline.js,
+     * con la zona de indications.conf). En una llamada común va vacía y el Dial queda como
+     * siempre. Los grupos creados antes los actualiza la migración 0030. */
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
+    try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_ringgroups (name,label,access_exten,members,strategy,ring_time) VALUES ($1,$2,$3,$4,$5,$6)', [name, label || name, access_exten, list.join(','), strategy, ring_time]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Ring group ' + name], [2, 'Dial', dialStr + ',' + ring_time + ',${DIAL_OPCIONES}'], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
-  app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
+  app.delete('/api/ringgroups/:name', async (req, res) => { const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_ringgroups WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_ringgroups WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); } });
 
   app.get('/api/paging', async (req, res) => { try { const { rows } = await pool.query('SELECT id,name,label,access_exten,members FROM pbxng_paging ORDER BY id'); res.json(rows); } catch (e) { errorHttp(res, e); } });
   app.post('/api/paging', async (req, res) => {
     const { name, label, access_exten, members } = req.body || {};
     if (!name || !access_exten || !members) return res.status(400).json({ error: 'name, access_exten y members son obligatorios' });
     const list = String(members).split(',').map(s => s.trim()).filter(Boolean); const pageStr = list.map(e => 'PJSIP/' + e).join('&');
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try { await c.query('BEGIN'); await c.query('INSERT INTO pbxng_paging (name,label,access_exten,members) VALUES ($1,$2,$3,$4)', [name, label || name, access_exten, list.join(',')]); await setDialplan(c, 'ivr', access_exten, [[1, 'NoOp', 'Paging ' + name], [2, 'Page', pageStr + ',i'], [3, 'Hangup', '']]); await c.query('COMMIT'); broadcastSoon(); res.status(201).json({ created: name }); }
-    catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
-  app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
+  app.delete('/api/paging/:name', async (req, res) => { const { name } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); const { rows } = await c.query('SELECT access_exten FROM pbxng_paging WHERE name=$1', [name]); if (rows[0]) await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]); await c.query('DELETE FROM pbxng_paging WHERE name=$1', [name]); await c.query('COMMIT'); res.json({ deleted: name }); } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); } });
 
   /* Lo que hace falta para avisar, buscado UNA vez. En la rotación en lote esto se
    * calcula al principio y se comparte: armar un transporte SMTP por buzón eran catorce
@@ -884,7 +944,7 @@ module.exports = function init(deps) {
     const pin = password === undefined || password === null || String(password).trim() === '' ? vmpin.pinNuevo() : String(password).trim();
     if (!vmpin.PIN_OK.test(pin)) return res.status(400).json({ error: 'el PIN tiene que ser de 4 a 10 dígitos' });
     if (vmpin.pinDebil(mailbox, pin)) return res.status(400).json({ error: 'el PIN no puede ser el número del buzón' });
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       await c.query("INSERT INTO voicemail (mailbox,context,password,fullname,email) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [mailbox, context, pin, fullname || mailbox, email || null]);
@@ -898,7 +958,7 @@ module.exports = function init(deps) {
       const quedo = (rows[0] && rows[0].password) || pin;
       res.status(201).json({ created: mailbox, pin: quedo, ya_existia: quedo !== pin });
     }
-    catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
   /* Rota UN buzón y avisa. Lo comparten la rotación de a uno y la de lote para que las dos
    * se comporten igual: mismo UPDATE, mismo registro en el log y mismo correo. Devuelve
@@ -989,7 +1049,7 @@ module.exports = function init(deps) {
       res.json({ rotados, avisados: resultados.filter((r) => r.avisado).length, resultados });
     } catch (e) { errorHttp(res, e); }
   });
-  app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; const c = await pool.connect(); try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); } });
+  app.delete('/api/mailboxes/:mailbox', async (req, res) => { const { mailbox } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */ try { await c.query('BEGIN'); await c.query('DELETE FROM voicemail WHERE mailbox=$1', [mailbox]); await c.query('DELETE FROM pbxng_mailboxes WHERE mailbox=$1', [mailbox]); await c.query('COMMIT'); res.json({ deleted: mailbox }); } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); } });
 
   /* Los códigos de función se movieron a telefonia.js (sprint 6): ahora salen de la
    * tabla pbxng_featurecodes, cada acción tiene su código EDITABLE y hay muchos más
@@ -1052,13 +1112,12 @@ module.exports = function init(deps) {
       const hasta = parseInt(await setGet('park_hasta', '720'), 10);
       const tiempo = parseInt(await setGet('park_time', '300'), 10);
 
-      // ParkedCalls devuelve un evento por llamada aparcada.
+      /* ParkedCalls devuelve un evento `ParkedCall` por llamada aparcada y cierra con
+       * `ParkedCallsComplete`. Se leía `r.events` de la respuesta, que esta librería de AMI
+       * no arma: la tabla mostraba TODAS las plazas libres con llamadas aparcadas. Es el
+       * mismo error que tenía la vista en vivo de las salas, y el mismo arreglo (amiList). */
       let evs = [];
-      try {
-        const r = await amiAction({ Action: 'ParkedCalls' });
-        evs = (r && (r.events || r.eventlist || [])) || [];
-        if (!Array.isArray(evs)) evs = [];
-      } catch (_) {}
+      try { evs = await amiList({ Action: 'ParkedCalls' }, { evento: 'ParkedCall', fin: 'ParkedCallsComplete' }); } catch (_) {}
 
       const ocupadas = evs
         .filter((e) => String(e.event || e.Event || '').toLowerCase() === 'parkedcall')

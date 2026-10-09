@@ -3,7 +3,7 @@ name: ci
 # Red de seguridad de desarrollo (EVALUACION §5 bloque 5): lo que rompe acá no llega ni a
 # main ni a un release. Corre en cada push a main y en cada PR; release.yml lo invoca
 # (workflow_call) antes de gastar 40 min de build, así un tag con tests rotos no publica.
-# Cuatro jobs independientes para que un fallo señale su área (api / panel / compose / shell)
+# Jobs independientes para que un fallo señale su área (api / panel / softphone / compose / shell)
 # y para que corran en paralelo: el más lento (dashboard, next build) manda en el total.
 
 on:
@@ -33,7 +33,9 @@ jobs:
   api:
     name: api (lint + test)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 y no 15: con la regla del 90 % la suite pasó de ~600 a más de 1000 pruebas, muchas
+    # con un Postgres y la API levantados, y el runner tiene 2 núcleos.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16-alpine
@@ -90,8 +92,11 @@ jobs:
             sleep 1
           done
           echo "Postgres no respondió en 30 s" >&2; exit 1
-      - name: Tests (unitarios + integración)
-        run: npm test
+      # Regla: 90% o más de cobertura en líneas, ramas y funciones de todo control-plane.
+      # Es un piso duro: por debajo, el job falla aunque todos los tests pasen. Y como
+      # release.yml invoca este workflow, tampoco sale un release por debajo del 90%.
+      - name: Tests (unitarios + integración) con cobertura mínima del 90%
+        run: npm run test:coverage
 
   # ---------------------------------------------------------------------------
   # Panel: `next build` corre su propio lint y falla con errores (CONTRATOS §10).
@@ -99,7 +104,7 @@ jobs:
   # cualquiera sólo por si algún componente lo consulta en tiempo de compilación.
   # ---------------------------------------------------------------------------
   dashboard:
-    name: dashboard (lint + build)
+    name: dashboard (lint + tests + build)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -123,7 +128,37 @@ jobs:
       # Ya pasó dos veces (SbcFlow y /troncales); barato de verificar, caro de encontrar.
       - name: Dependencias de hooks estables
         run: npm run check:deps --if-present
+      # Regla del proyecto: 90 % de líneas, ramas y funciones (vitest.config.mjs).
+      - name: Tests con cobertura (90 %)
+        run: npm run test:coverage
       - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Softphone (Vite + React + Electron): tests con el mismo piso de 90 % y el build
+  # web. Sin bajar el binario de Electron: las pruebas del proceso principal lo simulan.
+  # ---------------------------------------------------------------------------
+  softphone:
+    name: softphone (tests + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    defaults:
+      run:
+        working-directory: softphone-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: softphone-app/package-lock.json
+      - name: Instalar dependencias (npm ci, del lock)
+        run: npm ci --no-audit --no-fund
+      - name: Tests con cobertura (90 %)
+        run: npm run test:coverage
+      - name: Build web
         run: npm run build
 
   # ---------------------------------------------------------------------------

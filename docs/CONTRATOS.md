@@ -266,8 +266,10 @@ de cada archivo y en `.claude/agents/api.md`.
   cadencia que no existía. Se borró con el resto del código muerto del panel.)
   4) ningún poll pide nada con `document.hidden` (lo garantiza `usePoll`; los pocos
   `setInterval` que quedan lo comprueban a mano). Con esto una pestaña abierta en el Resumen
-  hace 5 pedidos por minuto (`/system/overview` cada 30 s + `/trunks`, `/asterisk/core` y
-  `/topology` cada 60 s) contra los ~44 de antes, y cero en segundo plano.
+  hace 6 pedidos por minuto (`/system/overview` cada 30 s + `/trunks`, `/topology`,
+  `/security` y `/turn/estado` cada 60 s) contra los ~44 de antes, y cero en segundo plano.
+  (`/asterisk/core` figuraba acá y se seguía pidiendo cada 60 s sin mostrarse en ningún
+  lado; el Resumen ya no lo pide.)
 - `GET /api/metrics` ya **no lo usa ninguna pantalla**: su contenido es un subconjunto de
   `GET /api/system/overview` (el nodo `core` es el mismo `os.*` del host y `storage.db.bytes`
   es el `db_size`), así que el Resumen pide uno solo de los dos. La ruta sigue existiendo para
@@ -1645,6 +1647,11 @@ instala `tzdata` (`docker/images/asterisk/Dockerfile`) porque `debian:12-slim` n
 sin `/usr/share/zoneinfo` glibc ignora `TZ` y vuelve a UTC en silencio: poner la variable sin
 el paquete parece arreglado y no lo está. Comprobación: `docker compose exec asterisk date` y
 `docker compose exec api date` tienen que dar la misma hora local) ·
+**`TONE_COUNTRY`** (opcional, default `uy` en los dos compose; solo lo lee el servicio
+`asterisk`: el país de la zona de tono de `docker/config/asterisk/indications.conf`, es decir,
+con qué tono suena la central cuando lo genera ella. El entrypoint lo aplica si la zona existe
+en el archivo, hoy `uy` y `ar`; si no, avisa en el log y deja la de fábrica. Sin zona de tono,
+una derivación de la IA suena muda, §11) ·
 `PBXNG_COMPOSE_FILE` (qué compose usa la instalación, lo fija `install.sh`; lo leen
 `pbxng-ctl` y `backup-cron.sh`, no los contenedores) · `CONF_DIR` (directorio de
 configuración persistente de la API, default `/etc/pbxng`; el compose lo fija ahí: ACME,
@@ -1683,7 +1690,7 @@ Recrear Asterisk corta llamadas: `pbxng-ctl` y `deploy.sh` drenan antes con
 Respaldo programado: `docker/backup-cron.sh` (cron del host 03:00, lo instala `install.sh`)
 → `docker compose exec -T api node backup-cli.js --keep=N`; `pbxng-ctl backup [args]` es el
 mismo camino a mano. `control-plane/backup-cli.js` (dueño `api`) invoca `backup.programado()` (= `crear()` con
-nombre `pbxng-auto-YYYYMMDD-HHMM.tar.gz` + retención: se borran sólo los `pbxng-auto-*` que
+nombre `pbxng-auto-YYYYMMDD-HHMMSS.tar.gz` + retención: se borran sólo los `pbxng-auto-*` que
 excedan `--keep`/`BACKUP_KEEP`, nunca los manuales del panel; si la creación falla no se poda
 nada). Además, la API trae un planificador interno equivalente (§3, `backup/schedule`), activo
 por defecto a las 03:00 del reloj del contenedor, así que el cron del host es opcional. Los dos
@@ -1851,3 +1858,89 @@ no rompe porque las tablas ya existen, pero la próxima migración no se aplicar
   (`check-compose-parity.sh` + `docker compose config -q` de ambos), `shell` (`bash -n` de
   todos los `.sh` y `pbxng-ctl`, `py_compile` de los agentes). Detalle en `docs/PACKAGING.md`
   §CI.
+
+## 11. IA externa: el backend del asistente conduce la llamada
+
+Proveedor `ia-externa` de `pbxng_ai_agents` (migración 0029, `control-plane/ia-externa.js`, modo `externo` de `ai-pipeline.js`). En este perfil **la central no sabe de negocio**: atiende, pone el audio con el mismo puente de `realtime.js` (WebSocket a GPT-Live, remuestreo 8↔24 kHz, ritmo de 20 ms y descarte por barge-in) y ejecuta órdenes. Qué decir, cuándo verificar, abrir, derivar o cortar lo decide el backend. No se usan el prompt, el saludo, las herramientas ni la escalera de inactividad del agente.
+
+**Campos del agente**, validados al guardar (400 si no):
+- `externo_url`: la URL del backend, obligatoria. Puede ser **http** o **https**, en la red de la central o por internet. Se recomienda https, porque por ahí viajan el token, el audio del visitante y las órdenes que abren el portón, pero lo decide la instalación. Se rechaza lo que no sea una URL http(s) válida;
+- `externo_token`: el `PBX_TOKEN` del backend, obligatorio;
+- `agentes_exten`: a dónde se transfiere cuando el backend deriva;
+- `default_exten`: el destino de **respaldo**, cuando no hay backend o configuración. Hace falta al menos uno de los dos: sin destino, el backend rechaza cada llamada;
+- `herramientas.abrir_porton.dtmf`: el DTMF de apertura del portero. Solo en `modo: "dtmf"`, y solo `0-9 * # A-D`.
+
+**Contrato v2 (desde el cambio `contrato-pbx-v2`, 01/10):** el backend corre en **varias instancias** detrás de un balanceador, sin afinidad. Todo lo de una llamada va por **su relay**, así la instancia que lo recibe la conduce; si esa instancia se cae o se apaga, la central reabre el relay, cae en otra y esa la retoma. El canal de control queda solo para la configuración. Es un cambio incompatible con la v1: la central y el backend se despliegan juntos.
+
+**Configuración de la sesión** (`GET <externo_url>/api/pbx/session-config`, `Authorization: Bearer <token>`, `If-None-Match` con la versión guardada; responde 304 si no cambió):
+- devuelve `{ version, generatedAt, session, attachTimeoutMs, resumeWindowMs }`;
+- `session` se manda **tal cual** en `{ type: "session.start", session }`;
+- se rechaza si `session.model` no es GPT-Live, porque el relay existe para esa API; `attachTimeoutMs` se acota entre 1 y 30 s, y `resumeWindowMs` (cuánto se intenta reabrir el relay) entre 0 y 60 s, con 20 s si no viene;
+- se guarda en `pbxng_ia_externa_config` (migraciones 0029 y 0031), así que un reinicio de la API no deja al agente sin configuración;
+- se baja al recibir la orden `refrescar_config`.
+
+**Canal de control** (`ws(s)://<externo_url>/api/pbx/canal`, `Authorization: Bearer <token>`): uno por backend, que comparten todos sus agentes; lo atiende una instancia cualquiera. El backend manda un ping cada 5 s; sin ping en 15 s, la central lo da por caído y reconecta, con esperas de 1, 2, 5 y 10 s. Con token inválido (401/403), reintenta cada 60 s y lo avisa una vez.
+- La única orden es `refrescar_config { id }`: el backend la manda al conectarse el canal y cuando cambia la configuración (desde cualquier instancia). La central contesta `{ type: "ack", id }` después de bajarla, u `orden_fallida` si no pudo. Una repetida no se ejecuta dos veces.
+- Cualquier otra orden por el canal se contesta con `orden_fallida`: lo de las llamadas va por su relay.
+- **Sin canal no se va al respaldo:** una llamada nueva se atiende igual si hay configuración bajada.
+
+**Relay de la llamada** (`ws(s)://<externo_url>/api/pbx/llamadas/<pbxCallId>/relay`, con el token): uno por llamada, abierto cuando la sesión de GPT-Live está lista. `pbxCallId` es el uuid de la sesión de IA.
+- **Primer mensaje (central → backend), el aviso:** `llamada_nueva { pbxCallId, from, to, origen: "portero"|"telefono", configVersion, dtmfApertura, destinoAgentes, reanudar, ultimoSeq }`. `reanudar` es `false` y `ultimoSeq` `null` en una llamada nueva.
+- **El backend contesta** `enganche_confirmado { pbxCallId, desde? }` o `enganche_rechazado { pbxCallId, motivo }`.
+- **Central → backend, numerados (`seq`, de a uno en toda la llamada):** cada evento de GPT-Live tal cual, el `session.input_audio.append` que manda la central, y los hechos: `colgo { pbxCallId }`, `dtmf { pbxCallId, digito }`, `transferencia { pbxCallId, ok, detalle }`. La central guarda los últimos 2000 (unos 20 s) para reenviarlos. El aviso y las respuestas a las órdenes no se numeran.
+- **Backend → central:**
+  - `session.instructions.append`, `session.commentary.append` y `session.close`, que pasan a la sesión; cualquier otro tipo se descarta;
+  - las órdenes de esa llamada, cada una con `id`: `colgar { pbxCallId }`, `transferir { pbxCallId, destino }`, `enviar_dtmf { pbxCallId, digitos }`. El `id` es determinístico (`<llamada>:<tipo>:<n>`): si otra instancia retoma la llamada y manda la misma orden, lleva el mismo id.
+
+  La central contesta `{ type: "ack", id }` **después** de ejecutarla, u `orden_fallida { pbxCallId, ordenId, detalle }` si no pudo. Las órdenes ya vistas se recuerdan **por llamada**, no por socket: una repetida, también por un relay reabierto, no se ejecuta dos veces y se repite la respuesta. Una orden con otro `pbxCallId`, o de un tipo desconocido, se contesta con `orden_fallida`.
+- **Restricciones:**
+  - `transferir` solo acepta como `destino` el `agentes_exten` o el `default_exten` del agente, porque en el contexto `internal` también están las salidas por troncal y la DISA;
+  - `colgar` y `transferir` esperan a que suene lo que quedaba en la cola de audio, hasta 5 s, para no cortar la despedida.
+- **El relay lo cierra la central**, cuando termina la llamada: espera que salga la respuesta de las órdenes en curso (el ack del `colgar` que la terminó; tope de 10 s) y un instante más para el hecho final. Para la central, un cierre del backend significa «reabrí». Con la llamada terminada, una orden nueva se contesta con `orden_fallida` («la llamada ya no está en curso») sin ejecutarse, y una ya hecha repite su respuesta.
+- **Tope para abrir:** el relay y el canal se abren con un tope de 3 s; si no hay respuesta, se corta y se reintenta. Un balanceador que manda la conexión a una instancia apagada la puede dejar colgada en vez de rechazarla.
+- **Latido:** la central manda un ping por el relay cada 2 s (el backend lo contesta solo, con su librería de WebSocket); sin respuesta en 6 s, lo da por cortado y lo reabre. Así una instancia congelada o una red cortada sin aviso no dejan la llamada sin conducir.
+- **Si la sesión de GPT-Live se corta sin `session.closed`** (un corte de red), la central manda un `session.closed { reason: "cortada_en_la_central" }` numerado, porque el cierre del relay ya no sirve para avisarlo.
+
+**Reanudar** (el relay se corta sin que la llamada haya terminado):
+- la central lo reabre **enseguida**, y después cada 1 s, durante `resumeWindowMs`. El balanceador lo manda a cualquier instancia;
+- el aviso va con `reanudar: true` y `ultimoSeq` (el último número que mandó). Lo que pasa mientras está cortado se sigue numerando y guardando;
+- el backend contesta `enganche_confirmado` con `desde` (el siguiente al último que tiene guardado), y la central reenvía desde ahí, en orden. Si `desde` es más viejo que lo guardado, manda lo que tiene y lo anota (el backend nota el hueco por el `seq`);
+- **código 4001 («reubicar»):** una instancia que se apaga cierra el relay así; la central lo reabre sin esperar. Solo el primer intento de cada corte sale sin esperar: si las reaperturas siguientes también reciben 4001 (todas las instancias drenándose), van cada 1 s, sin bucle;
+- si vence la ventana sin confirmación, o el backend rechaza la reanudación, va al respaldo.
+
+**Hechos con el relay cerrado** (el resultado de una transferencia, el corte de quien llama al final): `POST <externo_url>/api/pbx/llamadas/<pbxCallId>/hechos` con el token y el hecho como cuerpo. Cualquier instancia lo anota en la llamada. Tres intentos (1 y 2 s entre ellos); un 4xx no se reintenta. Si el aviso de la llamada nunca llegó a salir (quien llama cortó antes de abrir el relay), no se le manda nada: el backend no sabe de esa llamada.
+
+**Quién atendió la derivación** (nuevo, compatible para los dos lados): después de un `transferir` que salió bien, la central avisa con el hecho `atendio { pbxCallId, interno }`, por HTTP como los demás hechos con el relay cerrado (a esa altura el relay ya terminó).
+- `interno` es el interno que contestó (dígitos), tomado del `DialEnd` con `ANSWER` de AMI de la misma llamada (`linkedid` del canal de quien llama; si no se puede leer, el `uniqueid` del canal). En un grupo de timbre cuenta el primero que contesta: se avisa una sola vez por llamada.
+- `interno: null` es «nadie atendió»: quien llama cortó (el `Hangup` de su canal) sin que ningún interno contestara.
+- Si en 10 min no pasó ninguna de las dos cosas, la central se olvida de la llamada sin avisar. Una transferencia que falla no se vigila.
+- Un backend que no conoce el hecho contesta 4xx y no se reintenta; un backend que lo conoce y nunca lo recibe (una central anterior) deja la llamada sin ese dato.
+
+**Respaldo** (transferir a `default_exten`, o colgar si no hay):
+- **Sin abrir sesión:** no hay configuración bajada.
+- **Cerrando la sesión:** el backend no confirma dentro de `attachTimeoutMs` o la rechaza, o la sesión no abre.
+- **Pasados 5 s sin orden del backend** después de que se cerró la sesión de voz: no llegó `colgar` ni `transferir`. Se espera porque el backend primero cierra la sesión (se despide o anuncia la derivación) y recién después manda la orden. Un corte del relay no la usa: el relay se reabre.
+- **El relay no se pudo reabrir** en la ventana.
+
+**Video del portero en la derivación:** el puente del agente de IA es `mixing,video_sfu`, que en Asterisk es el softmix. Con `mixing` solo, para dos canales Asterisk usaba el puente simple, que iguala las negociaciones: le sacaba el video al portero (re-INVITE con `m=video 0`, porque el canal de audio de la IA no tiene video) y la derivación al agente salía solo con audio. Con el softmix, el portero conserva su video mientras habla con la IA (que no lo usa) y el `Dial` al agente lo ofrece. La imagen verifica `bridge_softmix.so`.
+
+**Tono de llamada en la transferencia:** mientras suena el destino, quien llama **escucha el tono de llamada**, tanto en `transferir` como en cualquiera de los respaldos.
+- **La causa del silencio eran las zonas de tono.** La llamada ya la atendió el `Answer()` del `ivr`, y sobre un canal atendido Asterisk no manda 180: el tono lo tiene que generar el core por audio, con la zona de tono. La imagen no traía `indications.conf` (`indication show` vacío), así que no sonaba nada: ni el aviso de ringing del interno, ni la opción `r`. Quien llama escuchaba silencio y el softphone del panel cortaba solo a los ~8 s por su vigilante `rtp-timeout`. Se vio en la primera llamada real (29/09): dos derivaciones cortadas a los 9 s.
+- **Zonas de tono:** la imagen trae `docker/config/asterisk/indications.conf` con `uy` y `ar`, con los valores de la UIT (Anexo al Boletín de Explotación 781, 1.II.2003, «Various tones used in national networks»). Uruguay: 425 Hz, invitación a marcar continua, llamada 1 s sonando y 4 s de silencio, ocupado 0,5/0,5 s y congestión 0,25/0,25 s. El país sale de `TONE_COUNTRY` (§6, `uy` por defecto); para cambiarlo se pone en `docker/.env` y se recrea el contenedor de Asterisk. Para agregar un país hay que sumar su sección al archivo y reconstruir la imagen.
+- **`DIAL_OPCIONES=r`:** antes del `continueInDialplan` a `internal,<destino>,1`, la central pone la variable en el canal. La leen el `Dial` del interno, el del sígueme, el de los grupos de timbre y el de la opción de IVR que marca un interno, estos dos últimos escritos por el panel (`apps.js`). Con las zonas cargadas, `r` queda para los destinos que nunca avisan que suenan. Si no se puede poner, se anota en el log de la sesión y se transfiere igual.
+- **`Ringing()` al despertar:** si la variable está puesta y el interno no tiene contacto registrado, el tramo de despertar y esperar el registro (hasta unos 14 s antes del `Dial`) arranca con `Ringing()`. El generador de tono solo produce audio cuando alguien lee el canal, y el `CURL` del despertar lo bloquea sin leerlo (hasta ~6 s). Por eso el tono recién empieza en el primer `Wait(0.5)` del poll, cuando vuelve el `CURL`.
+- **Qué no cambia:** una llamada directa entre internos. Ahí la variable está vacía, los `Dial` y el despertar quedan como siempre, y el tono lo sigue armando el teléfono que llama con el 180. La variable no se hereda (va sin `_`).
+- **Qué cambia también, para bien, fuera de la IA:** las zonas de tono valen para cualquier llamada ya atendida, así que ahora también escuchan el tono una llamada a un IVR que marca un interno y una transferencia ciega hecha por una persona. Antes las dos quedaban en silencio mientras sonaba el destino.
+- **Efectos laterales aceptados:**
+  - con las zonas cargadas, `Busy()`, `Congestion()` y las demás indicaciones sobre canales atendidos pasan a sonar;
+  - con `r`, en el sígueme se pierde el audio temprano del celular, como el "apagado o fuera del área";
+  - la grabación de la transferencia incluye el tono;
+  - la variable queda en el canal, así que un desvío por no contestar o una transferencia ciega posterior también dan tono, que es lo correcto porque el canal sigue atendido.
+- **Los grupos e IVR que ya existían:** la migración `0030_tono_derivaciones.sql` les agrega `,${DIAL_OPCIONES}` a los `Dial` escritos antes del cambio. Solo toca las filas con la forma exacta que escribía el panel: `PJSIP/a&PJSIP/b,<timbre>` en la prioridad 2 del grupo y `PJSIP/<interno>,30` en las opciones del IVR. Es idempotente, y un grupo cuyo `Dial` no entra en la columna (256 caracteres) queda como estaba y se nombra en el log de la migración. Una cola no lee la variable.
+- **`ring_time` de los grupos de timbre:** tiene que ser un entero de 5 a 120 s (400 si no); sin él, 25 s. Entraba crudo al `Dial`, y una coma metía opciones propias y corría `${DIAL_OPCIONES}` a un argumento que `Dial` no lee.
+
+**Fin de la llamada:** todo fin que no ordenó el backend (colgó quien llama, se cortó el audio, un tope, un apagado) se le avisa con `colgo`, por el relay o, si ya no está, por HTTP.
+
+**Auditoría:** cada `enviar_dtmf` queda en `pbxng_ia_acciones` como `abrir_porton` (orden del backend).
+
+El lado del backend, en el repo del asistente: la spec `integracion-pbx` y SPEC §77 y §85 (contrato v2; el video del portero, §82).

@@ -300,6 +300,38 @@ test('telefonía: features del interno, horarios, feriados, modo noche, códigos
     assert.equal((await ctx.db.query("SELECT cfu, dnd FROM pbxng_ext_features WHERE ext='1005'")).rows[0].cfu, null);
   });
 
+  /* El tono en las derivaciones de la IA: ai-pipeline.js pone DIAL_OPCIONES=r en el canal y
+   * los Dial que escribe el panel la tienen que leer, porque la IA puede derivar a un grupo
+   * de timbre (o a un IVR que marca un interno) con la llamada ya atendida, y ahí el tono lo
+   * tiene que generar la central (`r`, con la zona de indications.conf). En una llamada común la
+   * variable va vacía: sacándola, el Dial tiene que ser el de siempre. */
+  await t.test('grupo de timbre e IVR: el Dial lleva ${DIAL_OPCIONES} y sin ella queda como antes', async () => {
+    const dialDe = async (exten) => (await ctx.db.query(
+      "SELECT appdata FROM extensions WHERE context='ivr' AND exten=$1 AND app='Dial' ORDER BY priority", [exten])).rows.map((x) => x.appdata);
+
+    assert.equal((await api('POST', '/api/ringgroups', { token: admin, body: { name: 'rg-tono', access_exten: '6601', members: '1001, 1002', ring_time: 20 } })).status, 201);
+    const rg = await dialDe('6601');
+    assert.deepEqual(rg, ['PJSIP/1001&PJSIP/1002,20,${DIAL_OPCIONES}'], 'el Dial del grupo tiene que pasar ${DIAL_OPCIONES} como opciones');
+    assert.deepEqual(rg.map((d) => d.replace(',${DIAL_OPCIONES}', '')), ['PJSIP/1001&PJSIP/1002,20']);
+
+    /* El timbre entra crudo al Dial: una coma metía opciones y corría ${DIAL_OPCIONES} a un
+     * cuarto argumento que Dial no lee. Entero de 5 a 120 s, o 400; sin él, 25 s. */
+    for (const malo of ['20,m', '20.5', 3, 121, 'abc', -5]) {
+      const r = await api('POST', '/api/ringgroups', { token: admin, body: { name: 'rg-malo', access_exten: '6609', members: '1001', ring_time: malo } });
+      assert.equal(r.status, 400, 'ring_time ' + JSON.stringify(malo) + ' tenía que dar 400');
+    }
+    assert.deepEqual(await dialDe('6609'), [], 'un ring_time inválido no deja nada escrito en el dialplan');
+    assert.equal((await api('POST', '/api/ringgroups', { token: admin, body: { name: 'rg-texto', access_exten: '6604', members: '1003', ring_time: '30' } })).status, 201);
+    assert.deepEqual(await dialDe('6604'), ['PJSIP/1003,30,${DIAL_OPCIONES}']);
+    assert.equal((await api('POST', '/api/ringgroups', { token: admin, body: { name: 'rg-sin-timbre', access_exten: '6605', members: '1003' } })).status, 201);
+    assert.deepEqual(await dialDe('6605'), ['PJSIP/1003,25,${DIAL_OPCIONES}'], 'sin ring_time, los 25 s de siempre');
+
+    assert.equal((await api('POST', '/api/ivr', { token: admin, body: { name: 'ivr-tono', exten: '6602', options: [{ digit: '1', dest_type: 'extension', dest_value: '1001' }] } })).status, 201);
+    const ivr = await dialDe('6602');
+    assert.deepEqual(ivr, ['PJSIP/1001,30,${DIAL_OPCIONES}'], 'la opción del IVR que marca un interno también la lleva');
+    assert.deepEqual(ivr.map((d) => d.replace(',${DIAL_OPCIONES}', '')), ['PJSIP/1001,30']);
+  });
+
   await t.test('roles: horarios y códigos son admin; el estado de modo noche lo ve el supervisor', async () => {
     assert.equal((await api('POST', '/api/users', { token: admin, body: { username: 'sup', password: 'Clave-sup-123', role: 'supervisor' } })).status, 201);
     const sup = (await login('sup', 'Clave-sup-123')).token;

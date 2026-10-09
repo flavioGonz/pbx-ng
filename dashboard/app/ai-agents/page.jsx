@@ -18,12 +18,14 @@ import { IconRefresh, IconBuildingStore, IconTool, IconDoorEnter, IconShieldLock
 import { IcoAgente, IcoCerebro, IcoNube, IcoOnda } from '../IaIcons';
 import { IconMicrophone2 } from '@tabler/icons-react';
 import { toast } from '../notify';
+import { api, apiGet, apiPost, apiPut, apiDel } from '../api';
 
 /* Los proveedores, con la única diferencia que le importa a quien elige: dónde corre. */
 const PROVIDERS = [
   { value: 'openai-realtime', label: 'OpenAI voz a voz (GPT-Live / Realtime)', donde: 'nube', pie: 'Una sola sesión con el modelo: la menor latencia' },
   { value: 'openai', label: 'OpenAI en tres pasos (Whisper → GPT → TTS)', donde: 'nube', pie: 'Más lento, pero permite elegir cada pieza' },
   { value: 'demo', label: 'Demo (offline · Vosk + voz local)', donde: 'local', pie: 'Sin clave ni internet, y sin costo. Para probar el recorrido' },
+  { value: 'ia-externa', label: 'IA externa (la conduce el backend del asistente)', donde: 'nube', pie: 'Otro sistema maneja la conversación; la central pone el audio y ejecuta sus órdenes' },
 ];
 const MODELS = [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini (rápido/económico)' }, { value: 'gpt-4o', label: 'gpt-4o (máxima calidad)' }];
 const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label: 'Alloy' }, { value: 'shimmer', label: 'Shimmer' }, { value: 'onyx', label: 'Onyx' }, { value: 'echo', label: 'Echo' }, { value: 'fable', label: 'Fable' }];
@@ -31,12 +33,19 @@ const OPENAI_VOICES = [{ value: 'nova', label: 'Nova' }, { value: 'alloy', label
  * cada pocos meses; una lista cerrada obligaría a actualizar la central para volver a
  * atender. Estas son sugerencias — la lista de verdad la trae «Nube». */
 const RT_MODELS = ['gpt-live-1', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini'];
+/* Modelos que el proveedor apaga: no se ofrecen aunque la cuenta todavía los sirva, y si un
+ * agente viejo tiene uno guardado se muestra el reemplazo (gpt-5.1 se apaga el 1/4/2027). */
+const RETIRADOS = ['gpt-5.1'];
+const vigentes = (lista) => lista.filter(m => !RETIRADOS.includes(m));
 const RT_VOICES = ['marin', 'cedar', 'alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
 const esRT = (p) => p === 'openai-realtime';
-const enLaNube = (p) => p === 'openai-realtime' || p === 'openai';
+const enLaNube = (p) => p === 'openai-realtime' || p === 'openai' || p === 'ia-externa';
+/* IA externa: el modelo, la voz, el prompt y el saludo los pone el backend del asistente,
+ * que publica la configuración de la sesión; la central no los usa. */
+const esExterna = (p) => p === 'ia-externa';
 const provMeta = (p) => PROVIDERS.find(x => x.value === p) || PROVIDERS[2];
 
-const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, record: false, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '', herramientas: {} };
+const empty = { name: '', exten: '', provider: 'openai-realtime', model: 'gpt-live-1', voice: 'marin', greeting_text: '', system_prompt: '', sales_exten: '', support_exten: '', default_exten: '', crm_webhook: '', enabled: true, record: false, inact1_s: 0, inact2_s: 0, cierre_s: 0, inact1_text: '', inact2_text: '', despedida_text: '', herramientas: {}, externo_url: '', externo_token: '', agentes_exten: '' };
 /* Los tiempos con los que se despliega la primera vez. Dos consultas antes de cortar, y
  * no una, porque la primera se pierde seguido: el visitante se dio vuelta, estaba hablando
  * con alguien, se le cayó el teléfono. */
@@ -73,7 +82,9 @@ export default function AiAgents() {
    * lista que se desincroniza, y en esta pantalla eso significa ofrecer una herramienta
    * que el backend no sabe ejecutar. */
   async function cargarCatalogo() {
-    try { setCatalogo(await fetch('/backend/api/ai-agents/herramientas').then(r => r.json())); } catch (_) {}
+    /* Antes era un fetch suelto: un 403/500 con cuerpo JSON dejaba `catalogo` en un objeto
+     * `{error}` y la solapa Herramientas reventaba en `catalogo.filter`. */
+    try { const d = await apiGet('/ai-agents/herramientas'); setCatalogo(Array.isArray(d) ? d : []); } catch (e) { toast(e.message, 'bad'); }
   }
   /* El registro de acciones. No es un log de depuración: es la respuesta a «¿quién abrió
    * el portón a las 3 de la mañana?». Por eso vive en la misma pantalla que los agentes
@@ -83,24 +94,27 @@ export default function AiAgents() {
   const [soloRechazos, setSoloRechazos] = useState(false);
   const [herrFiltro, setHerrFiltro] = useState('');
   async function cargarAcciones() {
-    try { setAcciones(await fetch('/backend/api/ai-agents/acciones?limite=200').then(r => r.json())); } catch (_) { setAcciones([]); }
+    try { const d = await apiGet('/ai-agents/acciones?limite=200'); setAcciones(Array.isArray(d) ? d : []); } catch (_) { setAcciones((a) => a || []); }
   }
   const previewRef = useRef(null);
 
   async function load() {
-    try { setList(await fetch('/backend/api/ai-agents').then(r => r.json())); } catch (_) { setList([]); }
+    /* Mismo problema que el catálogo: con un error de la API `list` quedaba en `{error}` y la
+     * pantalla entera se caía en `list.filter`. Ahora el error se dice y la lista queda como
+     * estaba (vacía si nunca cargó). */
+    try { const d = await apiGet('/ai-agents'); setList(Array.isArray(d) ? d : []); } catch (e) { toast(e.message, 'bad'); setList((l) => l || []); }
     try {
-      const l = await fetch('/backend/api/ai-agents/live').then(r => r.json());
+      const l = (await apiGet('/ai-agents/live')) || {};
       /* El chequeo periódico manda sobre el último error visto en una llamada: si la cuenta
        * ya se recuperó (cargaron saldo), el banner tiene que irse solo. */
       if (l.salud && l.salud.estado !== 'ok' && l.salud.estado !== 'sin_clave') setProblema({ que: l.salud.que, arreglo: l.salud.arreglo, ts: l.salud.ts });
       else if (l.salud && l.salud.estado === 'ok') setProblema(null);
       else setProblema(l.problema || null);
-    } catch (_) {}
+    } catch (_) { /* el banner de salud es informativo: sin él la pantalla sigue sirviendo */ }
   }
-  async function loadVozList() { try { const v = await fetch('/backend/api/voz/voices').then(r => r.json()); setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (_) {} }
+  async function loadVozList() { try { const v = (await apiGet('/voz/voices')) || {}; setVozList((v.installed || []).map(x => x.key)); setEdgeList(v.edge || []); } catch (e) { toast(e.message, 'bad'); } }
   async function cargarModelos() {
-    try { setRtModelos(await fetch('/backend/api/ai-agents/modelos').then(r => r.json())); } catch (_) { setRtModelos({ ok: false }); }
+    try { setRtModelos((await apiGet('/ai-agents/modelos')) || { ok: false }); } catch (_) { setRtModelos({ ok: false }); }
   }
   useEffect(() => { load(); loadVozList(); cargarCatalogo(); cargarAcciones(); const t = setInterval(() => { if (!document.hidden) { load(); cargarAcciones(); } }, 30000); return () => clearInterval(t); }, []);
 
@@ -129,42 +143,45 @@ export default function AiAgents() {
   async function save() {
     if (!form.name || !form.exten) { toast('El nombre y el número de acceso son obligatorios', 'bad'); setPaso('identidad'); return; }
     setSaving(true);
-    const url = form.id ? '/backend/api/ai-agents/' + form.id : '/backend/api/ai-agents';
-    const r = await fetch(url, { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }).then(x => x.json()).catch(() => ({ error: 'red' }));
+    try {
+      if (form.id) await apiPut('/ai-agents/' + form.id, form); else await apiPost('/ai-agents', form);
+      toast(form.id ? 'Agente actualizado' : 'Agente creado · marcá ' + form.exten, 'ok'); setOpened(false); load();
+    } catch (e) { toast('Error: ' + e.message, 'bad'); }
     setSaving(false);
-    if (r.error) toast('Error: ' + r.error, 'bad');
-    else { toast(form.id ? 'Agente actualizado' : 'Agente creado · marcá ' + form.exten, 'ok'); setOpened(false); load(); }
   }
+  /* Antes se ignoraba la respuesta: un borrado rechazado (403, o el agente en uso por una
+   * cola) avisaba «Agente eliminado» igual. */
   async function del(a) {
     if (!confirm('¿Eliminar el agente ' + a.name + '?')) return;
-    await fetch('/backend/api/ai-agents/' + a.id, { method: 'DELETE' });
-    toast('Agente eliminado', 'info'); load();
+    try { await apiDel('/ai-agents/' + a.id); toast('Agente eliminado', 'info'); load(); }
+    catch (e) { toast(e.message, 'bad'); }
   }
   /* Probar la caja del backoffice sin llamar por teléfono. Lo importante de lo que
    * devuelve no es «anda»: es qué se descartó y por qué. */
   async function probarBackoffice() {
     setProbandoBo(true); setPruebaBo(null);
-    const r = await fetch('/backend/api/ai-agents/probar-backoffice', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: herr('remoto').url, token: herr('remoto').token, tope_ms: herr('remoto').tope_ms }),
-    }).then(x => x.json()).catch(() => ({ ok: false, error: 'no se pudo contactar la central' }));
+    let r;
+    try { r = (await apiPost('/ai-agents/probar-backoffice', { url: herr('remoto').url, token: herr('remoto').token, tope_ms: herr('remoto').tope_ms })) || {}; }
+    catch (e) { r = { ok: false, error: e.message }; }
+    r = { ...r, herramientas: r.herramientas || [] };
     setProbandoBo(false); setPruebaBo(r);
     toast(r.ok ? 'El backoffice publicó ' + r.herramientas.length + ' herramienta(s)' : 'El backoffice no publicó nada usable', r.ok ? 'ok' : 'bad');
   }
   async function probarConexion() {
     setProbando(true); setPrueba(null);
-    const r = await fetch('/backend/api/ai-agents/probar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: form.model, voice: form.voice }) })
-      .then(x => x.json()).catch(() => ({ ok: false, error: 'no se pudo contactar la central' }));
+    let r;
+    try { r = (await apiPost('/ai-agents/probar', { model: form.model, voice: form.voice })) || { ok: false }; }
+    catch (e) { r = { ok: false, error: e.message }; }
     setProbando(false); setPrueba(r);
     toast(r.ok ? 'El modelo contestó: ya se puede marcar ' + (form.exten || 'el interno') : 'La prueba falló', r.ok ? 'ok' : 'bad');
   }
   async function preview(voice) {
     try {
-      const r = await fetch('/backend/api/voz/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }) });
-      if (!r.ok) { toast('No se pudo generar el audio', 'bad'); return; }
+      // `raw` porque la respuesta es el WAV sintetizado, no JSON.
+      const r = await api('/voz/test', { method: 'POST', body: { text: form.greeting_text || 'Hola, esta es la voz del agente.', voice }, raw: true });
       const b = await r.blob();
       if (previewRef.current) { previewRef.current.src = URL.createObjectURL(b); previewRef.current.play().catch(() => {}); }
-    } catch (_) {}
+    } catch (e) { toast('No se pudo generar el audio', 'bad', { description: e.message }); }
   }
 
   const filtrados = (list || []).filter(a => !filtro
@@ -418,14 +435,27 @@ export default function AiAgents() {
                       <Text size="xs">Todo adentro del fierro: sin clave, sin internet y sin costo. Entiende poco, pero sirve para probar el recorrido de la llamada.</Text>
                     </Alert>}
 
-                {form.provider !== 'demo' && (
+                {esExterna(form.provider) && (
+                  <Stack gap="md">
+                    <Alert variant="light" color="blue" p="xs">
+                      <Text size="xs">La conversación la conduce el <b>backend del asistente</b>: el modelo, la voz, las instrucciones y el saludo vienen de su configuración, y la central solo pone el audio y ejecuta sus órdenes (colgar, transferir, DTMF). El prompt, el saludo, la inactividad y las herramientas de esta pantalla <b>no se usan</b> con este proveedor, salvo el tono de «Abrir el portón», que es el DTMF con el que se abre. Sin backend, la llamada va al destino <b>Por defecto</b>.</Text>
+                    </Alert>
+                    <TextInput label="URL del backend" placeholder="http://asistente.local:3100" description="http o https (se recomienda https si va por internet)"
+                      value={form.externo_url || ''} onChange={e => up('externo_url', e.currentTarget.value)} required />
+                    <TextInput label="Token compartido" placeholder="el PBX_TOKEN del backend" description="El mismo valor que PBX_TOKEN en el backend"
+                      value={form.externo_token || ''} onChange={e => up('externo_token', e.currentTarget.value)} required />
+                    <TextInput label="Destino de agentes" placeholder="600" description="Cola o interno al que se transfiere cuando el backend deriva a una persona"
+                      value={form.agentes_exten || ''} onChange={e => up('agentes_exten', e.currentTarget.value)} leftSection={<IconHeadset size={14} />} />
+                  </Stack>
+                )}
+                {form.provider !== 'demo' && !esExterna(form.provider) && (
                   <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
                     {esRT(form.provider)
                       ? <Autocomplete label="Modelo" placeholder="gpt-live-1"
                           description={rtModelos === null ? 'gpt-live o gpt-realtime'
                             : rtModelos.ok ? (rtModelos.modelos.length ? 'Los ' + rtModelos.modelos.length + ' que sirve tu cuenta' : 'Tu cuenta no sirve ninguno de voz a voz')
                               : 'No se pudo consultar tu cuenta'}
-                          data={rtModelos && rtModelos.ok && rtModelos.modelos.length ? rtModelos.modelos : RT_MODELS}
+                          data={vigentes(rtModelos && rtModelos.ok && rtModelos.modelos.length ? rtModelos.modelos : RT_MODELS)}
                           value={form.model || ''} onChange={v => { up('model', v); setPrueba(null); }} />
                       : <Select label="Modelo" data={MODELS} value={form.model} onChange={v => up('model', v)} />}
                     {esRT(form.provider)
@@ -480,7 +510,7 @@ export default function AiAgents() {
                 <Switch mb={form.inact1_s > 0 ? 'md' : 0}
                   label={form.inact1_s > 0 ? 'La central consulta y, si no hay nadie, corta' : 'Apagado: la llamada queda abierta hasta que alguien cuelgue'}
                   checked={form.inact1_s > 0}
-                  onChange={e => setForm(s2 => ({ ...s2, ...(e.currentTarget.checked ? INACT_DEF : { inact1_s: 0, inact2_s: 0, cierre_s: 0 }) }))} />
+                  onChange={({ currentTarget: { checked } }) => setForm(s2 => ({ ...s2, ...(checked ? INACT_DEF : { inact1_s: 0, inact2_s: 0, cierre_s: 0 }) }))} />
                 {form.inact1_s > 0 && <>
                   <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md" mb="md">
                     <NumberInput label="¿Sigue ahí?" description="Silencio antes de consultar" suffix=" s" min={1} max={120}
@@ -648,8 +678,8 @@ export default function AiAgents() {
                   ayuda="Con herramientas encendidas son DOS modelos: el de voz escucha y habla, y este decide qué herramienta pedir. Es obligatorio: sin él la sesión no abre y la llamada se cae a «no puedo atenderte».">
                   <Select label="Modelo que razona" searchable
                     description={rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? 'Los que sirve tu cuenta' : 'Sugerencias'}
-                    data={rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? rtModelos.razonamiento : ['gpt-5.1', 'gpt-5-nano', 'gpt-4.1-nano']}
-                    value={(form.herramientas?.delegacion || {}).model || 'gpt-5.1'}
+                    data={vigentes(rtModelos && rtModelos.ok && (rtModelos.razonamiento || []).length ? rtModelos.razonamiento : ['gpt-6-sol', 'gpt-5-nano', 'gpt-4.1-nano'])}
+                    value={vigentes([(form.herramientas?.delegacion || {}).model || ''])[0] || 'gpt-6-sol'}
                     onChange={v => upHerr('delegacion', 'model', v)} />
                   <Text size="xs" c="dimmed" mt="xs">
                     Uno más chico contesta más rápido y sale menos; uno más grande entiende mejor cuándo NO usar una herramienta.

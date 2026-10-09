@@ -80,7 +80,7 @@ const emails = require('./emails');
  */
 module.exports = function init(deps) {
   const { app, pool, ami, amiAction, amiList, setDialplan, smtpHint, errorHttp, broadcastSoon, logger, createWebrtcEndpoint, rateLimit, reportarWeb, clientIp } = deps;
-  const log = logger ? logger('salas') : { info() {}, warn() {}, error() {} };
+  const log = logger ? logger('salas') : require('./log').mudo;
 
   const err = (status, msg) => Object.assign(new Error(msg), { status });
 
@@ -495,7 +495,6 @@ module.exports = function init(deps) {
    * avisa al bridge y el panel quedaría mostrando otra cosa). app_confbridge publica
    * exactamente eso por AMI: ConfbridgeList / ConfbridgeMute / ConfbridgeUnmute /
    * ConfbridgeKick. Es el mismo camino que ya usa el aparcado con ParkedCalls. */
-  const evs = (r) => { const e = (r && (r.events || r.eventlist)) || []; return Array.isArray(e) ? e : []; };
   const campo = (e, ...ks) => { for (const k of ks) { if (e[k] !== undefined) return e[k]; if (e[k.toLowerCase()] !== undefined) return e[k.toLowerCase()]; } return ''; };
   const si = (v) => String(v || '').toLowerCase() === 'yes';
 
@@ -621,7 +620,7 @@ module.exports = function init(deps) {
       if (!sala) return res.status(404).json({ error: 'no existe esa sala' });
       const p = await canalDeLaSala(sala.name, (req.body || {}).canal);
       await amiAction({ Action: 'ConfbridgeKick', Conference: sala.name, Channel: p.canal });
-      log.info('expulsado ' + p.canal + ' de ' + sala.name + ' por ' + ((req.user && req.user.user) || '?'));
+      log.info('expulsado ' + p.canal + ' de ' + sala.name + ' por ' + ((req.user && req.user.username) || '?'));
       res.json({ ok: true, canal: p.canal });
     } catch (e) { errorHttp(res, e); }
   });
@@ -715,7 +714,9 @@ module.exports = function init(deps) {
     ? rateLimit({
       windowMs: 5 * 60 * 1000, limit: 10,
       standardHeaders: 'draft-7', legacyHeaders: false,
-      keyGenerator: (req) => String((clientIp && clientIp(req)) || req.ip || ''),
+      /* `ipKeyGenerator` agrupa las IPv6 por /64, como el click-to-call y el login: sin
+       * eso, quien tiene un /64 rota de dirección en cada pedido y el cupo no lo frena. */
+      keyGenerator: (req) => require('express-rate-limit').ipKeyGenerator(String((clientIp && clientIp(req)) || req.ip || '')),
       handler: (req, res) => res.status(429).json({ error: 'Demasiados intentos, probá en unos minutos.' }),
     })
     : (req, res, next) => next();
@@ -788,7 +789,7 @@ module.exports = function init(deps) {
 
   app.post('/api/salas/web/:token/session', enlaceLimite, async (req, res) => {
     const b = req.body || {};
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       const { rows } = await c.query('SELECT ' + CAMPOS + ' FROM pbxng_conferences WHERE web_token=$1', [req.params.token]);
       const sala = rows[0];
@@ -840,7 +841,7 @@ module.exports = function init(deps) {
    * no sirve. Es admin porque entrar de moderador es exactamente lo que da el PIN de
    * moderador —abrir, silenciar y expulsar—. */
   app.post('/api/salas/:name/moderar', async (req, res) => {
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       const { rows } = await c.query('SELECT ' + CAMPOS + ' FROM pbxng_conferences WHERE name=$1', [req.params.name]);
       const sala = rows[0];
@@ -907,20 +908,28 @@ module.exports = function init(deps) {
    *  Esas filas se cierran al arrancar y quedan MARCADAS (`fin_estimado`): el panel lo dice
    *  en vez de mostrar una duración inventada.
    * ══════════════════════════════════════════════════════════════════════════ */
-  const abiertas = new Map();   // sala -> id de la reunión en curso
+  /* sala -> PROMESA del id de la reunión en curso. Se guarda la promesa y no el id: al
+   * arrancar una reunión entran varios casi juntos, y si cada entrada buscaba la reunión en
+   * la base por su cuenta, todas veían «no hay ninguna» y creaba cada una la suya (el
+   * historial mostraba dos reuniones de pico 1 en vez de una de pico 2). */
+  const abiertas = new Map();
 
-  async function reunionDe(sala, grabada) {
-    if (abiertas.has(sala)) return abiertas.get(sala);
-    /* Puede existir una reunión abierta en la base y no en memoria: la central se reinició
-     * en el medio. Se sigue la misma, en vez de partir la reunión en dos. */
-    const { rows } = await pool.query('SELECT id FROM pbxng_conf_reuniones WHERE sala=$1 AND fin IS NULL ORDER BY inicio DESC LIMIT 1', [sala]);
-    let id = rows[0] && rows[0].id;
-    if (!id) {
+  async function buscarOAbrir(sala, grabada) {
+    try {
+      /* Puede existir una reunión abierta en la base y no en memoria: la central se reinició
+       * en el medio. Se sigue la misma, en vez de partir la reunión en dos. */
+      const { rows } = await pool.query('SELECT id FROM pbxng_conf_reuniones WHERE sala=$1 AND fin IS NULL ORDER BY inicio DESC LIMIT 1', [sala]);
+      if (rows[0]) return rows[0].id;
       const r = await pool.query('INSERT INTO pbxng_conf_reuniones (sala, grabada) VALUES ($1,$2) RETURNING id', [sala, !!grabada]);
-      id = r.rows[0].id;
+      return r.rows[0].id;
+    } catch (e) {
+      abiertas.delete(sala);   // que la próxima entrada lo vuelva a intentar
+      throw e;
     }
-    abiertas.set(sala, id);
-    return id;
+  }
+  function reunionDe(sala, grabada) {
+    if (!abiertas.has(sala)) abiertas.set(sala, buscarOAbrir(sala, grabada));
+    return abiertas.get(sala);
   }
 
   async function alEntrar(e) {
@@ -949,8 +958,10 @@ module.exports = function init(deps) {
   async function alTerminar(e) {
     const sala = campo(e, 'Conference'); if (!sala) return;
     try {
-      const id = abiertas.get(sala);
+      const pendiente = abiertas.get(sala);
       abiertas.delete(sala);
+      let id = null;
+      try { id = await pendiente; } catch (_) { /* no se pudo abrir: se cierra por sala */ }
       await pool.query('UPDATE pbxng_conf_presencias SET salio=now() WHERE sala=$1 AND salio IS NULL', [sala]);
       await pool.query('UPDATE pbxng_conf_reuniones SET fin=now() WHERE ' + (id ? 'id=$1' : 'sala=$1 AND fin IS NULL'), [id || sala]);
     } catch (err) { log.warn('historial: no se pudo cerrar la reunión', err.message); }
@@ -1010,11 +1021,11 @@ module.exports = function init(deps) {
 
   app.delete('/api/salas/:name', async (req, res) => {
     const { name } = req.params;
-    const c = await pool.connect();
+    let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
     try {
       await c.query('BEGIN');
       const { rows } = await c.query('SELECT access_exten FROM pbxng_conferences WHERE name=$1', [name]);
-      if (!rows[0]) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'no existe esa sala' }); }
+      if (!rows[0]) { try { await c.query('ROLLBACK'); } catch (_) {} return res.status(404).json({ error: 'no existe esa sala' }); }
       await c.query("DELETE FROM extensions WHERE context='ivr' AND exten=$1", [rows[0].access_exten]);
       await c.query('DELETE FROM pbxng_conferences WHERE name=$1', [name]);
       await c.query('COMMIT');

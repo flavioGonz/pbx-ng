@@ -132,6 +132,10 @@ services:
       # "abierto/cerrado" con la hora de la api, dice lo contrario de lo que hace la
       # central. La imagen trae tzdata: sin /usr/share/zoneinfo glibc ignora TZ.
       TZ: ${TZ:-America/Montevideo}
+      # Pais de la zona de tono (indications.conf): con que tono suena la central cuando
+      # lo genera ella, por ejemplo mientras suena el interno en una derivacion de la IA.
+      # Tiene que tener su seccion en config/asterisk/indications.conf (uy, ar).
+      TONE_COUNTRY: ${TONE_COUNTRY:-uy}
     volumes:
       - asterisk_sounds:/var/lib/asterisk/sounds/custom
       # La astdb sobrevive a recrear el contenedor: el volcado Postgres -> AstDB de la API

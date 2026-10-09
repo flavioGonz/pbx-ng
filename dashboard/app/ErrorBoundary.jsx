@@ -17,7 +17,10 @@ export default class ErrorBoundary extends Component {
   }
 
   static getDerivedStateFromError(error) {
-    return { error };
+    /* `throw null` / `throw ''` también es un error: guardado tal cual, el estado quedaba
+     * falsy, el boundary volvía a dibujar la pantalla rota y React terminaba tirando
+     * abajo todo el árbol, que es justo lo que este componente existe para evitar. */
+    return { error: error || new Error('Error desconocido') };
   }
 
   componentDidCatch(error, info) {

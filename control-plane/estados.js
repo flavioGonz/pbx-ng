@@ -48,7 +48,7 @@ const campo = (e, k) => (e && (e[k] !== undefined ? e[k] : e[k.toLowerCase()] !=
 
 module.exports = function init(deps) {
   const { pool, ami, io, amiList, logger } = deps;
-  const log = (logger ? logger('estados') : { info: () => {}, warn: () => {}, error: () => {} });
+  const log = logger ? logger('estados') : require('./log').mudo;
 
   const dev = new Map();      // ext -> estado crudo del dispositivo
   const marcas = new Map();   // ext -> { dnd, desvio, desvioA, pausa, pausaMotivo, colas }

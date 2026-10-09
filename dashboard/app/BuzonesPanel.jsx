@@ -206,12 +206,12 @@ export default function BuzonesPanel() {
             ayuda="El buzón se identifica por el número del interno dueño. El correo es opcional: si está, cada mensaje le llega también por mail.">
             <TextInput label="Buzón (interno)" required leftSection={<IconHash size={15} />} placeholder="1001"
               description="Número del interno dueño del buzón."
-              value={nuevo.mailbox} onChange={(e) => setNuevo((s) => ({ ...s, mailbox: e.currentTarget.value }))} />
+              value={nuevo.mailbox} onChange={({ currentTarget: el }) => setNuevo((s) => ({ ...s, mailbox: el.value }))} />
             <TextInput label="Nombre completo" leftSection={<IconUser size={15} />} placeholder="Juan Pérez"
-              value={nuevo.fullname} onChange={(e) => setNuevo((s) => ({ ...s, fullname: e.currentTarget.value }))} />
+              value={nuevo.fullname} onChange={({ currentTarget: el }) => setNuevo((s) => ({ ...s, fullname: el.value }))} />
             <TextInput label="Email" leftSection={<IconMail size={15} />} placeholder="juan@empresa.com"
               description="Para recibir los mensajes por correo (opcional)."
-              value={nuevo.email} onChange={(e) => setNuevo((s) => ({ ...s, email: e.currentTarget.value }))} />
+              value={nuevo.email} onChange={({ currentTarget: el }) => setNuevo((s) => ({ ...s, email: el.value }))} />
             <Alert variant="light" color="indigo" icon={<IconKey size={18} />}>
               El <b>PIN se genera solo</b>, al azar, y se muestra una vez al terminar. Después se
               puede ver o cambiar desde la lista.

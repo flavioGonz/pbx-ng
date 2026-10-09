@@ -491,7 +491,7 @@ module.exports = function init(deps) {
       await c.query("INSERT INTO pbxng_enroll (token,ext,password,label,expires_at) VALUES ($1,$2,$3,$4, now() + interval '24 hours')", [token, String(ext), password, label || null]);
       await c.query('COMMIT'); broadcastSoon();
       res.json({ token, ext: String(ext), password, path: '/enroll?token=' + token });
-    } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
   });
 
   app.post('/api/enroll/email', async (req, res) => {

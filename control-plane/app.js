@@ -12,6 +12,7 @@ const acme = require('./acme');  // ACME/Let's Encrypt (certificados TLS sin pro
 const { Server } = require('socket.io');
 const { Pool } = require('pg');
 const AriClient = require('ari-client');
+const { vigilarAri } = require('./ari-vigia');
 const aiPipeline = require('./ai-pipeline');
 const realtime = require('./realtime');   // probar la conexión con el modelo desde el panel
 const AsteriskManager = require('asterisk-manager');
@@ -249,6 +250,13 @@ const pendingConf = {};
  * activas, y el IVR con IA muerto hasta reiniciar la API. AMI ya reconectaba solo
  * (keepConnected); ARI merece lo mismo. Backoff 2s -> 30s. */
 let ariBackoff = 2000;
+/* El WebSocket del ARI también puede morir sin avisar (medio abierto): ari-client no
+ * emite nada y Asterisk ya no tiene la app, así que cada llamada a la IA se cortaba
+ * hasta reiniciar la API. El vigía (ari-vigia.js) pregunta cada 30 s si la app sigue
+ * registrada y, si no, la da por desconectada como un WebSocketClose. */
+const ARI_VIGIA_MS = 30000;
+let vigiaAri = null;
+function pararVigiaAri() { if (vigiaAri) { vigiaAri.parar(); vigiaAri = null; } }
 /* ari-client, cuando Asterisk todavía no escucha, no rechaza la promesa: el cliente
  * swagger tira la excepción en un callback suelto y eso llega como uncaughtException
  * (con el manejador de cierre de 1.5.0 el proceso salía con 1 en cada arranque hasta
@@ -279,7 +287,7 @@ async function connectAri() {
     });
     const onDown = (why) => {
       if (ari !== c) return;                 // ya fue reemplazado por otra conexion
-      ari = null; state.ari = false; callEngine.detach();
+      ari = null; state.ari = false; callEngine.detach(); pararVigiaAri();
       logger('ARI').warn('desconectado: ' + why);
       setTimeout(connectAri, ariBackoff); ariBackoff = Math.min(30000, ariBackoff * 2);
     };
@@ -290,6 +298,17 @@ async function connectAri() {
     ari = c; state.ari = true; ariBackoff = 2000;
     logger('ARI').info('ok (eventos de toda la central)');
     callEngine.attach(c);
+    pararVigiaAri();
+    vigiaAri = vigilarAri({
+      ...CFG.ari,
+      cadaMs: ARI_VIGIA_MS,
+      log: (m) => logger('ARI').warn(m),
+      alPerder: () => {
+        onDown('la central ya no tiene la app ' + CFG.ari.app + ' (el WebSocket se cortó sin avisar)');
+        // El cliente viejo sigue creyéndose conectado: se cierra para que no quede colgado.
+        Promise.resolve(c.stop && c.stop()).catch(() => {});
+      },
+    });
     try { aiPipeline.init(ari, pool, { app: CFG.ari.app, mediaHost: NODES.media }); } catch (e) { logger('AI').error('init', e); }
   } catch (e) {
     logger('ARI').warn('sin conexion (' + e.message + '); reintento en ' + Math.round(ariBackoff / 1000) + 's');
@@ -341,7 +360,13 @@ ami.on('connect', () => {
     for (const f of resincronizar) { try { Promise.resolve(f()).catch(() => {}); } catch (_) {} }
   }, 5000);
 });
-ami.on('disconnect', () => { state.ami = false; });
+/* `close` y no `disconnect`: asterisk-manager reenvía los eventos del socket ('connect',
+ * 'close', 'end') y nunca emite 'disconnect'. Escuchando ese nombre, `state.ami` quedaba
+ * en true para siempre después de un corte: /health decía AMI arriba y cada amiAction
+ * escribía en un socket muerto y esperaba una respuesta que no llega (el pedido HTTP
+ * quedaba colgado hasta que el cliente se cansaba). Con 'close' se rechaza en el acto y
+ * keepConnected() lo vuelve a poner en true en el próximo 'connect'. */
+ami.on('close', () => { state.ami = false; });
 ami.on('error', (e) => logger('AMI').error(e && e.message));
 
 function amiAction(action) {
@@ -459,6 +484,7 @@ const apiV1 = require('./v1')({
   getChannels: (...a) => callEngine.getChannels(...a),
   endpointStates: (...a) => callEngine.endpointStates(...a),
   originar: (...a) => callEngine.originar(...a),
+  ariVivo: () => !!state.ari,
 });
 /* Outbox de eventos salientes (outbox.js): la mitad «la central avisa» del contrato.
  * Registra las suscripciones en `/api/eventos/**` (panel, admin) y el modo PULL en el
@@ -631,7 +657,7 @@ app.post('/api/softphone/ota/subir', soloAdminOta, express.json({ limit: '200mb'
     };
     for (const f of resto) await escribir(f);
     for (const f of yml) await escribir(f);
-    log.info({ archivos: archivos.length, por: req.user && req.user.user }, 'instalador subido a mano');
+    log.info({ archivos: archivos.length, por: req.user && req.user.username }, 'instalador subido a mano');
     res.json({ ok: true, ...softphoneLatest() });
   } catch (e) { errorHttp(res, e); }
 });
@@ -862,7 +888,7 @@ app.get('/api/c2c/public/:token', async (req, res) => {
   catch (e) { errorHttp(res, e); }
 });
 app.post('/api/c2c/public/:token/session', c2cLimite, async (req, res) => {
-  const b = req.body || {}; const c = await pool.connect();
+  const b = req.body || {}; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
   try {
     const { rows } = await c.query('SELECT * FROM pbxng_click2call WHERE token=$1', [req.params.token]);
     const link = rows[0]; if (!link || !link.enabled) { c.release(); return res.status(404).json({ error: 'enlace no disponible' }); }
@@ -1043,8 +1069,9 @@ app.post('/api/geo/report', async (req, res) => {
  * astFwd/vozBase/setDialplan/smtpHint son declaraciones de función (izadas), así que
  * pueden definirse más abajo sin TDZ. */
 require('./apps')({   // devuelve { aiAgentDialplan, buildIvrDialplan, vmList }; app.js hoy no usa ninguno
-  app, pool, amiAction, amiCommand, astFwd, vozBase, setDialplan, astconf, exigirExt, wavToPcm, analyzeText,
+  app, pool, amiList, amiCommand, astFwd, vozBase, setDialplan, astconf, exigirExt, wavToPcm, analyzeText,
   smtpHint, errorHttp, broadcastSoon: (...a) => broadcastSoon(...a), logger,
+  recargarIaExterna: () => aiPipeline.recargarIaExterna(),
 });
 
 // ---------------------------------------------------------------------------
@@ -1229,7 +1256,7 @@ app.post('/api/phones', async (req, res) => {
   const b = req.body || {}; const mac = normMac(b.mac);
   if (!mac || mac.length !== 12) return res.status(400).json({ error: 'MAC invalida (12 hex)' });
   if (!b.ext) return res.status(400).json({ error: 'interno requerido' });
-  const c = await pool.connect();
+  let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
   try {
     await c.query('BEGIN');
     let password = b.password;
@@ -2015,7 +2042,7 @@ app.post('/api/endpoints', async (req, res) => {
   if (!vn.ok && !(req.body && req.body.force)) {
     return res.status(409).json({ error: vn.mensaje, motivo: vn.motivo, conflicto: vn.conflicto || null });
   }
-  const c = await pool.connect();
+  let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
   /* El PIN del buzón que nace junto con el interno. Se devuelve UNA vez, en esta respuesta,
    * y no queda en ningún otro lado: el buzón recién creado todavía NO tiene dirección de
    * correo configurada, así que el aviso de `POST /api/mailboxes/:mailbox/pin` no tendría a
@@ -2049,7 +2076,7 @@ app.post('/api/endpoints', async (req, res) => {
     await c.query('COMMIT'); broadcastSoon();
     const _enAst = await setRecFlag(id, _rec);
     res.status(201).json(Object.assign({ created: id, webrtc, video, vm_mailbox: id, vm_pin: (vmSeed && vmSeed.pin) || null }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 app.put('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params;
@@ -2058,7 +2085,7 @@ app.put('/api/endpoints/:id', async (req, res) => {
   const transport = webrtc ? 'transport-ws' : 'transport-udp';
   // null = el body no lo trae -> COALESCE deja el valor que ya tenia el endpoint.
   const dtmf = dtmfOk((req.body || {}).dtmf_mode);
-  const c = await pool.connect();
+  let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
   try {
     await c.query('BEGIN');
     if (password) await c.query('UPDATE ps_auths SET password=$2 WHERE id=$1', [id, password]);
@@ -2079,12 +2106,12 @@ app.put('/api/endpoints/:id', async (req, res) => {
     await c.query('COMMIT'); broadcastSoon();
     const _enAst = _rec === null ? true : await setRecFlag(id, _rec);
     res.json(Object.assign({ updated: id, webrtc, video }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
-  } catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/endpoints/:id', async (req, res) => {
-  const { id } = req.params; const c = await pool.connect();
+  const { id } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
   try { await c.query('BEGIN'); await c.query('DELETE FROM ps_endpoints WHERE id=$1', [id]); await c.query('DELETE FROM ps_auths WHERE id=$1', [id]); await c.query('DELETE FROM ps_aors WHERE id=$1', [id]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: id }); }
-  catch (e) { await c.query('ROLLBACK'); errorHttp(res, e); } finally { c.release(); }
+  catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 
 
@@ -2583,6 +2610,9 @@ ami.on('managerevent', (e) => {
 
   /* Atendida: es el evento que el backoffice usa para empezar a contar el tiempo de
    * atención y para saber QUIÉN atendió, que con una cola no se sabe hasta este momento. */
+  /* Si es una derivación del asistente de voz, el backend se entera de quién la atendió
+   * (ai-pipeline.js · alAtender). */
+  if (status === 'ANSWER') aiPipeline.alAtender(linked, e.uniqueid || e.Uniqueid || '', ext);
   if (status === 'ANSWER' && !finDedup.visto('ans:' + key)) {
     outbox.emitir('llamada.contestada', {
       call_id: linked || null, leg_id: e.destuniqueid || e.DestUniqueid || null,
@@ -2608,6 +2638,9 @@ ami.on('managerevent', (e) => {
   if (!e || e.event !== 'Hangup') return;
   const uniq = e.uniqueid || e.Uniqueid || '';
   const linked = e.linkedid || e.Linkedid || '';
+  /* Colgó quien llamaba mientras sonaba una derivación del asistente y nadie la atendió
+   * (ai-pipeline.js · alColgar). */
+  if (uniq) aiPipeline.alColgar(uniq);
   if (!uniq || !linked || uniq !== linked) return;
   if (finDedup.visto('fin:' + linked)) return;
   outbox.emitir('llamada.terminada', {
@@ -3102,6 +3135,9 @@ app.post('/api/devices/:did/rele', async (req,res)=>{ const b=req.body||{}; try{
   const dev = rows[0];
   if(!dev) return res.status(404).json({error:'no existe'});
   if(!dev.enabled) return res.status(409).json({error:'el dispositivo está deshabilitado'});
+  /* La sesión del panel trae `username` (auth.js firma { uid, username, role, ext }); se
+   * leía `user`, que no existe: un admin sin interno quedaba anotado como «por: null» en
+   * la bitácora de aperturas y no podía abrir un relé por código de función. */
   const quien = (req.user && (req.user.ext || req.user.username)) || null;
   const idx = parseInt(b.rele, 10) || 0;
   let r;
@@ -3191,7 +3227,7 @@ async function cerrarOrdenado(senal) {
     for (const id of ids) await callEngine.stopSpy(id).catch(() => {});
     paso('supervisiones cortadas', { spies: ids.length });
   } catch (e) { log.warn('cierre: supervisiones', e); }
-  try { if (ari) { const c = ari; ari = null; state.ari = false; callEngine.detach(); await Promise.resolve(c.stop && c.stop()).catch(() => {}); } paso('ARI cerrado'); } catch (e) { log.warn('cierre: ARI', e); }
+  try { pararVigiaAri(); if (ari) { const c = ari; ari = null; state.ari = false; callEngine.detach(); await Promise.resolve(c.stop && c.stop()).catch(() => {}); } paso('ARI cerrado'); } catch (e) { log.warn('cierre: ARI', e); }
   try { ami.disconnect && ami.disconnect(); paso('AMI cerrado'); } catch (e) { log.warn('cierre: AMI', e); }
   try { await Promise.race([aiPipeline.close(), new Promise((ok) => setTimeout(ok, 2000))]); paso('AudioSocket cerrado'); } catch (e) { log.warn('cierre: AudioSocket', e); }
   try {

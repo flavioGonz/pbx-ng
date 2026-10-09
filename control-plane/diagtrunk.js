@@ -47,9 +47,12 @@ async function rutaHasta(ip) {
   if (!hops) return { ok: true, info: true, detalle: 'sin saltos (el operador puede filtrar ICMP)' };
   return { ok: true, info: true, detalle: `${hops} salto${hops === 1 ? '' : 's'} hasta el destino${llega ? '' : ' (no completó, normal si filtra ICMP)'}`, extra: { hops } };
 }
+const sni = (host) => (net.isIP(host) ? undefined : host);
 function conectarTCP(host, port, conTls, seg = 5) {
   return new Promise((ok) => {
-    const sock = conTls ? tls.connect({ host, port, servername: host, rejectUnauthorized: false }) : net.connect({ host, port });
+    /* SNI sólo con nombre: el RFC 6066 no lo permite con una IP, Node 20 lo avisa y las
+     * versiones nuevas cortan la conexión. Una troncal TLS por IP fallaba el diagnóstico. */
+    const sock = conTls ? tls.connect({ host, port, servername: sni(host), rejectUnauthorized: false }) : net.connect({ host, port });
     const to = setTimeout(() => { sock.destroy(); ok({ ok: false, detalle: `sin conexión en ${seg}s (¿firewall o puerto cerrado?)` }); }, seg * 1000);
     sock.on(conTls ? 'secureConnect' : 'connect', () => { clearTimeout(to); sock.end(); ok({ ok: true, detalle: `puerto ${port}/${conTls ? 'tls' : 'tcp'} abierto` }); });
     sock.on('error', (e) => { clearTimeout(to); ok({ ok: false, detalle: e.code || e.message }); });
@@ -90,7 +93,7 @@ function handshakeWSS(urlStr, seg = 7) {
     const port = u.port ? Number(u.port) : (conTls ? 443 : 80);
     const key = crypto.randomBytes(16).toString('base64');
     const mod = conTls ? tls : net;
-    const opts = conTls ? { host: u.hostname, port, servername: u.hostname, rejectUnauthorized: false } : { host: u.hostname, port };
+    const opts = conTls ? { host: u.hostname, port, servername: sni(u.hostname), rejectUnauthorized: false } : { host: u.hostname, port };
     const sock = mod.connect(opts);
     const to = setTimeout(() => { sock.destroy(); ok({ ok: false, detalle: `sin handshake en ${seg}s` }); }, seg * 1000);
     sock.on(conTls ? 'secureConnect' : 'connect', () => {

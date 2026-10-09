@@ -202,3 +202,20 @@ test('al cerrar, el socket se suelta ANTES de colgar el canal de medios, y con d
   const iBr = orden.indexOf('bridge.destroy');
   assert.ok(iBr === -1 || iSock < iBr, 'soltó el socket DESPUÉS de tocar el canal: ese es el orden que dejaba canales zombis');
 });
+
+test('sin decir/cortar/temporizador inyectados: corre con los relojes reales y no rompe', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const v = crearVigilante({ esperas: { consulta1: 1, consulta2: 1, cierre: 1 } });
+  assert.equal(v.activo, true);
+  v.callado();
+  t.mock.timers.tick(1000);
+  assert.equal(v.estado().paso, 1);
+  assert.equal(v.estado().esperandoAudio, true);
+  v.hablando(); v.callado();
+  t.mock.timers.tick(1000);
+  v.hablando(); v.callado();
+  t.mock.timers.tick(1000);
+  assert.equal(v.estado().paso, 3);
+  t.mock.timers.tick(TOPE_DESPEDIDA_MS);
+  assert.equal(v.estado().cerrado, true, 'la despedida corta aunque nadie sepa cortar');
+});

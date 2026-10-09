@@ -26,7 +26,8 @@ const CONF = process.env.CONF_DIR || '/etc/pbxng';
 const ACME_HOME = path.join(CONF, 'acme');        // estado de acme.sh (cuenta, historial)
 const CERT_DIR = path.join(CONF, 'certs');        // el cert instalado (fullchain.pem + key.pem)
 const CFG_FILE = path.join(ACME_HOME, 'config.json');
-const ACME_BIN = '/usr/local/bin/acme.sh';
+/* La imagen lo trae en /usr/local/bin. Se puede cambiar sólo para probar con uno de mentira. */
+const ACME_BIN = process.env.ACME_SH || '/usr/local/bin/acme.sh';
 const CA = 'letsencrypt';
 
 function asegurarDirs() {

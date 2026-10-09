@@ -236,7 +236,6 @@ module.exports = function initGuard(deps) {
     for (const k of BOOLES) if (b[k] !== undefined) s[k] = !!b[k] && b[k] !== '0' && b[k] !== 'false';
     if (s.max_fallos < 1) throw err(400, 'max_fallos tiene que ser al menos 1');
     if (s.ventana_s < 5) throw err(400, 'la ventana tiene que ser de al menos 5 segundos');
-    if (s.ban_s < 0) throw err(400, 'ban_s no puede ser negativo (0 = permanente)');
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
@@ -245,7 +244,7 @@ module.exports = function initGuard(deps) {
         await c.query('INSERT INTO pbxng_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', ['sec_' + k, v]);
       }
       await c.query('COMMIT');
-    } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
     settings = s;
     return s;
   }
@@ -710,7 +709,7 @@ module.exports = function initGuard(deps) {
       const lista = Array.isArray(req.body && req.body.paises) ? req.body.paises : [];
       const modo = (req.body && req.body.modo) === 'permitir' ? 'permitir' : 'bloquear';
       const filas = lista.map((p) => ({ cc: limpiarCc(p && p.cc !== undefined ? p.cc : p), nombre: String((p && p.nombre) || '').slice(0, 80) })).filter((p) => p.cc.length === 2);
-      const c = await pool.connect();
+      let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); }   // sin DB: 503 en vez de un pedido colgado
       try {
         await c.query('BEGIN');
         await c.query('DELETE FROM pbxng_geoblock');
@@ -719,7 +718,7 @@ module.exports = function initGuard(deps) {
         await c.query('COMMIT');
         await cargarGeoblock();
         res.json({ ok: true, total: filas.length, modo, pendiente: 'aplicar para revisar las IPs ya vistas' });
-      } catch (e) { await c.query('ROLLBACK').catch(() => {}); errorHttp(res, e); } finally { c.release(); }
+      } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
     });
     /* "Banear país" desde el SOC: en modo bloquear se agrega; en modo permitir se
      * SACA de los permitidos (siempre significa "este país no entra"). Aplica al toque. */

@@ -4,6 +4,7 @@ import { Stack, Switch, Card, Group, Text, Button, Table, Badge, ActionIcon, Tex
 import { IconAddressBook, IconDeviceLandlinePhone, IconPlus, IconEdit, IconTrash, IconCopy, IconCheck, IconHash, IconBolt, IconDeviceFloppy, IconInfoCircle, IconServer2, IconRouter, IconWifi } from '@tabler/icons-react';
 import PageHeader from '../PageHeader';
 import { toast } from '../notify';
+import { apiDel } from '../api';
 import DrawerNG, { BloqueNG } from '../DrawerNG';
 import { IcoConexion, IcoPersona } from '../IconosNG';
 
@@ -60,7 +61,14 @@ export default function Telefonos() {
     setSaving(false);
     if (r.error) toast('Error: ' + r.error, 'bad'); else { toast(form.id ? 'Teléfono actualizado' : 'Teléfono aprovisionado (extensión ' + form.ext + ')', 'ok'); setOpened(false); load(); }
   }
-  async function del(p) { if (!confirm('¿Eliminar el teléfono ' + p.mac + '?')) return; await fetch('/backend/api/phones/' + p.id, { method: 'DELETE' }); toast('Teléfono eliminado', 'info'); load(); }
+  /* Por `apiDel` y no por un `fetch` suelto: el fetch no tira con un 403/500, así que la
+   * pantalla decía «Teléfono eliminado» aunque la API lo hubiera rechazado. */
+  async function del(p) {
+    if (!confirm('¿Eliminar el teléfono ' + p.mac + '?')) return;
+    try { await apiDel('/phones/' + p.id); toast('Teléfono eliminado', 'info'); }
+    catch (e) { toast(e.message, 'bad'); }
+    load();
+  }
   async function saveAgenda() {
     setAgSaving(true);
     const r = await fetch('/backend/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prov_agenda_titulo: agTitulo || 'Central', agenda_clientes: agClientes ? '1' : '0' }) }).then(x => x.json()).catch(() => ({ error: 1 }));

@@ -71,13 +71,16 @@ export default function Notificaciones() {
         </Card>
         <Card withBorder radius="lg" padding="lg">
           <Group gap="sm" mb="md"><ThemeIcon variant="light" color="gray"><IconBrandApple size={18} /></ThemeIcon><Text fw={600}>Credenciales APNs (iOS)</Text></Group>
-          <PasswordInput label="Clave de firma .p8" description="Contenido del archivo AuthKey_XXXX.p8" placeholder={st.apns ? '•••••• (guardada)' : '-----BEGIN PRIVATE KEY-----'} value={ap.apns_key_p8} onChange={e => setAp(a => ({ ...a, apns_key_p8: e.currentTarget.value }))} mb="sm" />
+          {/* El valor se lee ANTES de `setAp`: el actualizador corre después del evento,
+              cuando React ya dejó `currentTarget` en null, y tipear en el segundo campo
+              tiraba «Cannot read properties of null» y se caía la pantalla entera. */}
+          <PasswordInput label="Clave de firma .p8" description="Contenido del archivo AuthKey_XXXX.p8" placeholder={st.apns ? '•••••• (guardada)' : '-----BEGIN PRIVATE KEY-----'} value={ap.apns_key_p8} onChange={e => { const v = e.currentTarget.value; setAp(a => ({ ...a, apns_key_p8: v })); }} mb="sm" />
           <SimpleGrid cols={2}>
-            <TextInput label="Key ID" value={ap.apns_key_id} onChange={e => setAp(a => ({ ...a, apns_key_id: e.currentTarget.value }))} placeholder="ABC123DEFG" />
-            <TextInput label="Team ID" value={ap.apns_team_id} onChange={e => setAp(a => ({ ...a, apns_team_id: e.currentTarget.value }))} placeholder="TEAM123456" />
+            <TextInput label="Key ID" value={ap.apns_key_id} onChange={e => { const v = e.currentTarget.value; setAp(a => ({ ...a, apns_key_id: v })); }} placeholder="ABC123DEFG" />
+            <TextInput label="Team ID" value={ap.apns_team_id} onChange={e => { const v = e.currentTarget.value; setAp(a => ({ ...a, apns_team_id: v })); }} placeholder="TEAM123456" />
           </SimpleGrid>
-          <TextInput label="Topic (bundle .voip)" mt="sm" value={ap.apns_topic} onChange={e => setAp(a => ({ ...a, apns_topic: e.currentTarget.value }))} placeholder="com.ies.pbx.voip" />
-          <Switch label="Producción (api.push.apple.com)" mt="sm" checked={ap.apns_prod} onChange={e => setAp(a => ({ ...a, apns_prod: e.currentTarget.checked }))} />
+          <TextInput label="Topic (bundle .voip)" mt="sm" value={ap.apns_topic} onChange={e => { const v = e.currentTarget.value; setAp(a => ({ ...a, apns_topic: v })); }} placeholder="com.ies.pbx.voip" />
+          <Switch label="Producción (api.push.apple.com)" mt="sm" checked={ap.apns_prod} onChange={e => { const v = e.currentTarget.checked; setAp(a => ({ ...a, apns_prod: v })); }} />
           <Group justify="flex-end" mt="sm"><Button leftSection={<IconDeviceFloppy size={16} />} loading={apSaving} onClick={saveApns}>Guardar APNs</Button></Group>
         </Card>
       </SimpleGrid>

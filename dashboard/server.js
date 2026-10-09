@@ -162,7 +162,7 @@ function entradaValida(url) {
   });
 }
 
-function proxyHttp(req, res, pathApi, U = API) {
+function proxyHttp(req, res, pathApi, U) {
   const headers = cabecerasProxy(req);
   const up = http.request({
     protocol: U.protocol, hostname: U.hostname, port: U.port || 80,
@@ -181,7 +181,7 @@ function proxyHttp(req, res, pathApi, U = API) {
   req.pipe(up);
 }
 
-function proxyUpgrade(req, socket, head, pathApi, U = API) {
+function proxyUpgrade(req, socket, head, pathApi, U) {
   const headers = cabecerasProxy(req);
   headers.connection = 'Upgrade';
   headers.upgrade = req.headers.upgrade;

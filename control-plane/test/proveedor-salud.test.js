@@ -14,7 +14,7 @@ const s = require('../proveedor-salud');
 const modelos = (ids) => ({ ok: true, status: 200, json: async () => ({ data: ids.map((id) => ({ id })) }) });
 const error = (status, message) => ({ ok: false, status, json: async () => ({ error: { message } }) });
 const bien = { ok: true, status: 200, json: async () => ({ output: [] }) };
-const IDS = ['gpt-5.1', 'gpt-5-nano', 'gpt-live-1', 'gpt-realtime-2.1'];
+const IDS = ['gpt-6-sol', 'gpt-5-nano', 'gpt-live-1', 'gpt-realtime-2.1'];
 
 test('sin clave no se consulta a nadie, y se dice qué hacer', async () => {
   let llamo = false;

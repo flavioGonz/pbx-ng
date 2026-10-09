@@ -191,7 +191,7 @@ respaldo sin grabaciones + retención):
    `docker compose exec -T api node backup-cli.js --keep=N`, con `flock`, y loguea en
    `/var/log/pbxng-backup.log`.
 
-Los automáticos se llaman `pbxng-auto-AAAAMMDD-HHMM.tar.gz`; **la retención sólo borra esos**,
+Los automáticos se llaman `pbxng-auto-AAAAMMDD-HHMMSS.tar.gz`; **la retención sólo borra esos**,
 nunca un respaldo hecho a mano desde el panel. Ambos caminos escriben `backup_last_run` /
 `backup_last_ok` en `pbxng_settings`, así el panel muestra la última corrida y el planificador
 no repite el de hoy si el cron ya lo hizo. Ojo con la zona horaria: cron = hora del host,

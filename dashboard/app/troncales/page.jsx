@@ -2,22 +2,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, Handle, Position, MarkerType, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Stack, Text, Group, Button, Badge, Card, ActionIcon, Modal, TextInput, PasswordInput, NumberInput, SegmentedControl, Switch, Select, MultiSelect, TagsInput, ThemeIcon, ScrollArea, Divider, Tooltip, Box, Paper, FileButton } from '@mantine/core';
-import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers, IconDeviceLandlinePhone, IconTag, IconWorld, IconHash, IconUser, IconLock, IconPlugConnected, IconAdjustmentsAlt, IconWaveSine, IconArrowsExchange, IconRefresh, IconX, IconKey, IconBroadcast, IconPhoto } from '@tabler/icons-react';
+import { Stack, Text, Group, Button, Badge, Card, ActionIcon, ThemeIcon, ScrollArea, Divider, Tooltip, Paper } from '@mantine/core';
+import { IconPlus, IconTrash, IconEdit, IconRouteAltLeft, IconServer2, IconUsers, IconDeviceLandlinePhone, IconAdjustmentsAlt, IconRefresh, IconX } from '@tabler/icons-react';
 import { useLive } from '../useLive';
 import TrunkEditor from '../TrunkEditor';
 import { toast } from '../notify';
-import { apiPost, apiPut, apiDel, usePoll } from '../api';
-
-const CODECS = ['ulaw', 'alaw', 'g722', 'g729', 'opus', 'gsm'];
-const blank = {
-  name: '', kind: 'asterisk', callerid: '', mode: 'register',
-  provider_host: '', provider_port: '5060', transport: 'udp',
-  username: '', password: '', from_user: '', from_domain: '',
-  codecs: ['ulaw', 'alaw'], dtmf_mode: 'rfc4733', nat: true, direct_media: false,
-  qualify_frequency: 60, expiration: 3600, retry_interval: 60, context: 'from-trunk',
-  outbound_enabled: true, outbound_prefix: '0', outbound_strip: 0, logo: '', dids: [], channels: 0, gateway: '',
-};
+import { apiDel, usePoll } from '../api';
 
 function TNode({ data }) {
   const accent = data.accent;
@@ -56,8 +46,8 @@ const nodeTypes = { t: TNode };
 
 export default function Troncales() {
   const { snap } = useLive();
-  const [open, setOpen] = useState(false); const [editName, setEditName] = useState(null); const [f, setF] = useState(blank);
-  const [saving, setSaving] = useState(false); const [editing, setEditing] = useState(false); const [showList, setShowList] = useState(true); const [sel, setSel] = useState(null);
+  const [open, setOpen] = useState(false); const [editName, setEditName] = useState(null);
+  const [showList, setShowList] = useState(true); const [sel, setSel] = useState(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   /* Mismo refresco de 8 s que antes, pero por la capa: se pausa con la pestaña
    * escondida y `load()` (botón Refrescar, alta y baja) fuerza las dos consultas. */
@@ -71,33 +61,8 @@ export default function Troncales() {
    * cada render: React #185 («Maximum update depth exceeded») y la pantalla caída. */
   const trunks = useMemo(() => (Array.isArray(trunksData) ? trunksData : []), [trunksData]);
   const load = () => { recargarTrunks(); recargarTopo(); };
-  const set = (k, v) => setF(s => ({ ...s, [k]: v }));
-  async function onLogo(file) {
-    if (!file) return;
-    try {
-      const img = new Image(); const url = URL.createObjectURL(file);
-      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-      const max = 128, sc = Math.min(1, max / Math.max(img.width, img.height));
-      const cv = document.createElement('canvas'); cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
-      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-      set('logo', cv.toDataURL('image/png'));
-      URL.revokeObjectURL(url);
-    } catch (_) { toast('No se pudo procesar el logo', 'bad'); }
-  }
   function openNew() { setEditName(null); setOpen(true); }
   function openEdit(t) { setEditName(t.name); setOpen(true); }
-  async function create() {
-    if (!f.name || !f.provider_host) { toast('Nombre y host del proveedor son obligatorios', 'bad'); return; }
-    setSaving(true);
-    const body = { ...f, provider_port: +f.provider_port || 5060 };
-    if (editing && !f.password) delete body.password;
-    try {
-      const r = editing ? await apiPut('/trunks/' + encodeURIComponent(f.name), body) : await apiPost('/trunks', body);
-      toast(editing ? 'Troncal actualizada' : 'Troncal ' + ((r && r.created) || f.name) + ' creada', 'ok');
-      setOpen(false); load();
-    } catch (e) { toast('Error: ' + e.message, 'bad'); }
-    setSaving(false);
-  }
   async function del(t) {
     if (!confirm('¿Eliminar la troncal ' + t.name + '?')) return;
     try { await apiDel('/trunks/' + encodeURIComponent(t.name)); toast('Troncal eliminada', 'info'); }

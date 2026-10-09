@@ -94,8 +94,13 @@ export default function NetMode() {
     api('/net/mode', { method: 'PUT', body: cfg }).then(cargar),
     { loading: 'Guardando…', success: 'Guardado (todavía no se aplicó)', error: (e) => e.message });
 
+  /* Cerrar el modal también olvida el plan: el cajón de «Lo que se va a ejecutar» se abre
+   * con `plan && !confirmar`, así que sin esto saltaba solo apenas se cancelaba o se
+   * aplicaba, tapando el aviso de confirmar el cambio. */
+  const cerrarConfirmar = () => { setConfirmar(false); setPlan(null); };
+
   const aplicarAhora = () => {
-    setConfirmar(false);
+    cerrarConfirmar();
     toastPromise(
       api('/net/mode/apply', { method: 'POST', body: { confirmar: true, cfg, rollback_seg: 120 } })
         .then((r) => { setPend({ vence: r.confirmar_antes_de }); cargar(); return r; }),
@@ -107,7 +112,7 @@ export default function NetMode() {
     setConfirmar(true);
     api('/net/mode/plan', { method: 'POST', body: cfg })
       .then((r) => setPlan(r.pasos || []))
-      .catch((e) => { toast(e.message, 'bad'); setConfirmar(false); });
+      .catch((e) => { toast(e.message, 'bad'); cerrarConfirmar(); });
   };
 
   const confirmarCambio = () => toastPromise(
@@ -196,7 +201,7 @@ export default function NetMode() {
 
       {/* Confirmación de aplicar: el cambio de red es el más riesgoso del panel,
           así que el modal muestra a qué modo se va, qué implica y el plan completo. */}
-      <Modal opened={confirmar} onClose={() => setConfirmar(false)} centered radius="lg" size="lg"
+      <Modal opened={confirmar} onClose={cerrarConfirmar} centered radius="lg" size="lg"
         withCloseButton={false} overlayProps={{ backgroundOpacity: 0.55, blur: 3 }}>
         <Stack gap="md" p="xs">
           <Group gap="sm" wrap="nowrap">
@@ -259,7 +264,7 @@ export default function NetMode() {
           )}
 
           <Group justify="flex-end" gap="sm" mt="xs">
-            <Button variant="default" onClick={() => setConfirmar(false)}>Cancelar</Button>
+            <Button variant="default" onClick={cerrarConfirmar}>Cancelar</Button>
             <Button color="orange" leftSection={<IconPlayerPlay size={16} />} onClick={aplicarAhora}>
               Aplicar modo {esSwitch ? 'switch' : 'router'}
             </Button>
