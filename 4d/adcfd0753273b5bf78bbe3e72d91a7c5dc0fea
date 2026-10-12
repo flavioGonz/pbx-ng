@@ -1,0 +1,27 @@
+CHANGELOG.md
+  s_e2d637ec25e302::t_80e4f29350bfb1 7-13
+control-plane/test/ia-externa-relay.test.js
+  s_e2d637ec25e302::t_3314587d79ceee 100,108,115
+control-plane/test/ia-externa.test.js
+  s_e2d637ec25e302::t_ae43e1b4a75375 53-56
+docs/CONTRATOS.md
+  s_e2d637ec25e302::t_ce7f35c5c702d0 1892
+control-plane/ia-externa.js
+  s_e2d637ec25e302::t_81ae56c2a2864e 29-33,114-115,117-118,483,640
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4dadcfd0753273b5bf78bbe3e72d91a7c5dc0fea",
+  "prompts": {},
+  "sessions": {
+    "s_e2d637ec25e302": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "918db8dc-a986-4a03-802b-a8da96afcad2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Federico de Pro <federicodepro@gmail.com>"
+    }
+  }
+}
