@@ -50,8 +50,10 @@ test('decidirArranque: sin configuración, respaldo; con ella se atiende, aunque
 });
 
 test('por el relay solo pasan instructions, commentary y close', () => {
-  for (const type of ['session.instructions.append', 'session.commentary.append', 'session.close']) assert.ok(iax.comandoPermitido({ type }));
-  for (const type of ['session.update', 'response.create', 'session.start', undefined]) assert.equal(iax.comandoPermitido({ type }), null);
+  // El relay es abstracto (11/10): cualquier comando de la sesión pasa, también los que la
+  // central no conoce; lo que no pasa son las órdenes (con `id`) y lo que no tiene tipo.
+  for (const type of ['session.instructions.append', 'session.commentary.append', 'session.close', 'response.create', 'response.item.create', 'session.update', 'algo.nuevo']) assert.ok(iax.comandoPermitido({ type, event_id: 'e1' }));
+  for (const msg of [{ type: 'colgar' }, { type: 'transferir', id: 'o1' }, { type: 'abrir_todo', id: 'o2' }, { type: '' }, { type: undefined }, {}]) assert.equal(iax.comandoPermitido(msg), null);
   assert.equal(iax.comandoPermitido(null), null);
 });
 

@@ -26,9 +26,11 @@
  * ==========================================================================*/
 'use strict';
 
-/* Lo único que el backend puede mandarle a la sesión. Cualquier otro tipo se descarta:
- * así, pase lo que pase del otro lado, nadie cambia la sesión por el relay. */
-const COMANDOS_RELAY = new Set(['session.instructions.append', 'session.commentary.append', 'session.close']);
+/* El relay es abstracto: la central no sabe qué eventos entiende la sesión. Lo que es suyo
+ * (las órdenes, con `id`, y el enganche) lo atiende ella; todo lo demás que manda el backend
+ * pasa tal cual a la sesión de GPT-Live (pedido del usuario, 11/10: el asistente necesita
+ * `response.create` y `response.item.create`, y no se le tiene que pedir permiso a la
+ * central por cada evento nuevo). El backend está autenticado: es quien conduce la llamada. */
 /* Las órdenes del backend sobre la llamada, por su relay. */
 const ORDENES_LLAMADA = new Set(['colgar', 'transferir', 'enviar_dtmf']);
 
@@ -109,9 +111,11 @@ function decidirArranque({ config }) {
   return { atender: true, motivo: '' };
 }
 
-/** El comando del backend, si es uno de los permitidos; null si hay que descartarlo. */
+/** El comando del backend para la sesión: cualquier mensaje con tipo que no sea de la
+ * central (una orden, que lleva `id`). null si no es un mensaje o es una orden. */
 function comandoPermitido(msg) {
-  return msg && typeof msg === 'object' && COMANDOS_RELAY.has(msg.type) ? msg : null;
+  if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string' || !msg.type) return null;
+  return msg.id === undefined && !ORDENES_LLAMADA.has(msg.type) ? msg : null;
 }
 
 const acotar = (valor, min, max, def) => {
@@ -476,7 +480,7 @@ class RelayLlamada {
     const cmd = comandoPermitido(msg);
     if (cmd) { this.alComando(cmd); return; }
     if (msg.id) this.responder({ type: 'orden_fallida', pbxCallId: this.aviso.pbxCallId, ordenId: String(msg.id), detalle: 'orden desconocida: ' + msg.type });
-    else this.log('relay: se descarta un mensaje no permitido (' + msg.type + ')');
+    else this.log('relay: se descarta un mensaje sin tipo');
   }
 
   confirmar(msg) {
@@ -633,6 +637,6 @@ function crear(deps) {
 
 module.exports = {
   crear, decidirArranque, comandoPermitido, bajarConfig, enviarHecho, CanalControl, RelayLlamada,
-  COMANDOS_RELAY, ORDENES_LLAMADA, CODIGO_REUBICAR, TOPE_RELAY, VENTANA_DEF_MS, VENTANA_MAX_MS, HANDSHAKE_MS,
+  ORDENES_LLAMADA, CODIGO_REUBICAR, TOPE_RELAY, VENTANA_DEF_MS, VENTANA_MAX_MS, HANDSHAKE_MS,
   urlPermitida, destinoPermitido, dtmfApertura, DTMF,
 };

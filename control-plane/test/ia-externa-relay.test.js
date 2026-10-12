@@ -97,7 +97,7 @@ test('relay: guarda solo los últimos (tope) para reenviar', () => {
   assert.deepEqual(r.guardados.map((g) => g.seq), [3, 4, 5]);
 });
 
-test('relay: comandos permitidos a la sesión, órdenes con ack, repetidas sin ejecutar, ajenas y desconocidas con falla', async (t) => {
+test('relay: los comandos pasan a la sesión, órdenes con ack, repetidas sin ejecutar, ajenas y desconocidas con falla', async (t) => {
   const srv = await backendRelay();
   t.after(() => srv.cerrar());
   const r = relayCon(srv);
@@ -105,14 +105,14 @@ test('relay: comandos permitidos a la sesión, órdenes con ack, repetidas sin e
   r.relay.iniciar();
   await hasta(() => srv.conexiones.length === 1 && srv.ultima().recibido.length === 1);
   srv.mandar({ type: 'session.commentary.append', content: 'Portería Orison' });
-  srv.mandar({ type: 'session.update', session: {} });            // no permitido: se descarta
+  srv.mandar({ type: 'response.create', event_id: 'e1' });          // el relay es abstracto: pasa
   srv.mandar({ type: 'transferir', id: 'o1', pbxCallId: 'c1', destino: '1002' });
   srv.mandar({ type: 'transferir', id: 'o1', pbxCallId: 'c1', destino: '1002' });
   srv.mandar({ type: 'enviar_dtmf', id: 'o2', pbxCallId: 'c1', digitos: 'falla' });
   srv.mandar({ type: 'colgar', id: 'o3', pbxCallId: 'otra' });
   srv.mandar({ type: 'abrir_todo', id: 'o4' });
   await hasta(() => srv.ultima().recibido.length === 5);
-  assert.deepEqual(r.comandos, ['session.commentary.append']);
+  assert.deepEqual(r.comandos, ['session.commentary.append', 'response.create']);
   assert.deepEqual(r.ordenes, ['transferir', 'enviar_dtmf'], 'la repetida no se ejecuta; la ajena tampoco');
   const respuestas = srv.ultima().recibido.slice(1);
   assert.deepEqual(respuestas.filter((m) => m.type === 'ack'), [{ type: 'ack', id: 'o1' }]);
@@ -120,7 +120,6 @@ test('relay: comandos permitidos a la sesión, órdenes con ack, repetidas sin e
   assert.ok(respuestas.some((m) => m.type === 'orden_fallida' && m.ordenId === 'o3' && /otra llamada/.test(m.detalle)));
   assert.ok(respuestas.some((m) => m.type === 'orden_fallida' && m.ordenId === 'o4' && /orden desconocida/.test(m.detalle)));
   assert.ok(respuestas.every((m) => m.seq === undefined), 'las respuestas a órdenes no se numeran');
-  assert.ok(r.logs.some((l) => /se descarta un mensaje no permitido \(session.update\)/.test(l)));
 });
 
 test('relay: se corta, se reabre enseguida como reanudación, y reenvía desde lo que pide el backend', async (t) => {

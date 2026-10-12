@@ -4,6 +4,13 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com). Versionado: [S
 
 ## [Unreleased]
 ### Changed
+- **IA externa: el relay de la llamada es abstracto.** Todo lo que manda el backend para la
+  sesión pasa tal cual a GPT-Live, no solo `session.instructions.append`,
+  `session.commentary.append` y `session.close`: el asistente necesita `response.create` y
+  `response.item.create` (las herramientas del modelo y que hable con sus palabras), y la
+  central no tiene que conocer cada evento nuevo. La central sigue atendiendo lo suyo: las
+  órdenes (con `id`, y una desconocida se contesta con `orden_fallida`) y el enganche.
+  `docs/CONTRATOS.md` §11.
 - **BREAKING · IA externa, contrato v2: el backend del asistente en varias instancias, y
   llamadas que se retoman.** Todo lo de una llamada va ahora por su relay: el aviso
   (`llamada_nueva`, primer mensaje), los eventos de la sesión y los hechos numerados
