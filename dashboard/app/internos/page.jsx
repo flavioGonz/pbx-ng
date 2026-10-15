@@ -16,6 +16,9 @@ import Slot from '../Slot';
  * viven en un componente compartido (app/DesviosPanel.jsx) y no acá adentro. */
 import DesviosPanel from '../DesviosPanel';
 import DrawerNG, { BloqueNG } from '../DrawerNG';
+/* Paginado de la tabla: con medio millar de internos, pintar la lista entera en cada
+ * snapshot hace que la pantalla tarde y el buscador se sienta pegajoso. */
+import Paginar, { usePaginar } from '../Paginar';
 import { IcoPersona, IcoConexion, IcoGrabar, IcoQr, IcoDesvio, IcoLlave, IcoRegistro, IcoLatencia } from '../IconosNG';
 
 const VIA = {
@@ -246,6 +249,10 @@ export default function Extensiones() {
             : filtro === 'desvio' ? !!r.desvio
               : filtro === 'off' ? !r.registrado : true;
   const fl = conEstado.filter(({ e, r }) => pasaFiltro(r) && (!q || e.id.includes(q) || (e.name || '').toLowerCase().includes(q.toLowerCase()) || (e.ip || '').includes(q)));
+  /* Los KPI, los contadores del filtro y la busqueda siguen mirando la lista COMPLETA;
+   * lo unico que se corta es lo que se pinta. Asi «En llamada (3)» no miente porque
+   * esos tres esten en otra pagina. */
+  const pg = usePaginar(fl, { clave: filtro + '|' + q });
 
   return (
     <Stack gap="lg">
@@ -274,7 +281,7 @@ export default function Extensiones() {
             <Table.ScrollContainer minWidth={760}>
               <Table striped highlightOnHover verticalSpacing="sm">
                 <Table.Thead><Table.Tr><Th icon={<IconHash size={13} />}>Extensión</Th><Th icon={<IconUser size={13} />}>Nombre</Th><Th icon={<IconActivity size={13} />}>Estado</Th><Th icon={<IconRouteAltLeft size={13} />}>Vía</Th><Th icon={<IconWorld size={13} />}>IP</Th><Th icon={<IconClock size={13} />}>RTT</Th><Th icon={<IconDeviceLandlinePhone size={13} />}>Tipo</Th><Th icon={<IconVideo size={13} />}>Video</Th><Th icon={<IconQrcode size={13} />}>Acceso</Th><Table.Th /></Table.Tr></Table.Thead>
-                <Table.Tbody>{fl.map(({ e, st }) => (
+                <Table.Tbody>{pg.visibles.map(({ e, st }) => (
                   <Table.Tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => openEdit(e)}>
                     <Table.Td ff="monospace" fw={600}>{e.id}</Table.Td>
                     <Table.Td>{e.name || <Text c="dimmed" size="sm">—</Text>}</Table.Td>
@@ -293,6 +300,7 @@ export default function Extensiones() {
                 ))}</Table.Tbody>
               </Table>
             </Table.ScrollContainer>}
+        <Paginar pg={pg} rotulo="extensiones" />
       </Card>
 
       {/* ── Alta y edición del interno ────────────────────────────────────

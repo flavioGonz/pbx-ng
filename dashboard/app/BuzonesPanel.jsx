@@ -22,13 +22,16 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import {
   IconMail, IconPlus, IconTrash, IconKey, IconRefresh, IconCopy, IconCheck,
-  IconAlertTriangle, IconInfoCircle, IconUser, IconHash, IconEye,
+  IconAlertTriangle, IconInfoCircle, IconUser, IconHash, IconEye, IconSearch,
 } from '@tabler/icons-react';
 import { toast } from './notify';
 import { apiDel, apiGet, apiPost, usePoll } from './api';
 import { TableSkeleton } from './Skeletons';
 import DrawerNG, { BloqueNG } from './DrawerNG';
 import { IcoLlave } from './IconosNG';
+/* Paginado: cada interno nace con su buzon, asi que esta lista es tan larga como la
+ * central. Con 540 internos, pintarla entera de una deja la pantalla pegajosa. */
+import Paginar, { usePaginar } from './Paginar';
 
 /* PIN con un clic para copiarlo: el operador lo dicta por teléfono o lo pega en un chat.
  * Mismo componente y mismo gesto que en SalasPanel, para que se lea igual en las dos. */
@@ -90,6 +93,15 @@ export default function BuzonesPanel() {
   const { data, error, cargando, recargar } = usePoll('/mailboxes', 30000);
   const buzones = Array.isArray(data) ? data : [];
   const debiles = buzones.filter((b) => b.pin_debil);
+  const [q, setQ] = useState('');
+  /* El buscador mira numero, nombre y correo: en una central grande el operador llega al
+   * buzon por el nombre de la persona, no por el numero. */
+  const filtrados = buzones.filter((b) => {
+    if (!q.trim()) return true;
+    const t = q.trim().toLowerCase();
+    return String(b.mailbox).includes(t) || String(b.fullname || '').toLowerCase().includes(t) || String(b.email || '').toLowerCase().includes(t);
+  });
+  const pg = usePaginar(filtrados, { clave: q });
 
   const [form, { open: abrirForm, close: cerrarForm }] = useDisclosure(false);
   const [nuevo, setNuevo] = useState({ mailbox: '', fullname: '', email: '' });
@@ -140,7 +152,10 @@ export default function BuzonesPanel() {
           title={debiles.length === 1 ? 'Hay un buzón sin PIN de verdad' : 'Hay ' + debiles.length + ' buzones sin PIN de verdad'}>
           El PIN de {debiles.length === 1 ? 'este buzón' : 'estos buzones'} es el propio número,
           así que cualquiera que sepa el interno los escucha marcando <b>*98</b>:{' '}
-          <b>{debiles.map((b) => b.mailbox).join(' · ')}</b>.
+          {/* Con una central migrada esto pueden ser cientos: se muestran los primeros y
+              se dice cuantos quedan, en vez de tapar la pantalla con un parrafo de numeros. */}
+          <b>{debiles.slice(0, 20).map((b) => b.mailbox).join(' · ')}</b>
+          {debiles.length > 20 && <> y <b>{debiles.length - 20}</b> mas</>}.
           {' '}Quedaron como estaban a propósito —rotarles el PIN de golpe deja a cada persona afuera
           de sus propios mensajes sin avisarle—. Rotalos de a uno con <b>PIN nuevo</b> y contale al dueño.
         </Alert>
@@ -155,7 +170,13 @@ export default function BuzonesPanel() {
               <Text size="sm" c="dimmed">Marcá *97 desde el interno para escuchar los mensajes; *98 para entrar a otro buzón con su PIN</Text>
             </div>
           </Group>
-          <Button leftSection={<IconPlus size={16} />} onClick={abrirForm}>Nuevo buzón</Button>
+          <Group gap="sm" wrap="wrap" justify="flex-end">
+            {buzones.length > 12 && (
+              <TextInput placeholder="Buscar buzón, nombre o correo" leftSection={<IconSearch size={15} />}
+                value={q} onChange={(e) => setQ(e.target.value)} w={250} />
+            )}
+            <Button leftSection={<IconPlus size={16} />} onClick={abrirForm}>Nuevo buzón</Button>
+          </Group>
         </Group>
 
         {cargando && !data ? <TableSkeleton rows={4} cols={4} /> :
@@ -172,7 +193,7 @@ export default function BuzonesPanel() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {buzones.map((b) => (
+                  {pg.visibles.map((b) => (
                     <Table.Tr key={b.mailbox}>
                       <Table.Td><Badge variant="light" ff="monospace">{b.mailbox}</Badge></Table.Td>
                       <Table.Td>{b.fullname || <Text c="dimmed" size="sm">—</Text>}</Table.Td>
@@ -195,6 +216,9 @@ export default function BuzonesPanel() {
               </Table>
             </Table.ScrollContainer>
           )}
+        {buzones.length > 0 && filtrados.length === 0 &&
+          <Text c="dimmed" ta="center" py="xl">Ningún buzón coincide con «{q}».</Text>}
+        <Paginar pg={pg} rotulo="buzones" />
       </Card>
 
       <DrawerNG
