@@ -345,3 +345,32 @@ test('la rutina de marcar un interno vive en [interno], alcanzable por patron y 
     assert.match(g, /internal,vm-/, 'el salto al buzon tiene que decir el contexto: ' + g);
   }
 });
+
+/* El include de pbxng.d/extensions.conf NO es como los otros. Si el archivo no esta,
+ * Asterisk no avisa y sigue: corta la lectura de extensions.conf entera («was listed as
+ * a #include but it does not exist», config.c) y la central arranca SIN dialplan. Medido
+ * en una instancia real con el archivo ausente: `dialplan show 1001@internal` falla, el
+ * contexto `internal` no existe, no hay internos, ni codigos de funcion, ni aparcado.
+ * El entrypoint tiene que dejarlo creado antes del primer arranque, que es cuando la API
+ * todavia no escribio nada. */
+test('el entrypoint deja pbxng.d/extensions.conf creado: sin el, Asterisk arranca sin dialplan', () => {
+  const ep = leer('images/asterisk/docker-entrypoint.sh');
+  const m = /for f in ([^;]+); do/.exec(ep);
+  assert.ok(m, 'no se encontro el bucle que crea los .conf vacios de pbxng.d');
+  assert.ok(m[1].split(/\s+/).includes('extensions.conf'),
+    'extensions.conf tiene que estar en la lista de archivos que el entrypoint crea vacios: ' + m[1]);
+  assert.match(leer('config/asterisk/extensions.conf'), /^#include "pbxng\.d\/extensions\.conf"$/m,
+    'si se saca el include, sobra lo de arriba; si se saca lo de arriba, la central no arranca con dialplan');
+});
+
+/* La recarga del plan de marcacion: `dialplan reload` no existe como comando del CLI
+ * (Asterisk 22 contesta «No such command»), asi que un typo ahi no falla ruidosamente —
+ * el archivo queda escrito y sin efecto hasta el proximo reinicio, que es justo lo que
+ * el generador viene a evitar. */
+test('la API recarga el dialplan con el modulo que lo lee, no con un comando inexistente', () => {
+  const app = leer('../control-plane/app.js');
+  assert.match(app, /amiCommand\('module reload pbx_config\.so'\)/,
+    'la recarga del plan tiene que ser `module reload pbx_config.so`');
+  assert.ok(!/amiCommand\('dialplan reload'\)/.test(app),
+    '`dialplan reload` no es un comando del CLI de Asterisk 22');
+});

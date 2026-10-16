@@ -515,7 +515,11 @@ async function regenerarInternos() {
   try {
     const { rows } = await pool.query("SELECT id FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension'");
     astconf.internos(rows.map((r) => r.id));
-    await amiCommand('dialplan reload');
+    /* `dialplan reload` NO es un comando del CLI (Asterisk 22 contesta «No such
+     * command»): la recarga del plan es recargar el modulo que lo lee. Con el comando
+     * equivocado el archivo quedaba escrito y sin efecto hasta el proximo reinicio, que
+     * es exactamente el sintoma que esto viene a arreglar. */
+    await amiCommand('module reload pbx_config.so');
     return true;
   } catch (e) {
     log.error('no se pudo regenerar el plan de marcacion de los internos:', e.message);

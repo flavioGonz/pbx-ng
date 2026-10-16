@@ -13,8 +13,14 @@ set -e
 # --- config que genera el panel (aparcado, captura, música en espera) ---
 # Los .conf horneados hacen #include de pbxng.d/. Si el panel todavía no escribió nada,
 # dejamos los archivos vacíos para que Asterisk no avise por cada include faltante.
+# OJO con extensions.conf: ahí el include faltante no es un aviso. Asterisk corta la
+# lectura del archivo entero (config.c: «was listed as a #include but it does not exist»)
+# y la central arranca SIN dialplan — ni los internos, ni los códigos de función, ni el
+# aparcado—. Medido en una instancia real: con el archivo ausente, `dialplan show` no
+# encuentra ni el contexto `internal`. Por eso tiene que existir desde el primer arranque,
+# antes de que la API escriba el suyo.
 mkdir -p /etc/asterisk/pbxng.d
-for f in parking.conf moh.conf features.conf pjsip.conf pjsip-security.conf; do
+for f in parking.conf moh.conf features.conf pjsip.conf pjsip-security.conf extensions.conf; do
   [ -f "/etc/asterisk/pbxng.d/$f" ] || echo "; generado por el panel PBX-NG (vacío por ahora)" > "/etc/asterisk/pbxng.d/$f"
 done
 # rtp.conf no arranca vacío: el rtp.conf horneado ya no trae el rango RTP ni el STUN (si
