@@ -161,7 +161,7 @@ function Ajustes() {
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         <NumberInput label="Fallos contra un interno" description="Claves erradas contra el mismo interno… (0 = apagado)" min={0}
                      value={s.cuenta_max_fallos} onChange={(v) => set('cuenta_max_fallos', v)} />
-        <NumberInput label="…en esta ventana (s)" description="…antes de avisar que ese interno está bajo ataque" min={5}
+        <NumberInput label="…en estos segundos" description="…antes de avisar que ese interno está bajo ataque" min={5}
                      value={s.cuenta_ventana_s} onChange={(v) => set('cuenta_ventana_s', v)} />
         <NumberInput label="Candar por (s)" description="0 = sólo avisar, no candar. Leé el aviso de abajo antes de prenderlo." min={0}
                      value={s.cuenta_candado_s} onChange={(v) => set('cuenta_candado_s', v)} />

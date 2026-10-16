@@ -256,7 +256,8 @@ const SOC = {
 };
 const rutasBase = (extra = {}) => ({
   'GET /security': SOC,
-  'GET /security/settings': { max_fallos: 5, ventana_s: 60, ban_s: 3600, ban_permanente_tras: 3, unidentified_count: 5, unidentified_period: 60, unidentified_prune: 300, escaneres: true, alertar: false },
+  'GET /security/settings': { max_fallos: 5, ventana_s: 60, ban_s: 3600, ban_permanente_tras: 3, unidentified_count: 5, unidentified_period: 60, unidentified_prune: 300, cuenta_max_fallos: 20, cuenta_ventana_s: 300, cuenta_candado_s: 0, escaneres: true, alertar: false },
+  'GET /security/cuentas': { candadas: [], bajo_ataque: [], umbral: 20, ventana_s: 300, candado_s: 0 },
   'GET /security/whitelist': [{ ip: '200.1.1.0/24', note: 'sucursal' }, { ip: '201.0.0.1', reason: 'proveedor SIP', country: 'UY' }, { ip: '201.0.0.2' }],
   'GET /security/geoblock': { modo: 'bloquear', paises: [{ cc: 'CN', nombre: 'China' }, { cc: 'XK', nombre: 'Kosovo' }] },
   ...extra,
@@ -541,7 +542,7 @@ describe('/seguridad — Ajustes de la central', () => {
     expect(guardar.disabled).toBe(false);
     fireEvent.click(guardar);
     await waitFor(() => expect(promesas).toContainEqual(['ok', 'Guardado. Los límites de PJSIP entran al aplicar.']));
-    expect(f.a('PUT', '/security/settings')[0].body).toEqual({ max_fallos: 8, ventana_s: 120, ban_s: 7200, ban_permanente_tras: 0, unidentified_count: 9, unidentified_period: 30, unidentified_prune: 600, escaneres: false, alertar: true });
+    expect(f.a('PUT', '/security/settings')[0].body).toEqual({ max_fallos: 8, ventana_s: 120, ban_s: 7200, ban_permanente_tras: 0, unidentified_count: 9, unidentified_period: 30, unidentified_prune: 600, cuenta_max_fallos: 20, cuenta_ventana_s: 300, cuenta_candado_s: 0, escaneres: false, alertar: true });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Guardar' }).disabled).toBe(true));
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar' }));
     await waitFor(() => expect(promesas).toContainEqual(['ok', 'Umbrales aplicados']));
@@ -563,6 +564,79 @@ describe('/seguridad — Ajustes de la central', () => {
     renderUI(<Seguridad />);
     solapa('Ajustes de la central');
     await waitFor(() => expect(screen.getByText('No se pudieron leer los ajustes: Solo administradores')).toBeTruthy());
+  });
+});
+
+
+/* ── Candado por cuenta ───────────────────────────────────────────────────────
+ *  Es la unica pantalla que ve el ataque cuando entra por WebRTC: ahi todas las
+ *  conexiones llegan con la IP del proxy, asi que el contador por IP no puede decir
+ *  nada. Lo que se fija: que el interno bajo ataque se vea con cuantas IPs vino, que
+ *  candar y abrir manden lo que la API espera, que sin ser admin no aparezca ningun
+ *  boton que cambie algo, y que prender el candado automatico avise en la cara lo que
+ *  se acaba de habilitar —es la parte que convierte la proteccion en vulnerabilidad—.
+ * ------------------------------------------------------------------------- */
+describe('/seguridad — Internos', () => {
+  const CUENTAS = {
+    candadas: [{ ext: '1002', hasta: '2026-10-17T03:00:00.000Z', motivo: 'fuerza bruta contra el interno', fallos: 40, ips: ['10.1.1.221'], manual: false }],
+    bajo_ataque: [{ ext: '1001', fallos: 25, ips: ['10.1.1.221'], n_ips: 1 }],
+    umbral: 20, ventana_s: 300, candado_s: 0,
+  };
+
+  it('muestra quién está bajo ataque y quién candado, y canda y abre por la API', async () => {
+    const f = fakeFetch(rutasBase({
+      'GET /security/cuentas': CUENTAS,
+      'POST /security/cuentas/1001/candar': { ext: '1001' },
+      'POST /security/cuentas/1002/abrir': { ext: '1002', abierto: true },
+    }));
+    renderUI(<Seguridad />);
+    solapa('Internos');
+    await waitFor(() => expect(screen.getByText('Internos bajo ataque')).toBeTruthy());
+    expect(screen.getByText('1001')).toBeTruthy();
+    expect(screen.getByText('25')).toBeTruthy();
+    expect(screen.getByText('1 IP')).toBeTruthy();
+    expect(screen.getByText('fuerza bruta contra el interno')).toBeTruthy();
+    expect(screen.getByText('automático')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Candar/ })[0]);
+    await waitFor(() => expect(promesas).toContainEqual(['ok', 'Interno 1001 candado']));
+    expect(f.a('POST', '/security/cuentas/1001/candar')[0].body).toEqual({ segundos: 3600 });
+
+    fireEvent.click(screen.getByRole('button', { name: /Abrir/ }));
+    await waitFor(() => expect(promesas).toContainEqual(['ok', 'Interno 1002 abierto']));
+  });
+
+  it('sin ser admin se ve el estado pero no hay nada para tocar', async () => {
+    estado.admin = false;
+    fakeFetch(rutasBase({ 'GET /security/cuentas': CUENTAS }));
+    renderUI(<Seguridad />);
+    solapa('Internos');
+    await waitFor(() => expect(screen.getByText('Internos candados')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /Candar/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Abrir/ })).toBeNull();
+  });
+
+  it('sin nada que mostrar lo dice, y si la API falla también', async () => {
+    fakeFetch(rutasBase({ 'GET /security/cuentas': { candadas: [], bajo_ataque: [], umbral: 20, ventana_s: 300 } }));
+    const { unmount } = renderUI(<Seguridad />);
+    solapa('Internos');
+    await waitFor(() => expect(screen.getByText('Ningún interno acumula fallos ahora mismo.')).toBeTruthy());
+    expect(screen.getByText('Ninguno.')).toBeTruthy();
+    unmount();
+    fakeFetch(rutasBase({ 'GET /security/cuentas': res(503, { error: 'base caída' }) }));
+    renderUI(<Seguridad />);
+    solapa('Internos');
+    await waitFor(() => expect(screen.getByText('No se pudo leer: base caída')).toBeTruthy());
+  });
+
+  it('prender el candado automático avisa que la protección se puede volver la vulnerabilidad', async () => {
+    fakeFetch(rutasBase());
+    renderUI(<Seguridad />);
+    solapa('Ajustes de la central');
+    await waitFor(() => expect(screen.getByLabelText('Candar por (s)')).toBeTruthy());
+    expect(screen.queryByText('El candado automático es un arma de doble filo')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Candar por (s)'), { target: { value: '900' } });
+    await waitFor(() => expect(screen.getByText('El candado automático es un arma de doble filo')).toBeTruthy());
   });
 });
 

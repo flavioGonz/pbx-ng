@@ -1001,7 +1001,7 @@ module.exports = function init(deps) {
       const { rows: gente } = await pool.query(
         `SELECT reunion_id, quien, numero, moderador, web, entro, salio, fin_estimado,
                 EXTRACT(EPOCH FROM (COALESCE(salio, now()) - entro))::int AS segundos
-           FROM pbxng_conf_presencias WHERE reunion_id = ANY($1::bigint[]) ORDER BY entro`,
+           FROM pbxng_conf_presencias WHERE reunion_id = ANY($1::bigint[]) ORDER BY entro, id`,
         [reuniones.map((r) => r.id)]);
       const porReunion = new Map();
       for (const p of gente) { if (!porReunion.has(p.reunion_id)) porReunion.set(p.reunion_id, []); porReunion.get(p.reunion_id).push(p); }
