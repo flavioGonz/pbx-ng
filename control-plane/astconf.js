@@ -102,4 +102,39 @@ function mohArchivos(nombre) {
   } catch (_) { return []; }
 }
 
-module.exports = { parking, moh, mohCarpeta, mohBorrarCarpeta, mohArchivos, escribir, DIR, MOH_DIR };
+/* ---------- Internos que no caen en el patron del dialplan ----------
+ * `extensions.conf` atrapa a los internos con `_[1-9]XXX`: exactamente cuatro digitos
+ * que no empiezan en cero. Pero el plan de numeracion acepta de 2 a 6 digitos, asi que
+ * un 500, un 10001 o un 0012 se creaban, se registraban y figuraban «en linea» en el
+ * panel, y al marcarlos la central contestaba «extension not found in context internal».
+ * Nadie los podia llamar y nada lo avisaba.
+ *
+ * Aca se escribe un destino literal por cada uno de esos internos, que salta a la rutina
+ * del contexto [interno]. Es lo mismo que hace FreePBX con su extensions_additional.conf,
+ * y tiene dos propiedades que un patron mas ancho no tiene: un destino literal le gana a
+ * cualquier patron —asi que una ruta saliente (_0. y companiia) no se lo puede comer— y
+ * solo existe para los internos que existen de verdad.
+ *
+ * POR QUE SOLO LOS QUE QUEDAN FUERA: a los otros ya los atrapa el patron, escribirlos de
+ * nuevo no cambia nada y haria que este archivo creciera con toda la central. En una
+ * numeracion de cuatro digitos el archivo queda vacio. */
+const EN_PATRON = /^[1-9][0-9]{3}$/;
+
+function internos(lista) {
+  const fuera = (Array.isArray(lista) ? lista : [])
+    .map((x) => String(x == null ? '' : x).trim())
+    .filter((n) => /^[0-9]{1,6}$/.test(n) && !EN_PATRON.test(n));
+  const unicos = [...new Set(fuera)].sort();
+  const L = [
+    '; ============================================================',
+    ';  Internos fuera del patron _[1-9]XXX · GENERADO POR EL PANEL — no editar a mano',
+    `;  ${new Date().toISOString()} · ${unicos.length} interno(s)`,
+    '; ============================================================',
+    '[internal](+)',
+  ];
+  for (const n of unicos) L.push(`exten => ${n},1,Goto(interno,${n},1)`);
+  L.push('');
+  return escribir('extensions.conf', L.join('\n'));
+}
+
+module.exports = { parking, moh, internos, mohCarpeta, mohBorrarCarpeta, mohArchivos, escribir, DIR, MOH_DIR };
