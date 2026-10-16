@@ -96,3 +96,43 @@ test('escribir crea la carpeta si no existe y devuelve la ruta', () => {
   const ruta = ac.escribir('x.conf', 'hola');
   assert.equal(leer(ruta), 'hola');
 });
+
+/* ---------------------------------------------------------------------------
+ *  Internos que no caen en el patron `_[1-9]XXX` del dialplan.
+ *
+ *  El patron de extensions.conf son exactamente cuatro digitos que no empiezan en
+ *  cero, pero el plan de numeracion acepta de 2 a 6. Los que quedaban afuera se
+ *  creaban, se registraban y figuraban «en linea» en el panel, y marcarlos daba
+ *  «extension not found in context internal». Lo que se prueba aca es lo que hace
+ *  falta para que eso no vuelva a pasar en silencio: que el archivo tenga un destino
+ *  literal por cada uno de esos internos, que NO tenga a los que el patron ya atrapa
+ *  (si no, el archivo crece con toda la central sin que nadie gane nada), y que algo
+ *  raro en la lista no termine escrito en un .conf.
+ * ------------------------------------------------------------------------- */
+test('internos fuera del patron: un destino literal por cada uno, y nada mas', () => {
+  const ruta = ac.internos(['1001', '500', '10001', '0012', '9999', '602']);
+  assert.equal(ruta, path.join(ac.DIR, 'extensions.conf'));
+  const t = leer(ruta);
+  assert.match(t, /GENERADO POR EL PANEL/);
+  assert.match(t, /^\[internal\]\(\+\)$/m, 'tiene que agregar a [internal], no redefinirlo');
+  assert.match(t, /4 interno\(s\)/);
+
+  const destinos = t.split('\n').filter((l) => l.startsWith('exten =>'));
+  assert.deepEqual(destinos, [
+    'exten => 0012,1,Goto(interno,0012,1)',
+    'exten => 10001,1,Goto(interno,10001,1)',
+    'exten => 500,1,Goto(interno,500,1)',
+    'exten => 602,1,Goto(interno,602,1)',
+  ], 'van los de 3, 5 y 6 digitos y los que empiezan en cero; 1001 y 9999 ya los atrapa el patron');
+});
+
+test('internos: lista vacia, repetidos y basura', () => {
+  assert.match(leer(ac.internos([])), /0 interno\(s\)/);
+  assert.match(leer(ac.internos()), /0 interno\(s\)/, 'sin argumento no revienta');
+
+  const t = leer(ac.internos(['500', '500', ' 500 ', null, '', 'abc', '12;Hangup()', '1234567', '1001']));
+  const destinos = t.split('\n').filter((l) => l.startsWith('exten =>'));
+  assert.deepEqual(destinos, ['exten => 500,1,Goto(interno,500,1)'],
+    'el repetido va una sola vez; lo que no es un numero de hasta 6 digitos no llega al .conf');
+  assert.ok(!/Hangup/.test(t), 'nada de la lista puede escribir una linea de dialplan');
+});

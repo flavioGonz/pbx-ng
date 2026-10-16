@@ -103,12 +103,15 @@ test('el guard de bucle de internal escribe __SALTOS (heredable por el canal Loc
 test('los Dial del interno usan ${DIAL_OPCIONES} y nada mas del dialplan la toca', () => {
   const ext = leer('config/asterisk/extensions.conf');
   const sinComentario = (l) => l.replace(/;.*$/, '').trim();
-  const ini = ext.indexOf('\n[internal]');
-  const fin = ext.indexOf('\n[', ini + 1);
-  assert.ok(ini >= 0 && fin > ini, 'no se encontro el contexto [internal]');
-  const internal = ext.slice(ini, fin).split('\n').map(sinComentario).filter(Boolean);
+  /* La rutina de marcar un interno vive en [interno], no en [internal]: ver el test de
+     abajo y el comentario de extensions.conf. */
+  const ini = ext.indexOf('\n[interno]');
+  const fin0 = ext.indexOf('\n[', ini + 1);
+  const fin = fin0 > ini ? fin0 : ext.length;
+  assert.ok(ini >= 0, 'no se encontro el contexto [interno]');
+  const interno = ext.slice(ini, fin).split('\n').map(sinComentario).filter(Boolean);
 
-  const dials = internal.filter((l) => /\bDial\(/.test(l));
+  const dials = interno.filter((l) => /\bDial\(/.test(l));
   assert.deepEqual(dials, [
     'same => n(marcar),Dial(PJSIP/${EXTEN},${TIMBRE},${DIAL_OPCIONES})',
     'same => n,Dial(Local/${DB(fm/${EXTEN})}@internal/n,45,${DIAL_OPCIONES})',
@@ -304,4 +307,70 @@ test('el rtp.conf que deja el entrypoint es el de fabrica del panel', async () =
   for (const k of ['rtpstart', 'rtpend', 'icesupport', 'stunaddr']) {
     assert.equal(deFabrica[k], String(sc.DEFAULTS.rtp[k]), `el entrypoint y DEFAULTS de sipconf.js no coinciden en ${k}`);
   }
+});
+
+/* El patron `_[1-9]XXX` de [internal] son exactamente cuatro digitos que no empiezan en
+ * cero, y el plan de numeracion de PBX-NG acepta de 2 a 6: un 500, un 10001 o un 0012 se
+ * creaban, se registraban y figuraban «en linea» en el panel, y marcarlos contestaba
+ * «extension not found in context internal». Como la rutina de marcar era un bloque de
+ * cien lineas colgado de ESE patron, no habia forma de alcanzarla con otro numero.
+ *
+ * Ahora la rutina vive en [interno] y a ella se llega por dos caminos: el patron, para la
+ * numeracion de cuatro digitos de siempre, y los destinos literales que la API escribe en
+ * pbxng.d/extensions.conf (astconf.internos) para todos los demas. Esto fija las tres
+ * piezas: sin cualquiera de ellas vuelve el mismo agujero y nada lo avisa hasta que
+ * alguien marca. */
+test('la rutina de marcar un interno vive en [interno], alcanzable por patron y por destino literal', () => {
+  const ext = leer('config/asterisk/extensions.conf');
+  assert.match(ext, /^exten => _\[1-9\]XXX,1,Goto\(interno,\$\{EXTEN\},1\)$/m,
+    'el patron de [internal] tiene que saltar a [interno], no volver a tener la rutina adentro');
+  assert.match(ext, /^\[interno\]$/m, 'falta el contexto [interno]');
+  assert.match(ext, /^#include "pbxng\.d\/extensions\.conf"$/m,
+    'sin el include, los internos que no caen en el patron no tienen destino');
+
+  /* Un solo lugar con la rutina: si alguien la vuelve a pegar en [internal], los dos
+   * caminos empiezan a divergir (desvios, buzon, grabacion) sin que nada falle. */
+  const ini = ext.indexOf('\n[internal]');
+  const fin = ext.indexOf('\n[', ini + 1);
+  const internal = ext.slice(ini, fin);
+  assert.ok(!/\bDial\(/.test(internal), 'quedo un Dial( en [internal]: la rutina del interno va en [interno]');
+
+  /* Los buzones siguen viviendo en [internal], asi que desde [interno] hay que nombrarlos
+   * con el contexto: un Goto relativo no los encuentra y la llamada muere sin buzon. */
+  const interno = ext.slice(ext.indexOf('\n[interno]'));
+  const saltosVm = interno.split('\n').map((l) => l.replace(/;.*$/, '').trim())
+    .filter((l) => l.startsWith('same =>') && /vm-/.test(l));
+  assert.ok(saltosVm.length >= 6, 'se esperaban los saltos al buzon en la rutina, hay ' + saltosVm.length);
+  for (const g of saltosVm) {
+    assert.match(g, /internal,vm-/, 'el salto al buzon tiene que decir el contexto: ' + g);
+  }
+});
+
+/* El include de pbxng.d/extensions.conf NO es como los otros. Si el archivo no esta,
+ * Asterisk no avisa y sigue: corta la lectura de extensions.conf entera («was listed as
+ * a #include but it does not exist», config.c) y la central arranca SIN dialplan. Medido
+ * en una instancia real con el archivo ausente: `dialplan show 1001@internal` falla, el
+ * contexto `internal` no existe, no hay internos, ni codigos de funcion, ni aparcado.
+ * El entrypoint tiene que dejarlo creado antes del primer arranque, que es cuando la API
+ * todavia no escribio nada. */
+test('el entrypoint deja pbxng.d/extensions.conf creado: sin el, Asterisk arranca sin dialplan', () => {
+  const ep = leer('images/asterisk/docker-entrypoint.sh');
+  const m = /for f in ([^;]+); do/.exec(ep);
+  assert.ok(m, 'no se encontro el bucle que crea los .conf vacios de pbxng.d');
+  assert.ok(m[1].split(/\s+/).includes('extensions.conf'),
+    'extensions.conf tiene que estar en la lista de archivos que el entrypoint crea vacios: ' + m[1]);
+  assert.match(leer('config/asterisk/extensions.conf'), /^#include "pbxng\.d\/extensions\.conf"$/m,
+    'si se saca el include, sobra lo de arriba; si se saca lo de arriba, la central no arranca con dialplan');
+});
+
+/* La recarga del plan de marcacion: `dialplan reload` no existe como comando del CLI
+ * (Asterisk 22 contesta «No such command»), asi que un typo ahi no falla ruidosamente —
+ * el archivo queda escrito y sin efecto hasta el proximo reinicio, que es justo lo que
+ * el generador viene a evitar. */
+test('la API recarga el dialplan con el modulo que lo lee, no con un comando inexistente', () => {
+  const app = leer('../control-plane/app.js');
+  assert.match(app, /amiCommand\('module reload pbx_config\.so'\)/,
+    'la recarga del plan tiene que ser `module reload pbx_config.so`');
+  assert.ok(!/amiCommand\('dialplan reload'\)/.test(app),
+    '`dialplan reload` no es un comando del CLI de Asterisk 22');
 });

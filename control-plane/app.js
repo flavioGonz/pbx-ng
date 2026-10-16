@@ -498,6 +498,45 @@ apiV1.cerrar();
 app.use('/api/v1', apiV1.router);
 setTimeout(() => { sipConf.ensure().catch(() => {}); }, 6000);   // pjsip.conf/rtp.conf generados (y recargados) antes de que el panel toque nada
 
+/* ---------- Plan de marcacion de los internos que no caen en `_[1-9]XXX` ----------
+ * El patron del dialplan son cuatro digitos; el plan de numeracion acepta de 2 a 6. Los
+ * que quedan afuera (un 500, un 10001, un 0012) se creaban bien, se registraban bien y
+ * no los podia llamar nadie. astconf.internos() escribe un destino literal por cada uno
+ * en el volumen que comparten la API y Asterisk, y despues hay que recargar: sin el
+ * `dialplan reload` el archivo esta pero la central sigue con el plan de antes.
+ *
+ * POR QUE CON ESPERA Y NO EN EL ACTO: el archivo se regenera entero en cada alta, baja o
+ * cambio de interno. Una migracion que crea medio millar de internos dispararia medio
+ * millar de recargas del dialplan completo, cada una por una linea de diferencia. Con la
+ * espera, una rafaga termina en una sola recarga; para un alta suelta desde el panel la
+ * demora es menor que lo que tarda la pantalla en volver. Mismo criterio que
+ * broadcastSoon(). */
+async function regenerarInternos() {
+  try {
+    const { rows } = await pool.query("SELECT id FROM ps_endpoints WHERE COALESCE(pbxng_kind,'extension')='extension'");
+    astconf.internos(rows.map((r) => r.id));
+    /* `dialplan reload` NO es un comando del CLI (Asterisk 22 contesta «No such
+     * command»): la recarga del plan es recargar el modulo que lo lee. Con el comando
+     * equivocado el archivo quedaba escrito y sin efecto hasta el proximo reinicio, que
+     * es exactamente el sintoma que esto viene a arreglar. */
+    await amiCommand('module reload pbx_config.so');
+    return true;
+  } catch (e) {
+    log.error('no se pudo regenerar el plan de marcacion de los internos:', e.message);
+    return false;
+  }
+}
+let tInternos = null;
+function regenerarInternosPronto() {
+  if (tInternos) return;
+  tInternos = setTimeout(() => { tInternos = null; regenerarInternos(); }, 1500);
+  if (tInternos.unref) tInternos.unref();
+}
+/* Al arrancar: un volumen nuevo, una restauracion o una version anterior a esto dejan el
+ * archivo sin escribir, y los internos fuera del patron quedarian mudos hasta la proxima
+ * alta. Va junto con el ensure() de la config SIP, por lo mismo. */
+setTimeout(() => { regenerarInternos(); }, 6500);
+
 async function getExtensions() {
   /* El contexto `c2c` queda AFUERA. Son los invitados de las llamadas desde la web: la
    * central les crea un endpoint WebRTC descartable para cada visita, con un id como
@@ -2073,7 +2112,7 @@ app.post('/api/endpoints', async (req, res) => {
      * que el dialplan consulta en tiempo de llamada. */
     const _rec = !!(req.body && req.body.record);
     await c.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]);
-    await c.query('COMMIT'); broadcastSoon();
+    await c.query('COMMIT'); broadcastSoon(); regenerarInternosPronto();
     const _enAst = await setRecFlag(id, _rec);
     res.status(201).json(Object.assign({ created: id, webrtc, video, vm_mailbox: id, vm_pin: (vmSeed && vmSeed.pin) || null }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
   } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
@@ -2103,14 +2142,14 @@ app.put('/api/endpoints/:id', async (req, res) => {
     const _pedido = (req.body || {}).record;
     const _rec = _pedido === undefined ? null : !!_pedido;
     if (_rec !== null) await c.query('UPDATE ps_endpoints SET pbxng_record=$2 WHERE id=$1', [id, _rec]);
-    await c.query('COMMIT'); broadcastSoon();
+    await c.query('COMMIT'); broadcastSoon(); regenerarInternosPronto();
     const _enAst = _rec === null ? true : await setRecFlag(id, _rec);
     res.json(Object.assign({ updated: id, webrtc, video }, _enAst ? {} : { aviso: AVISO_ASTDB_REC }));
   } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 app.delete('/api/endpoints/:id', async (req, res) => {
   const { id } = req.params; let c; try { c = await pool.connect(); } catch (e) { return errorHttp(res, e); } /* sin DB: 503, no un pedido colgado */
-  try { await c.query('BEGIN'); await c.query('DELETE FROM ps_endpoints WHERE id=$1', [id]); await c.query('DELETE FROM ps_auths WHERE id=$1', [id]); await c.query('DELETE FROM ps_aors WHERE id=$1', [id]); await c.query('COMMIT'); broadcastSoon(); res.json({ deleted: id }); }
+  try { await c.query('BEGIN'); await c.query('DELETE FROM ps_endpoints WHERE id=$1', [id]); await c.query('DELETE FROM ps_auths WHERE id=$1', [id]); await c.query('DELETE FROM ps_aors WHERE id=$1', [id]); await c.query('COMMIT'); broadcastSoon(); regenerarInternosPronto(); res.json({ deleted: id }); }
   catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} errorHttp(res, e); } finally { c.release(); }
 });
 
