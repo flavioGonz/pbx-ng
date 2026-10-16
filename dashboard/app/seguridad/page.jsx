@@ -153,6 +153,30 @@ function Ajustes() {
 
       <Divider my="md" />
 
+      <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb="xs" style={{ letterSpacing: '.04em' }}>Candado por cuenta (internos)</Text>
+      <Text size="xs" c="dimmed" mb="sm">
+        Cuenta los fallos contra un mismo <b>interno</b>, no contra la IP. Es lo único que ve el ataque cuando entra por
+        WebRTC —ahí todas las conexiones llegan con la IP del proxy— y el que viene repartido entre muchas IPs.
+      </Text>
+      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+        <NumberInput label="Fallos contra un interno" description="Claves erradas contra el mismo interno… (0 = apagado)" min={0}
+                     value={s.cuenta_max_fallos} onChange={(v) => set('cuenta_max_fallos', v)} />
+        <NumberInput label="…en estos segundos" description="…antes de avisar que ese interno está bajo ataque" min={5}
+                     value={s.cuenta_ventana_s} onChange={(v) => set('cuenta_ventana_s', v)} />
+        <NumberInput label="Candar por (s)" description="0 = sólo avisar, no candar. Leé el aviso de abajo antes de prenderlo." min={0}
+                     value={s.cuenta_candado_s} onChange={(v) => set('cuenta_candado_s', v)} />
+      </SimpleGrid>
+      {s.cuenta_candado_s > 0 && (
+        <Alert variant="light" color="orange" radius="md" mt="sm" icon={<IconAlertTriangle size={16} />}
+               title="El candado automático es un arma de doble filo">
+          Con esto prendido, a cualquiera le alcanza con fallar {s.cuenta_max_fallos} veces para dejar un interno afuera
+          durante {s.cuenta_candado_s} s — sin saber ninguna clave. La protección se vuelve la vulnerabilidad. Por eso de
+          fábrica viene en 0: avisar sí, candar lo decidís vos desde <b>Internos bajo ataque</b>.
+        </Alert>
+      )}
+
+      <Divider my="md" />
+
       <Stack gap="sm">
         <Switch label="Bloquear escáneres a la primera" checked={!!s.escaneres}
                 onChange={(e) => set('escaneres', e.currentTarget.checked)}
@@ -166,6 +190,140 @@ function Ajustes() {
         identificar, al aplicar.
       </Alert>
     </Card>
+  );
+}
+
+/* ── Candado por cuenta: el ataque que el contador por IP no puede ver ─────────
+ *
+ *  Los internos WebRTC entran por el proxy inverso, así que la central reporta SIEMPRE
+ *  la IP del proxy — y además es privada, que es justo lo que el contador por IP exime
+ *  a propósito. O sea que una fuerza bruta contra un interno WebRTC no se contaba, no
+ *  se avisaba y no se bloqueaba; y bloquear al proxy sería dejar sin WebRTC a todos.
+ *  Lo único real que queda en el evento es el número del interno, y con eso se cuenta
+ *  acá. De paso agarra el ataque repartido entre muchas IPs, que el contador por IP
+ *  tampoco ve aunque no haya proxy de por medio.
+ * ========================================================================== */
+const fechaCorta = (v) => {
+  if (!v) return '—';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
+
+const DURACIONES = [
+  { value: '900', label: '15 minutos' },
+  { value: '3600', label: '1 hora' },
+  { value: '28800', label: '8 horas' },
+  { value: '0', label: 'Hasta abrirlo a mano' },
+];
+
+function Cuentas({ admin }) {
+  const { data, cargando, error, recargar } = usePoll('/security/cuentas', 8000);
+  const [ext, setExt] = useState('');
+  const [dur, setDur] = useState('3600');
+  if (error && !data) return <Alert color="red" variant="light" icon={<IconAlertTriangle size={16} />}>No se pudo leer: {error.message}</Alert>;
+  if (cargando && !data) return <SkelFilas filas={5} />;
+  const candadas = (data && data.candadas) || [];
+  const bajo = (data && data.bajo_ataque) || [];
+
+  const candar = (n, segundos) => toastPromise(
+    api('/security/cuentas/' + encodeURIComponent(n) + '/candar', { method: 'POST', body: { segundos: Number(segundos) || 0 } }).then(() => { setExt(''); recargar(); }),
+    { loading: 'Candando…', success: 'Interno ' + n + ' candado', error: (e) => e.message });
+  const abrir = (n) => toastPromise(
+    api('/security/cuentas/' + encodeURIComponent(n) + '/abrir', { method: 'POST' }).then(recargar),
+    { loading: 'Abriendo…', success: 'Interno ' + n + ' abierto', error: (e) => e.message });
+
+  return (
+    <Stack gap="lg">
+      <Card p="lg" className="pbx-tabin">
+        <Group justify="space-between" mb="xs">
+          <div>
+            <Text fw={700}>Internos bajo ataque</Text>
+            <Text size="sm" c="dimmed">
+              Fallos de autenticación contra un mismo interno en los últimos {data && data.ventana_s} s. Se avisa a partir de {data && data.umbral}.
+            </Text>
+          </div>
+          <Badge variant="light" color={bajo.length ? 'orange' : 'gray'}>{bajo.length}</Badge>
+        </Group>
+        {!bajo.length
+          ? <Text size="sm" c="dimmed">Ningún interno acumula fallos ahora mismo.</Text>
+          : (
+            <Table highlightOnHover verticalSpacing="xs">
+              <Table.Thead><Table.Tr>
+                <Table.Th>Interno</Table.Th><Table.Th>Fallos</Table.Th><Table.Th>Origen</Table.Th><Table.Th />
+              </Table.Tr></Table.Thead>
+              <Table.Tbody>
+                {bajo.map((c) => (
+                  <Table.Tr key={c.ext}>
+                    <Table.Td><Code>{c.ext}</Code></Table.Td>
+                    <Table.Td><Badge variant="light" color={c.fallos >= (data.umbral || 20) ? 'red' : 'yellow'}>{c.fallos}</Badge></Table.Td>
+                    <Table.Td>
+                      <Tooltip label={c.ips.join(', ')} disabled={!c.ips.length} multiline w={320}>
+                        <Text size="sm" c="dimmed" style={{ cursor: c.ips.length ? 'help' : 'default' }}>
+                          {c.n_ips} {c.n_ips === 1 ? 'IP' : 'IPs'}
+                        </Text>
+                      </Tooltip>
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>
+                      {admin && <Button size="compact-xs" variant="light" color="red" leftSection={<IconLock size={13} />} onClick={() => candar(c.ext, dur)}>Candar</Button>}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+      </Card>
+
+      <Card p="lg" className="pbx-tabin">
+        <Group justify="space-between" mb="md" wrap="wrap" gap="sm">
+          <div>
+            <Text fw={700}>Internos candados</Text>
+            <Text size="sm" c="dimmed">
+              Mientras está candado, ninguna clave entra — tampoco la buena. La del dueño no se toca: se puede cambiar
+              ahora y abrir después.
+            </Text>
+          </div>
+          {admin && (
+            <Group gap="xs" wrap="nowrap">
+              <TextInput placeholder="Interno" value={ext} w={110} onChange={(e) => setExt(e.currentTarget.value)} />
+              <Select data={DURACIONES} value={dur} onChange={(v) => v && setDur(v)} w={190} allowDeselect={false} comboboxProps={{ withinPortal: true }} />
+              <Button leftSection={<IconLock size={15} />} color="red" disabled={!ext.trim()} onClick={() => candar(ext.trim(), dur)}>Candar</Button>
+            </Group>
+          )}
+        </Group>
+        {!candadas.length
+          ? <Text size="sm" c="dimmed">Ninguno.</Text>
+          : (
+            <Table highlightOnHover verticalSpacing="xs">
+              <Table.Thead><Table.Tr>
+                <Table.Th>Interno</Table.Th><Table.Th>Motivo</Table.Th><Table.Th>Hasta</Table.Th><Table.Th>Puesto</Table.Th><Table.Th />
+              </Table.Tr></Table.Thead>
+              <Table.Tbody>
+                {candadas.map((c) => (
+                  <Table.Tr key={c.ext}>
+                    <Table.Td><Code>{c.ext}</Code></Table.Td>
+                    <Table.Td><Text size="sm">{c.motivo || '—'}</Text></Table.Td>
+                    <Table.Td>
+                      {c.hasta
+                        ? <Text size="sm">{fechaCorta(c.hasta)}</Text>
+                        : <Badge variant="light" color="red">hasta abrirlo</Badge>}
+                    </Table.Td>
+                    <Table.Td><Badge variant="light" color={c.manual ? 'blue' : 'orange'}>{c.manual ? 'a mano' : 'automático'}</Badge></Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>
+                      {admin && <Button size="compact-xs" variant="light" leftSection={<IconLockOff size={13} />} onClick={() => abrir(c.ext)}>Abrir</Button>}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+      </Card>
+
+      <Alert variant="light" color="pbx" radius="md" icon={<IconInfoCircle size={16} />}>
+        El candado automático viene apagado de fábrica, y es a propósito: si alcanza con fallar N veces para dejar un
+        interno afuera, cualquiera puede sacar de servicio al interno que quiera sin saber ninguna clave. De fábrica esto
+        <b> avisa</b> y no toca nada; candar es una decisión tuya. Se prende en <b>Ajustes de la central</b>.
+      </Alert>
+    </Stack>
   );
 }
 
@@ -819,11 +977,13 @@ export default function Seguridad() {
         <Tabs.List mb="md">
           <Tabs.Tab value="soc" leftSection={<IconShieldX size={15} />}>Centro de operaciones</Tabs.Tab>
           {admin && <Tabs.Tab value="ajustes" leftSection={<IconAdjustments size={15} />}>Ajustes de la central</Tabs.Tab>}
+          <Tabs.Tab value="cuentas" leftSection={<IconUserOff size={15} />}>Internos</Tabs.Tab>
           <Tabs.Tab value="listas" leftSection={<IconList size={15} />}>Listas negras/blancas</Tabs.Tab>
           <Tabs.Tab value="geo" leftSection={<IconWorld size={15} />}>Filtro por país</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="soc"><SOC data={data} error={error} recargar={recargar} admin={admin} /></Tabs.Panel>
         {admin && <Tabs.Panel value="ajustes"><Ajustes /></Tabs.Panel>}
+        <Tabs.Panel value="cuentas"><Cuentas admin={admin} /></Tabs.Panel>
         <Tabs.Panel value="listas"><Listas soc={data} recargarSoc={recargar} admin={admin} /></Tabs.Panel>
         <Tabs.Panel value="geo"><GeoBlock admin={admin} /></Tabs.Panel>
       </Tabs>
