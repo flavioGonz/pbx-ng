@@ -29,7 +29,7 @@ const THEMES = {
   info:      { accent: '#475569', soft: '#f8fafc', icon: 'ℹ️', kicker: 'Aviso' },
 };
 const THEME_BY_EVENT = {
-  'security.attack': 'attack', 'security.ban': 'security',
+  'security.attack': 'attack', 'security.ban': 'security', 'security.cuenta': 'attack',
   'auth.login': 'auth', 'auth.login_failed': 'security',
   'trunk.down': 'infra', 'trunk.failover': 'infra', 'service.down': 'infra', 'extension.offline': 'infra',
   'fraud.long_call': 'fraud', 'fraud.after_hours': 'fraud', 'fraud.international': 'fraud',

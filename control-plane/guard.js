@@ -30,6 +30,7 @@
 'use strict';
 
 const { EventEmitter } = require('events');
+const crypto = require('crypto');   // la clave descartable del candado por cuenta: al azar, 32 bytes
 const net = require('net');            // isIPv6: el mismo parser que usa Node para los sockets, en vez de una regex propia
 const { errorHttp } = require('./errores');   // errores de pg → mensaje genérico (docs/CONTRATOS.md §3)
 
@@ -53,9 +54,17 @@ const DEFAULTS = {
   unidentified_count: 5,
   unidentified_period: 60,
   unidentified_prune: 30,
-  alertar: true,             // avisar por correo (alerts.js: security.ban / security.attack)
+  /* Candado por cuenta. Cuenta los fallos contra el MISMO interno, no contra la IP:
+   * es lo único que sirve cuando la IP que reporta Asterisk es la del proxy (WebRTC) o
+   * cuando el ataque viene repartido entre muchas IPs. `cuenta_candado_s` en 0 = sólo
+   * avisar; ver el comentario largo de contarCuenta() para por qué ese es el default. */
+  cuenta_max_fallos: 20,     // fallos contra un mismo interno en la ventana antes de avisar (0 = apagado)
+  cuenta_ventana_s: 300,
+  cuenta_candado_s: 0,       // 0 = no candar, sólo avisar
+  alertar: true,             // avisar por correo (alerts.js: security.ban / security.attack / security.cuenta)
 };
-const ENTEROS = ['max_fallos', 'ventana_s', 'ban_s', 'ban_permanente_tras', 'unidentified_count', 'unidentified_period', 'unidentified_prune'];
+const ENTEROS = ['max_fallos', 'ventana_s', 'ban_s', 'ban_permanente_tras', 'unidentified_count', 'unidentified_period', 'unidentified_prune',
+  'cuenta_max_fallos', 'cuenta_ventana_s', 'cuenta_candado_s'];
 const BOOLES = ['escaneres', 'alertar'];
 
 /* Cómo se traduce cada SecurityEvent de Asterisk a un tipo del panel.
@@ -82,6 +91,8 @@ const CLASES = {
   // ChallengeSent es el desafío normal de cada REGISTER: ruido puro, se ignora.
 };
 const TIPOS_ATAQUE = ['auth', 'cuenta', 'acl', 'escaner', 'flood', 'ban', 'geo'];
+/* `cuenta` ya estaba: es el tipo del evento «cuenta inexistente». El candado por cuenta
+ * publica con el mismo tipo a propósito, porque para la pantalla son la misma familia. */
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const CIDR = /^(\S+)\/(\d{1,3})$/;
@@ -202,6 +213,8 @@ module.exports = function initGuard(deps) {
   const bloqueadas = new Map();               // ip → { permanent, expires } (espejo de pbxng_blocked para no consultar por evento)
   const pendientesHits = new Map();           // ip → n (golpes a IPs ya bloqueadas que siguen llegando: nft no está cortando)
   const pendientesFallos = new Map();         // ip → { n, tipos:{}, cuentas:Set, cc, pais, sev } (se vuelca a pbxng_sec_events cada 15 s)
+  const porCuenta = new Map();                // interno → { fallos: [t], ips: Map(ip → t), avisado: t }
+  const candadas = new Map();                 // interno → { hasta, motivo, manual } (espejo de pbxng_cuenta_candado)
   let settings = { ...DEFAULTS };
   let whitelist = [];                         // reglas (ip o CIDR) de pbxng_f2b_whitelist
   let geoblock = { paises: new Set(), modo: 'bloquear' };
@@ -505,7 +518,186 @@ module.exports = function initGuard(deps) {
     publicar({ sev: r.sev, tipo: r.tipo, ip, cuenta, texto: r.texto + (cuenta ? ' · cuenta ' + cuenta : '') + (rem.proto ? ' · ' + rem.proto : '') + pais + (esPrivada(ip) ? ' · red local' : '') });
     if (r.fallo) acumularFallo(ip, r.tipo, cuenta, r.sev, g);
     if (r.banear && !esPrivada(ip)) await banear(ip, { reason: r.motivo, geo: g, cuenta });
+    /* El contador por cuenta va aparte del de IP y SIN la guarda de `esPrivada`: ese es
+     * justamente el caso que esto viene a cubrir (el proxy del WebRTC es una IP privada).
+     *
+     * Y va DESPUÉS del baneo, no antes. Entre el `await` de geo() y el de banear() no
+     * puede haber ningún otro: en una ráfaga del mismo tick, los doce eventos reanudan en
+     * fila después de geo(), el primero banea y marca `bloqueadas` sin ceder el hilo, y
+     * los once de atrás lo ven al entrar. Un `await` en el medio los deja pasar a todos y
+     * salen doce bans del mismo atacante (lo agarró guard.test.js). */
+    if (r.fallo && cuenta) await contarCuenta(cuenta, ip, g);
     return r;
+  }
+
+  /* ---------- candado por cuenta ----------
+   *  EL AGUJERO QUE TAPA: los internos WebRTC entran por el proxy inverso y Asterisk
+   *  reporta SIEMPRE la IP del proxy (medido: `RemoteAddress="IPV4/WS/<proxy>/47920"`).
+   *  Esa IP es privada, y acá las privadas están eximidas a propósito, así que una
+   *  fuerza bruta por WebRTC no se contaba, no se avisaba y no se baneaba. Banear al
+   *  proxy tampoco sirve: deja sin WebRTC a todos de una vez. Lo único real que queda en
+   *  el evento es el `AccountID`, y con eso se cuenta acá. De paso agarra el ataque
+   *  distribuido —muchas IPs contra una sola cuenta—, que el contador por IP nunca vio
+   *  aunque no haya proxy de por medio.
+   *
+   *  POR QUÉ CANDAR VIENE APAGADO: un candado automático por cuenta es un arma de doble
+   *  filo conocida. Si alcanza con fallar N veces para dejar un interno afuera, cualquiera
+   *  puede sacar de servicio al interno que quiera sin saber ninguna clave: la protección
+   *  se convierte en la vulnerabilidad. Por eso de fábrica esto AVISA (evento en vivo,
+   *  línea en la bitácora y correo) y no toca nada; candar es una decisión del operador,
+   *  con un clic desde el panel o prendiendo `cuenta_candado_s`. */
+  const AUTH_CANDADO = (ext) => 'candado-' + ext;
+
+  const estadoCuenta = (c) => {
+    let s = porCuenta.get(c);
+    if (!s) { s = { fallos: [], ips: new Map(), avisado: 0 }; porCuenta.set(c, s); }
+    return s;
+  };
+
+  /* Cuenta un fallo contra el interno y, si desborda, avisa (y canda si está activado).
+   * Devuelve el detalle cuando avisó, null si no. */
+  async function contarCuenta(cuenta, ip, g) {
+    const s = settings;
+    if (!s.cuenta_max_fallos || !cuenta) return null;
+    const st = estadoCuenta(cuenta);
+    const t = ahora(); const ventana = s.cuenta_ventana_s * 1000;
+    podar(st.fallos, ventana); st.fallos.push(t);
+    for (const [k, v] of st.ips) if (t - v > ventana) st.ips.delete(k);
+    if (ip) st.ips.set(ip, t);
+    if (st.fallos.length < s.cuenta_max_fallos) return null;
+    /* Un aviso por ventana y no uno por intento: un ataque real son decenas por segundo,
+     * y el que recibe el correo no necesita mil copias del mismo aviso. */
+    if (t - st.avisado < ventana) return null;
+    st.avisado = t;
+    const ips = [...st.ips.keys()];
+    const detalle = {
+      ext: cuenta, fallos: st.fallos.length, ventana_s: s.cuenta_ventana_s,
+      ips: ips.slice(0, 20), n_ips: ips.length, pais: g.country || '?', cc: g.cc || '',
+    };
+    publicar({
+      sev: 'crit', tipo: 'cuenta', ip, cuenta,
+      texto: 'interno bajo ataque: ' + st.fallos.length + ' fallos en ' + s.cuenta_ventana_s
+        + ' s desde ' + ips.length + (ips.length === 1 ? ' IP' : ' IPs distintas'),
+    });
+    await evento('cuenta', 'crit', detalle);
+    if (s.alertar && alerts && alerts.raise) alerts.raise('security.cuenta', detalle).catch(() => {});
+    if (s.cuenta_candado_s > 0) {
+      await candar(cuenta, { segundos: s.cuenta_candado_s, motivo: 'fuerza bruta contra el interno', fallos: st.fallos.length, ips })
+        .catch((e) => log.warn('no se pudo candar el interno', { cuenta }, e && e.message));
+    }
+    return detalle;
+  }
+
+  /* Cierra el interno: el endpoint pasa a apuntar a un `auth` descartable con una clave
+   * de 32 bytes al azar que nadie conoce, así ninguna clave entra —ni la buena—. Se hace
+   * sobre la tabla de realtime, que Asterisk lee en cada autenticación (sorcery.conf no
+   * cachea `ps_endpoints`), así que tiene efecto sin recargar nada.
+   *
+   * POR QUÉ NO SE CAMBIA LA CLAVE DEL INTERNO: eso sería irreversible. El `auth` de antes
+   * queda guardado en `pbxng_cuenta_candado.auth_previo` y abrir el candado lo devuelve
+   * tal cual; la clave del dueño no se toca en ningún momento, así que cambiarla mientras
+   * está candado (para después abrirlo) funciona como siempre.
+   *
+   * Los contactos ya registrados se borran: si el atacante entró, candar sin echarlo lo
+   * deja adentro hasta que venza el registro. */
+  async function candar(ext, opt) {
+    const o = opt || {};
+    const id = String(ext == null ? '' : ext).trim();
+    if (!id) throw err(400, 'falta el interno');
+    const hasta = o.segundos > 0 ? new Date(ahora() + o.segundos * 1000) : null;
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      const { rows } = await c.query("SELECT auth FROM ps_endpoints WHERE id=$1 AND COALESCE(pbxng_kind,'extension')='extension' FOR UPDATE", [id]);
+      if (!rows.length) throw err(404, 'ese interno no existe');
+      const actual = rows[0].auth || id;
+      /* Si ya está candado se conserva el `auth_previo` de la primera vez: pisarlo con
+       * `candado-<ext>` dejaría al interno sin forma de volver. */
+      const previo = actual === AUTH_CANDADO(id)
+        ? ((await c.query('SELECT auth_previo FROM pbxng_cuenta_candado WHERE ext=$1', [id])).rows[0] || {}).auth_previo || id
+        : actual;
+      await c.query("INSERT INTO ps_auths (id,auth_type,username,password,tenant_id) VALUES ($1,'userpass',$2,$3,1) ON CONFLICT (id) DO UPDATE SET password=EXCLUDED.password",
+        [AUTH_CANDADO(id), id, crypto.randomBytes(32).toString('hex')]);
+      await c.query('UPDATE ps_endpoints SET auth=$2 WHERE id=$1', [id, AUTH_CANDADO(id)]);
+      await c.query(`INSERT INTO pbxng_cuenta_candado (ext,hasta,motivo,fallos,ips,auth_previo,manual)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7)
+                     ON CONFLICT (ext) DO UPDATE SET hasta=EXCLUDED.hasta, motivo=EXCLUDED.motivo,
+                       fallos=EXCLUDED.fallos, ips=EXCLUDED.ips, manual=EXCLUDED.manual`,
+        [id, hasta, String(o.motivo || '').slice(0, 200), o.fallos || 0, (o.ips || []).slice(0, 20).join(','), previo, !!o.manual]);
+      await c.query('DELETE FROM ps_contacts WHERE id LIKE $1 OR endpoint=$2', [id + ';%', id]).catch(() => {});
+      await c.query('COMMIT');
+    } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    candadas.set(id, { hasta: hasta ? hasta.getTime() : null, motivo: o.motivo || '', manual: !!o.manual });
+    publicar({ sev: 'crit', tipo: 'cuenta', ip: null, cuenta: id, texto: 'interno candado' + (hasta ? ' por ' + o.segundos + ' s' : ' hasta que se abra a mano') + (o.motivo ? ' · ' + o.motivo : '') });
+    await evento('candado', 'crit', { ext: id, hasta: hasta ? hasta.toISOString() : null, motivo: o.motivo || '', manual: !!o.manual, fallos: o.fallos || 0 });
+    return { ext: id, hasta: hasta ? hasta.toISOString() : null, manual: !!o.manual };
+  }
+
+  /* Devuelve el endpoint a su `auth` de siempre y limpia el descartable. */
+  async function abrir(ext, motivo) {
+    const id = String(ext == null ? '' : ext).trim();
+    if (!id) throw err(400, 'falta el interno');
+    const c = await pool.connect();
+    let hubo = false;
+    try {
+      await c.query('BEGIN');
+      const { rows } = await c.query('SELECT auth_previo FROM pbxng_cuenta_candado WHERE ext=$1 FOR UPDATE', [id]);
+      if (rows.length) {
+        hubo = true;
+        await c.query('UPDATE ps_endpoints SET auth=$2 WHERE id=$1', [id, rows[0].auth_previo || id]);
+        await c.query('DELETE FROM pbxng_cuenta_candado WHERE ext=$1', [id]);
+      }
+      await c.query('DELETE FROM ps_auths WHERE id=$1', [AUTH_CANDADO(id)]);
+      await c.query('COMMIT');
+    } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    candadas.delete(id);
+    const st = porCuenta.get(id); if (st) { st.fallos = []; st.ips.clear(); st.avisado = 0; }
+    if (hubo) {
+      publicar({ sev: 'info', tipo: 'cuenta', ip: null, cuenta: id, texto: 'candado abierto' + (motivo ? ' · ' + motivo : '') });
+      await evento('candado_abierto', 'info', { ext: id, motivo: motivo || '' });
+    }
+    return { ext: id, abierto: hubo };
+  }
+
+  async function cargarCandados() {
+    const { rows } = await pool.query('SELECT ext, extract(epoch from hasta)*1000 AS hasta, motivo, manual FROM pbxng_cuenta_candado');
+    candadas.clear();
+    for (const r of rows) candadas.set(r.ext, { hasta: r.hasta ? +r.hasta : null, motivo: r.motivo || '', manual: !!r.manual });
+  }
+
+  /* Cada 30 s: abre los candados vencidos y limpia los que quedaron sin interno (alguien
+   * borró el interno mientras estaba candado). Es lo que hace que un candado automático
+   * no dependa de que la API siga viva: si se cayó, al volver abre lo que venció. */
+  async function revisarCandados() {
+    try {
+      const { rows } = await pool.query('SELECT ext FROM pbxng_cuenta_candado WHERE hasta IS NOT NULL AND hasta <= now()');
+      for (const r of rows) await abrir(r.ext, 'venció el candado').catch((e) => log.warn('no se pudo abrir', { ext: r.ext }, e && e.message));
+      const { rows: huerfanos } = await pool.query('SELECT k.ext FROM pbxng_cuenta_candado k LEFT JOIN ps_endpoints e ON e.id = k.ext WHERE e.id IS NULL');
+      for (const r of huerfanos) {
+        await pool.query('DELETE FROM pbxng_cuenta_candado WHERE ext=$1', [r.ext]).catch(() => {});
+        await pool.query('DELETE FROM ps_auths WHERE id=$1', [AUTH_CANDADO(r.ext)]).catch(() => {});
+        candadas.delete(r.ext);
+      }
+      return rows.length;
+    } catch (e) { log.warn('revisión de candados falló', e && e.message); return 0; }
+  }
+
+  /* Lo que la pantalla necesita: quién está candado y qué internos vienen recibiendo
+   * fallos aunque todavía no hayan desbordado. */
+  async function cuentas() {
+    const { rows } = await pool.query('SELECT ext, hasta, motivo, fallos, ips, manual, creado_en FROM pbxng_cuenta_candado ORDER BY creado_en DESC');
+    const t = ahora(); const ventana = settings.cuenta_ventana_s * 1000;
+    const bajo = [];
+    for (const [ext, st] of porCuenta) {
+      const n = st.fallos.filter((x) => t - x <= ventana).length;
+      if (n > 0) bajo.push({ ext, fallos: n, ips: [...st.ips.keys()].slice(0, 20), n_ips: st.ips.size });
+    }
+    bajo.sort((a, b) => b.fallos - a.fallos);
+    return {
+      candadas: rows.map((r) => ({ ...r, ips: String(r.ips || '').split(',').filter(Boolean) })),
+      bajo_ataque: bajo.slice(0, 50),
+      umbral: settings.cuenta_max_fallos, ventana_s: settings.cuenta_ventana_s, candado_s: settings.cuenta_candado_s,
+    };
   }
 
   /* ---------- ¿bajo ataque? (mismo criterio que soc.js) ---------- */
@@ -555,6 +747,7 @@ module.exports = function initGuard(deps) {
       bloqueos: conBandera, top_paises: topPaises, top_atacantes: topAtacantes, eventos,
       ataque: detectarAtaque(),
       geoblock: { modo: (geoModo[0] && geoModo[0].value) === 'permitir' ? 'permitir' : 'bloquear', paises: geoPaises },
+      cuentas: await cuentas().catch(() => ({ candadas: [], bajo_ataque: [] })),
       enforcement: { ...enforcement },
     };
   }
@@ -637,6 +830,18 @@ module.exports = function initGuard(deps) {
   if (app) {
     app.get('/api/security', async (req, res) => { try { res.json(await resumen()); } catch (e) { errorHttp(res, e); } });
     app.get('/api/security/live', (req, res) => res.json(historial()));
+    app.get('/api/security/cuentas', async (req, res) => { try { res.json(await cuentas()); } catch (e) { errorHttp(res, e); } });
+    app.post('/api/security/cuentas/:ext/candar', async (req, res) => {
+      const b = req.body || {};
+      /* Sin `segundos` el candado es hasta que alguien lo abra: es lo que quiere el
+       * operador que acaba de ver un interno bajo ataque y prefiere decidir él cuándo
+       * vuelve, no que se abra solo en medio de la noche. */
+      try { res.json(await candar(req.params.ext, { segundos: parseInt(b.segundos, 10) || 0, motivo: b.motivo || 'candado a mano desde el panel', manual: true })); }
+      catch (e) { errorHttp(res, e); }
+    });
+    app.post('/api/security/cuentas/:ext/abrir', async (req, res) => {
+      try { res.json(await abrir(req.params.ext, 'abierto a mano desde el panel')); } catch (e) { errorHttp(res, e); }
+    });
     app.get('/api/security/enforcement', async (req, res) => { try { res.json(await sincronizarFw()); } catch (e) { errorHttp(res, e); } });
 
     app.post('/api/security/block', async (req, res) => {
@@ -746,7 +951,7 @@ module.exports = function initGuard(deps) {
 
   /* ---------- arranque ---------- */
   async function iniciar() {
-    try { await cargarSettings(); await cargarWhitelist(); await cargarGeoblock(); await cargarBloqueadas(); }
+    try { await cargarSettings(); await cargarWhitelist(); await cargarGeoblock(); await cargarBloqueadas(); await cargarCandados(); }
     catch (e) { log.warn('no se pudo cargar el estado inicial (¿migración 0010 pendiente?)', e); }
     asegurarPjsip();
     engancharAmi();
@@ -754,12 +959,20 @@ module.exports = function initGuard(deps) {
     timers.push(setInterval(() => expirar().catch((e) => log.error('expirando bloqueos', e)), 60000));
     timers.push(setInterval(() => sincronizarFw().catch(() => {}), 300000));
     timers.push(setInterval(() => vigilarAtaque().catch((e) => log.error('vigilando ataque', e)), 10000));
+    /* Los candados vencen solos aunque la API se haya caído en el medio: el vencimiento
+     * vive en la base, no en un timer en memoria. */
+    timers.push(setInterval(() => revisarCandados(), 30000));
     // la lista blanca y el geo-bloqueo se recargan cada minuto por si alguien los tocó por SQL
     timers.push(setInterval(() => Promise.all([cargarWhitelist(), cargarGeoblock()]).catch(() => {}), 60000));
     // poda: los fallos agregados se guardan 30 días; el resto de la línea de tiempo, 180
     timers.push(setInterval(() => pool.query("DELETE FROM pbxng_sec_events WHERE (kind='fallo' AND created_at < now() - interval '30 days') OR created_at < now() - interval '180 days'").catch(() => {}), 6 * 3600000));
     // memoria por IP: se olvida a quien no golpea hace 24 h
     timers.push(setInterval(() => { const lim = ahora() - 24 * 3600000; for (const [ip, s] of porIp) if (s.ultimo < lim) porIp.delete(ip); }, 600000));
+    // y lo mismo por cuenta: sin fallos dentro de la ventana, el interno se olvida
+    timers.push(setInterval(() => {
+      const lim = ahora() - Math.max(settings.cuenta_ventana_s * 1000, 3600000);
+      for (const [c, s] of porCuenta) if (!s.fallos.length || s.fallos[s.fallos.length - 1] < lim) porCuenta.delete(c);
+    }, 600000));
     for (const t of timers) if (t.unref) t.unref();
     // el agente de Asterisk suele tardar más que la API en levantar: el primer sync espera un poco
     setTimeout(() => sincronizarFw().catch(() => {}), 8000).unref();
@@ -781,6 +994,7 @@ module.exports = function initGuard(deps) {
 
   return {
     iniciar, detener, unirSocket, resumen, detectarAtaque, procesar, clasificar, banear, desbloquear, expirar, sincronizarFw, aplicarGeoblock, web,
+    contarCuenta, candar, abrir, cuentas, revisarCandados, _cargarCandados: cargarCandados,
     recientes: historial, bus, bandera, esIpv4, esIpv6, esIp, normalizarIp, esPrivada, ipEn, parseRemote,
     enforcement: () => ({ ...enforcement }), settings: () => ({ ...settings }),
     _cargar: { settings: cargarSettings, whitelist: cargarWhitelist, geoblock: cargarGeoblock, bloqueadas: cargarBloqueadas },

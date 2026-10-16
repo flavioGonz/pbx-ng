@@ -85,7 +85,7 @@ async function raise(event, { severity = 'warn', title, lines = [], foot = '', k
     const brandName = await brand();
     const tx = nodemailer.createTransport({ host: cfg.host, port: cfg.port || 587, secure: !!cfg.secure, auth: cfg.username ? { user: cfg.username, pass: cfg.password } : undefined });
     const subject = `[${brandName}] ${severity === 'crit' ? '🔴 ' : severity === 'warn' ? '🟠 ' : ''}${title}`;
-    const link = await panelUrl(event === 'security.ban' || event === 'security.attack' ? '/seguridad' : event.startsWith('fraud') ? '/historial' : event.startsWith('ccreport') ? '/reportes' : event === 'digest.daily' ? '/' : event === 'trunk.failover' ? '/rutas' : '/monitor');
+    const link = await panelUrl(event === 'security.ban' || event === 'security.attack' || event === 'security.cuenta' ? '/seguridad' : event.startsWith('fraud') ? '/historial' : event.startsWith('ccreport') ? '/reportes' : event === 'digest.daily' ? '/' : event === 'trunk.failover' ? '/rutas' : '/monitor');
     /* Los resúmenes (el diario y los informes de call center programados) van con el
      * layout de números grandes; las alertas, con la tabla clave→valor. */
     const isDigest = event === 'digest.daily' || event.startsWith('ccreport');

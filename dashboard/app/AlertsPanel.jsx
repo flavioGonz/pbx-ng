@@ -10,6 +10,7 @@ import { fmtFecha, fmtHora } from './fmt';
 const META = {
   'security.attack':     { icon: <IconShieldLock size={17} />, color: 'red',    title: 'Estamos bajo ataque', desc: 'Ráfaga de intentos de registro fallidos. Una sola alerta agrupada, no un mail por IP.' },
   'security.ban':        { icon: <IconShieldLock size={17} />, color: 'orange', title: 'IP bloqueada', desc: 'El firewall (fail2ban) bloqueó una o más IPs. Incluye país e ISP.' },
+  'security.cuenta':     { icon: <IconShieldLock size={17} />, color: 'red',    title: 'Interno bajo ataque', desc: 'Muchos intentos fallidos contra un mismo interno. Es el único aviso que llega cuando el ataque entra por WebRTC (ahí todas las IPs son la del proxy) o viene repartido entre muchas IPs.' },
   'auth.login':          { icon: <IconLogin size={17} />,      color: 'blue',   title: 'Inicio de sesión al panel', desc: 'Aviso al entrar al panel. Recomendado: solo desde una IP nueva.' },
   'auth.login_failed':   { icon: <IconLogin size={17} />,      color: 'red',    title: 'Intentos fallidos al panel', desc: 'Varios intentos de acceso fallidos: posible fuerza bruta.' },
   'trunk.down':          { icon: <IconPhoneOff size={17} />,   color: 'red',    title: 'Troncal caída / recuperada', desc: 'Si la troncal se cae, dejás de recibir llamadas. Avisa también al recuperarse.' },
